@@ -333,7 +333,7 @@ mod tests {
     fn holes_on_both_sides() {
         let mut h = Holes::new();
         let (a, b) = (h.fresh(), h.fresh());
-        h.unify(&func(vec![a.clone()], b.clone()), &func(vec![Type::Int], a.clone())).unwrap();
+        h.unify(&func(vec![a.clone()], b.clone()), &func(vec![Type::Int], a)).unwrap();
         assert_eq!(h.resolve(&b), Type::Int);
     }
 

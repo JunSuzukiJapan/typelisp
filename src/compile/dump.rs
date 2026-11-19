@@ -301,7 +301,7 @@ pub fn dump_image(interp: &Interp, heap: &mut Heap, path: &str) -> Result<(), St
         .borrow()
         .iter()
         .filter(|(_, id)| **id >= globals_before)
-        .map(|(p, id)| (p.clone(), *id))
+        .map(|(p, id)| (*p, *id))
         .collect();
     globals.sort_by_key(|(_, id)| *id);
 

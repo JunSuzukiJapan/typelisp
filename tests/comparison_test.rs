@@ -9,24 +9,9 @@
 //! trait methods are available.
 
 extern crate typelisp;
-use typelisp::{load_prelude, Checker, EvalError, Heap, Interp, Reader, Value};
-
-fn run(src: &str) -> Result<Value, EvalError> {
-    let mut h = Heap::with_capacity(1 << 16);
-    let r = Reader::new();
-    let mut chk = Checker::new();
-    let mut interp = Interp::new();
-    load_prelude(&mut h, &mut chk, &mut interp);
-    let vs = r.read_all(&mut h, src).expect("read failed");
-    let mut last = Value::Empty;
-    for v in vs {
-        let tl = chk.check_form(&mut h, &interp, v).expect("check failed");
-        if let Some(v) = interp.exec(&mut h, tl)? {
-            last = v;
-        }
-    }
-    Ok(last)
-}
+mod common;
+use common::{run};
+use typelisp::Value;
 
 fn b(src: &str) -> bool {
     match run(src).expect("eval failed") {

@@ -507,7 +507,7 @@ pub fn print_builtin(heap: &mut Heap, name: SymRef, args: &[Value]) -> Option<Re
         // the queue past that block's buffered output.
         wk::F_FORMAT_RT => (|| {
             let dest = arg_bool(args, 0, "format")?;
-            let control = arg_str(heap, args, 1, "format")?.to_string();
+            let control = arg_str(heap, args, 1, "format")?;
             let list = *args.get(2).ok_or_else(|| PrintError::Shape("format: expected 3 arguments".into()))?;
             let out = build_format(heap, &control, list).map_err(PrintError::Raise)?;
             let opts = current_opts(heap).map_err(PrintError::Raise)?;
@@ -518,7 +518,7 @@ pub fn print_builtin(heap: &mut Heap, name: SymRef, args: &[Value]) -> Option<Re
             Ok(heap.alloc_string(text))
         })(),
         wk::F_PRINT_RT | wk::F_PRINTLN_RT => (|| {
-            let control = arg_str(heap, args, 0, name.name())?.to_string();
+            let control = arg_str(heap, args, 0, name.name())?;
             let list = *args.get(1).ok_or_else(|| PrintError::Shape(format!("{}: expected 2 arguments", name)))?;
             let out = build_format(heap, &control, list).map_err(PrintError::Raise)?;
             let opts = current_opts(heap).map_err(PrintError::Raise)?;
@@ -528,7 +528,7 @@ pub fn print_builtin(heap: &mut Heap, name: SymRef, args: &[Value]) -> Option<Re
         // `pprint`/`pprint-fill`/`pprint-linear`/`pprint-tabular`, which pass
         // their own name so one builtin serves all four.
         wk::F_PPRINT_RT => (|| {
-            let which = arg_str(heap, args, 0, "pprint")?.to_string();
+            let which = arg_str(heap, args, 0, "pprint")?;
             let value = *args.get(1).ok_or_else(|| PrintError::Shape("pprint: expected 3 arguments".into()))?;
             let colinc = arg_int(args, 2, "pprint")?;
             let out = build_pprint(heap, &which, value, colinc).map_err(PrintError::Raise)?;
@@ -538,9 +538,9 @@ pub fn print_builtin(heap: &mut Heap, name: SymRef, args: &[Value]) -> Option<Re
         })(),
         wk::F_PPRINT_BLOCK_START_RT => (|| {
             let obj = *args.first().ok_or_else(|| PrintError::Shape("pprint-logical-block: expected 4 arguments".into()))?;
-            let prefix = arg_str(heap, args, 1, "pprint-logical-block")?.to_string();
+            let prefix = arg_str(heap, args, 1, "pprint-logical-block")?;
             let per_line = arg_bool(args, 2, "pprint-logical-block")?;
-            let suffix = arg_str(heap, args, 3, "pprint-logical-block")?.to_string();
+            let suffix = arg_str(heap, args, 3, "pprint-logical-block")?;
             let opts = current_opts(heap).map_err(PrintError::Raise)?;
             block_start(heap, obj, &prefix, per_line, &suffix, &opts);
             Ok(Value::Empty)

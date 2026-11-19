@@ -94,7 +94,7 @@ fn eval_known(heap: &mut Heap, name: SymRef, argv: &[Value]) -> Result<Value, Ev
             Value::Empty
         }
         ALLOC => {
-            if argv.len() < 4 || argv.len() % 2 != 0 {
+            if argv.len() < 4 || !argv.len().is_multiple_of(2) {
                 return Err(EvalError::Internal(format!("{}: expected a layout of offsets and types, got {} arguments", name, argv.len())));
             }
             let positions = (4..argv.len()).step_by(2).map(|i| Ok((word(i)? as usize, ty(i + 1)?))).collect::<Result<_, EvalError>>()?;

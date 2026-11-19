@@ -6,28 +6,12 @@
 //! function returning the enum hands back the box, read by the callee's
 //! declared return representation.
 
-use typelisp::{load_compiler, load_prelude, Checker, EvalError, Heap, Interp, Reader, Value};
+mod common;
+use common::{Load, Session, eval_in};
+use typelisp::{Checker, Heap, Interp, Value};
 
 fn env() -> (Heap, Checker, Interp) {
-    let mut h = Heap::with_capacity(1 << 16);
-    let mut chk = Checker::new();
-    let mut interp = Interp::new();
-    load_prelude(&mut h, &mut chk, &mut interp);
-    load_compiler(&mut h, &mut chk, &mut interp);
-    (h, chk, interp)
-}
-
-fn eval_in(h: &mut Heap, chk: &mut Checker, interp: &mut Interp, src: &str) -> Result<Value, EvalError> {
-    let r = Reader::new();
-    let vs = r.read_all(h, src).expect("read failed");
-    let mut last = Value::Empty;
-    for v in vs {
-        let tl = chk.check_form(h, interp, v).expect("check failed");
-        if let Some(val) = interp.exec(h, tl).map_err(EvalError::into_kind)? {
-            last = val;
-        }
-    }
-    Ok(last)
+    Session::new(Load::Compiler).into_parts()
 }
 
 /// `:hello` — a keyword, the one self-evaluating `symbol` literal

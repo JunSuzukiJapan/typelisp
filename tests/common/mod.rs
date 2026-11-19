@@ -34,6 +34,19 @@
 // property of how Cargo builds `tests/`, not of the code.
 #![allow(dead_code)]
 
+mod process;
+mod project;
+mod whole;
+
+// The same holds for these re-exports: a file that uses none of a
+// submodule's helpers leaves its re-export unused.
+#[allow(unused_imports)]
+pub use process::*;
+#[allow(unused_imports)]
+pub use project::*;
+#[allow(unused_imports)]
+pub use whole::*;
+
 use typelisp::{load_compiler, load_prelude, Checker, Error, EvalError, Heap, Interp, Reader, TopLevelForm, Value};
 
 /// The default heap for a test: large enough for the prelude and the island
@@ -204,6 +217,26 @@ pub fn eval_string_compiled(src: &str) -> String {
     let mut s = Session::new(Load::Compiler);
     let v = s.eval(src).expect("eval failed");
     s.text(v)
+}
+
+/// `body` (a `string`-valued expression) after `defs`, interpreted and inside
+/// a compiled function, both expected to give `expected`.
+pub fn both(defs: &str, body: &str, expected: &str) {
+    let interpreted = eval_string(&format!("{}\n{}", defs, body));
+    assert_eq!(interpreted, expected, "interpreted: {}", body);
+    let compiled = eval_string_compiled(&format!("{}\n(defun go () string {})\n(compile go)\n(go)", defs, body));
+    assert_eq!(compiled, expected, "compiled: {}", body);
+}
+
+/// `expr` rendered with `~a` after `defs`, interpreted and compiled (after
+/// `(compile NAME)` for each of `names`), asserting the two agree; returns
+/// the text.
+pub fn both_rendered(defs: &str, names: &[&str], expr: &str) -> String {
+    let interpreted = eval_string(&format!("{}\n(format false \"~a\" {})", defs, expr));
+    let compiles: String = names.iter().map(|n| format!("(compile {})\n", n)).collect();
+    let compiled = eval_string_compiled(&format!("{}\n{}(format false \"~a\" {})", defs, compiles, expr));
+    assert_eq!(interpreted, compiled, "interpreted and compiled disagree for {}", expr);
+    interpreted
 }
 
 /// The message of the `TypeError` that checking `src` against the prelude is

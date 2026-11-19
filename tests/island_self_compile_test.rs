@@ -12,7 +12,9 @@
 //! does to a fixed artifact: if `(compile compile-function)` works here, the
 //! island can be lifted to native code.
 
-use typelisp::{load_compiler, load_prelude, Checker, EvalError, Heap, Interp, Reader, Value};
+mod common;
+use common::{eval_in_island as eval_in};
+use typelisp::{load_compiler, load_prelude, Checker, Heap, Interp};
 
 fn fresh() -> (Heap, Checker, Interp) {
     let mut h = Heap::with_capacity(1 << 18);
@@ -21,26 +23,6 @@ fn fresh() -> (Heap, Checker, Interp) {
     load_prelude(&mut h, &mut chk, &mut interp);
     load_compiler(&mut h, &mut chk, &mut interp);
     (h, chk, interp)
-}
-
-fn eval_in(h: &mut Heap, chk: &mut Checker, interp: &mut Interp, src: &str) -> Result<Value, EvalError> {
-    // In the island's own module, where its functions are.
-    chk.enter_file_module(&typelisp::compiler::island_module_segments()).expect("the island's module");
-    let vs: Vec<Value> = Reader::new()
-        .read_all_in_spanned_within(h, "<input>", src, typelisp::NsId::CORE)
-        .expect("read failed")
-        .into_iter()
-        .map(|(v, _)| v)
-        .collect();
-    let mut last = Value::Empty;
-    for v in vs {
-        let tl = chk.check_form(h, interp, v).expect("check failed");
-        if let Some(val) = interp.exec(h, tl).map_err(EvalError::into_kind)? {
-            last = val;
-        }
-    }
-    chk.exit_file_module();
-    Ok(last)
 }
 
 /// Every top-level `defun` in `compiler.rs`'s `SOURCE`, in declaration

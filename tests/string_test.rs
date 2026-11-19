@@ -7,46 +7,12 @@
 //! same pattern as `HashTable`.
 
 extern crate typelisp;
-use typelisp::{load_prelude, Checker, Error, EvalError, Heap, Interp, Reader, Value};
-
-fn run(src: &str) -> Result<Value, EvalError> {
-    let mut h = Heap::with_capacity(1 << 16);
-    let r = Reader::new();
-    let mut chk = Checker::new();
-    chk.publish_names(&h);
-    let vs = r.read_all(&mut h, src).expect("read failed");
-    let interp = Interp::new();
-    let mut last = Value::Empty;
-    for v in vs {
-        let tl = chk.check_form(&mut h, &interp, v).expect("check failed");
-        if let Some(val) = interp.exec(&mut h, tl).map_err(EvalError::into_kind)? {
-            last = val;
-        }
-    }
-    Ok(last)
-}
+mod common;
+use common::{run as run_with_prelude, run_bare as run};
+use typelisp::{Checker, Error, EvalError, Heap, Interp, Reader, Value};
 
 fn eval_ok(src: &str) -> Value {
     run(src).expect("eval failed")
-}
-
-/// Like [`run`], but with the prelude loaded first — needed for `and` (a
-/// `defmacro` in `src/prelude.rs`, not a checker-native special form).
-fn run_with_prelude(src: &str) -> Result<Value, EvalError> {
-    let mut h = Heap::with_capacity(1 << 16);
-    let mut chk = Checker::new();
-    let mut interp = Interp::new();
-    load_prelude(&mut h, &mut chk, &mut interp);
-    let r = Reader::new();
-    let vs = r.read_all(&mut h, src).expect("read failed");
-    let mut last = Value::Empty;
-    for v in vs {
-        let tl = chk.check_form(&mut h, &interp, v).expect("check failed");
-        if let Some(val) = interp.exec(&mut h, tl).map_err(EvalError::into_kind)? {
-            last = val;
-        }
-    }
-    Ok(last)
 }
 
 fn eval_ok_with_prelude(src: &str) -> Value {

@@ -33,19 +33,22 @@ use super::scope;
 pub use super::value::EvalError;
 use super::value::Slot;
 
-/// The evaluator over core forms — the cons-cell program representation that
-/// replaces the `Typed` tree. A child module rather than a sibling of
-/// `interp`, so it can reach this module's private items (the builtin
-/// dispatch, the module tree) while it is being built alongside the evaluator
-/// it will replace.
+/// The evaluator over core forms, the cons-cell program representation the
+/// checker produces: the tag vocabulary, the leaves, the field readers and the
+/// top level. A child module rather than a sibling of `interp`, so it can
+/// reach this module's private items (the builtin dispatch, the module tree).
 mod core_eval;
 
-/// The same evaluator with the Rust recursion taken out: an explicit state
-/// machine over a continuation stack, so the depth of a Lisp recursion stops
-/// being the depth of the Rust stack and the continuation becomes data a task
-/// can be suspended on. Built alongside `core_eval` and replaces it when every
-/// `Op` has moved — `docs/dev/cps-evaluator-design.md`.
+/// The loop that drives it: an explicit state machine over a continuation
+/// stack, so the depth of a Lisp recursion is not the depth of the Rust stack
+/// and the continuation is data a task can be suspended on —
+/// `docs/dev/cps-evaluator-design.md`.
 mod core_cps;
+
+/// What `core_eval`'s and `core_cps`'s tests both read and evaluate core forms
+/// with.
+#[cfg(test)]
+mod core_test_support;
 
 /// The scheduler's task body over `core_cps`'s task and the compiled one,
 /// and the worker threads that step the compiled kind.
@@ -771,7 +774,7 @@ impl Interp {
             .ok_or_else(|| EvalError::Internal(format!("compile: global \"{}\" is not defined", path)))?;
         let v = slot.get(heap);
         let id = typelisp_rt::global_new(heap, v);
-        self.compiled_globals.borrow_mut().insert(path.clone(), id);
+        self.compiled_globals.borrow_mut().insert(*path, id);
         self.printer_tables_changed();
         Ok(id)
     }

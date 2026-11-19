@@ -12,22 +12,11 @@
 extern crate typelisp;
 
 mod common;
-use common::{eval_string_compiled as eval_string, Load, Session};
-use typelisp::{load_compiler, load_prelude, Checker, Error, EvalError, Heap, Interp, Reader, TopLevelForm, Value};
+use common::{Load, Session, check_last, eval_string_compiled as eval_string};
+use typelisp::{Error, EvalError, TopLevelForm, Value};
 
 fn check(src: &str) -> Result<TopLevelForm, Error> {
-    let mut h = Heap::with_capacity(1 << 16);
-    let mut chk = Checker::new();
-    let mut interp = Interp::new();
-    load_prelude(&mut h, &mut chk, &mut interp);
-    load_compiler(&mut h, &mut chk, &mut interp);
-    let r = Reader::new();
-    let vs = r.read_all(&mut h, src).expect("read failed");
-    let mut last = None;
-    for v in vs {
-        last = Some(chk.check_form(&mut h, &interp, v)?);
-    }
-    Ok(last.expect("no forms"))
+    check_last(Load::Compiler, src)
 }
 
 fn run(src: &str) -> Result<Value, EvalError> {
@@ -37,7 +26,6 @@ fn run(src: &str) -> Result<Value, EvalError> {
 fn eval_ok(src: &str) -> Value {
     run(src).expect("eval failed")
 }
-
 
 /// A `(1 2 3)`-valued `Vector<int>` builder (no variadic `vector-of` builder
 /// exists — the language has no value-level `&rest`).

@@ -11,7 +11,9 @@
 //! available; `match` itself is a checker special form and needs no prelude.
 
 extern crate typelisp;
-use typelisp::{load_prelude, Checker, Error, EvalError, Heap, Interp, Reader, Value, TopLevelForm};
+mod common;
+use common::{run};
+use typelisp::{load_prelude, Checker, Error, Heap, Interp, Reader, Value, TopLevelForm};
 
 /// Check every form in `src` (with the prelude loaded); return the last node.
 fn check(src: &str) -> Result<TopLevelForm, Error> {
@@ -26,24 +28,6 @@ fn check(src: &str) -> Result<TopLevelForm, Error> {
         last = Some(chk.check_form(&mut h, &interp, v)?);
     }
     Ok(last.expect("no forms"))
-}
-
-/// Check, then execute, every form in `src`; return the last value produced.
-fn run(src: &str) -> Result<Value, EvalError> {
-    let mut h = Heap::with_capacity(1 << 16);
-    let r = Reader::new();
-    let mut chk = Checker::new();
-    let mut interp = Interp::new();
-    load_prelude(&mut h, &mut chk, &mut interp);
-    let vs = r.read_all(&mut h, src).expect("read failed");
-    let mut last = Value::Empty;
-    for v in vs {
-        let tl = chk.check_form(&mut h, &interp, v).expect("check failed");
-        if let Some(v) = interp.exec(&mut h, tl)? {
-            last = v;
-        }
-    }
-    Ok(last)
 }
 
 fn eval_ok(src: &str) -> Value {

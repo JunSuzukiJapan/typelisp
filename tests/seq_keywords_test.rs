@@ -7,28 +7,9 @@
 //! results are read through their `~a` rendering.
 
 extern crate typelisp;
-use typelisp::{load_prelude, Checker, Heap, Interp, Reader, Value};
-
-fn show(expr: &str) -> String {
-    let src = format!("(format false \"~a\" {})", expr);
-    let mut h = Heap::with_capacity(1 << 18);
-    let mut chk = Checker::new();
-    let mut interp = Interp::new();
-    load_prelude(&mut h, &mut chk, &mut interp);
-    let r = Reader::new();
-    let vs = r.read_all(&mut h, &src).expect("read failed");
-    let mut last = Value::Empty;
-    for v in vs {
-        let tl = chk.check_form(&mut h, &interp, v).expect("check failed");
-        if let Some(val) = interp.exec(&mut h, tl).expect("eval failed") {
-            last = val;
-        }
-    }
-    match last {
-        Value::Str(id) => h.string(id).to_string(),
-        other => panic!("expected a string, got {:?}", other),
-    }
-}
+mod common;
+use common::{show};
+use typelisp::{load_prelude, Checker, Heap, Interp, Reader};
 
 /// `expr` with `a` = `#(1 2 2 3)`, `b` = `#(2 3 4)`,
 /// `neg` = `#(-1 -2 -3)` and `al` = an alist of `1->"one"`, `2->"two"`.

@@ -67,15 +67,14 @@ fn missing<'p>(reg: &Registry, wild: &'p Pat, rows: &[Vec<&'p Pat>], tys: &[Type
 /// matches anything there).
 fn specialize<'p>(wild: &'p Pat, rows: &[Vec<&'p Pat>], variant: usize, arity: usize, all: &[Variant]) -> Vec<Vec<&'p Pat>> {
     rows.iter()
-        .filter_map(|r| {
+        .flat_map(|r| {
             // A row with `:or` alternatives of the variant is one row for each.
             let fields: Vec<Vec<&Pat>> = match cases(r[0], wild, all) {
                 Some(cs) => cs.into_iter().filter(|(v, _)| *v == variant).map(|(_, f)| f).collect(),
                 None => vec![vec![wild; arity]],
             };
-            Some(fields.into_iter().map(|f| f.into_iter().chain(r[1..].iter().copied()).collect::<Vec<_>>()).collect::<Vec<_>>())
+            fields.into_iter().map(move |f| f.into_iter().chain(r[1..].iter().copied()).collect::<Vec<_>>())
         })
-        .flatten()
         .collect()
 }
 

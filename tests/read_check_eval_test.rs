@@ -23,11 +23,11 @@
 //! of `(eval-when (:compile-toplevel) ...)`. The LSP depends on that — it
 //! checks documents for diagnostics and must never run them.
 
-use std::io::Write;
+mod common;
+use common::{repl_stdout, run_project, session};
 use std::path::PathBuf;
-use std::process::{Command, Stdio};
 
-use typelisp::project::{find_src_root, load_file_flat, Loader};
+use typelisp::project::load_file_flat;
 use typelisp::*;
 
 /// A fresh directory under `target/read-check-eval-tmp/<name>` holding
@@ -44,16 +44,6 @@ fn fixture(name: &str, files: &[(&str, &str)]) -> PathBuf {
     dir
 }
 
-/// A session with the prelude loaded.
-fn session() -> (Heap, Reader, Checker, Interp) {
-    let mut heap = Heap::with_capacity(1 << 16);
-    let reader = Reader::new();
-    let mut checker = Checker::new();
-    let mut interp = Interp::new();
-    load_prelude(&mut heap, &mut checker, &mut interp);
-    (heap, reader, checker, interp)
-}
-
 /// Check and run one source form in an existing session, returning its value.
 fn eval_in(heap: &mut Heap, reader: &Reader, checker: &mut Checker, interp: &mut Interp, src: &str) -> Option<Value> {
     let forms = reader.read_all(heap, src).expect("read failed");
@@ -63,19 +53,6 @@ fn eval_in(heap: &mut Heap, reader: &Reader, checker: &mut Checker, interp: &mut
         last = interp.exec(heap, tl).expect("exec failed");
     }
     last
-}
-
-/// Feed `input` to the `typl` REPL over stdin and return its stdout.
-fn repl_stdout(input: &str) -> String {
-    let mut child = Command::new(env!("CARGO_BIN_EXE_typl"))
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .spawn()
-        .expect("failed to start the typl binary");
-    child.stdin.take().unwrap().write_all(input.as_bytes()).expect("failed to write stdin");
-    let out = child.wait_with_output().expect("failed to wait on typl");
-    String::from_utf8_lossy(&out.stdout).into_owned()
 }
 
 // ----------------------------------------------------------------------
@@ -215,29 +192,6 @@ fn a_loaded_file_still_runs_every_form_when_nothing_is_broken() {
 // ----------------------------------------------------------------------
 // The module loader: `use` is a dependency of what follows it
 // ----------------------------------------------------------------------
-
-/// Load `entry` in `dir` through the real module loader and run what it
-/// queued, returning the last top-level value or the first error's text.
-fn run_project(dir: &std::path::Path, entry: &str) -> Result<Option<Value>, String> {
-    let (mut heap, reader, mut checker, mut interp) = session();
-    let entry_path = dir.join(entry);
-    let entry_dir = entry_path.parent().unwrap().to_path_buf();
-    let src_root = find_src_root(&entry_dir).unwrap_or(entry_dir);
-    let mut loader = Loader::new(src_root);
-
-    loader
-        .load_entry(&mut heap, &reader, &mut checker, &mut interp, &entry_path)
-        .map_err(|e| e.to_string())?;
-    let mut last = None;
-    for tl in loader.take_pending() {
-        match interp.exec(&mut heap, tl) {
-            Ok(Some(v)) => last = Some(v),
-            Ok(None) => {}
-            Err(e) => return Err(e.to_string()),
-        }
-    }
-    Ok(last)
-}
 
 #[test]
 fn a_use_above_the_reference_resolves() {

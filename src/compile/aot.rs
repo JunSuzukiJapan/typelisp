@@ -576,7 +576,7 @@ pub fn compile_file(source_path: &str, output_path: &str) -> Result<(), String> 
             let id = interp
                 .compiled_global_id(path)
                 .ok_or_else(|| format!("internal error: global `{}` was collected but never promoted", path))?;
-            Ok((path.clone(), id))
+            Ok((*path, id))
         })
         .collect::<Result<_, String>>()?;
 
@@ -642,7 +642,7 @@ pub fn compile_file(source_path: &str, output_path: &str) -> Result<(), String> 
         build_main_wrapper(
             ctx,
             &m,
-            &target_symbol_name(&CompileTarget::Fn(entry_path.clone())),
+            &target_symbol_name(&CompileTarget::Fn(entry_path)),
             &global_init_names,
             &interp.vtable_descriptors(),
             &interp.upcast_descriptors(),

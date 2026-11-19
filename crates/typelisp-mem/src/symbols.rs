@@ -271,7 +271,6 @@ impl StdModule {
     pub const VEC: StdModule = StdModule(&["vec"]);
     pub const SEXPR: StdModule = StdModule(&["sexpr"]);
     pub const COLLECTIONS: StdModule = StdModule(&["collections"]);
-    pub const SYNC: StdModule = StdModule(&["sync"]);
     pub const READER: StdModule = StdModule(&["reader"]);
     pub const EVAL: StdModule = StdModule(&["eval"]);
     pub const NUM: StdModule = StdModule(&["num"]);

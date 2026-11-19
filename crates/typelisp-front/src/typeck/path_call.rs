@@ -238,7 +238,7 @@ fn table_constructor(heap: &mut Heap, owner: Path, member: SymRef, args: &[(Valu
     let test = match args {
         [] if set => return Ok(None),
         [] => "eql",
-        [(key, _), (named, _)] if matches!(key, Value::Symbol(k) if k.is_keyword() && k.name() == "test") => {
+        [(Value::Symbol(k), _), (named, _)] if k.is_keyword() && k.name() == "test" => {
             let named = match heap.list_to_vec(*named) {
                 Ok(elems) if elems.len() == 2 && matches!(elems[0], Value::Symbol(q) if q.is(wk::QUOTE)) => elems[1],
                 _ => *named,

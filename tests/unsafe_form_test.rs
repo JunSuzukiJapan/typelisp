@@ -17,37 +17,14 @@
 //! anything at all.
 
 extern crate typelisp;
-use typelisp::{load_compiler, load_prelude, Checker, EvalError, Heap, Interp, Reader, Value};
-
-fn run(src: &str) -> Result<(Heap, Value), EvalError> {
-    let mut h = Heap::with_capacity(1 << 18);
-    let mut chk = Checker::new();
-    let mut interp = Interp::new();
-    load_prelude(&mut h, &mut chk, &mut interp);
-    let r = Reader::new();
-    let vs = r.read_all(&mut h, src).expect("read failed");
-    let mut last = Value::Empty;
-    for v in vs {
-        let tl = chk.check_form(&mut h, &interp, v).expect("check failed");
-        if let Some(val) = interp.exec(&mut h, tl).map_err(EvalError::into_kind)? {
-            last = val;
-        }
-    }
-    Ok((h, last))
-}
+mod common;
+use common::{check_err_evaluating as check_err, run_whole as run, text};
+use typelisp::{load_compiler, load_prelude, Checker, Heap, Interp, Reader, Value};
 
 fn int(src: &str) -> i64 {
     match run(src).expect("eval failed").1 {
         Value::Int(n) => n,
         other => panic!("expected an integer, got {:?}", other),
-    }
-}
-
-fn text(src: &str) -> String {
-    let (h, v) = run(src).expect("eval failed");
-    match v {
-        Value::Str(id) => h.string(id).to_string(),
-        other => panic!("expected a string, got {:?}", other),
     }
 }
 
@@ -72,25 +49,6 @@ fn int_compiled(src: &str) -> i64 {
         Value::Int(n) => n,
         other => panic!("expected an integer, got {:?}", other),
     }
-}
-
-/// The checker's complaint about a program that must not type-check.
-fn check_err(src: &str) -> String {
-    let mut h = Heap::with_capacity(1 << 18);
-    let mut chk = Checker::new();
-    let mut interp = Interp::new();
-    load_prelude(&mut h, &mut chk, &mut interp);
-    let r = Reader::new();
-    let vs = r.read_all(&mut h, src).expect("read failed");
-    for v in vs {
-        match chk.check_form(&mut h, &interp, v) {
-            Ok(tl) => {
-                interp.exec(&mut h, tl).expect("eval failed");
-            }
-            Err(e) => return e.to_string(),
-        }
-    }
-    panic!("expected a type error, but the program checked");
 }
 
 // ---------------------------------------------------------------- as a progn

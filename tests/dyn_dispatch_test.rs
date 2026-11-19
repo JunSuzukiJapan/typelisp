@@ -9,25 +9,11 @@
 extern crate typelisp;
 
 mod common;
-use common::{eval_string_compiled as eval_string};
-use typelisp::{load_compiler, load_prelude, Checker, Heap, Interp, Reader, Value};
+use common::{Load, eval_string_compiled as eval_string, run_debug_err};
+use typelisp::Value;
 
 fn run(src: &str) -> Result<Value, String> {
-    let mut h = Heap::with_capacity(1 << 16);
-    let mut chk = Checker::new();
-    let mut interp = Interp::new();
-    load_prelude(&mut h, &mut chk, &mut interp);
-    load_compiler(&mut h, &mut chk, &mut interp);
-    let r = Reader::new();
-    let vs = r.read_all(&mut h, src).map_err(|e| format!("{:?}", e))?;
-    let mut last = Value::Empty;
-    for v in vs {
-        let tl = chk.check_form(&mut h, &interp, v).map_err(|e| format!("{:?}", e))?;
-        if let Some(val) = interp.exec(&mut h, tl).map_err(|e| format!("{:?}", e))? {
-            last = val;
-        }
-    }
-    Ok(last)
+    run_debug_err(Load::Compiler, src)
 }
 
 fn eval_ok(src: &str) -> Value {

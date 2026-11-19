@@ -8,29 +8,8 @@
 //! which is why a one- and a zero-argument call are tested explicitly.
 
 extern crate typelisp;
-use typelisp::{load_prelude, Checker, Heap, Interp, Reader, Value};
-
-/// Runs `expr` with the prelude loaded and renders it with `~a`.
-fn show(expr: &str) -> String {
-    let src = format!("(format false \"~a\" {})", expr);
-    let mut h = Heap::with_capacity(1 << 18);
-    let mut chk = Checker::new();
-    let mut interp = Interp::new();
-    load_prelude(&mut h, &mut chk, &mut interp);
-    let r = Reader::new();
-    let vs = r.read_all(&mut h, &src).expect("read failed");
-    let mut last = Value::Empty;
-    for v in vs {
-        let tl = chk.check_form(&mut h, &interp, v).expect("check failed");
-        if let Some(val) = interp.exec(&mut h, tl).expect("eval failed") {
-            last = val;
-        }
-    }
-    match last {
-        Value::Str(id) => h.string(id).to_string(),
-        other => panic!("expected a string, got {:?}", other),
-    }
-}
+mod common;
+use common::{show};
 
 /// CL's `ffloor`/`fceiling`/`fround`/`ftruncate` round but stay a float —
 /// which is what this language's `f64` `floor`/`ceiling`/`round`/`truncate`

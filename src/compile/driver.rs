@@ -300,7 +300,7 @@ fn prepare_targets(interp: &Interp, heap: &mut Heap, body: &[Value]) -> Result<(
     // A trait dispatched on natively from here on: see
     // `Interp::dyn_dispatch_compiled`.
     for trait_path in &targets.dyn_traits {
-        interp.dyn_dispatch_compiled.borrow_mut().insert(trait_path.clone());
+        interp.dyn_dispatch_compiled.borrow_mut().insert(*trait_path);
     }
     Ok(())
 }

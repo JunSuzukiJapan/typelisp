@@ -11,7 +11,9 @@
 //! runs its tasks on several threads — `tests/os_threads_test.rs`.
 
 extern crate typelisp;
-use typelisp::{load_compiler, load_prelude, Checker, Error, EvalError, Heap, Interp, Reader, Value};
+mod common;
+use common::{run_with as run_with_stress, text};
+use typelisp::{load_prelude, Checker, Error, EvalError, Heap, Interp, Reader, Value};
 
 fn run(src: &str) -> Result<(Heap, Value), EvalError> {
     run_with(src, false)
@@ -35,28 +37,6 @@ fn run_with(src: &str, with_compiler: bool) -> Result<(Heap, Value), EvalError> 
 /// from the program's first form on — the environment is loaded unstressed.
 fn run_compiled_stressed(src: &str) -> Result<(Heap, Value), EvalError> {
     run_with_stress(src, true, true)
-}
-
-fn run_with_stress(src: &str, with_compiler: bool, stress: bool) -> Result<(Heap, Value), EvalError> {
-    let mut h = Heap::with_capacity(1 << 18);
-    let mut chk = Checker::new();
-    let mut interp = Interp::new();
-    load_prelude(&mut h, &mut chk, &mut interp);
-    if with_compiler {
-        typelisp::compile::install_llvm_backend();
-        load_compiler(&mut h, &mut chk, &mut interp);
-    }
-    h.set_gc_stress(stress);
-    let r = Reader::new();
-    let vs = r.read_all(&mut h, src).expect("read failed");
-    let mut last = Value::Empty;
-    for v in vs {
-        let tl = chk.check_form(&mut h, &interp, v).expect("check failed");
-        if let Some(val) = interp.exec(&mut h, tl).map_err(EvalError::into_kind)? {
-            last = val;
-        }
-    }
-    Ok((h, last))
 }
 
 fn int(src: &str) -> i64 {
@@ -362,15 +342,6 @@ fn a_throw_that_leaves_a_task_stops_the_program() {
 }
 
 // ---- yield ---------------------------------------------------------------
-
-/// The string a program answers with.
-fn text(src: &str) -> String {
-    let (h, v) = run(src).expect("eval failed");
-    match v {
-        Value::Str(id) => h.string(id).to_string(),
-        other => panic!("expected a string, got {:?}", other),
-    }
-}
 
 /// `(yield)` gives up the rest of the turn, so two tasks interleave.
 ///

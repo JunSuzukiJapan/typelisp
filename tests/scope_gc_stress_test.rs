@@ -15,41 +15,12 @@
 //! fail deterministically if the session rooting were missing or released too
 //! early, rather than depending on the free list happening to run dry.
 
-use typelisp::{load_compiler, load_prelude, Checker, EvalError, Heap, Interp, Reader, Value};
+mod common;
+use common::{Load, Session, eval_in_island as eval_in};
+use typelisp::{Checker, Heap, Interp, Value};
 
-/// A prelude+island environment whose heap collects on every allocation.
-///
-/// The heap is created at the usual size and only *then* switched into stress
-/// mode: loading the prelude and island under stress would take far too long,
-/// and neither is what these tests are about.
 fn stressed() -> (Heap, Checker, Interp) {
-    let mut h = Heap::with_capacity(1 << 18);
-    let mut chk = Checker::new();
-    let mut interp = Interp::new();
-    load_prelude(&mut h, &mut chk, &mut interp);
-    load_compiler(&mut h, &mut chk, &mut interp);
-    h.set_gc_stress(true);
-    (h, chk, interp)
-}
-
-fn eval_in(h: &mut Heap, chk: &mut Checker, interp: &mut Interp, src: &str) -> Result<Value, EvalError> {
-    // In the island's own module, where its functions are.
-    chk.enter_file_module(&typelisp::compiler::island_module_segments()).expect("the island's module");
-    let vs: Vec<Value> = Reader::new()
-        .read_all_in_spanned_within(h, "<input>", src, typelisp::NsId::CORE)
-        .expect("read failed")
-        .into_iter()
-        .map(|(v, _)| v)
-        .collect();
-    let mut last = Value::Empty;
-    for v in vs {
-        let tl = chk.check_form(h, interp, v).expect("check failed");
-        if let Some(val) = interp.exec(h, tl).map_err(EvalError::into_kind)? {
-            last = val;
-        }
-    }
-    chk.exit_file_module();
-    Ok(last)
+    Session::with_capacity(Load::Compiler, 1 << 18).stressed().into_parts()
 }
 
 /// The island's own scope constructors, driven through the compiled

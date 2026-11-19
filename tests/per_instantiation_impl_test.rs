@@ -4,16 +4,7 @@
 //! for every instantiation or for each one it applies to, never both.
 
 mod common;
-use common::{check_err, eval_string, eval_string_compiled};
-
-/// `body` (a `string`-valued expression) after `defs`, interpreted and inside
-/// a compiled function, both expected to give `expected`.
-fn both(defs: &str, body: &str, expected: &str) {
-    let interpreted = eval_string(&format!("{}\n{}", defs, body));
-    assert_eq!(interpreted, expected, "interpreted: {}", body);
-    let compiled = eval_string_compiled(&format!("{}\n(defun go () string {})\n(compile go)\n(go)", defs, body));
-    assert_eq!(compiled, expected, "compiled: {}", body);
-}
+use common::{both, check_err, eval_string, eval_string_compiled};
 
 const BOXES: &str = r##"
 (defstruct Box<T> (v T))

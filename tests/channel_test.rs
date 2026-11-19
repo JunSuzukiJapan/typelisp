@@ -14,52 +14,9 @@
 //! not merely likely.
 
 extern crate typelisp;
-use typelisp::{load_compiler, load_prelude, Checker, Error, EvalError, Heap, Interp, Reader, Value};
-
-fn run_with(src: &str, with_compiler: bool, stress: bool) -> Result<(Heap, Value), EvalError> {
-    let mut h = Heap::with_capacity(1 << 18);
-    let mut chk = Checker::new();
-    let mut interp = Interp::new();
-    load_prelude(&mut h, &mut chk, &mut interp);
-    if with_compiler {
-        typelisp::compile::install_llvm_backend();
-        load_compiler(&mut h, &mut chk, &mut interp);
-    }
-    h.set_gc_stress(stress);
-    let r = Reader::new();
-    let vs = r.read_all(&mut h, src).expect("read failed");
-    let mut last = Value::Empty;
-    for v in vs {
-        let tl = chk.check_form(&mut h, &interp, v).expect("check failed");
-        if let Some(val) = interp.exec(&mut h, tl).map_err(EvalError::into_kind)? {
-            last = val;
-        }
-    }
-    Ok((h, last))
-}
-
-fn text(src: &str) -> String {
-    match run_with(src, false, false).expect("eval failed") {
-        (h, Value::Str(id)) => h.string(id).to_string(),
-        (_, other) => panic!("expected a string, got {:?}", other),
-    }
-}
-
-/// [`text`] with the collector running at every allocation.
-fn text_stressed(src: &str) -> String {
-    match run_with(src, false, true).expect("eval failed") {
-        (h, Value::Str(id)) => h.string(id).to_string(),
-        (_, other) => panic!("expected a string, got {:?}", other),
-    }
-}
-
-/// [`text`] for a source that compiles something first.
-fn text_compiled(src: &str) -> String {
-    match run_with(src, true, false).expect("eval failed") {
-        (h, Value::Str(id)) => h.string(id).to_string(),
-        (_, other) => panic!("expected a string, got {:?}", other),
-    }
-}
+mod common;
+use common::{check_err_unlocated as check_err, run_with, text, text_compiled, text_stressed};
+use typelisp::Value;
 
 fn int(src: &str) -> i64 {
     match run_with(src, false, false).expect("eval failed").1 {
@@ -88,26 +45,6 @@ fn err_compiled(src: &str) -> String {
         Ok(_) => panic!("expected the program to fail"),
         Err(e) => e.to_string(),
     }
-}
-
-/// The checker's complaint about `src`.
-fn check_err(src: &str) -> String {
-    let mut h = Heap::with_capacity(1 << 18);
-    let mut chk = Checker::new();
-    let mut interp = Interp::new();
-    load_prelude(&mut h, &mut chk, &mut interp);
-    let r = Reader::new();
-    let vs = r.read_all(&mut h, src).expect("read failed");
-    for v in vs {
-        match chk.check_form(&mut h, &interp, v) {
-            Ok(tl) => {
-                let _ = interp.exec(&mut h, tl);
-            }
-            Err(Error::At(_, inner)) => return inner.to_string(),
-            Err(other) => return other.to_string(),
-        }
-    }
-    panic!("expected a check error")
 }
 
 // ---- buffering and rendezvous -------------------------------------------

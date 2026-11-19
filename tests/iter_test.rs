@@ -4,48 +4,17 @@
 //! `doiter` is layered on top.
 
 extern crate typelisp;
-use typelisp::{load_prelude, Checker, Error, EvalError, Heap, Interp, Reader, Value, TopLevelForm};
+mod common;
+use common::{Load, check_last, run};
+use typelisp::{Error, Value, TopLevelForm};
 
-/// Checks `src` against a heap/checker/interp with the prelude already
-/// loaded — needed since `Iter`/`VectorIter<T>` are themselves defined in
-/// `src/prelude.rs` (`Checker::new()`/`Interp::new()` alone register only
-/// the Rust-builtin types, not the prelude's `deftrait`/`impl`/`defstruct`
-/// forms) — mirrors `hashtable_test.rs`'s `run_with_capacity_and_prelude`.
 fn check(src: &str) -> Result<TopLevelForm, Error> {
-    let mut h = Heap::with_capacity(1 << 16);
-    let mut chk = Checker::new();
-    let mut interp = Interp::new();
-    load_prelude(&mut h, &mut chk, &mut interp);
-    let r = Reader::new();
-    let vs = r.read_all(&mut h, src).expect("read failed");
-    let mut last = None;
-    for v in vs {
-        last = Some(chk.check_form(&mut h, &interp, v)?);
-    }
-    Ok(last.expect("no forms"))
-}
-
-fn run(src: &str) -> Result<Value, EvalError> {
-    let mut h = Heap::with_capacity(1 << 16);
-    let mut chk = Checker::new();
-    let mut interp = Interp::new();
-    load_prelude(&mut h, &mut chk, &mut interp);
-    let r = Reader::new();
-    let vs = r.read_all(&mut h, src).expect("read failed");
-    let mut last = Value::Empty;
-    for v in vs {
-        let tl = chk.check_form(&mut h, &interp, v).expect("check failed");
-        if let Some(v) = interp.exec(&mut h, tl)? {
-            last = v;
-        }
-    }
-    Ok(last)
+    check_last(Load::Prelude, src)
 }
 
 fn eval_ok(src: &str) -> Value {
     run(src).expect("eval failed")
 }
-
 
 #[test]
 fn next_on_an_empty_vector_returns_none() {

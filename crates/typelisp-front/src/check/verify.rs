@@ -56,7 +56,7 @@ pub(crate) fn bound_message(of: &str, param: &str, unmet: &Unmet) -> String {
 
 pub(crate) fn not_dyn(ty: &Type, trait_path: &crate::Path, pins: &[Type], why: &NotDyn) -> String {
     let converts = |why: String| {
-        let to = Type::Dyn(trait_path.clone(), pins.to_vec());
+        let to = Type::Dyn(*trait_path, pins.to_vec());
         format!(
             "cannot convert `{}` to `{}` — {}; box the concrete value as `:dyn {}` instead",
             ty,

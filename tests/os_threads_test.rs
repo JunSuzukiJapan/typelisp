@@ -15,26 +15,10 @@
 //! `thread` (Phase 4) starts a task on an OS thread of its own, whatever the
 //! count: the tests for it give the same answers on one thread and on four.
 
+mod common;
+use common::{compile_only as compile, tmp_dir};
 use std::path::PathBuf;
 use std::process::Command;
-
-fn tmp_dir() -> PathBuf {
-    let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("target").join("aot-test-tmp");
-    std::fs::create_dir_all(&dir).expect("failed to create the AOT test scratch dir");
-    dir
-}
-
-/// Compiles `source` as `<scratch>/<name>` and answers with the executable's
-/// path.
-fn compile(name: &str, source: &str) -> PathBuf {
-    let dir = tmp_dir();
-    let src_path = dir.join(format!("{}.typl", name));
-    let out_path = dir.join(name);
-    std::fs::write(&src_path, source).expect("failed to write test source file");
-    typelisp::compile::aot::compile_file(src_path.to_str().unwrap(), out_path.to_str().unwrap())
-        .expect("compile_file failed");
-    out_path
-}
 
 /// Runs `exe` with `TYPELISP_THREADS=threads`: exit code, stdout, stderr.
 fn run_on(exe: &PathBuf, threads: &str) -> (Option<i32>, String, String) {

@@ -6,6 +6,7 @@ use num_rational::BigRational;
 use num_traits::{FromPrimitive, ToPrimitive, Zero};
 use crate::{wk, Heap, SymRef, TypeId, Value};
 use crate::eval::value::EvalError;
+use typelisp_mem::IntArg;
 use super::{expect_str, rt_i64};
 
 /// Evaluate a built-in integer arithmetic/comparison instance method
@@ -331,23 +332,6 @@ pub fn str_rt(heap: &mut Heap, s: impl Into<String>) -> Value {
 
 // ---- `int`: fixnum ∪ bignum ------------------------------------------------
 
-/// An `int` operand as the interpreter reads it: a fixnum straight out of
-/// its `Value::Int`, or the `BigInt` cloned out of its box (owned, for the
-/// reason [`expect_bignum`] gives — every caller goes on to allocate).
-pub(super) enum IntArg {
-    Fix(i64),
-    Big(BigInt),
-}
-
-impl IntArg {
-    fn into_big(self) -> BigInt {
-        match self {
-            IntArg::Fix(n) => BigInt::from(n),
-            IntArg::Big(n) => n,
-        }
-    }
-}
-
 /// The `int` behind a value, in either of its two shapes — and nothing else:
 /// a `Value::Int` past the fixnum range or a bignum box holding one inside it
 /// is a producer that skipped `Heap::canonical_int`, reported as the internal
@@ -501,7 +485,7 @@ pub(super) fn integer_unary(heap: &mut Heap, args: &[Value], name: SymRef) -> Re
     let v = match name.well_known() {
         wk::M_LOGNOT => int_rt(heap, !&a),
         wk::M_LOGCOUNT => {
-            let n = if a.sign() == num_bigint::Sign::Minus { !&a } else { a.clone() };
+            let n = if a.sign() == num_bigint::Sign::Minus { !&a } else { a };
             let count: u64 = n.magnitude().to_u32_digits().iter().map(|d| d.count_ones() as u64).sum();
             int_rt(heap, BigInt::from(count))
         }
@@ -514,16 +498,6 @@ pub(super) fn integer_unary(heap: &mut Heap, args: &[Value], name: SymRef) -> Re
     Ok(v)
 }
 
-/// The low 64 bits of an `int`, two's complement — what a width cast out of
-/// it starts from. A fixnum is already that; a bignum is cut, which is what
-/// `int->W` means (`registry::int_assoc`'s "truncates").
-fn int_low_word(a: IntArg) -> i64 {
-    match a {
-        IntArg::Fix(n) => n,
-        IntArg::Big(n) => (n & BigInt::from(u64::MAX)).to_u64().expect("masked to 64 bits") as i64,
-    }
-}
-
 /// `int->W`/`try-int->W` on an `int` receiver: the cast truncates to the
 /// target (`int_to_width`'s meaning), and the question is answered exactly —
 /// a bignum fits a 64-bit C word when it is in that word's range, and never
@@ -531,13 +505,13 @@ fn int_low_word(a: IntArg) -> i64 {
 pub(super) fn integer_to_width(heap: &mut Heap, args: &[Value], width: u32, signed: bool, try_variant: bool, ret_type: TypeId) -> Result<Value, EvalError> {
     let a = expect_int(heap, &args[0])?;
     if !try_variant {
-        return Ok(Value::Int(crate::types::normalize_int(int_low_word(a), width, signed)));
+        return Ok(Value::Int(crate::types::normalize_int(a.low_word(), width, signed)));
     }
     let fits = match &a {
         IntArg::Fix(n) => crate::types::normalize_int(*n, width, signed) == *n,
         IntArg::Big(n) => width == 64 && if signed { n.to_i64().is_some() } else { n.to_u64().is_some() },
     };
-    let word = int_low_word(a);
+    let word = a.low_word();
     Ok(heap.alloc_option(ret_type, fits.then_some(Value::Int(word))))
 }
 

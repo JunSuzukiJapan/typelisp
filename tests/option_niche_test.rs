@@ -13,19 +13,9 @@
 
 mod common;
 
-use common::{check_err, eval_ok, eval_string, eval_string_compiled, Load, Session};
+use common::{Load, Session, both_rendered as both, check_err, eval_ok, eval_string};
 use typelisp::check::repr::Repr;
 use typelisp::{Path, Type, Value};
-
-/// `expr` rendered with `~a`, interpreted and compiled (after `(compile
-/// NAME)` for each of `names`), asserting the two agree; returns the text.
-fn both(defs: &str, names: &[&str], expr: &str) -> String {
-    let interpreted = eval_string(&format!("{}\n(format false \"~a\" {})", defs, expr));
-    let compiles: String = names.iter().map(|n| format!("(compile {})\n", n)).collect();
-    let compiled = eval_string_compiled(&format!("{}\n{}(format false \"~a\" {})", defs, compiles, expr));
-    assert_eq!(interpreted, compiled, "interpreted and compiled disagree for {}", expr);
-    interpreted
-}
 
 // ---- representation ------------------------------------------------------
 

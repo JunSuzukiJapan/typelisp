@@ -16,9 +16,10 @@
 //! (`project::needs_immediate_exec`), and what it registers has to already
 //! exist, which a `defun` in the same file does not.
 
-use std::io::Write;
+mod common;
+use common::{repl_stdout};
 use std::path::PathBuf;
-use std::process::{Command, Stdio};
+use std::process::Command;
 
 use typelisp::project::{find_src_root, Loader};
 use typelisp::*;
@@ -57,18 +58,6 @@ fn run_project(dir: &std::path::Path, entry: &str) -> Result<Option<Value>, Stri
         }
     }
     Ok(last)
-}
-
-fn repl_stdout(input: &str) -> String {
-    let mut child = Command::new(env!("CARGO_BIN_EXE_typl"))
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .spawn()
-        .expect("failed to start the typl binary");
-    child.stdin.take().unwrap().write_all(input.as_bytes()).expect("failed to write stdin");
-    let out = child.wait_with_output().expect("failed to wait on typl");
-    String::from_utf8_lossy(&out.stdout).into_owned()
 }
 
 /// `!x` -> `(not x)`: the smallest macro that actually reads something.

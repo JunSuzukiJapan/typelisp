@@ -4,16 +4,7 @@
 //! alone, so one name can have a method on each type.
 
 mod common;
-use common::{check_err, eval_string, eval_string_compiled};
-
-/// `body` (a `string`-valued expression) after `defs`, interpreted and
-/// inside a compiled function, both expected to give `expected`.
-fn both(defs: &str, body: &str, expected: &str) {
-    let interpreted = eval_string(&format!("{}\n{}", defs, body));
-    assert_eq!(interpreted, expected, "interpreted: {}", body);
-    let compiled = eval_string_compiled(&format!("{}\n(defun go () string {})\n(compile go)\n(go)", defs, body));
-    assert_eq!(compiled, expected, "compiled: {}", body);
-}
+use common::{both, check_err, eval_string};
 
 /// One name, a method on each of two standard library types, chosen by the
 /// first argument's type.

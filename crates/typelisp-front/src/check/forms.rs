@@ -594,7 +594,7 @@ pub(crate) fn type_to_form(heap: &mut Heap, t: &Type) -> Result<Value, Error> {
             let head = Value::Symbol(typelisp_mem::symbols::well_known_symbol(wk::DYN));
             let mut s = RootScope::new(heap);
             s.push_root(head);
-            let inner = type_to_form(&mut s, &Type::Named(p.clone(), pins.clone()))?;
+            let inner = type_to_form(&mut s, &Type::Named(*p, pins.clone()))?;
             s.push_root(inner);
             list_from_vec_locs(&mut s, &[(head, None), (inner, None)])
         }

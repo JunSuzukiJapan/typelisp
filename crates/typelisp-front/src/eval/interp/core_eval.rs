@@ -13,29 +13,14 @@
 //! ([`Interp::eval_leaf`]), the readers for a node's fields, and the top level
 //! ([`Interp::exec`]).
 //!
-//! # Roots
-//!
-//! Every value here is a heap value and [`Heap::cons`] collects whenever the
-//! free list is empty, so anything the evaluator is holding *in a Rust local*
-//! is invisible to the collector unless it is rooted. Two things are rooted for
-//! the whole of an [`eval_core`](super::Interp::eval_core) call, in two
-//! dedicated slots the loop overwrites in place rather than pushing onto:
-//!
-//! - the **environment**, which the loop replaces as it descends;
-//! - the **form**, so a body reached by a tail jump stays reachable even when
-//!   it belongs to a different tree than the one the caller rooted.
-//!
-//! Overwriting (`set_root`) rather than pushing is what keeps a tail loop from
-//! growing the root stack without bound. Continuation frames push *above*
-//! those two slots, and are truncated back down to them as they resume.
+//! How the loop roots what it holds is described there too.
 //!
 //! # Tail positions
 //!
 //! `if` branches, a `let` body's last form and a call's body are *jumps*, not
 //! recursive calls: the loop moves on to the next form without pushing a
-//! frame. The Rust-tree evaluator this replaced special-cased only `if`, to
-//! survive long `cond` chains; here every tail position is constant-stack, so
-//! mutual recursion through a tail call is too.
+//! frame, so every tail position is constant-stack and mutual recursion
+//! through a tail call is too.
 //!
 //! # Environment
 //!
@@ -45,10 +30,8 @@
 //! CELL  : Value::Boxed(BoxedObj::Cell)
 //! ```
 //!
-//! Lookup compares interned [`SymRef`]s, so it is a `u32` comparison rather
-//! than the `String` comparison `Env`'s `Vec<(String, Slot)>` needs. Within a
-//! frame the *most recently added* binding is found first, matching
-//! `env_get`'s `.rev()`.
+//! Lookup compares interned [`SymRef`]s. Within a frame the *most recently
+//! added* binding is found first.
 
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -304,7 +287,7 @@ impl Interp {
 
             // ---- variables -----------------------------------------------
             Op::Var => {
-                let sym = self.sym_field(heap, form, 0, "var")?;
+                let sym = sym_field(heap, form, 0, "var")?;
                 match env_lookup(heap, env, sym) {
                     Some(cell) => cell_value(heap, cell),
                     None => Err(EvalError::Unbound(heap.symbol_spelling(sym).to_string())),
@@ -439,7 +422,7 @@ impl Interp {
         if has_native_dispatcher {
             for (type_name, method) in &slots {
                 if !self.root.borrow().method_compiled(type_name, *method) {
-                    let target = crate::CompileTarget::Method(type_name.clone(), *method);
+                    let target = crate::CompileTarget::Method(*type_name, *method);
                     (crate::eval::interp::backend_compile_function()?)(self, &mut s, &target)?;
                 }
             }
@@ -542,14 +525,6 @@ impl Interp {
         core::field(heap, form, 0).ok_or_else(|| EvalError::Internal("eval: literal has no value".to_string()))
     }
 
-    /// Field `i` of `form`, which must be a symbol.
-    pub(super) fn sym_field(&self, heap: &Heap, form: Value, i: usize, what: &str) -> Result<SymRef, EvalError> {
-        match core::field(heap, form, i) {
-            Some(Value::Symbol(id)) => Ok(id),
-            other => Err(EvalError::Internal(format!("eval: ({} ..) field {} is not a symbol: {:?}", what, i, other))),
-        }
-    }
-
     /// `(global PATH REPR)` — read a `defvar`.
     ///
     /// A global some compiled function reads or writes lives in a permanent GC
@@ -600,7 +575,7 @@ impl Interp {
     /// for a method.
     fn methodref_core(&self, heap: &mut Heap, form: Value) -> Result<Value, EvalError> {
         let type_name = definition_field(heap, form, 0, "methodref")?;
-        let method = self.sym_field(heap, form, 1, "methodref")?;
+        let method = sym_field(heap, form, 1, "methodref")?;
         let f = self.root.borrow().get_method(&type_name, method);
         match f {
             Some(f) => self.reify(heap, &f),
@@ -633,7 +608,7 @@ impl Interp {
             Some(wk::FN) => crate::CompileTarget::Fn(definition_field(heap, payload, 0, who)?),
             Some(wk::METHOD) => {
                 let type_name = definition_field(heap, payload, 0, who)?;
-                let method = self.sym_field(heap, payload, 1, who)?;
+                let method = sym_field(heap, payload, 1, who)?;
                 crate::CompileTarget::Method(type_name, method)
             }
             other => {
@@ -1643,7 +1618,7 @@ pub(super) fn param_reprs(heap: &Heap, params: Value) -> Result<Vec<Repr>, EvalE
 /// A field naming a definition, as a [`crate::Path`] (`core::definition_value`).
 pub(super) fn definition_field(heap: &Heap, form: Value, i: usize, what: &str) -> Result<crate::Path, EvalError> {
     let v = core::field(heap, form, i);
-    v.and_then(|v| core::definition_value(v))
+    v.and_then(core::definition_value)
         .ok_or_else(|| EvalError::Internal(format!("eval: ({} ..) field {} is not a path: {:?}", what, i, v)))
 }
 
@@ -1690,9 +1665,8 @@ pub(super) fn bool_field(heap: &Heap, form: Value, i: usize, what: &str) -> Resu
 /// The cell a name is bound to in `env`, or `None` if it is unbound.
 ///
 /// Frames are searched innermost first, and within a frame the most recently
-/// added binding wins — the order `env_get`'s `.rev()` gives, so a `let` that
-/// shadows an outer name (or, in a malformed one, itself) resolves the same
-/// way it always has.
+/// added binding wins, so a `let` that shadows an outer name (or, in a
+/// malformed one, itself) finds the inner binding.
 pub(super) fn env_lookup(heap: &Heap, env: Value, name: SymRef) -> Option<Value> {
     let mut frames = env;
     while let Ok(frame) = heap.car(frames) {
@@ -1778,14 +1752,14 @@ impl Interp {
             // separate field needed.
             "defmethod" => {
                 let type_name = definition_field(heap, tl, 0, "defmethod")?;
-                let method = self.sym_field(heap, tl, 1, "defmethod")?;
+                let method = sym_field(heap, tl, 1, "defmethod")?;
                 let _instance = bool_field(heap, tl, 2, "defmethod")?;
                 let (params, param_reprs) = param_list(heap, tl, 3, "defmethod")?;
                 let ret = repr_field(heap, tl, 4, "defmethod")?;
                 let body = body_forms(heap, tl, 5, "defmethod")?;
                 heap.push_permanent_root(tl);
                 let def = FnDef { ffi: false,
-                    target: crate::CompileTarget::Method(type_name.clone(), method),
+                    target: crate::CompileTarget::Method(type_name, method),
                     params,
                     body,
                     rest: false,
@@ -1824,7 +1798,7 @@ impl Interp {
                 // arguments into one `Sexpr` before the call.
                 let sig = (vec![Repr::Sexpr; params.len()], Repr::Sexpr);
                 let def = FnDef { ffi: false,
-                    target: crate::CompileTarget::Fn(name.clone()),
+                    target: crate::CompileTarget::Fn(name),
                     params,
                     body,
                     rest,
@@ -1976,7 +1950,7 @@ impl Interp {
             // an error to avoid.
             "defffi" => {
                 let decl = read_ffi_decl(heap, tl)?;
-                let name = decl.path.clone();
+                let name = decl.path;
                 let (params, param_reprs) = param_list(heap, tl, 3, "defffi")?;
                 let ret = repr_field(heap, tl, 4, "defffi")?;
                 // Before registering, so a declaration that cannot be
@@ -1985,7 +1959,7 @@ impl Interp {
                     .map_err(EvalError::Panic)?;
                 heap.push_permanent_root(tl);
                 let def = FnDef { ffi: true,
-                    target: crate::CompileTarget::Fn(name.clone()),
+                    target: crate::CompileTarget::Fn(name),
                     params,
                     body: Vec::new(),
                     rest: false,
@@ -2100,11 +2074,11 @@ impl Interp {
     }
 }
 
-/// A field holding an interned symbol, as a `String`.
-pub(super) fn sym_field(heap: &Heap, form: Value, i: usize, what: &str) -> Result<String, EvalError> {
+/// Field `i` of `form`, which must be a symbol.
+pub(super) fn sym_field(heap: &Heap, form: Value, i: usize, what: &str) -> Result<SymRef, EvalError> {
     match core::field(heap, form, i) {
-        Some(Value::Symbol(id)) => Ok(heap.symbol_spelling(id).to_string()),
-        other => Err(EvalError::Internal(format!("exec: ({} ..) field {} is not a symbol: {:?}", what, i, other))),
+        Some(Value::Symbol(id)) => Ok(id),
+        other => Err(EvalError::Internal(format!("eval: ({} ..) field {} is not a symbol: {:?}", what, i, other))),
     }
 }
 
@@ -2304,61 +2278,8 @@ fn macro_lambda(heap: &Heap, form: Value, i: usize) -> Result<MacroLambda, EvalE
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    /// A binding name as core IR text read in `%core` spells it — the same
-    /// symbol [`read1`] reads for that name.
-    fn core_symbol(name: &str) -> Value {
-        Value::Symbol(typelisp_mem::symbols::intern_in(typelisp_mem::NsId::CORE, name))
-    }
+    use super::super::core_test_support::{core_symbol, eval_ok, eval_src, read1, stress_heap};
     use crate::sexpr_variant::{CONS, INT, NIL, PATH, STR};
-
-    /// A heap in stress mode: every `cons` collects first, so a value the
-    /// evaluator holds without rooting dies at the very next allocation rather
-    /// than one run in a hundred.
-    fn stress_heap() -> Heap {
-        let mut h = Heap::with_capacity(1 << 16);
-        h.set_gc_stress(true);
-        h
-    }
-
-    /// Read exactly one core form. The reader conses, so this already runs
-    /// under `gc_stress` when the heap is one of ours.
-    fn read1(heap: &mut Heap, src: &str) -> Value {
-        // Core IR, read in the core IR's module so its tags are the IR's own.
-        // The standard library's modules its paths name are declared first,
-        // since a path is read one segment at a time.
-        use typelisp_mem::StdModule;
-        for m in [StdModule::OPTION, StdModule::RESULT, StdModule::VEC, StdModule::SEXPR, StdModule::COLLECTIONS, StdModule::PRIMITIVE] {
-            heap.names().declare_module(m.ns());
-        }
-        let mut vs: Vec<Value> = crate::Reader::new()
-            .read_all_in_spanned_within(heap, "<core>", src, typelisp_mem::NsId::CORE)
-            .expect("read failed")
-            .into_iter()
-            .map(|(v, _)| crate::check::core::name_written_definitions(heap, v))
-            .collect();
-        assert_eq!(vs.len(), 1, "expected exactly one form in {:?}", src);
-        vs.pop().unwrap()
-    }
-
-    /// Evaluate a core form written as source, in the empty environment.
-    ///
-    /// Also asserts that the root stack is exactly where it started: a leaked
-    /// root is not a crash, it is a value that can never be collected, and the
-    /// only place it shows up is here.
-    fn eval_src(heap: &mut Heap, src: &str) -> Result<Value, EvalError> {
-        let form = read1(heap, src);
-        heap.push_root(form);
-        let before = heap.root_count();
-        let interp = Interp::new();
-        let out = interp.eval_core(heap, form, Value::Empty);
-        assert_eq!(heap.root_count(), before, "eval_core leaked or over-popped roots on {:?}", src);
-        out
-    }
-
-    fn eval_ok(heap: &mut Heap, src: &str) -> Value {
-        eval_src(heap, src).unwrap_or_else(|e| panic!("{:?} failed to evaluate: {}", src, e))
-    }
 
     // ---- literals --------------------------------------------------------
 

@@ -234,8 +234,8 @@ impl Cells {
         let mut acc = tail;
         for (elem, (car, cdr)) in elems.into_iter().zip(self.cells).rev() {
             let (car, cdr) = (cx.resolve(&car), cx.resolve(&cdr));
-            let ty = Type::Named(cons.clone(), vec![car.clone(), cdr.clone()]);
-            let node = Node::Construct { owner: cons.clone(), targs: vec![car.clone(), cdr.clone()], variant: 0, mutable: true, field_tys: vec![car, cdr], args: vec![elem, acc] };
+            let ty = Type::Named(cons, vec![car.clone(), cdr.clone()]);
+            let node = Node::Construct { owner: cons, targs: vec![car.clone(), cdr.clone()], variant: 0, mutable: true, field_tys: vec![car, cdr], args: vec![elem, acc] };
             acc = Typed { node, ty, loc: None };
         }
         acc.loc = loc;

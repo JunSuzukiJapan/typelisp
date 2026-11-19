@@ -2,7 +2,7 @@
 //! `defstruct` value is built. Every case runs interpreted and compiled.
 
 mod common;
-use common::{check_err, eval_string, eval_string_compiled};
+use common::{check_err, eval_string};
 
 const DEFS: &str = r##"
 (defstruct Point (pub x f64) (pub y f64 0.5))
@@ -11,13 +11,9 @@ const DEFS: &str = r##"
 (defstruct Holder (pub o Option<int>) (pub n int))
 "##;
 
-/// `body` (a `string`-valued expression) after [`DEFS`], interpreted and
-/// inside a compiled function, both expected to give `expected`.
+/// `body` after [`DEFS`], interpreted and inside a compiled function.
 fn both(body: &str, expected: &str) {
-    let interpreted = eval_string(&format!("{}\n{}", DEFS, body));
-    assert_eq!(interpreted, expected, "interpreted: {}", body);
-    let compiled = eval_string_compiled(&format!("{}\n(defun go () string {})\n(compile go)\n(go)", DEFS, body));
-    assert_eq!(compiled, expected, "compiled: {}", body);
+    common::both(DEFS, body, expected)
 }
 
 /// Slots are given by keyword, in any order.

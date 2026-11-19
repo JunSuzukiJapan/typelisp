@@ -7,27 +7,9 @@
 //! back, and `malloc` is memory C owns.
 
 extern crate typelisp;
-use typelisp::{load_compiler, load_prelude, Checker, Heap, Interp, Reader, Value};
-
-fn eval(src: &str) -> Result<(Heap, Value), String> {
-    let mut h = Heap::with_capacity(1 << 18);
-    let mut chk = Checker::new();
-    let mut interp = Interp::new();
-    load_prelude(&mut h, &mut chk, &mut interp);
-    load_compiler(&mut h, &mut chk, &mut interp);
-    let r = Reader::new();
-    let vs = r.read_all(&mut h, src).map_err(|e| e.to_string())?;
-    let mut last = Value::Empty;
-    for v in vs {
-        let tl = chk.check_form(&mut h, &interp, v).map_err(|e| e.to_string())?;
-        match interp.exec(&mut h, tl) {
-            Ok(Some(val)) => last = val,
-            Ok(None) => {}
-            Err(e) => return Err(e.to_string()),
-        }
-    }
-    Ok((h, last))
-}
+mod common;
+use common::{run_compiled_display_err as eval};
+use typelisp::Value;
 
 fn int(src: &str) -> i64 {
     match eval(src).expect("evaluation failed").1 {

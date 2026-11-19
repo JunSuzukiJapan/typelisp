@@ -164,7 +164,7 @@ fn define_accessor(
     let (params, ret, body) = match accessor {
         Accessor::Get => {
             let get = Node::FieldGet { obj: Box::new(local(self_name, &recv_ty)), index };
-            (vec![(self_name, recv_ty.clone())], field_ty.clone(), Typed { node: get, ty: field_ty.clone(), loc: None })
+            (vec![(self_name, recv_ty)], field_ty.clone(), Typed { node: get, ty: field_ty, loc: None })
         }
         Accessor::Set => {
             let set = Node::FieldSet {
@@ -173,7 +173,7 @@ fn define_accessor(
                 field_ty: field_ty.clone(),
                 value: Box::new(local(value_name, &field_ty)),
             };
-            (vec![(self_name, recv_ty.clone()), (value_name, field_ty.clone())], Type::Unit, Typed { node: set, ty: Type::Unit, loc: None })
+            (vec![(self_name, recv_ty), (value_name, field_ty)], Type::Unit, Typed { node: set, ty: Type::Unit, loc: None })
         }
     };
     let sig = FnDef { public: field.public, ..FnDef::plain(own.clone(), params.iter().map(|(_, t)| t.clone()).collect(), ret.clone()) };

@@ -180,7 +180,7 @@ fn list_type(heap: &Heap, cx: &TypeCx, v: Value) -> Result<Type, Error> {
     // The reader keeps no place for a dotted tail.
     let mut ty = parse_raw(heap, cx, cur, None)?;
     for elem in elems.into_iter().rev() {
-        ty = Type::Named(cons.clone(), vec![elem, ty]);
+        ty = Type::Named(cons, vec![elem, ty]);
     }
     Ok(ty)
 }

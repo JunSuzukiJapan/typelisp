@@ -12,27 +12,10 @@
 //!   it is that it *is* the compiler.
 
 extern crate typelisp;
+mod common;
+use common::{check_error, eval_compiled_with_heap as eval};
 use std::io::Write;
-use typelisp::{load_compiler, load_prelude, Checker, Error, Heap, Interp, Reader, Value};
-
-/// Runs `src` and returns its last value together with the heap it lives in.
-fn eval(src: &str) -> (Heap, Value) {
-    let mut h = Heap::with_capacity(1 << 16);
-    let mut chk = Checker::new();
-    let mut interp = Interp::new();
-    load_prelude(&mut h, &mut chk, &mut interp);
-    load_compiler(&mut h, &mut chk, &mut interp);
-    let r = Reader::new();
-    let vs = r.read_all(&mut h, src).expect("read failed");
-    let mut last = Value::Empty;
-    for v in vs {
-        let tl = chk.check_form(&mut h, &interp, v).expect("check failed");
-        if let Some(val) = interp.exec(&mut h, tl).expect("eval failed") {
-            last = val;
-        }
-    }
-    (h, last)
-}
+use typelisp::{load_compiler, load_prelude, Checker, Heap, Interp, Reader, Value};
 
 /// Runs `src` and returns its last value as text.
 fn eval_string(src: &str) -> String {
@@ -41,31 +24,6 @@ fn eval_string(src: &str) -> String {
         Value::Str(id) => h.string(id).to_string(),
         other => panic!("expected a string, got {:?}", other),
     }
-}
-
-/// The `TypeError` message the first failing form produces.
-fn check_error(src: &str) -> String {
-    let mut h = Heap::with_capacity(1 << 16);
-    let mut chk = Checker::new();
-    let mut interp = Interp::new();
-    load_prelude(&mut h, &mut chk, &mut interp);
-    load_compiler(&mut h, &mut chk, &mut interp);
-    let r = Reader::new();
-    let vs = r.read_all(&mut h, src).expect("read failed");
-    for v in vs {
-        match chk.check_form(&mut h, &interp, v) {
-            Ok(tl) => {
-                interp.exec(&mut h, tl).expect("eval failed");
-            }
-            Err(e) => {
-                return match e.kind() {
-                    Error::TypeError(m) => m.clone(),
-                    other => panic!("expected a type error, got {:?}", other),
-                }
-            }
-        }
-    }
-    panic!("expected `{}` to fail checking", src)
 }
 
 /// Runs `src` with `*standard-output*` pointed at a string stream, and

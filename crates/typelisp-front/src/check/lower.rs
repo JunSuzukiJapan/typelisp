@@ -317,7 +317,7 @@ pub(crate) trait CoreForms {
         // above stays for the questions that are about the *definition*
         // (struct or enum, where it was defined); this is the one about the
         // *value* (which instantiation it is).
-        let key = core::type_form(f.heap(), &Type::Named(type_name.clone(), targs.to_vec()))?;
+        let key = core::type_form(f.heap(), &Type::Named(*type_name, targs.to_vec()))?;
         f.push(key);
         f.push(Value::Int(variant as i64));
         f.push(Value::Bool(mutable));

@@ -43,7 +43,7 @@ fn a_collection_runs_while_one_thread_holds_the_stream_lock_and_another_waits_fo
 
     let (waiting_tx, waiting_rx) = mpsc::channel::<()>();
     let waiter = {
-        let (heap, rt) = (heap.clone(), rt.clone());
+        let (heap, rt) = (heap.clone(), rt);
         std::thread::spawn(move || {
             set_rt_shared(rt);
             let mut h = Heap::attach(&heap);

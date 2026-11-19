@@ -4,7 +4,7 @@
 //! refused, whatever the type.
 
 mod common;
-use common::{check_err, eval_string, eval_string_compiled};
+use common::check_err;
 
 const DEFS: &str = r##"
 (deftrait Named ()
@@ -19,10 +19,7 @@ const DEFS: &str = r##"
 
 /// `body` after [`DEFS`], interpreted and inside a compiled function.
 fn both(body: &str, expected: &str) {
-    let interpreted = eval_string(&format!("{}\n{}", DEFS, body));
-    assert_eq!(interpreted, expected, "interpreted: {}", body);
-    let compiled = eval_string_compiled(&format!("{}\n(defun go () string {})\n(compile go)\n(go)", DEFS, body));
-    assert_eq!(compiled, expected, "compiled: {}", body);
+    common::both(DEFS, body, expected)
 }
 
 #[test]

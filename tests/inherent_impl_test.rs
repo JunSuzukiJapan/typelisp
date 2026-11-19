@@ -3,7 +3,7 @@
 //! static method, called `(Type::name args...)`.
 
 mod common;
-use common::{check_err, eval_string, eval_string_compiled};
+use common::{both as both_with, check_err, eval_string};
 
 const DEFS: &str = r##"
 (defstruct Point (pub x f64) (pub y f64))
@@ -23,14 +23,6 @@ const DEFS: &str = r##"
 /// inside a compiled function, both expected to give `expected`.
 fn both(body: &str, expected: &str) {
     both_with(DEFS, body, expected);
-}
-
-/// [`both`] after `defs` instead of [`DEFS`].
-fn both_with(defs: &str, body: &str, expected: &str) {
-    let interpreted = eval_string(&format!("{}\n{}", defs, body));
-    assert_eq!(interpreted, expected, "interpreted: {}", body);
-    let compiled = eval_string_compiled(&format!("{}\n(defun go () string {})\n(compile go)\n(go)", defs, body));
-    assert_eq!(compiled, expected, "compiled: {}", body);
 }
 
 #[test]

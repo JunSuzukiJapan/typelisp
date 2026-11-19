@@ -12,71 +12,21 @@
 //! duplicated here.
 
 extern crate typelisp;
-use std::cell::RefCell;
-use typelisp::{load_prelude, Checker, Error, EvalError, Heap, Interp, Reader, Value};
-
-// `abs`/`signum`/`gcd`/`lcm`/`rem` (and `f64` `mod`/`rem`) are `prelude.rs`
-// methods, not registry builtins, so the prelude must be loaded. Shared
-// per-thread as `prelude_test` does.
-thread_local! {
-    static CTX: RefCell<Option<(Heap, Checker, Interp)>> = const { RefCell::new(None) };
-}
-
-fn run(src: &str) -> Result<Value, EvalError> {
-    CTX.with(|cell| {
-        let mut opt = cell.borrow_mut();
-        let (h, chk, interp) = opt.get_or_insert_with(|| {
-            let mut h = Heap::with_capacity(1 << 16);
-            let mut chk = Checker::new();
-            let mut interp = Interp::new();
-            load_prelude(&mut h, &mut chk, &mut interp);
-            (h, chk, interp)
-        });
-        let r = Reader::new();
-        let vs = r.read_all(h, src).expect("read failed");
-        let mut last = Value::Empty;
-        for v in vs {
-            let tl = chk.check_form(h, &*interp, v).expect("check failed");
-            if let Some(val) = interp.exec(h, tl).map_err(EvalError::into_kind)? {
-                last = val;
-            }
-        }
-        Ok(last)
-    })
-}
+mod common;
+use common::{run_shared as run, type_error, with_shared_heap};
+use typelisp::{EvalError, Value};
 
 fn eval_ok(src: &str) -> Value {
     run(src).expect("eval failed")
 }
 
-fn type_error(src: &str) {
-    let mut h = Heap::with_capacity(8192);
-    let r = Reader::new();
-    let vs = r.read_all(&mut h, src).expect("read failed");
-    let mut chk = Checker::new();
-    let interp = Interp::new();
-    let mut result: Result<_, Error> = Ok(());
-    for v in vs {
-        if let Err(e) = chk.check_form(&mut h, &interp, v) {
-            result = Err(e);
-            break;
-        }
-    }
-    assert!(result.is_err(), "expected a type error");
-}
-
 /// The `f64` a result carries. An `f64` is a `BoxedObj::Float` since the
-/// scalar unification, so reading one needs the heap it lives in — which is
-/// the same thread-local `CTX` the evaluation used, so call sites stay
-/// unchanged.
+/// scalar unification, so reading one needs the heap it lives in — the
+/// shared session's, which the evaluation used.
 fn as_f64(actual: Value) -> f64 {
-    CTX.with(|cell| {
-        let opt = cell.borrow();
-        let (h, _, _) = opt.as_ref().expect("no evaluation has run yet");
-        match actual {
-            typelisp::Value::Boxed(id) if h.is_f64(id) => h.f64_value(id),
-            other => panic!("expected an f64, got {:?}", other),
-        }
+    with_shared_heap(|h| match actual {
+        typelisp::Value::Boxed(id) if h.is_f64(id) => h.f64_value(id),
+        other => panic!("expected an f64, got {:?}", other),
     })
 }
 

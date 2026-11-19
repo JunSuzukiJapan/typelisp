@@ -81,7 +81,7 @@ fn streams(reg: &mut Registry, ns: NsId) {
     native("stream-write-string", vec![h.clone(), Type::Str], unit_or_err.clone());
     native("stream-at-line-start", vec![h.clone()], result_of(Type::Bool, file_err.clone()));
     native("stream-finish-output", vec![h.clone()], unit_or_err.clone());
-    native("stream-take-output-string", vec![h.clone()], result_of(Type::Str, file_err.clone()));
+    native("stream-take-output-string", vec![h], result_of(Type::Str, file_err.clone()));
 
     // Filesystem operations that need no open stream. Every one of these is
     // a *primitive* under a `Pathish` prelude wrapper that carries the CL
@@ -110,7 +110,7 @@ fn streams(reg: &mut Registry, ns: NsId) {
     // CL's `file-author`, spelled with the routing prefix. `Option` inside
     // the `Result` because CL separates the two failures: the file not being
     // there is an error, an owner with no password-database entry is `NIL`.
-    native("file-owner-name", vec![Type::Str], result_of(option_of(Type::Str), file_err.clone()));
+    native("file-owner-name", vec![Type::Str], result_of(option_of(Type::Str), file_err));
 }
 
 /// The `net-*` primitives (`typelisp_rt::net_builtin`): a TCP socket as an
@@ -226,9 +226,9 @@ fn net(reg: &mut Registry, ns: NsId) {
     // One more certificate on a `tls-listen` listener, for clients asking
     // for that name.
     native("net-tls-add-certificate", vec![h.clone(), Type::Str, Type::Str, Type::Str], unit_or_err.clone());
-    native("net-shutdown-write", vec![h.clone()], unit_or_err.clone());
+    native("net-shutdown-write", vec![h.clone()], unit_or_err);
     native("net-local-address", vec![h.clone()], result_of(Type::Str, net_err.clone()));
-    native("net-peer-address", vec![h.clone()], result_of(Type::Str, net_err.clone()));
+    native("net-peer-address", vec![h.clone()], result_of(Type::Str, net_err));
 
     // The wait itself. Not a `Result`: a closed handle here is a program
     // error (the stream was closed and then waited on), which is a panic.

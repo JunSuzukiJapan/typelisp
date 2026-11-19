@@ -18,7 +18,9 @@
 //! is what [`traced`] below does. Nothing here has to scrape stdout.
 
 extern crate typelisp;
-use typelisp::{load_compiler, load_prelude, Checker, Error, Heap, Interp, Reader, Value};
+mod common;
+use common::{check_error, eval_compiled_with_heap as eval};
+use typelisp::{load_compiler, load_prelude, Checker, Heap, Interp, Reader, Value};
 
 /// Runs `src` with `*trace-output*` pointed at a string stream, and returns
 /// what was written there.
@@ -62,50 +64,6 @@ fn eval_string(src: &str) -> String {
         Value::Str(id) => h.string(id).to_string(),
         other => panic!("expected a string, got {:?}", other),
     }
-}
-
-/// Runs `src` and returns its last value, with no trace redirection.
-fn eval(src: &str) -> (Heap, Value) {
-    let mut h = Heap::with_capacity(1 << 16);
-    let mut chk = Checker::new();
-    let mut interp = Interp::new();
-    load_prelude(&mut h, &mut chk, &mut interp);
-    load_compiler(&mut h, &mut chk, &mut interp);
-    let r = Reader::new();
-    let vs = r.read_all(&mut h, src).expect("read failed");
-    let mut last = Value::Empty;
-    for v in vs {
-        let tl = chk.check_form(&mut h, &interp, v).expect("check failed");
-        if let Some(val) = interp.exec(&mut h, tl).expect("eval failed") {
-            last = val;
-        }
-    }
-    (h, last)
-}
-
-/// The `TypeError` message the first failing form produces.
-fn check_error(src: &str) -> String {
-    let mut h = Heap::with_capacity(1 << 16);
-    let mut chk = Checker::new();
-    let mut interp = Interp::new();
-    load_prelude(&mut h, &mut chk, &mut interp);
-    load_compiler(&mut h, &mut chk, &mut interp);
-    let r = Reader::new();
-    let vs = r.read_all(&mut h, src).expect("read failed");
-    for v in vs {
-        match chk.check_form(&mut h, &interp, v) {
-            Ok(tl) => {
-                interp.exec(&mut h, tl).expect("eval failed");
-            }
-            Err(e) => {
-                return match e.kind() {
-                    Error::TypeError(m) => m.clone(),
-                    other => panic!("expected a type error, got {:?}", other),
-                }
-            }
-        }
-    }
-    panic!("expected `{}` to fail checking", src)
 }
 
 // ---- the report itself ---------------------------------------------------

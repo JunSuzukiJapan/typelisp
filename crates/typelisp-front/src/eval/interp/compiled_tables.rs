@@ -55,7 +55,7 @@ impl Interp {
         let mut out = Vec::new();
         for (path, def) in &enums {
             for (i, (name, _)) in def.variants.iter().enumerate() {
-                out.push((path.clone(), i, name.clone()));
+                out.push((*path, i, name.clone()));
             }
         }
         // `collect_struct_and_enum_types` returns a `HashMap`, so sort for a
@@ -117,7 +117,7 @@ impl Interp {
     /// `TraitDef::method_order` order and already monomorphized, so this only
     /// records it.
     pub(crate) fn vtable_id_for(&self, concrete: crate::TypeId, trait_path: &Path, slots: &[(Path, SymRef)]) -> u32 {
-        let key = (concrete, trait_path.clone());
+        let key = (concrete, *trait_path);
         if let Some(&id) = self.vtable_ids.borrow().get(&key) {
             return id;
         }
@@ -148,7 +148,7 @@ impl Interp {
         }
         let mut ids = self.trait_ids.borrow_mut();
         let id = ids.len() as u32;
-        ids.insert(trait_path.clone(), id);
+        ids.insert(*trait_path, id);
         id
     }
 

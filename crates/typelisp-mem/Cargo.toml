@@ -15,6 +15,7 @@ name = "typelisp_mem"
 [dependencies]
 num-bigint = "0.4"
 num-rational = "0.4"
+num-traits = "0.2"
 # Mapped read-guards (`RwLockReadGuard::map`) — `std::sync::RwLock` has no
 # stable way to return a reference into a lock while keeping it held, which
 # `Heap::type_key_name`/`path_segments`/etc. need once their storage moves

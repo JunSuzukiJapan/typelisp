@@ -4,16 +4,7 @@
 //! any of them. Every case runs interpreted and compiled.
 
 mod common;
-use common::{check_err, eval_string, eval_string_compiled};
-
-/// `body` (a `string`-valued expression), interpreted and inside a compiled
-/// function, both expected to give `expected`.
-fn both(defs: &str, body: &str, expected: &str) {
-    let interpreted = eval_string(&format!("{}\n{}", defs, body));
-    assert_eq!(interpreted, expected, "interpreted: {}", body);
-    let compiled = eval_string_compiled(&format!("{}\n(defun go () string {})\n(compile go)\n(go)", defs, body));
-    assert_eq!(compiled, expected, "compiled: {}", body);
-}
+use common::{both, check_err};
 
 const PUSH_ALL: &str = r##"(use std::collections::Deque std::collections::HashSet)
 (defun push-all<C,T> ((c C) (xs Vector<T>)) () (:where (Push C (Item T)))

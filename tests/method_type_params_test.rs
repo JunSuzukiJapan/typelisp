@@ -32,13 +32,9 @@ const DEFS: &str = r##"
   (v (g (make-instance 'Box :v 5) (lambda ((x int)) bool (> x 2)))))
 "##;
 
-/// `body` (a `string`-valued expression) after [`DEFS`], interpreted and
-/// inside a compiled function, both expected to give `expected`.
+/// `body` after [`DEFS`], interpreted and inside a compiled function.
 fn both(body: &str, expected: &str) {
-    let interpreted = eval_string(&format!("{}\n{}", DEFS, body));
-    assert_eq!(interpreted, expected, "interpreted: {}", body);
-    let compiled = eval_string_compiled(&format!("{}\n(defun go () string {})\n(compile go)\n(go)", DEFS, body));
-    assert_eq!(compiled, expected, "compiled: {}", body);
+    common::both(DEFS, body, expected)
 }
 
 /// The owner's parameter comes from the receiver, the method's own from the

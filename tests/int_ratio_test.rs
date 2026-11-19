@@ -6,38 +6,9 @@
 //! conversions with `i32`/`f64`.
 
 extern crate typelisp;
-use std::cell::RefCell;
-use typelisp::{load_prelude, Checker, EvalError, Heap, Interp, Reader, Value};
-
-// `abs`/`signum`/`gcd`/`lcm`/`rem`/`expt` (and `f64`/`ratio` `mod`/`rem`) are
-// `prelude.rs` methods, not registry builtins, so the prelude must be loaded.
-// Shared per-thread (prelude load reused) exactly as `prelude_test` does.
-thread_local! {
-    static CTX: RefCell<Option<(Heap, Checker, Interp)>> = const { RefCell::new(None) };
-}
-
-fn run(src: &str) -> Result<Value, EvalError> {
-    CTX.with(|cell| {
-        let mut opt = cell.borrow_mut();
-        let (h, chk, interp) = opt.get_or_insert_with(|| {
-            let mut h = Heap::with_capacity(1 << 16);
-            let mut chk = Checker::new();
-            let mut interp = Interp::new();
-            load_prelude(&mut h, &mut chk, &mut interp);
-            (h, chk, interp)
-        });
-        let r = Reader::new();
-        let vs = r.read_all(h, src).expect("read failed");
-        let mut last = Value::Empty;
-        for v in vs {
-            let tl = chk.check_form(h, &*interp, v).expect("check failed");
-            if let Some(val) = interp.exec(h, tl).map_err(EvalError::into_kind)? {
-                last = val;
-            }
-        }
-        Ok(last)
-    })
-}
+mod common;
+use common::{run_shared as run, with_shared_heap as with_heap};
+use typelisp::{EvalError, Value};
 
 fn eval_ok(src: &str) -> Value {
     run(src).expect("eval failed")
@@ -45,17 +16,6 @@ fn eval_ok(src: &str) -> Value {
 
 fn bignum(s: &str) -> num_bigint::BigInt {
     s.parse().unwrap()
-}
-
-/// A `bignum`/`ratio` is a GC-heap box now rather than a Rust-side `Rc`, so
-/// reading one back needs the heap it lives in — which is the same
-/// thread-local `CTX` the evaluation used, so the call sites stay unchanged.
-fn with_heap<R>(f: impl FnOnce(&Heap) -> R) -> R {
-    CTX.with(|cell| {
-        let opt = cell.borrow();
-        let (h, _, _) = opt.as_ref().expect("no evaluation has run yet");
-        f(h)
-    })
 }
 
 /// An `int` result, in either of its shapes: a fixnum when the number fits

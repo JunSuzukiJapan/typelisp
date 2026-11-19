@@ -1,6 +1,8 @@
 //! Tests for `quote`/quasiquote/`gensym`/`defmacro` (CL-style macros).
 
 extern crate typelisp;
+mod common;
+use common::{run_with_prelude_under_gc_stress, sexpr_to_string};
 use typelisp::{load_prelude, Checker, EvalError, Heap, Interp, Reader, Value};
 
 /// Read, type-check, and evaluate a program; return the last expression's
@@ -62,70 +64,6 @@ fn run_with_prelude(src: &str) -> Result<(Value, Heap), EvalError> {
 
 fn eval_ok_with_prelude(src: &str) -> (Value, Heap) {
     run_with_prelude(src).expect("eval failed")
-}
-
-/// Runs `src` with the prelude loaded and **a collection before every
-/// allocation** (`gc_stress`), returning the heap alongside the value so a
-/// `Sexpr` result can be read out of it.
-///
-/// There is no `capacity` parameter any more, and that absence is the point.
-/// These tests used to check against a roomy heap and then execute
-/// against a 96-cell one so the churn forced repeated collections; that is not
-/// expressible any more. Since the checker lowers code into cons cells, the
-/// checked program *is* cells in the heap it was checked against, and handing it
-/// to a second heap reads those cells through the wrong symbol/string tables
-/// (`sym_names` is empty there). A 96-cell heap could not hold the prelude, let
-/// alone the program. Stressing one heap is both the honest shape and strictly
-/// stronger pressure — a collection before *every* allocation, not only before
-/// the ones a small arena happens to block on. See `eval_test.rs`'s
-/// `eval_under_gc_pressure`, which this mirrors.
-///
-/// Stress goes on *after* the prelude loads: it is large, and collecting through
-/// it would dominate the runtime without testing anything these cases are about.
-fn run_with_prelude_under_gc_stress(src: &str) -> Result<(Value, Heap), EvalError> {
-    let mut h = Heap::with_capacity(1 << 16);
-    let mut chk = Checker::new();
-    let mut interp = Interp::new();
-    load_prelude(&mut h, &mut chk, &mut interp);
-    h.set_gc_stress(true);
-    let r = Reader::new();
-    let vs = r.read_all(&mut h, src).expect("read failed");
-    let mut last = Value::Empty;
-    for v in vs {
-        let tl = chk.check_form(&mut h, &interp, v).expect("check failed");
-        if let Some(val) = interp.exec(&mut h, tl)? {
-            last = val;
-        }
-    }
-    Ok((last, h))
-}
-
-/// Render a heap-backed `Sexpr` value in reader syntax, for easy assertions.
-fn sexpr_to_string(heap: &Heap, v: Value) -> String {
-    match v {
-        Value::Empty => "()".to_string(),
-        Value::Int(i) => i.to_string(),
-        Value::Boxed(id) => heap.f64_value(id).to_string(),
-        Value::Bool(b) => b.to_string(),
-        Value::Char(c) => format!("#\\{}", c),
-        Value::Symbol(id) => heap.symbol_spelling(id).to_string(),
-        Value::Str(id) => format!("{:?}", heap.string(id)),
-        Value::Path(_) => "<path>".to_string(),
-        Value::Cons(_) => {
-            let mut parts = Vec::new();
-            let mut cur = v;
-            loop {
-                match cur {
-                    Value::Cons(_) => {
-                        parts.push(sexpr_to_string(heap, heap.car(cur).unwrap()));
-                        cur = heap.cdr(cur).unwrap();
-                    }
-                    Value::Empty => return format!("({})", parts.join(" ")),
-                    other => return format!("({} . {})", parts.join(" "), sexpr_to_string(heap, other)),
-                }
-            }
-        }
-    }
 }
 
 fn as_sexpr_string(v: Value, h: &Heap) -> String {

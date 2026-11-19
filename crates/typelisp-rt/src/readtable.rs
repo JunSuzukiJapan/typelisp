@@ -8,7 +8,7 @@
 //! compiled code calls, so a registration cannot mean two different things
 //! depending on which side of the compile boundary made it.
 
-use crate::stream_builtin::ArgError;
+use crate::stream_builtin::{character, ArgError};
 use typelisp_mem::{spec, wk, Heap, StdModule, SymRef, TypeSpec, Value};
 
 /// The type `Option<(fn (string-input-stream char) Option<Sexpr>)>` — what
@@ -26,13 +26,6 @@ pub const READER_MACRO_OPTION_TYPE: TypeSpec = TypeSpec::Named(
         &TypeSpec::Named(StdModule::OPTION, "Option", &[spec::SEXPR]),
     )],
 );
-
-fn character(args: &[Value], i: usize, who: &str) -> Result<char, ArgError> {
-    match args.get(i) {
-        Some(Value::Char(c)) => Ok(*c),
-        other => Err(format!("{}: argument {} is not a character, got {:?}", who, i, other)),
-    }
-}
 
 /// `Some(f)`/`None` of [`READER_MACRO_OPTION_TYPE`] — a niche, since a
 /// function value is never the empty list (`Heap::alloc_option`).

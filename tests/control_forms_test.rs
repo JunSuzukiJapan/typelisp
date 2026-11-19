@@ -15,24 +15,9 @@
 //! the plan's Phase 3c decision).
 
 extern crate typelisp;
-use typelisp::{load_prelude, Checker, EvalError, Heap, Interp, Reader, Value};
-
-fn run(src: &str) -> Result<(Heap, Value), EvalError> {
-    let mut h = Heap::with_capacity(1 << 18);
-    let mut chk = Checker::new();
-    let mut interp = Interp::new();
-    load_prelude(&mut h, &mut chk, &mut interp);
-    let r = Reader::new();
-    let vs = r.read_all(&mut h, src).expect("read failed");
-    let mut last = Value::Empty;
-    for v in vs {
-        let tl = chk.check_form(&mut h, &interp, v).expect("check failed");
-        if let Some(val) = interp.exec(&mut h, tl).map_err(EvalError::into_kind)? {
-            last = val;
-        }
-    }
-    Ok((h, last))
-}
+mod common;
+use common::{run_whole as run};
+use typelisp::{load_prelude, Checker, Heap, Interp, Reader, Value};
 
 /// `expr` rendered with `~a`, so a `Vector` result is legible.
 fn show(expr: &str) -> String {

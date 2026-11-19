@@ -98,7 +98,7 @@ impl OptKeyParam {
 /// [`OptKeyParam::effective_ty`] before the default has been checked into an
 /// [`OwnedForm`](crate::owned_form::OwnedForm): all it depends on is
 /// *whether* there is one.
-pub fn opt_key_effective_ty(decl_ty: &Type, has_default: bool) -> Type {
+pub(crate) fn opt_key_effective_ty(decl_ty: &Type, has_default: bool) -> Type {
     if has_default {
         decl_ty.clone()
     } else {
@@ -110,7 +110,7 @@ pub fn opt_key_effective_ty(decl_ty: &Type, has_default: bool) -> Type {
 /// (every parameter and the result are `Sexpr`, so there is no type to
 /// record).
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
-pub struct MacroDef {
+pub(crate) struct MacroDef {
     /// The number of leading required parameters — the call's minimum
     /// argument count.
     pub required: usize,
@@ -134,7 +134,7 @@ pub struct MacroDef {
 /// allocated. The layout is computed once, when the definition is checked,
 /// by C's rules on an LP64 target.
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
-pub struct CStructDef {
+pub(crate) struct CStructDef {
     /// The struct's fully-qualified name, its identity (`Type::CStruct`).
     pub name: Path,
     pub fields: Vec<CField>,
@@ -148,7 +148,7 @@ pub struct CStructDef {
 
 /// One field of a [`CStructDef`].
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
-pub struct CField {
+pub(crate) struct CField {
     /// The field's member symbol: `p::x` finds it on the struct by the name
     /// written.
     #[serde(with = "crate::owned_form::sym_serde")]

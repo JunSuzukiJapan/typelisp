@@ -349,7 +349,7 @@ pub fn apply_types(
 /// The AOT half of the split described on [`apply_types`].
 pub fn bind_globals(interp: &crate::Interp, globals: &[(Path, usize)]) {
     for (path, id) in globals {
-        interp.bind_compiled_global(path.clone(), *id);
+        interp.bind_compiled_global(*path, *id);
     }
 }
 

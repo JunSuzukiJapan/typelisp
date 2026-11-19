@@ -468,14 +468,13 @@ impl Heap {
         });
 
         let slot = shared.threads.register();
-        let heap = Heap {
+        Heap {
             shared,
             slot,
             home_stack: 0,
             current_stack: 0,
             current,
-        };
-        heap
+        }
     }
 
     /// A second (or third, ...) view onto the same underlying heap —

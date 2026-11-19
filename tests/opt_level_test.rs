@@ -3,6 +3,8 @@
 //! levels reach the island's IR passes (`optimize-ir`) and LLVM's pipeline,
 //! both of which only the `typl` binary sets up, so this drives it.
 
+mod common;
+use common::{output};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -11,16 +13,6 @@ fn scratch(name: &str) -> PathBuf {
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).expect("creating the scratch directory");
     dir
-}
-
-/// Exit code, stdout, stderr.
-fn output(cmd: &mut Command) -> (i32, String, String) {
-    let out = cmd.output().expect("running a command");
-    (
-        out.status.code().expect("did not exit normally"),
-        String::from_utf8_lossy(&out.stdout).into_owned(),
-        String::from_utf8_lossy(&out.stderr).into_owned(),
-    )
 }
 
 fn typl() -> Command {

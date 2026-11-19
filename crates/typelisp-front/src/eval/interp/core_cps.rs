@@ -1470,7 +1470,7 @@ impl Interp {
                         }
                     }
                 }
-                stack.push(heap, Frame::SelectArm { form, env }, loc.clone());
+                stack.push(heap, Frame::SelectArm { form, env }, loc);
                 Ok(State::Blocked(Waiting::Select { ops, has_else }))
             }
 
@@ -1489,7 +1489,7 @@ impl Interp {
                         let callee = core::field(heap, call, 0).ok_or_else(|| {
                             EvalError::Internal("eval: (apply ..) has no callee".to_string())
                         })?;
-                        stack.push(heap, Frame::ApplyCallee { form: call, env, spawn: Spawn::Task(key) }, loc.clone());
+                        stack.push(heap, Frame::ApplyCallee { form: call, env, spawn: Spawn::Task(key) }, loc);
                         Ok(State::Eval(callee, env))
                     }
                     kind => self.start_args(heap, stack, call, env, kind, Spawn::Task(key), loc),
@@ -1514,7 +1514,7 @@ impl Interp {
                         let callee = core::field(heap, call, 0).ok_or_else(|| {
                             EvalError::Internal("eval: (apply ..) has no callee".to_string())
                         })?;
-                        stack.push(heap, Frame::ApplyCallee { form: call, env, spawn: Spawn::Thread(ret, key) }, loc.clone());
+                        stack.push(heap, Frame::ApplyCallee { form: call, env, spawn: Spawn::Thread(ret, key) }, loc);
                         Ok(State::Eval(callee, env))
                     }
                     kind => self.start_args(heap, stack, call, env, kind, Spawn::Thread(ret, key), loc),
@@ -1524,14 +1524,14 @@ impl Interp {
             Op::If => {
                 let cond = core::field(heap, form, 0)
                     .ok_or_else(|| EvalError::Internal("eval: (if ..) has no condition".to_string()))?;
-                stack.push(heap, Frame::If { form, env }, loc.clone());
+                stack.push(heap, Frame::If { form, env }, loc);
                 Ok(State::Eval(cond, env))
             }
 
             Op::Panic => {
                 let msg = core::field(heap, form, 0)
                     .ok_or_else(|| EvalError::Internal("eval: (panic ..) has no message".to_string()))?;
-                stack.push(heap, Frame::Panic, loc.clone());
+                stack.push(heap, Frame::Panic, loc);
                 Ok(State::Eval(msg, env))
             }
 
@@ -1541,20 +1541,20 @@ impl Interp {
                 // Field 2 is the field's representation, read by the bridge
                 // and by nothing here.
                 let idx = int_field(heap, form, 1, "field-get")? as usize;
-                stack.push(heap, Frame::FieldGet { idx }, loc.clone());
+                stack.push(heap, Frame::FieldGet { idx }, loc);
                 Ok(State::Eval(obj, env))
             }
 
             Op::DynValue => {
                 let inner = core::field(heap, form, 0)
                     .ok_or_else(|| EvalError::Internal("eval: (dyn-value ..) has no operand".to_string()))?;
-                stack.push(heap, Frame::DynValue, loc.clone());
+                stack.push(heap, Frame::DynValue, loc);
                 Ok(State::Eval(inner, env))
             }
             Op::UntagInt => {
                 let inner = core::field(heap, form, 0)
                     .ok_or_else(|| EvalError::Internal("eval: (untag-int ..) has no operand".to_string()))?;
-                stack.push(heap, Frame::UntagInt, loc.clone());
+                stack.push(heap, Frame::UntagInt, loc);
                 Ok(State::Eval(inner, env))
             }
             // The identity: an `int` value is what it is on this side; the
@@ -1576,15 +1576,15 @@ impl Interp {
                 let ty = type_field(heap, form, 0, "box-option")?;
                 let inner = core::field(heap, form, 1)
                     .ok_or_else(|| EvalError::Internal("eval: (box-option ..) has no operand".to_string()))?;
-                stack.push(heap, Frame::BoxOption { ty }, loc.clone());
+                stack.push(heap, Frame::BoxOption { ty }, loc);
                 Ok(State::Eval(inner, env))
             }
 
             Op::Set => {
-                let sym = self.sym_field(heap, form, 0, "set")?;
+                let sym = sym_field(heap, form, 0, "set")?;
                 let val = core::field(heap, form, 1)
                     .ok_or_else(|| EvalError::Internal("eval: (set ..) has no value".to_string()))?;
-                stack.push(heap, Frame::Set { sym, env }, loc.clone());
+                stack.push(heap, Frame::Set { sym, env }, loc);
                 Ok(State::Eval(val, env))
             }
 
@@ -1597,13 +1597,13 @@ impl Interp {
                     // `(let () E...)` is `progn`.
                     let (next, pushed) = sequence_state(heap, body, env)?;
                     if let Some(f) = pushed {
-                        stack.push(heap, f, loc.clone());
+                        stack.push(heap, f, loc);
                     }
                     return Ok(next);
                 }
                 let first = heap.car(binds).map_err(|_| bad("binding list is not a list"))?;
                 let (_, init) = bind_parts(heap, first)?;
-                stack.push(heap, Frame::LetInit { binds, rest: binds, done: Vec::new(), body, env }, loc.clone());
+                stack.push(heap, Frame::LetInit { binds, rest: binds, done: Vec::new(), body, env }, loc);
                 Ok(State::Eval(init, env))
             }
 
@@ -1632,7 +1632,7 @@ impl Interp {
                 };
                 self.stepping.set(true);
                 self.step_quiet_depth.set(usize::MAX);
-                stack.push(heap, frame, loc.clone());
+                stack.push(heap, frame, loc);
                 Ok(State::Eval(inner, env))
             }
 
@@ -1641,21 +1641,21 @@ impl Interp {
                 // bridge and by nothing here.
                 let value = core::field(heap, form, 5)
                     .ok_or_else(|| EvalError::Internal("eval: (dyn-new ..) has no value".to_string()))?;
-                stack.push(heap, Frame::DynNew { form }, loc.clone());
+                stack.push(heap, Frame::DynNew { form }, loc);
                 Ok(State::Eval(value, env))
             }
 
             Op::DynUpcast => {
                 let value = core::field(heap, form, 1)
                     .ok_or_else(|| EvalError::Internal("eval: (dyn-upcast ..) has no operand".to_string()))?;
-                stack.push(heap, Frame::DynUpcast { form }, loc.clone());
+                stack.push(heap, Frame::DynUpcast { form }, loc);
                 Ok(State::Eval(value, env))
             }
 
             Op::Apply => {
                 let callee = core::field(heap, form, 0)
                     .ok_or_else(|| EvalError::Internal("eval: (apply ..) has no callee".to_string()))?;
-                stack.push(heap, Frame::ApplyCallee { form, env, spawn: Spawn::No }, loc.clone());
+                stack.push(heap, Frame::ApplyCallee { form, env, spawn: Spawn::No }, loc);
                 Ok(State::Eval(callee, env))
             }
 
@@ -1708,7 +1708,7 @@ impl Interp {
                 // slots take it.
                 let (next, pushed) = sequence_state(heap, body, inner)?;
                 if let Some(f) = pushed {
-                    stack.push(heap, f, loc.clone());
+                    stack.push(heap, f, loc);
                 }
                 Ok(next)
             }
@@ -1716,21 +1716,21 @@ impl Interp {
             Op::Match => {
                 let scrut = core::field(heap, form, 0)
                     .ok_or_else(|| EvalError::Internal("eval: (match ..) has no scrutinee".to_string()))?;
-                stack.push(heap, Frame::MatchArms { form, env }, loc.clone());
+                stack.push(heap, Frame::MatchArms { form, env }, loc);
                 Ok(State::Eval(scrut, env))
             }
 
             Op::FieldSet => {
                 let obj = core::field(heap, form, 0)
                     .ok_or_else(|| EvalError::Internal("eval: (field-set ..) has no object".to_string()))?;
-                stack.push(heap, Frame::FieldSetObj { form, env }, loc.clone());
+                stack.push(heap, Frame::FieldSetObj { form, env }, loc);
                 Ok(State::Eval(obj, env))
             }
 
             Op::SetGlobal => {
                 let value = core::field(heap, form, 2)
                     .ok_or_else(|| EvalError::Internal("eval: (set-global ..) has no value form".to_string()))?;
-                stack.push(heap, Frame::SetGlobal { form }, loc.clone());
+                stack.push(heap, Frame::SetGlobal { form }, loc);
                 Ok(State::Eval(value, env))
             }
 
@@ -1771,7 +1771,7 @@ impl Interp {
                 let first = heap
                     .car(body)
                     .map_err(|e| EvalError::Internal(format!("eval: (loop ..): {}", e)))?;
-                stack.push(heap, Frame::Loop { body, rest: body, env }, loc.clone());
+                stack.push(heap, Frame::Loop { body, rest: body, env }, loc);
                 Ok(State::Eval(first, env))
             }
 
@@ -1779,7 +1779,7 @@ impl Interp {
 
             Op::Return => match core::field(heap, form, 0) {
                 Some(val) => {
-                    stack.push(heap, Frame::Return, loc.clone());
+                    stack.push(heap, Frame::Return, loc);
                     Ok(State::Eval(val, env))
                 }
                 None => Ok(State::Unwind(EvalError::Return(Box::new(Value::Empty)))),
@@ -1789,7 +1789,7 @@ impl Interp {
                 let name = self.block_name_of(heap, form)?;
                 let body = core::field(heap, form, 1)
                     .ok_or_else(|| EvalError::Internal("eval: (block ..) has no body".to_string()))?;
-                stack.push(heap, Frame::Block { name }, loc.clone());
+                stack.push(heap, Frame::Block { name }, loc);
                 Ok(State::Eval(body, env))
             }
 
@@ -1797,7 +1797,7 @@ impl Interp {
                 let name = self.block_name_of(heap, form)?;
                 match core::field(heap, form, 1) {
                     Some(val) => {
-                        stack.push(heap, Frame::ReturnFrom { name }, loc.clone());
+                        stack.push(heap, Frame::ReturnFrom { name }, loc);
                         Ok(State::Eval(val, env))
                     }
                     None => Ok(State::Unwind(EvalError::ReturnFrom(name, Box::new(Value::Empty)))),
@@ -1808,7 +1808,7 @@ impl Interp {
                 let tag = self.throw_tag_of(heap, form, "catch")?;
                 let body = core::field(heap, form, 1)
                     .ok_or_else(|| EvalError::Internal("eval: (catch ..) has no body".to_string()))?;
-                stack.push(heap, Frame::Catch { tag }, loc.clone());
+                stack.push(heap, Frame::Catch { tag }, loc);
                 Ok(State::Eval(body, env))
             }
 
@@ -1816,7 +1816,7 @@ impl Interp {
                 let tag = self.throw_tag_of(heap, form, "throw")?;
                 let value = core::field(heap, form, 1)
                     .ok_or_else(|| EvalError::Internal("eval: (throw ..) has no value".to_string()))?;
-                stack.push(heap, Frame::Throw { tag }, loc.clone());
+                stack.push(heap, Frame::Throw { tag }, loc);
                 Ok(State::Eval(value, env))
             }
 
@@ -1825,7 +1825,7 @@ impl Interp {
                     .ok_or_else(|| EvalError::Internal("eval: (unwind-protect ..) has no protected form".to_string()))?;
                 let cleanup = core::field(heap, form, 1)
                     .ok_or_else(|| EvalError::Internal("eval: (unwind-protect ..) has no cleanup form".to_string()))?;
-                stack.push(heap, Frame::Protect { cleanup, env }, loc.clone());
+                stack.push(heap, Frame::Protect { cleanup, env }, loc);
                 Ok(State::Eval(protected, env))
             }
 
@@ -1847,13 +1847,13 @@ impl Interp {
         let args = arg_forms(heap, form, kind)?;
         match args.first() {
             Some(&first) => {
-                stack.push(heap, Frame::Args { form, done: Vec::new(), env, kind, spawn }, loc.clone());
+                stack.push(heap, Frame::Args { form, done: Vec::new(), env, kind, spawn }, loc);
                 Ok(State::Eval(first, env))
             }
             None => {
                 let (next, pushed) = self.finish_args(heap, form, Vec::new(), kind, spawn)?;
                 if let Some(f) = pushed {
-                    stack.push(heap, f, loc.clone());
+                    stack.push(heap, f, loc);
                 }
                 Ok(next)
             }
@@ -1989,15 +1989,15 @@ impl Interp {
                 let Some(f) = self.root.borrow().get_fn(&path) else {
                     return Err(not_compilable(format!("`{}`", path), "is a built-in with no body to compile".to_string()));
                 };
-                let target = crate::CompileTarget::Fn(path.clone());
+                let target = crate::CompileTarget::Fn(path);
                 let body = self.compiled_for_thread(heap, &f, &target, &format!("`{}`", path))?;
                 let params = compiled_params(&f, &path.to_string())?;
                 (sched::Entry::Body(body), params, argv)
             }
             ArgsKind::Assoc => {
                 let type_name = definition_field(heap, form, 0, "assoc")?;
-                let method = self.sym_field(heap, form, 1, "assoc")?;
-                let name = typelisp_mem::ConcreteNames::method_link(&type_name, method.name());
+                let method = sym_field(heap, form, 1, "assoc")?;
+                let name = typelisp_mem::ConcreteNames::method_link(type_name, method.name());
                 let Some(f) = self.root.borrow().get_method(&type_name, method) else {
                     return Err(not_compilable(format!("`{}`", name), "is a built-in with no body to compile".to_string()));
                 };
@@ -2111,7 +2111,7 @@ impl Interp {
                     compiled: std::cell::RefCell::new(None),
                 };
                 self.root.borrow_mut().insert_fn(&path, Rc::new(def));
-                self.thread_entries.borrow_mut().insert(key, path.clone());
+                self.thread_entries.borrow_mut().insert(key, path);
                 path
             }
         };
@@ -2440,7 +2440,7 @@ impl Interp {
                         match super::eval_builtin_method(heap, &type_name, name, &argv, ret_type) {
                             Some(r) => r?,
                             None => {
-                                return Err(EvalError::NoSuchFunction(typelisp_mem::ConcreteNames::method_link(&type_name, name.name())))
+                                return Err(EvalError::NoSuchFunction(typelisp_mem::ConcreteNames::method_link(type_name, name.name())))
                             }
                         }
                     }
@@ -2503,7 +2503,7 @@ impl Interp {
         argv: Vec<Value>,
     ) -> Result<(State, Option<Frame>), EvalError> {
         let type_name = definition_field(heap, form, 0, "assoc")?;
-        let method = self.sym_field(heap, form, 1, "assoc")?;
+        let method = sym_field(heap, form, 1, "assoc")?;
         // The result's runtime identity, for the built-in methods that build a
         // box: `Vector::new` has no field to read an instantiation off.
         let ret_type = type_field(heap, form, 5, "assoc")?;
@@ -2583,7 +2583,7 @@ impl Interp {
             Some(f) => self.enter_fn(heap, form, &f, argv),
             None => match super::eval_builtin_method(heap, &type_name, method, &argv, ret_type) {
                 Some(result) => Ok((State::Apply(result?), None)),
-                None => Err(EvalError::NoSuchFunction(typelisp_mem::ConcreteNames::method_link(&type_name, method.name()))),
+                None => Err(EvalError::NoSuchFunction(typelisp_mem::ConcreteNames::method_link(type_name, method.name()))),
             },
         }
     }
@@ -2626,7 +2626,7 @@ impl Interp {
         let f = self.root.borrow().get_method(&target_type, target_method);
         match f {
             Some(f) => self.enter_fn(heap, form, &f, argv),
-            None => Err(EvalError::NoSuchFunction(typelisp_mem::ConcreteNames::method_link(&target_type, target_method.name()))),
+            None => Err(EvalError::NoSuchFunction(typelisp_mem::ConcreteNames::method_link(target_type, target_method.name()))),
         }
     }
 
@@ -3066,54 +3066,7 @@ impl Interp {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    /// A binding name as core IR text read in `%core` spells it — the same
-    /// symbol [`read1`] reads for that name.
-    fn core_symbol(name: &str) -> Value {
-        Value::Symbol(typelisp_mem::symbols::intern_in(typelisp_mem::NsId::CORE, name))
-    }
-
-    /// A heap in stress mode: every `cons` collects first, so a value a frame
-    /// holds without rooting dies at the very next allocation rather than one
-    /// run in a hundred. Every test here uses one — a continuation frame that
-    /// forgets to root what it carries is the failure this rewrite is most
-    /// likely to produce.
-    fn stress_heap() -> Heap {
-        let mut h = Heap::with_capacity(1 << 16);
-        h.set_gc_stress(true);
-        h
-    }
-
-    fn read1(heap: &mut Heap, src: &str) -> Value {
-        // The built-in helpers live in `std::%internal`, a module of every
-        // session the registry is published into; there is no registry here.
-        heap.names().declare_module(typelisp_mem::symbols::ns_of(&["std".to_string(), crate::INTERNAL_MODULE.to_string()]));
-        heap.names().declare_module(typelisp_mem::StdModule::SEXPR.ns());
-        // Core IR, read in the core IR's module so its tags are the IR's own.
-        let mut vs: Vec<Value> = crate::Reader::new()
-            .read_all_in_spanned_within(heap, "<core>", src, typelisp_mem::NsId::CORE)
-            .expect("read failed")
-            .into_iter()
-            .map(|(v, _)| crate::check::core::name_written_definitions(heap, v))
-            .collect();
-        assert_eq!(vs.len(), 1, "expected exactly one form in {:?}", src);
-        vs.pop().unwrap()
-    }
-
-    /// Evaluate a core form through the continuation machine.
-    ///
-    /// Asserts the root stack ends exactly where it started: a leaked root is
-    /// not a crash but a value that can never be collected, and this is the
-    /// only place it shows up.
-    fn eval_src(heap: &mut Heap, src: &str) -> Result<Value, EvalError> {
-        let form = read1(heap, src);
-        heap.push_root(form);
-        let before = heap.root_count();
-        let interp = Interp::new();
-        let out = interp.eval_core(heap, form, Value::Empty);
-        assert_eq!(heap.root_count(), before, "eval_core leaked or over-popped roots on {:?}", src);
-        out
-    }
+    use super::super::core_test_support::{core_symbol, eval_ok, eval_src, read1, stress_heap};
 
     /// Peels the location layers off an error. A runtime error is placed at
     /// the node it came from (`EvalError::At`), which is the right behaviour
@@ -3123,10 +3076,6 @@ mod tests {
             EvalError::At(_, inner) => unlocated(inner),
             other => other,
         }
-    }
-
-    fn eval_ok(heap: &mut Heap, src: &str) -> Value {
-        eval_src(heap, src).unwrap_or_else(|e| panic!("{:?} failed to evaluate: {}", src, e))
     }
 
     // ---- leaves ----------------------------------------------------------

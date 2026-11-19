@@ -11,14 +11,10 @@
 //! naming scheme (which relies on distinct `output_path`s for the same
 //! reason) stays collision-free too.
 
+mod common;
+use common::{compile_only, tmp_dir};
 use std::path::PathBuf;
 use std::process::Command;
-
-fn tmp_dir() -> PathBuf {
-    let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("target").join("aot-test-tmp");
-    std::fs::create_dir_all(&dir).expect("failed to create the AOT test scratch dir");
-    dir
-}
 
 /// Writes `source` to `<scratch>/<name>.typl`, AOT-compiles it to
 /// `<scratch>/<name>`, and returns the exit code of running that
@@ -1714,17 +1710,6 @@ fn compile_and_capture_with(name: &str, source: &str, args: &[&str]) -> (Option<
         String::from_utf8_lossy(&out.stdout).into_owned(),
         String::from_utf8_lossy(&out.stderr).into_owned(),
     )
-}
-
-/// Writes and compiles `source` under `name`, returning the executable's path.
-fn compile_only(name: &str, source: &str) -> PathBuf {
-    let dir = tmp_dir();
-    let src_path = dir.join(format!("{}.typl", name));
-    let out_path = dir.join(name);
-    std::fs::write(&src_path, source).expect("failed to write test source file");
-    typelisp::compile::aot::compile_file(src_path.to_str().unwrap(), out_path.to_str().unwrap())
-        .expect("compile_file failed");
-    out_path
 }
 
 /// `(task ...)` in a standalone executable starts a task, and `wait` gets its

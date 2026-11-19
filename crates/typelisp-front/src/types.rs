@@ -555,7 +555,7 @@ pub fn primitive_types() -> Vec<Type> {
 /// — which has no table of its own.
 pub fn nominal_path(ty: &Type) -> Option<Path> {
     match ty {
-        Type::Named(n, _) => Some(n.clone()),
+        Type::Named(n, _) => Some(*n),
         other => prim_type_path(other),
     }
 }

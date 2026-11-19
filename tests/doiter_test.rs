@@ -5,22 +5,11 @@
 extern crate typelisp;
 
 mod common;
-use common::{Load, Session};
-use typelisp::{load_prelude, load_compiler, Checker, Error, EvalError, Heap, Interp, Reader, Value, TopLevelForm};
+use common::{Load, Session, check_last};
+use typelisp::{Error, EvalError, Value, TopLevelForm};
 
 fn check(src: &str) -> Result<TopLevelForm, Error> {
-    let mut h = Heap::with_capacity(1 << 16);
-    let mut chk = Checker::new();
-    let mut interp = Interp::new();
-    load_prelude(&mut h, &mut chk, &mut interp);
-    load_compiler(&mut h, &mut chk, &mut interp);
-    let r = Reader::new();
-    let vs = r.read_all(&mut h, src).expect("read failed");
-    let mut last = None;
-    for v in vs {
-        last = Some(chk.check_form(&mut h, &interp, v)?);
-    }
-    Ok(last.expect("no forms"))
+    check_last(Load::Compiler, src)
 }
 
 fn run(src: &str) -> Result<Value, EvalError> {

@@ -379,7 +379,7 @@ pub fn promote_globals(
     for path in &plan.globals {
         let id =
             interp.promote_global(heap, path).map_err(|e| format!("prelude: promoting `{}`: {}", path, e))?;
-        out.push((path.clone(), id));
+        out.push((*path, id));
     }
     Ok(out)
 }

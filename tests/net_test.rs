@@ -10,50 +10,8 @@
 //! prelude's wait loop and a compiled one see the same answers.
 
 extern crate typelisp;
-use typelisp::{load_compiler, load_prelude, Checker, EvalError, Heap, Interp, Reader, Value};
-
-fn run_with(src: &str, with_compiler: bool, stress: bool) -> Result<(Heap, Value), EvalError> {
-    let mut h = Heap::with_capacity(1 << 18);
-    let mut chk = Checker::new();
-    let mut interp = Interp::new();
-    load_prelude(&mut h, &mut chk, &mut interp);
-    if with_compiler {
-        typelisp::compile::install_llvm_backend();
-        load_compiler(&mut h, &mut chk, &mut interp);
-    }
-    h.set_gc_stress(stress);
-    let r = Reader::new();
-    let vs = r.read_all(&mut h, src).expect("read failed");
-    let mut last = Value::Empty;
-    for v in vs {
-        let tl = chk.check_form(&mut h, &interp, v).expect("check failed");
-        if let Some(val) = interp.exec(&mut h, tl).map_err(EvalError::into_kind)? {
-            last = val;
-        }
-    }
-    Ok((h, last))
-}
-
-fn text(src: &str) -> String {
-    match run_with(src, false, false).expect("eval failed") {
-        (h, Value::Str(id)) => h.string(id).to_string(),
-        (_, other) => panic!("expected a string, got {:?}", other),
-    }
-}
-
-fn text_stressed(src: &str) -> String {
-    match run_with(src, false, true).expect("eval failed") {
-        (h, Value::Str(id)) => h.string(id).to_string(),
-        (_, other) => panic!("expected a string, got {:?}", other),
-    }
-}
-
-fn text_compiled(src: &str) -> String {
-    match run_with(src, true, false).expect("eval failed") {
-        (h, Value::Str(id)) => h.string(id).to_string(),
-        (_, other) => panic!("expected a string, got {:?}", other),
-    }
-}
+mod common;
+use common::{run_with, text, text_compiled, text_stressed};
 
 fn err(src: &str) -> String {
     match run_with(src, false, false) {
@@ -316,7 +274,7 @@ fn several_clients_are_served_at_once() {
         r))))"
     );
     assert_eq!(text(&src), "abc");
-    assert_eq!(text_compiled(&src.to_string().replace("(task (echo-serve l 3))", "(compile echo-conn) (task (echo-serve l 3))")), "abc");
+    assert_eq!(text_compiled(&src.replace("(task (echo-serve l 3))", "(compile echo-conn) (task (echo-serve l 3))")), "abc");
 }
 
 // ---- timeouts, names, UDP, TLS ---------------------------------------------

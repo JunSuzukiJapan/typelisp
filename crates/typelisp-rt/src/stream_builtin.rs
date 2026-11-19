@@ -143,7 +143,7 @@ pub(crate) fn text(heap: &Heap, args: &[Value], i: usize, who: &str) -> Result<S
     }
 }
 
-fn character(args: &[Value], i: usize, who: &str) -> Result<char, ArgError> {
+pub(crate) fn character(args: &[Value], i: usize, who: &str) -> Result<char, ArgError> {
     match args.get(i) {
         Some(Value::Char(c)) => Ok(*c),
         other => Err(format!("{}: argument {} is not a character, got {:?}", who, i, other)),

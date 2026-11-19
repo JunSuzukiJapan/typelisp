@@ -10,19 +10,12 @@
 //! already is: it loads a module's file on demand, exactly once, keyed by the
 //! module path. See docs/dev/cl-parity-plan.md Stage 9b.
 
+mod common;
+use common::{session};
 use std::path::PathBuf;
 
 use typelisp::project::load_file_flat;
 use typelisp::*;
-
-fn session() -> (Heap, Reader, Checker, Interp) {
-    let mut heap = Heap::with_capacity(1 << 16);
-    let reader = Reader::new();
-    let mut checker = Checker::new();
-    let mut interp = Interp::new();
-    load_prelude(&mut heap, &mut checker, &mut interp);
-    (heap, reader, checker, interp)
-}
 
 /// Check and run `src`'s forms in an existing session, returning the last
 /// value. Errors are reported as their display string.

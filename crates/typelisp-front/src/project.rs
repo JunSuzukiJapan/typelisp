@@ -697,7 +697,7 @@ pub fn load_file_flat(
 ) -> Result<(), Error> {
     let raw = FsPath::new(path);
     let base = if raw.is_absolute() { raw.to_path_buf() } else { dir.join(raw) };
-    let typl = if base.extension().is_some() { base.clone() } else { base.with_extension("typl") };
+    let typl = if base.extension().is_some() { base } else { base.with_extension("typl") };
 
     let src = fs::read_to_string(&typl)
         .map_err(|e| Error::TypeError(format!("load: cannot read `{}`: {}", typl.display(), e)))?;

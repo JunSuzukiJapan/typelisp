@@ -22,24 +22,7 @@ use num_integer::Integer;
 use num_rational::BigRational;
 use num_traits::{ToPrimitive, Zero};
 use typelisp_abi::{active_heap, fatal, raise};
-use typelisp_mem::{decode, encode, fixnum_fits, normalize_int, Value};
-
-/// One `int` operand, cloned out of its box when it is one (owned, for the
-/// reason the interpreter's `expect_bignum` gives: every caller allocates
-/// next, and a `&BigInt` into the heap cannot survive that).
-enum IntArg {
-    Fix(i64),
-    Big(BigInt),
-}
-
-impl IntArg {
-    fn into_big(self) -> BigInt {
-        match self {
-            IntArg::Fix(n) => BigInt::from(n),
-            IntArg::Big(n) => n,
-        }
-    }
-}
+use typelisp_mem::{decode, encode, fixnum_fits, normalize_int, IntArg, Value};
 
 /// # Safety
 ///
@@ -361,15 +344,6 @@ fn scalar_of(a: &IntArg) -> Option<u32> {
     }
 }
 
-/// The low 64 bits of an `int`, two's complement — what a width cast out of
-/// it starts from.
-fn low_word(a: IntArg) -> i64 {
-    match a {
-        IntArg::Fix(n) => n,
-        IntArg::Big(n) => (n & BigInt::from(u64::MAX)).to_u64().expect("masked to 64 bits") as i64,
-    }
-}
-
 /// `int->W` — the raw normalized word of width `wsig` (`args[1]`, the
 /// `width * 2 + signed` code every `rt_int_*` shim takes): a cast out of an
 /// `int` truncates, as every width cast does.
@@ -384,7 +358,7 @@ pub unsafe extern "C" fn rt_integer_narrow(args: *const i64, argc: u32) -> i64 {
     }
     let a = integer_arg(args, 0, "rt_integer_narrow");
     let (width, signed) = crate::wsig(*args.add(1));
-    normalize_int(low_word(a), width, signed)
+    normalize_int(a.low_word(), width, signed)
 }
 
 /// `try-int->W`'s question — raw `0`/`1`: a fixnum fits when normalizing

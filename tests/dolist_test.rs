@@ -5,7 +5,9 @@
 //! orthogonal (Pattern A), rather than fusing the `match` into the loop.
 
 extern crate typelisp;
-use typelisp::{load_prelude, Checker, Error, EvalError, Heap, Interp, Reader, Value, TopLevelForm};
+mod common;
+use common::{Load, check_last, run};
+use typelisp::{Error, Value, TopLevelForm};
 
 // `dolist` is a pure-interpreter prelude macro (`let`/`while`/`match`/`setf`/
 // `sexpr-*`), so these tests only need `load_prelude` — not `load_compiler`.
@@ -13,35 +15,9 @@ use typelisp::{load_prelude, Checker, Error, EvalError, Heap, Interp, Reader, Va
 // `LLVMContext`, so it stays safe under `cargo test`'s default thread
 // parallelism (unlike `doiter_test`/`compile_test`, which must run serially —
 // see `scripts/test-serial.sh`).
-fn run(src: &str) -> Result<Value, EvalError> {
-    let mut h = Heap::with_capacity(1 << 16);
-    let mut chk = Checker::new();
-    let mut interp = Interp::new();
-    load_prelude(&mut h, &mut chk, &mut interp);
-    let r = Reader::new();
-    let vs = r.read_all(&mut h, src).expect("read failed");
-    let mut last = Value::Empty;
-    for v in vs {
-        let tl = chk.check_form(&mut h, &interp, v).expect("check failed");
-        if let Some(v) = interp.exec(&mut h, tl)? {
-            last = v;
-        }
-    }
-    Ok(last)
-}
 
 fn check(src: &str) -> Result<TopLevelForm, Error> {
-    let mut h = Heap::with_capacity(1 << 16);
-    let mut chk = Checker::new();
-    let mut interp = Interp::new();
-    load_prelude(&mut h, &mut chk, &mut interp);
-    let r = Reader::new();
-    let vs = r.read_all(&mut h, src).expect("read failed");
-    let mut last = None;
-    for v in vs {
-        last = Some(chk.check_form(&mut h, &interp, v)?);
-    }
-    Ok(last.expect("no forms"))
+    check_last(Load::Prelude, src)
 }
 
 fn eval_ok(src: &str) -> Value {

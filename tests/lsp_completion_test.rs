@@ -283,7 +283,7 @@ fn recover_mode_records_each_independent_error_with_its_own_location() {
         .map(|e| e.loc().map(|l| l.col))
         .collect();
     assert!(cols.iter().all(|c| c.is_some()), "every error is located");
-    let mut distinct = cols.clone();
+    let mut distinct = cols;
     distinct.dedup();
     assert_eq!(distinct.len(), 3, "the three errors have distinct columns");
 }

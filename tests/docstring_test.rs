@@ -8,31 +8,8 @@
 extern crate typelisp;
 
 mod common;
-use common::{eval_ok_compiled as eval_ok, eval_string_compiled as eval_string};
-use typelisp::{load_prelude, Checker, Error, Heap, Interp, Reader, Value};
-
-/// Type-checks `src` (prelude loaded, so `documentation`/`unwrap-or`/etc. are
-/// in scope) and returns the `TypeError` message from the first form that
-/// fails to check.
-fn check_err(src: &str) -> String {
-    let mut h = Heap::with_capacity(1 << 16);
-    let mut chk = Checker::new();
-    let mut interp = Interp::new();
-    load_prelude(&mut h, &mut chk, &mut interp);
-    let r = Reader::new();
-    let vs = r.read_all(&mut h, src).expect("read failed");
-    let mut result = Ok(());
-    for v in vs {
-        if let Err(e) = chk.check_form(&mut h, &interp, v) {
-            result = Err(e);
-            break;
-        }
-    }
-    match result.map_err(Error::into_kind) {
-        Err(Error::TypeError(msg)) => msg,
-        other => panic!("expected a TypeError, got {:?}", other),
-    }
-}
+use common::{check_err, eval_ok_compiled as eval_ok, eval_string_compiled as eval_string};
+use typelisp::Value;
 
 // ---- defun ------------------------------------------------------------------
 

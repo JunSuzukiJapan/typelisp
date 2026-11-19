@@ -28,7 +28,9 @@
 //! really waited.
 
 extern crate typelisp;
-use typelisp::{load_prelude, Checker, Heap, Interp, Reader, Value};
+mod common;
+use common::{program_text as run};
+use typelisp::{load_prelude, Checker, Heap, Interp, Reader};
 
 /// Runs `src` with the prelude loaded and renders the last form with `~a`.
 fn show(expr: &str) -> String {
@@ -57,27 +59,6 @@ fn part(time_expr: &str, field: &str) -> String {
 /// program that produced it, which is what this composes.
 fn decoded(ut_expr: &str, field: &str) -> String {
     part(&format!("(decode-universal-time {})", ut_expr), field)
-}
-
-/// Runs a whole program (definitions and all), rendering the last form.
-fn run(src: &str) -> String {
-    let mut h = Heap::with_capacity(1 << 18);
-    let mut chk = Checker::new();
-    let mut interp = Interp::new();
-    load_prelude(&mut h, &mut chk, &mut interp);
-    let r = Reader::new();
-    let vs = r.read_all(&mut h, src).expect("read failed");
-    let mut last = Value::Empty;
-    for v in vs {
-        let tl = chk.check_form(&mut h, &interp, v).expect("check failed");
-        if let Some(val) = interp.exec(&mut h, tl).expect("eval failed") {
-            last = val;
-        }
-    }
-    match last {
-        Value::Str(id) => h.string(id).to_string(),
-        other => panic!("expected a string, got {:?}", other),
-    }
 }
 
 // ---- Universal time ----------------------------------------------------

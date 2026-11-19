@@ -100,7 +100,7 @@ fn collect_into_here(heap: &Heap, form: Value, t: &mut Targets) -> Result<(), Er
             let slots = vtable_at(heap, form, 2)?;
             let supers = supers_at(heap, form, 3)?;
             for key in &slots {
-                push_unique(&mut t.methods, key.clone());
+                push_unique(&mut t.methods, *key);
             }
             if !t.dyn_boxes.iter().any(|s| s.concrete == concrete && s.trait_path == trait_path) {
                 t.dyn_boxes.push(DynBoxSite { concrete, trait_path, slots, supers });

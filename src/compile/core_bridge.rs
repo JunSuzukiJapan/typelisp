@@ -1294,7 +1294,7 @@ fn translate_assoc(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Error
     // names, and calls every other one by `SYMBOL`
     // ([`ConcreteNames::method_symbol`]), the name its body was compiled
     // under.
-    let symbol = ConcreteNames::method_symbol(&type_name, method.name());
+    let symbol = ConcreteNames::method_symbol(type_name, method.name());
     let mut f = Items::new(heap);
     f.push(builtin_receiver(&type_name));
     let method_v = f.heap().alloc_string(method.name().to_string());
@@ -1456,7 +1456,7 @@ fn translate_set(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Error> 
 /// struct field read already does, and writing one needs the same tagging.
 fn global_id_and_kind(heap: &Heap, form: Value, cx: Ctx) -> Result<(i64, i64), Error> {
     let path = core::field(heap, form, 0)
-        .and_then(|v| core::definition_value(v))
+        .and_then(core::definition_value)
         .ok_or_else(|| malformed(heap, form))?;
     let repr = core::field(heap, form, 1)
         .and_then(|v| Repr::read(heap, v))
@@ -1525,7 +1525,7 @@ pub fn top_level_function(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Optio
             }
             let path = core::definition_value(parts[0]).ok_or_else(|| malformed(heap, form))?;
             let method = symbol_field(heap, form, 1)?;
-            (ConcreteNames::method_symbol(&path, &method), params_of(heap, parts[3])?, parts[5..].to_vec())
+            (ConcreteNames::method_symbol(path, &method), params_of(heap, parts[3])?, parts[5..].to_vec())
         }
         _ => return Ok(None),
     };
@@ -1875,7 +1875,7 @@ fn translate_dyn_new(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Err
     let concrete = typelisp_mem::type_of_form(heap, parts[0]).ok_or_else(|| malformed(heap, form))?;
     let trait_path = core::definition_value(parts[1]).ok_or_else(|| malformed(heap, form))?;
     let repr = Repr::read(heap, parts[4]).ok_or_else(|| malformed(heap, form))?;
-    let id = *cx.dyn_tables.vtables.get(&(concrete, trait_path.clone())).ok_or_else(|| {
+    let id = *cx.dyn_tables.vtables.get(&(concrete, trait_path)).ok_or_else(|| {
         Error::TypeError(format!(
             "compile: no vtable id interned for `{}` as `:dyn {}` (internal error)",
             &*typelisp_mem::type_name(concrete),
@@ -1896,7 +1896,7 @@ fn translate_dyn_new(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Err
 /// through the mapping the boxing site registered.
 fn translate_dyn_upcast(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Error> {
     let to_trait = core::field(heap, form, 0)
-        .and_then(|v| core::definition_value(v))
+        .and_then(core::definition_value)
         .ok_or_else(|| malformed(heap, form))?;
     let value = core::field(heap, form, 1).ok_or_else(|| malformed(heap, form))?;
     let id = *cx.dyn_tables.trait_ids.get(&to_trait).ok_or_else(|| {
@@ -2255,7 +2255,7 @@ fn translate_immediate_lambda_call(
 /// parameter is simply the last one.
 fn translate_fnref(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Error> {
     let path = core::field(heap, form, 0)
-        .and_then(|v| core::definition_value(v))
+        .and_then(core::definition_value)
         .ok_or_else(|| malformed(heap, form))?;
     let reprs = repr_list(heap, core::field(heap, form, 1).ok_or_else(|| malformed(heap, form))?)?;
     let target = callee_symbol_name(&path);
@@ -2286,12 +2286,12 @@ fn builtin_receiver(type_name: &Path) -> Value {
 /// same convention an ordinary method call uses.
 fn translate_methodref(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Error> {
     let path = core::field(heap, form, 0)
-        .and_then(|v| core::definition_value(v))
+        .and_then(core::definition_value)
         .ok_or_else(|| malformed(heap, form))?;
     let method = symbol_field(heap, form, 1)?;
     let reprs = repr_list(heap, core::field(heap, form, 2).ok_or_else(|| malformed(heap, form))?)?;
     forwarding_lambda(heap, "method", &reprs, cx, move |heap, forwarded| {
-        let symbol = ConcreteNames::method_symbol(&path, &method);
+        let symbol = ConcreteNames::method_symbol(path, &method);
         let mut f = Items::new(heap);
         f.push(builtin_receiver(&path));
         let method_v = f.heap().alloc_string(method);

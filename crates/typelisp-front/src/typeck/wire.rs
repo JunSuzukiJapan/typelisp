@@ -141,7 +141,7 @@ pub(crate) struct RegistryDelta {
 /// What a unit wrote of the checker's registry: its entries and
 /// its generic bodies.
 #[derive(Default, Serialize, Deserialize)]
-pub struct RebuiltUnit {
+pub(crate) struct RebuiltUnit {
     registry: RegistryDelta,
     bodies: RebuiltBodies,
 }

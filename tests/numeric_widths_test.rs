@@ -14,29 +14,9 @@
 //! `as` is a real conversion. The tests that pin that down say so by name.
 
 extern crate typelisp;
-use typelisp::{load_prelude, Checker, Heap, Interp, Reader, Value};
-
-/// Runs `src`'s forms with the prelude loaded and renders the last value with
-/// `~a`.
-fn show(src: &str) -> String {
-    let mut h = Heap::with_capacity(1 << 18);
-    let mut chk = Checker::new();
-    let mut interp = Interp::new();
-    load_prelude(&mut h, &mut chk, &mut interp);
-    let r = Reader::new();
-    let vs = r.read_all(&mut h, src).expect("read failed");
-    let mut last = Value::Empty;
-    for v in vs {
-        let tl = chk.check_form(&mut h, &interp, v).expect("check failed");
-        if let Some(val) = interp.exec(&mut h, tl).expect("eval failed") {
-            last = val;
-        }
-    }
-    match last {
-        Value::Str(id) => h.string(id).to_string(),
-        other => panic!("expected a string, got {:?}", other),
-    }
-}
+mod common;
+use common::{program_text as show};
+use typelisp::{load_prelude, Checker, Heap, Interp, Reader};
 
 /// The same, but expecting the check to fail — returns the message.
 fn check_error(src: &str) -> String {

@@ -858,6 +858,7 @@ version = "0.3.6"
 dependencies = [
  "num-bigint",
  "num-rational",
+ "num-traits",
  "parking_lot",
  "stacker",
 ]
