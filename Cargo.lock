@@ -805,7 +805,7 @@ dependencies = [
 
 [[package]]
 name = "typelisp"
-version = "0.3.6"
+version = "0.3.7"
 dependencies = [
  "inkwell",
  "lsp-server",
@@ -829,14 +829,14 @@ dependencies = [
 
 [[package]]
 name = "typelisp-abi"
-version = "0.3.6"
+version = "0.3.7"
 dependencies = [
  "typelisp-mem",
 ]
 
 [[package]]
 name = "typelisp-front"
-version = "0.3.6"
+version = "0.3.7"
 dependencies = [
  "bincode",
  "num-bigint",
@@ -854,7 +854,7 @@ dependencies = [
 
 [[package]]
 name = "typelisp-mem"
-version = "0.3.6"
+version = "0.3.7"
 dependencies = [
  "num-bigint",
  "num-rational",
@@ -865,7 +865,7 @@ dependencies = [
 
 [[package]]
 name = "typelisp-print"
-version = "0.3.6"
+version = "0.3.7"
 dependencies = [
  "num-traits",
  "parking_lot",
@@ -875,7 +875,7 @@ dependencies = [
 
 [[package]]
 name = "typelisp-read"
-version = "0.3.6"
+version = "0.3.7"
 dependencies = [
  "num-bigint",
  "num-rational",
@@ -885,7 +885,7 @@ dependencies = [
 
 [[package]]
 name = "typelisp-rt"
-version = "0.3.6"
+version = "0.3.7"
 dependencies = [
  "libc",
  "num-bigint",
