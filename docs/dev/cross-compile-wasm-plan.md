@@ -46,10 +46,16 @@ typl -c SOURCE [-o OUTPUT] [--target TRIPLE] [--heap-cells N] [--no-cons] [--max
 
 ### 段階 3: 巻き戻しを状態語に
 
-- `throw`/`panic` は今、Rust の panic による巻き戻しで、ドライバが活性化の境界 1 か所で `catch_unwind` している（C4）。stable Rust の wasm は `panic=abort` なので、このままでは動かない。
-- `rt_panic`/`rt_throw` などは巻き戻さず、「巻き戻し中」の状態を記録して特別な状態語を返す。島が emit する呼び出し地点は、その状態語を受けたら自フレームのハンドラ pc（`FRAME_HANDLER_SLOT`）へ飛ぶか、ドライバへ返す。
-- ネイティブも同じ仕組みにして、仕組みを 1 つにする。`catch_unwind` はランタイムの Rust 自身のバグ（本物の panic）を報告するためだけに残る。
-- extern の表が変わるので、島の再生成 2 回と prelude の再生成が要る（C4 と同じ手順: 機構の切り替え → regen → 古い方の削除 → regen）。
+今の形: `throw`/`panic` と shim のエラー（`typelisp_abi::raise`）は Rust の panic で、コンパイル済みの 1 活性化ぶんのマシンフレームを抜けて、ドライバの `catch_unwind` が受ける（C4）。ドライバは受けた payload を退避し（`park_activation_unwind`）、`STATUS_UNWIND` としてフレーム鎖をたどってハンドラの `pc` へ再開する。stable Rust の wasm は `panic=abort` なので、この panic が使えない。
+
+変える形:
+
+1. **raise は戻る。** `raise` は payload を退避して呼び出し元へ戻る（`-> !` ではなくなる）。raise しうる Rust の関数は `Result<_, Raised>` を返し、shim の境界まで伝える。shim は 0 を返す。`Raised` はトークンで、raise した事実を型で運ぶ（黙って捨てられない）。
+2. **生成コードが確かめる。** raise しうる shim を呼んだ後、生成コードは `rt_unwinding` を呼び、退避された巻き戻しがあれば `coroutine-unwind`（`STATUS_UNWIND` を返す）へ分岐する。どの shim が raise しうるかは extern の表で 1 か所に答える。
+3. **ドライバは catch_unwind しない。** 戻ってきた状態語と退避の有無だけで判断する。classic ABI の本体を呼ぶ箇所も同じ。`catch_unwind` は、ランタイムの Rust 自身の不具合（本物の panic）を報告する場所にだけ残る。
+4. **コンパイル済みコードを呼ぶ Rust**（`print-object` のフック、C コールバック、`rt_drive_body`）は、戻ったあとに退避を確かめて `Raised` を返す。
+
+ネイティブも同じ仕組みにする。extern の表と島の SOURCE が変わるので、島の再生成 2 回と prelude の再生成が要る。
 
 ### 段階 4: wasm32-wasip1
 
