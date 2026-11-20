@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ 3a6ff5cd72bee55134721d600c276c160f556bb9 -->
+<!-- translated-from: docs/ja/guide/compile.md @ eb0e7d31e1d6e61f64d90fcfb4f0dc5e6bfe813f -->
 # Biên dịch
 
 Nếu bạn không làm gì thêm, chương trình typelisp chạy trong trình thông dịch. Ngoài ra còn có hai
@@ -183,7 +183,7 @@ args: #(hello.wasm a b)
 fib(25) = 75025
 ```
 
-- Cần chuẩn bị (cũng dùng cho mục 3.7). Trước tiên chạy `rustup target add wasm32-wasip1 wasm32-unknown-unknown` bằng rustup. Sau đó, khi cài `typl` bằng `cargo install`, hãy thêm `--features wasm` (`cargo install --locked --path . --features wasm`).
+- `typl` cài bằng `install.sh` có thể dùng ngay. Khi cài bằng `cargo install` thì cần chuẩn bị (cũng dùng cho mục 3.7). Trước tiên chạy `rustup target add wasm32-wasip1 wasm32-unknown-unknown` bằng rustup. Sau đó cài với `--features wasm` (`cargo install --locked --path . --features wasm`).
   `typl` cài mà không có tùy chọn này sẽ không có runtime WebAssembly, và `--target` báo lỗi. Với bản build debug của `typl` trong kho mã, hãy chạy `scripts/build-wasm-runtime.sh` trong kho mã thay thế.
 - Việc liên kết dùng trình liên kết của toolchain rustup (`rust-lld`), nên khi biên dịch cũng cần rustup.
 - Mô-đun hoạt động như tệp thực thi: đầu ra chuẩn, lỗi chuẩn và mã thoát, `(command-line-args)`,

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ 3a6ff5cd72bee55134721d600c276c160f556bb9 -->
+<!-- translated-from: docs/ja/guide/compile.md @ eb0e7d31e1d6e61f64d90fcfb4f0dc5e6bfe813f -->
 # कंपाइल करना
 
 यदि आप और कुछ न करें, तो typelisp प्रोग्राम इंटरप्रेटर में चलते हैं। इसके अलावा नेटिव कोड में कंपाइल करने के दो तरीके हैं, और एक पर्यावरण को सहेजने का तरीका है। विनिर्देश का विवरण [सिंटैक्स संदर्भ अध्याय 10](../reference/syntax.md#10-कंपाइलेशन) में है।
@@ -159,7 +159,7 @@ args: #(hello.wasm a b)
 fib(25) = 75025
 ```
 
-- इसके लिए तैयारी चाहिए (जो खंड 3.7 के लिए भी है)। पहले rustup से `rustup target add wasm32-wasip1 wasm32-unknown-unknown` चलाएँ। फिर `cargo install` से `typl` इंस्टॉल करते समय `--features wasm` जोड़ें (`cargo install --locked --path . --features wasm`)।
+- `install.sh` से इंस्टॉल किया गया `typl` वैसे ही इस्तेमाल किया जा सकता है। `cargo install` से इंस्टॉल करने पर तैयारी चाहिए (जो खंड 3.7 के लिए भी है)। पहले rustup से `rustup target add wasm32-wasip1 wasm32-unknown-unknown` चलाएँ। फिर उसे `--features wasm` के साथ इंस्टॉल करें (`cargo install --locked --path . --features wasm`)।
   इसके बिना इंस्टॉल किए गए `typl` में WebAssembly रनटाइम नहीं होता, और `--target` त्रुटि देता है। रिपॉज़िटरी के डीबग बिल्ड `typl` के लिए इसके बजाय रिपॉज़िटरी में `scripts/build-wasm-runtime.sh` चलाएँ।
 - लिंक करने में rustup टूलचेन का लिंकर (`rust-lld`) इस्तेमाल होता है, इसलिए कंपाइल करते समय भी rustup चाहिए।
 - मॉड्यूल एक्ज़ीक्यूटेबल जैसा ही व्यवहार करता है: मानक आउटपुट, मानक त्रुटि और निकास कोड, `(command-line-args)`,

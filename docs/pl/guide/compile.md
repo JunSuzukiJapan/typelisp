@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ 3a6ff5cd72bee55134721d600c276c160f556bb9 -->
+<!-- translated-from: docs/ja/guide/compile.md @ eb0e7d31e1d6e61f64d90fcfb4f0dc5e6bfe813f -->
 # Kompilacja
 
 O ile nie zrobisz nic więcej, programy typelisp działają w interpreterze. Ponadto istnieją dwa
@@ -184,7 +184,7 @@ args: #(hello.wasm a b)
 fib(25) = 75025
 ```
 
-- Wymaga to przygotowania (obejmującego też podrozdział 3.7). Najpierw uruchom `rustup target add wasm32-wasip1 wasm32-unknown-unknown` przez rustup. Następnie, instalując `typl` przez `cargo install`, dodaj `--features wasm` (`cargo install --locked --path . --features wasm`).
+- `typl` zainstalowany przez `install.sh` działa od razu. Instalacja przez `cargo install` wymaga przygotowania (obejmującego też podrozdział 3.7). Najpierw uruchom `rustup target add wasm32-wasip1 wasm32-unknown-unknown` przez rustup. Następnie zainstaluj go z `--features wasm` (`cargo install --locked --path . --features wasm`).
   `typl` zainstalowany bez tego nie ma środowiska uruchomieniowego WebAssembly i `--target` kończy się błędem. Dla wersji debug `typl` w repozytorium uruchom zamiast tego `scripts/build-wasm-runtime.sh` w repozytorium.
 - Do linkowania używany jest linker z toolchaina rustup (`rust-lld`), więc rustup jest potrzebny także podczas kompilacji.
 - Moduł zachowuje się jak plik wykonywalny: standardowe wyjście, standardowe wyjście błędów i kod wyjścia, `(command-line-args)`,

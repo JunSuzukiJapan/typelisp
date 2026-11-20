@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ 3a6ff5cd72bee55134721d600c276c160f556bb9 -->
+<!-- translated-from: docs/ja/guide/compile.md @ eb0e7d31e1d6e61f64d90fcfb4f0dc5e6bfe813f -->
 # Compileren
 
 Tenzij je iets anders doet, draaien typelisp-programma's in de interpreter. Daarnaast zijn er twee
@@ -194,7 +194,7 @@ args: #(hello.wasm a b)
 fib(25) = 75025
 ```
 
-- Dit vraagt voorbereiding (die ook voor paragraaf 3.7 geldt). Voer eerst met rustup `rustup target add wasm32-wasip1 wasm32-unknown-unknown` uit. Installeer `typl` daarna met `--features wasm` als u het met `cargo install` installeert (`cargo install --locked --path . --features wasm`).
+- Een met `install.sh` geïnstalleerde `typl` is zo te gebruiken. Een die met `cargo install` wordt geïnstalleerd, vraagt voorbereiding (die ook voor paragraaf 3.7 geldt). Voer eerst met rustup `rustup target add wasm32-wasip1 wasm32-unknown-unknown` uit. Installeer hem daarna met `--features wasm` (`cargo install --locked --path . --features wasm`).
   Een zonder deze optie geïnstalleerde `typl` heeft geen WebAssembly-runtime, en `--target` is een fout. Voor een debug-build van `typl` in de repository voert u in plaats daarvan `scripts/build-wasm-runtime.sh` uit in de repository.
 - Het linken gebruikt de linker van de rustup-toolchain (`rust-lld`), dus ook bij het compileren is rustup nodig.
 - De module gedraagt zich als het uitvoerbare bestand: standaarduitvoer, standaardfout en exitcode, `(command-line-args)`,

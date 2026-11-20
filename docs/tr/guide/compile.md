@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ 3a6ff5cd72bee55134721d600c276c160f556bb9 -->
+<!-- translated-from: docs/ja/guide/compile.md @ eb0e7d31e1d6e61f64d90fcfb4f0dc5e6bfe813f -->
 # Derleme
 
 Başka bir şey yapmazsanız typelisp programları yorumlayıcıda çalışır. Buna ek olarak yerel koda
@@ -186,7 +186,7 @@ args: #(hello.wasm a b)
 fib(25) = 75025
 ```
 
-- Hazırlık gerekir (3.7 bölümü için de geçerlidir). Önce rustup ile `rustup target add wasm32-wasip1 wasm32-unknown-unknown` çalıştırın. Ardından `typl`'ı `cargo install` ile kurarken `--features wasm` ekleyin (`cargo install --locked --path . --features wasm`).
+- `install.sh` ile kurulan `typl` olduğu gibi kullanılabilir. `cargo install` ile kurarken hazırlık gerekir (3.7 bölümü için de geçerlidir). Önce rustup ile `rustup target add wasm32-wasip1 wasm32-unknown-unknown` çalıştırın. Ardından `--features wasm` ile kurun (`cargo install --locked --path . --features wasm`).
   Bu olmadan kurulan `typl`'da WebAssembly çalışma zamanı yoktur ve `--target` hata verir. Depodaki hata ayıklama derlemesi `typl` için bunun yerine depoda `scripts/build-wasm-runtime.sh` çalıştırın.
 - Bağlama, rustup araç zincirinin bağlayıcısını (`rust-lld`) kullanır; bu yüzden derlerken de rustup gerekir.
 - Modül çalıştırılabilir dosya gibi davranır: standart çıktı, standart hata ve çıkış kodu, `(command-line-args)`,

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ 3a6ff5cd72bee55134721d600c276c160f556bb9 -->
+<!-- translated-from: docs/ja/guide/compile.md @ eb0e7d31e1d6e61f64d90fcfb4f0dc5e6bfe813f -->
 # Compiling
 
 Unless you do anything else, typelisp programs run in the interpreter. In addition there are two
@@ -193,7 +193,7 @@ args: #(hello.wasm a b)
 fib(25) = 75025
 ```
 
-- This needs preparation (which also covers section 3.7). First run `rustup target add wasm32-wasip1 wasm32-unknown-unknown` with rustup. Then install `typl` with `--features wasm` when you install it with `cargo install` (`cargo install --locked --path . --features wasm`).
+- A `typl` installed with `install.sh` can be used as it is. One installed with `cargo install` needs preparation (which also covers section 3.7). First run `rustup target add wasm32-wasip1 wasm32-unknown-unknown` with rustup. Then install it with `--features wasm` (`cargo install --locked --path . --features wasm`).
   A `typl` installed without it has no WebAssembly runtime, and `--target` is an error. To use a debug build of `typl` in the repository, run `scripts/build-wasm-runtime.sh` in the repository instead.
 - Linking uses the linker of the rustup toolchain (`rust-lld`), so rustup is needed when compiling too.
 - The module behaves as the executable does: standard output, standard error and the exit code, `(command-line-args)`,

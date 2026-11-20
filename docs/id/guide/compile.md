@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ 3a6ff5cd72bee55134721d600c276c160f556bb9 -->
+<!-- translated-from: docs/ja/guide/compile.md @ eb0e7d31e1d6e61f64d90fcfb4f0dc5e6bfe813f -->
 # Kompilasi
 
 Jika Anda tidak melakukan apa-apa lagi, program typelisp berjalan di interpreter. Selain itu ada dua
@@ -189,7 +189,7 @@ args: #(hello.wasm a b)
 fib(25) = 75025
 ```
 
-- Ini memerlukan persiapan (yang juga berlaku untuk bagian 3.7). Pertama jalankan `rustup target add wasm32-wasip1 wasm32-unknown-unknown` dengan rustup. Lalu, saat memasang `typl` dengan `cargo install`, pasang dengan `--features wasm` (`cargo install --locked --path . --features wasm`).
+- `typl` yang dipasang dengan `install.sh` dapat langsung dipakai. Yang dipasang dengan `cargo install` memerlukan persiapan (yang juga berlaku untuk bagian 3.7). Pertama jalankan `rustup target add wasm32-wasip1 wasm32-unknown-unknown` dengan rustup. Lalu pasang dengan `--features wasm` (`cargo install --locked --path . --features wasm`).
   `typl` yang dipasang tanpanya tidak memiliki runtime WebAssembly, dan `--target` menjadi galat. Untuk build debug `typl` di repositori, jalankan `scripts/build-wasm-runtime.sh` di repositori sebagai gantinya.
 - Penautan memakai linker dari toolchain rustup (`rust-lld`), jadi rustup juga diperlukan saat mengompilasi.
 - Modul berperilaku seperti berkas eksekusi: keluaran standar, galat standar, dan kode keluar, `(command-line-args)`,

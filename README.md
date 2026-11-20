@@ -1,4 +1,4 @@
-<!-- translated-from: README_JP.md @ 3a6ff5cd72bee55134721d600c276c160f556bb9 -->
+<!-- translated-from: README_JP.md @ eb0e7d31e1d6e61f64d90fcfb4f0dc5e6bfe813f -->
 # TypeLisp
 
 English | [日本語](README_JP.md) | [简体中文](docs/zh-CN/README.md) | [繁體中文](docs/zh-TW/README.md) | [한국어](docs/ko/README.md) | [Español](docs/es/README.md) | [Português (Brasil)](docs/pt-BR/README.md) | [Deutsch](docs/de/README.md) | [Français](docs/fr/README.md) | [Русский](docs/ru/README.md) | [العربية](docs/ar/README.md) | [Italiano](docs/it/README.md) | [हिन्दी](docs/hi/README.md) | [Türkçe](docs/tr/README.md) | [Tiếng Việt](docs/vi/README.md) | [Bahasa Indonesia](docs/id/README.md) | [Polski](docs/pl/README.md) | [ภาษาไทย](docs/th/README.md) | [Українська](docs/uk/README.md) | [Nederlands](docs/nl/README.md) | [Svenska](docs/sv/README.md)
@@ -302,6 +302,9 @@ build executables with `typl -c`, you also need the Xcode Command Line Tools
 macOS 15 or later on Intel. On Apple Silicon with a macOS older than 26, `typl` prints a one-line
 warning at startup. You can keep using it, but code that `typl` compiles while running may crash if
 it uses `panic`, `throw` or `unwind-protect`.
+
+The prebuilt `typl` can also compile to WebAssembly (`typl -c --target wasm32-wasip1` and the
+like). It links with the linker of a rustup toolchain, so `--target` needs rustup.
 
 The environment variable `TYPELISP_HOME` sets the install location, and `TYPELISP_VERSION` sets the
 version (the latest release if not given).

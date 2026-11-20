@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ 3a6ff5cd72bee55134721d600c276c160f556bb9 -->
+<!-- translated-from: docs/ja/guide/compile.md @ eb0e7d31e1d6e61f64d90fcfb4f0dc5e6bfe813f -->
 # الترجمة
 
 إذا لم تفعل شيئًا آخر فإن برامج typelisp تعمل في المفسِّر (interpreter). وإضافة إلى ذلك توجد طريقتان
@@ -183,7 +183,7 @@ args: #(hello.wasm a b)
 fib(25) = 75025
 ```
 
-- يحتاج هذا إلى تحضير (يصلح أيضًا للقسم 3.7). نفّذ أولًا `rustup target add wasm32-wasip1 wasm32-unknown-unknown` عبر rustup. ثم عند تثبيت `typl` بـ `cargo install` أضف `--features wasm` (`cargo install --locked --path . --features wasm`).
+- يمكن استخدام `typl` المثبّت بـ `install.sh` كما هو. أما المثبّت بـ `cargo install` فيحتاج إلى تحضير (يصلح أيضًا للقسم 3.7). نفّذ أولًا `rustup target add wasm32-wasip1 wasm32-unknown-unknown` عبر rustup. ثم ثبّته مع `--features wasm` (`cargo install --locked --path . --features wasm`).
   لا يملك `typl` المثبَّت بدونه بيئة تشغيل WebAssembly، ويكون `--target` خطأً. ولاستخدام نسخة تصحيح من `typl` في المستودع، نفّذ بدلًا من ذلك `scripts/build-wasm-runtime.sh` في المستودع.
 - يستخدم الربط رابط سلسلة أدوات rustup (`rust-lld`)، لذا يلزم rustup عند الترجمة أيضًا.
 - تتصرف الوحدة كما يتصرف الملف التنفيذي: المخرج القياسي والخطأ القياسي ورمز الخروج، و`(command-line-args)`،

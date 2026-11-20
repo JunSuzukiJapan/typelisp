@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ 3a6ff5cd72bee55134721d600c276c160f556bb9 -->
+<!-- translated-from: docs/ja/guide/compile.md @ eb0e7d31e1d6e61f64d90fcfb4f0dc5e6bfe813f -->
 # 编译
 
 如果不做任何处理，typelisp 程序由解释器执行。除此之外，还有两种编译为本机代码的方法，以及一种保存环境的方法。
@@ -173,7 +173,7 @@ args: #(hello.wasm a b)
 fib(25) = 75025
 ```
 
-- 需要准备（同时也是 3.7 节的准备）。首先用 rustup 执行 `rustup target add wasm32-wasip1 wasm32-unknown-unknown`。然后，用 `cargo install` 安装 `typl` 时加上 `--features wasm`（`cargo install --locked --path . --features wasm`）。
+- 用 `install.sh` 安装的 `typl` 可以直接使用。用 `cargo install` 安装时需要准备（同时也是 3.7 节的准备）。首先用 rustup 执行 `rustup target add wasm32-wasip1 wasm32-unknown-unknown`。然后加上 `--features wasm` 安装（`cargo install --locked --path . --features wasm`）。
   不加此项安装的 `typl` 没有 WebAssembly 运行时，`--target` 会报错。使用仓库中的调试版 `typl` 时，改为在仓库中执行 `scripts/build-wasm-runtime.sh`。
 - 链接使用 rustup 工具链的链接器（`rust-lld`），因此编译时也需要 rustup。
 - 模块的行为与可执行文件相同：标准输出、标准错误和退出码、`(command-line-args)`、

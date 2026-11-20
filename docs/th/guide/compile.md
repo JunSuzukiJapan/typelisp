@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ 3a6ff5cd72bee55134721d600c276c160f556bb9 -->
+<!-- translated-from: docs/ja/guide/compile.md @ eb0e7d31e1d6e61f64d90fcfb4f0dc5e6bfe813f -->
 # การคอมไพล์
 
 หากไม่ทำอะไรเพิ่ม โปรแกรม typelisp จะรันในอินเทอร์พรีเตอร์ นอกจากนี้ยังมีวิธีคอมไพล์เป็นโค้ดเนทีฟ
@@ -185,7 +185,7 @@ args: #(hello.wasm a b)
 fib(25) = 75025
 ```
 
-- ต้องเตรียมการก่อน (ซึ่งใช้กับหัวข้อ 3.7 ด้วย) ก่อนอื่นรัน `rustup target add wasm32-wasip1 wasm32-unknown-unknown` ด้วย rustup จากนั้นเมื่อติดตั้ง `typl` ด้วย `cargo install` ให้ใส่ `--features wasm` (`cargo install --locked --path . --features wasm`)
+- `typl` ที่ติดตั้งด้วย `install.sh` ใช้ได้ทันที ส่วนที่ติดตั้งด้วย `cargo install` ต้องเตรียมการก่อน (ซึ่งใช้กับหัวข้อ 3.7 ด้วย) ก่อนอื่นรัน `rustup target add wasm32-wasip1 wasm32-unknown-unknown` ด้วย rustup จากนั้นติดตั้งโดยใส่ `--features wasm` (`cargo install --locked --path . --features wasm`)
   `typl` ที่ติดตั้งโดยไม่ใส่จะไม่มีรันไทม์ WebAssembly และ `--target` จะเป็นข้อผิดพลาด ถ้าใช้ `typl` แบบ debug build ในรีโพสิทอรี ให้รัน `scripts/build-wasm-runtime.sh` ในรีโพสิทอรีแทน
 - การลิงก์ใช้ลิงเกอร์ของ toolchain ของ rustup (`rust-lld`) จึงต้องมี rustup ตอนคอมไพล์ด้วย
 - โมดูลทำงานเหมือนไฟล์ปฏิบัติการ: เอาต์พุตมาตรฐาน ข้อผิดพลาดมาตรฐาน และรหัสออก, `(command-line-args)`,

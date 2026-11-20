@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ 3a6ff5cd72bee55134721d600c276c160f556bb9 -->
+<!-- translated-from: docs/ja/guide/compile.md @ eb0e7d31e1d6e61f64d90fcfb4f0dc5e6bfe813f -->
 # Компіляція
 
 Якщо ви нічого більше не робите, програми typelisp виконуються в інтерпретаторі. Крім того, є два
@@ -187,7 +187,7 @@ args: #(hello.wasm a b)
 fib(25) = 75025
 ```
 
-- Потрібна підготовка (вона ж підходить для розділу 3.7). Спершу виконайте `rustup target add wasm32-wasip1 wasm32-unknown-unknown` через rustup. Потім, встановлюючи `typl` через `cargo install`, додайте `--features wasm` (`cargo install --locked --path . --features wasm`).
+- `typl`, встановлений через `install.sh`, можна використовувати як є. Для встановлення через `cargo install` потрібна підготовка (вона ж підходить для розділу 3.7). Спершу виконайте `rustup target add wasm32-wasip1 wasm32-unknown-unknown` через rustup. Потім встановіть його з `--features wasm` (`cargo install --locked --path . --features wasm`).
   У `typl`, встановленого без цього, немає середовища виконання WebAssembly, і `--target` дає помилку. Для налагоджувальної збірки `typl` у репозиторії натомість виконайте `scripts/build-wasm-runtime.sh` у репозиторії.
 - Компонування використовує компонувальник тулчейна rustup (`rust-lld`), тож rustup потрібен і під час компіляції.
 - Модуль поводиться як виконуваний файл: стандартний вивід, стандартний потік помилок і код виходу, `(command-line-args)`,
