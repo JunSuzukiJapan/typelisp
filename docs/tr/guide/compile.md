@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ a36274f320d8c5d5cb4466ab6e64fa298bc602c3 -->
+<!-- translated-from: docs/ja/guide/compile.md @ 3394dc00d5681022b29cf8e2f0ac2199e52846b5 -->
 # Derleme
 
 Başka bir şey yapmazsanız typelisp programları yorumlayıcıda çalışır. Buna ek olarak yerel koda
@@ -166,10 +166,12 @@ derlenmiş `typl` ile çalışır. `typl`'yi yeniden derledikten sonra onu yenid
 ```sh
 $ typl --heap-cells 100000 -c hello.typl    # cons alanını 100000 hücrede sabitle
 $ typl -c hello.typl --max-memory 64M       # en çok 64 MiB ayır
+$ typl -c hello.typl --no-cons              # cons hücresi kullanma
 ```
 
 - `--heap-cells N`, cons hücre alanının kapasitesini `N` hücrede sabitler. Alan bunun ötesine büyümez: çöp toplama tek bir hücre bile boşaltamazsa program bir çalışma zamanı hatasıyla durur. Seçenek verilmezse alan 65536 hücreyle başlar ve gerektikçe büyür.
 - `--max-memory SIZE`, çalıştırılabilir dosyanın ayırdığı toplam belleği sınırlar. Her şey sayılır: cons alanı, dizgeler, vektörler ve karma tablolar gibi değerler ve çalışma zamanının kendisinin kullandığı bellek. `SIZE` bir bayt sayısıdır ve ardından `K`, `M` veya `G` (1024, 1024² ve 1024³ katı) gelebilir. Sınırı aşacak bir ayırma bildirilir ve program 1 çıkış koduyla sonlanır. Bu sonlanma `catch` ile yakalanamaz. Seçenek verilmezse sınır yoktur.
+- `--no-cons`, cons hücresi kullanmayan bir çalıştırılabilir dosya oluşturur. Cons alanı yoktur; bu yüzden cons hücresi gerektiren bir şey yapan program bir **derleme hatasıdır** ve bu işlemi ve `main`'den ona ulaşan fonksiyon zincirini gösterir. Cons hücreleri bir `Sexpr` listesi (alıntılanmış liste ve quasiquote ile kurulan liste dahil) veya bir `&rest` argümanı kurmak için, ayrıca `read`, `eval` ve `macroexpand` için gerekir. Sayılar, dizgeler, vektörler, karma tablolar, yapılar, kanallar ve benzerleri üzerindeki işlemler ile `print`/`println`/`format` hiç kullanmaz. `--heap-cells` ile birlikte verilemez ve `-c`'den sonra yazılır.
 
 `--max-memory`, `-c`'den sonra yazılır. `--heap-cells`, `-c`'den önce veya sonra yazılabilir ve o zaman çalıştırılabilir dosyanın cons alanının kapasitesidir. Cons alanı bellek sınırına dahildir; alanın sığmadığı bir sınırla program başlamadan durur.
 

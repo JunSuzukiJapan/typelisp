@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ a36274f320d8c5d5cb4466ab6e64fa298bc602c3 -->
+<!-- translated-from: docs/ja/guide/compile.md @ 3394dc00d5681022b29cf8e2f0ac2199e52846b5 -->
 # Compiling
 
 Unless you do anything else, typelisp programs run in the interpreter. In addition there are two
@@ -165,6 +165,7 @@ with the `typl` built together with it. After rebuilding `typl`, copy it again.
 ```sh
 $ typl --heap-cells 100000 -c hello.typl    # fix the cons arena at 100000 cells
 $ typl -c hello.typl --max-memory 64M       # allocate at most 64 MiB
+$ typl -c hello.typl --no-cons              # use no cons cells
 ```
 
 - `--heap-cells N` fixes the capacity of the cons cell arena at `N` cells. The arena does not grow
@@ -175,6 +176,7 @@ $ typl -c hello.typl --max-memory 64M       # allocate at most 64 MiB
   `SIZE` is a number of bytes and may be followed by `K`, `M` or `G` (1024, 1024² and 1024³ times).
   An allocation that would go past the bound is reported, and the program exits with exit code 1.
   This exit cannot be caught with `catch`. Without it, there is no bound.
+- `--no-cons` builds an executable that uses no cons cells. It has no cons arena, so a program that does something needing cons cells is a **compile error**, which shows that operation and the chain of functions from `main` that reaches it. Cons cells are needed to build a `Sexpr` list (including a quoted list and one built by quasiquote) or a `&rest` argument, and by `read`, `eval` and `macroexpand`. Operations on numbers, strings, vectors, hash tables, structs, channels and the like, and `print`/`println`/`format`, use none. It cannot be given with `--heap-cells`, and is written after `-c`.
 
 `--max-memory` is written after `-c`. `--heap-cells` may be written before or after `-c`. The cons
 arena counts toward the memory bound, so a bound the arena does not fit in stops the program before

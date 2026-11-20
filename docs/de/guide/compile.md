@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ a36274f320d8c5d5cb4466ab6e64fa298bc602c3 -->
+<!-- translated-from: docs/ja/guide/compile.md @ 3394dc00d5681022b29cf8e2f0ac2199e52846b5 -->
 # Kompilierung
 
 Ohne weiteres Zutun laufen typelisp-Programme im Interpreter. Darüber hinaus gibt es zwei Wege, in nativen
@@ -170,10 +170,12 @@ sie erneut.
 ```sh
 $ typl --heap-cells 100000 -c hello.typl    # die cons-Arena auf 100000 Zellen festlegen
 $ typl -c hello.typl --max-memory 64M       # höchstens 64 MiB belegen
+$ typl -c hello.typl --no-cons              # keine cons-Zellen verwenden
 ```
 
 - `--heap-cells N` legt die Kapazität der Arena der cons-Zellen auf `N` Zellen fest. Die Arena wächst nicht darüber hinaus: Kann die Garbage Collection keine Zelle freigeben, endet das Programm mit einem Laufzeitfehler. Ohne die Option beginnt die Arena mit 65536 Zellen und wächst nach Bedarf.
 - `--max-memory SIZE` begrenzt den gesamten Speicher, den das Programm belegt. Alles zählt: die cons-Arena, Zeichenketten, Werte wie Vektoren und Hashtabellen und der Speicher der Laufzeit selbst. `SIZE` ist eine Anzahl Bytes, gefolgt optional von `K`, `M` oder `G` (das 1024-, 1024²- und 1024³-fache). Eine Belegung über die Grenze hinaus wird gemeldet, und das Programm endet mit dem Exit-Code 1. Dieses Ende lässt sich nicht mit `catch` abfangen. Ohne die Option gibt es keine Grenze.
+- `--no-cons` erzeugt ein Programm, das keine cons-Zellen verwendet. Es hat keine cons-Arena; ein Programm, das etwas tut, wofür cons-Zellen nötig sind, ist daher ein **Kompilierfehler**, der diese Operation und die Kette der Funktionen von `main` bis dorthin zeigt. Cons-Zellen braucht man, um eine `Sexpr`-Liste (auch eine quotierte oder per Quasiquote gebaute) oder ein `&rest`-Argument zu bauen, sowie für `read`, `eval` und `macroexpand`. Operationen auf Zahlen, Zeichenketten, Vektoren, Hashtabellen, Strukturen, Kanälen und Ähnlichem sowie `print`/`println`/`format` brauchen keine. Lässt sich nicht zusammen mit `--heap-cells` angeben und steht nach `-c`.
 
 `--max-memory` steht nach `-c`. `--heap-cells` darf vor oder nach `-c` stehen und gibt dann die Kapazität der cons-Arena des Programms an. Die cons-Arena zählt zur Speichergrenze; bei einer Grenze, in die die Arena nicht passt, endet das Programm, bevor es beginnt.
 

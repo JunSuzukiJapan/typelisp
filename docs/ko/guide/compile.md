@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ a36274f320d8c5d5cb4466ab6e64fa298bc602c3 -->
+<!-- translated-from: docs/ja/guide/compile.md @ 3394dc00d5681022b29cf8e2f0ac2199e52846b5 -->
 # 컴파일
 
 아무것도 하지 않으면 typelisp 프로그램은 인터프리터에서 실행된다. 그 밖에 네이티브 코드로 컴파일하는 방법이 두 가지,
@@ -158,10 +158,12 @@ $ typl --lib-dir ~/lib/typelisp build.typl
 ```sh
 $ typl --heap-cells 100000 -c hello.typl    # cons 영역을 100000 셀로 고정한다
 $ typl -c hello.typl --max-memory 64M       # 메모리를 최대 64 MiB까지 확보한다
+$ typl -c hello.typl --no-cons              # cons 셀을 쓰지 않는다
 ```
 
 - `--heap-cells N`은 cons 셀 영역의 용량을 `N` 셀로 고정한다. 영역은 그 이상 커지지 않는다. 가비지 컬렉션으로도 빈 셀을 만들 수 없으면 실행 시간 오류로 멈춘다. 지정하지 않으면 65536 셀로 시작해 필요에 따라 커진다.
 - `--max-memory SIZE`는 실행 파일이 확보하는 메모리 합계의 상한이다. cons 영역, 문자열, 벡터나 해시 표 같은 값, 런타임 자신이 쓰는 메모리를 모두 센다. `SIZE`는 바이트 수이며 `K` `M` `G`(각각 1024배, 1024²배, 1024³배)를 붙여 쓸 수 있다. 상한을 넘겨 확보하려 하면 그 사실을 표시하고 종료 코드 1로 끝난다. 이 종료는 `catch`로 잡을 수 없다. 지정하지 않으면 상한은 없다.
+- `--no-cons`는 cons 셀을 쓰지 않는 실행 파일을 만든다. cons 영역이 없으므로, cons 셀이 필요한 조작을 하는 프로그램은 **컴파일 오류**가 된다. 오류에는 그 조작과, `main`에서 거기까지 닿는 함수의 연쇄가 표시된다. cons 셀이 필요한 것은 `Sexpr` 리스트(인용한 리스트나 준인용으로 만드는 것 포함)나 `&rest` 인수를 만들 때, `read`, `eval`, `macroexpand`를 쓸 때다. 수, 문자열, 벡터, 해시 표, 구조체, 채널 등의 조작과 `print`/`println`/`format`은 cons 셀을 쓰지 않는다. `--heap-cells`와 함께 지정할 수 없으며, `-c` 뒤에 쓴다.
 
 `--max-memory`는 `-c` 뒤에 쓴다. `--heap-cells`는 `-c` 앞에도 뒤에도 쓸 수 있으며, 이때 실행 파일의 cons 영역의 용량이 된다. cons 영역도 메모리 상한에 포함되므로, 영역이 들어가지 않는 상한을 지정하면 프로그램이 시작되기 전에 멈춘다.
 

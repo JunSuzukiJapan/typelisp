@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ a36274f320d8c5d5cb4466ab6e64fa298bc602c3 -->
+<!-- translated-from: docs/ja/guide/compile.md @ 3394dc00d5681022b29cf8e2f0ac2199e52846b5 -->
 # Kompilering
 
 Om du inte gör något annat körs typelisp-program i tolken. Dessutom finns två sätt att kompilera till
@@ -167,10 +167,12 @@ bara med den `typl` som byggdes tillsammans med den. Efter att ha byggt om `typl
 ```sh
 $ typl --heap-cells 100000 -c hello.typl    # lås cons-arenan vid 100000 celler
 $ typl -c hello.typl --max-memory 64M       # allokera högst 64 MiB
+$ typl -c hello.typl --no-cons              # använd inga cons-celler
 ```
 
 - `--heap-cells N` låser kapaciteten för arenan av cons-celler vid `N` celler. Arenan växer inte förbi den: kan skräpsamlingen inte frigöra någon cell stannar programmet med ett körtidsfel. Utan flaggan börjar arenan med 65536 celler och växer efter behov.
 - `--max-memory SIZE` begränsar det totala minne den körbara filen allokerar. Allt räknas: cons-arenan, strängar, värden som vektorer och hashtabeller, och minnet som körtidsmiljön själv använder. `SIZE` är ett antal byte och kan följas av `K`, `M` eller `G` (1024, 1024² och 1024³ gånger). En allokering som skulle gå över gränsen rapporteras, och programmet avslutas med slutkod 1. Detta avslut kan inte fångas med `catch`. Utan flaggan finns ingen gräns.
+- `--no-cons` bygger en körbar fil som inte använder några cons-celler. Den har ingen cons-arena, så ett program som gör något som kräver cons-celler är ett **kompileringsfel**, som visar operationen och kedjan av funktioner från `main` som når den. Cons-celler behövs för att bygga en `Sexpr`-lista (även en citerad lista och en som byggs med kvasicitering) eller ett `&rest`-argument, och av `read`, `eval` och `macroexpand`. Operationer på tal, strängar, vektorer, hashtabeller, structar, kanaler och liknande, och `print`/`println`/`format`, använder inga. Kan inte anges tillsammans med `--heap-cells` och skrivs efter `-c`.
 
 `--max-memory` skrivs efter `-c`. `--heap-cells` kan skrivas före eller efter `-c` och är då kapaciteten för den körbara filens cons-arena. Cons-arenan räknas in i minnesgränsen, så med en gräns som arenan inte ryms i stannar programmet innan det börjar.
 

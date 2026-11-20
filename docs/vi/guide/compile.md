@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ a36274f320d8c5d5cb4466ab6e64fa298bc602c3 -->
+<!-- translated-from: docs/ja/guide/compile.md @ 3394dc00d5681022b29cf8e2f0ac2199e52846b5 -->
 # Biên dịch
 
 Nếu bạn không làm gì thêm, chương trình typelisp chạy trong trình thông dịch. Ngoài ra còn có hai
@@ -163,10 +163,12 @@ với `typl` được build cùng với nó. Sau khi build lại `typl`, hãy sa
 ```sh
 $ typl --heap-cells 100000 -c hello.typl    # cố định vùng cons ở 100000 ô
 $ typl -c hello.typl --max-memory 64M       # cấp phát tối đa 64 MiB
+$ typl -c hello.typl --no-cons              # không dùng ô cons
 ```
 
 - `--heap-cells N` cố định dung lượng vùng ô cons ở `N` ô. Vùng không lớn thêm: nếu thu gom rác không giải phóng được ô nào, chương trình dừng với lỗi thời gian chạy. Khi không chỉ định, vùng bắt đầu với 65536 ô và lớn dần khi cần.
 - `--max-memory SIZE` giới hạn tổng bộ nhớ tệp thực thi cấp phát. Mọi thứ đều được tính: vùng cons, chuỗi, các giá trị như vector và bảng băm, và bộ nhớ mà chính runtime dùng. `SIZE` là số byte và có thể theo sau bởi `K`, `M` hoặc `G` (gấp 1024, 1024² và 1024³ lần). Một lần cấp phát vượt quá giới hạn sẽ được báo, và chương trình kết thúc với mã thoát 1. Kết thúc này không bắt được bằng `catch`. Khi không chỉ định thì không có giới hạn.
+- `--no-cons` tạo tệp thực thi không dùng ô cons nào. Nó không có vùng cons, nên một chương trình làm việc cần đến ô cons là **lỗi biên dịch**, hiển thị thao tác đó và chuỗi hàm từ `main` dẫn tới nó. Ô cons cần cho việc tạo danh sách `Sexpr` (kể cả danh sách được quote và danh sách tạo bằng quasiquote) hoặc đối số `&rest`, và cho `read`, `eval`, `macroexpand`. Các thao tác trên số, chuỗi, vector, bảng băm, struct, kênh và những thứ tương tự, cùng `print`/`println`/`format`, không dùng ô nào. Không thể chỉ định cùng `--heap-cells`, và được viết sau `-c`.
 
 `--max-memory` được viết sau `-c`. `--heap-cells` có thể viết trước hoặc sau `-c`, và khi đó là dung lượng vùng cons của tệp thực thi. Vùng cons được tính vào giới hạn bộ nhớ, nên với một giới hạn không chứa nổi vùng, chương trình dừng trước khi bắt đầu.
 

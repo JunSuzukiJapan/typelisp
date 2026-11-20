@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ a36274f320d8c5d5cb4466ab6e64fa298bc602c3 -->
+<!-- translated-from: docs/ja/guide/compile.md @ 3394dc00d5681022b29cf8e2f0ac2199e52846b5 -->
 # Compilación
 
 Si no se hace nada más, los programas de typelisp se ejecutan en el intérprete. Además hay dos formas de
@@ -165,10 +165,12 @@ funciona con el `typl` compilado junto con él. Tras recompilar `typl`, vuelve a
 ```sh
 $ typl --heap-cells 100000 -c hello.typl    # fija la arena de cons en 100000 celdas
 $ typl -c hello.typl --max-memory 64M       # reserva como mucho 64 MiB
+$ typl -c hello.typl --no-cons              # no usa celdas cons
 ```
 
 - `--heap-cells N` fija la capacidad de la arena de celdas cons en `N` celdas. La arena no crece más allá: si la recolección de basura no puede liberar una celda, el programa se detiene con un error de ejecución. Sin la opción, la arena empieza con 65536 celdas y crece según haga falta.
 - `--max-memory SIZE` limita la memoria total que reserva el ejecutable. Todo cuenta: la arena de cons, las cadenas, valores como vectores y tablas hash, y la memoria que usa el propio runtime. `SIZE` es un número de bytes y puede ir seguido de `K`, `M` o `G` (1024, 1024² y 1024³ veces). Una reserva que superaría el límite se informa y el programa termina con el código de salida 1. Esta salida no se puede capturar con `catch`. Sin la opción no hay límite.
+- `--no-cons` crea un ejecutable que no usa celdas cons. No tiene arena de cons, así que un programa que haga algo que necesite celdas cons es un **error de compilación**, que muestra esa operación y la cadena de funciones desde `main` que llega a ella. Se necesitan celdas cons para construir una lista `Sexpr` (incluidas una lista citada y una construida con cuasicita) o un argumento `&rest`, y para `read`, `eval` y `macroexpand`. Las operaciones con números, cadenas, vectores, tablas hash, estructuras, canales y similares, y `print`/`println`/`format`, no usan ninguna. No se puede dar junto con `--heap-cells` y se escribe después de `-c`.
 
 `--max-memory` se escribe después de `-c`. `--heap-cells` puede escribirse antes o después de `-c`, y entonces es la capacidad de la arena de cons del ejecutable. La arena de cons cuenta para el límite de memoria, así que con un límite en el que no cabe la arena el programa se detiene antes de empezar.
 

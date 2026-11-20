@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ a36274f320d8c5d5cb4466ab6e64fa298bc602c3 -->
+<!-- translated-from: docs/ja/guide/compile.md @ 3394dc00d5681022b29cf8e2f0ac2199e52846b5 -->
 # 編譯
 
 不做任何處理的話，typelisp 程式由直譯器執行。此外還有兩種編譯為原生碼的方法，以及一種保存環境的方法。規格的詳情見
@@ -150,10 +150,12 @@ $ typl --lib-dir ~/lib/typelisp build.typl
 ```sh
 $ typl --heap-cells 100000 -c hello.typl    # 把 cons 區域固定為 100000 個單元
 $ typl -c hello.typl --max-memory 64M       # 最多配置 64 MiB 記憶體
+$ typl -c hello.typl --no-cons              # 不使用 cons 單元
 ```
 
 - `--heap-cells N` 把 cons 單元區域的容量固定為 `N` 個單元。區域不會再變大。垃圾回收後仍無法騰出空單元時，以執行期錯誤停止。不指定時從 65536 個單元開始，視需要變大。
 - `--max-memory SIZE` 是執行檔配置的記憶體總量的上限。cons 區域、字串、向量與雜湊表等值、執行環境本身使用的記憶體全部計算在內。`SIZE` 是位元組數，可以加上 `K` `M` `G`（分別為 1024 倍、1024² 倍、1024³ 倍）。試圖超過上限配置時，會顯示這件事並以結束碼 1 結束。這種結束無法用 `catch` 捕捉。不指定時沒有上限。
+- `--no-cons` 產生不使用 cons 單元的執行檔。它沒有 cons 區域，因此進行需要 cons 單元之操作的程式會成為**編譯錯誤**。錯誤中會顯示該操作，以及從 `main` 到達那裡的函式序列。需要 cons 單元的情況是：建構 `Sexpr` 串列（包括引用的串列與用準引用建構的串列）或 `&rest` 引數時，以及使用 `read`、`eval`、`macroexpand` 時。數值、字串、向量、雜湊表、結構、通道等的操作，以及 `print`/`println`/`format` 都不使用 cons 單元。不能與 `--heap-cells` 一起指定，寫在 `-c` 之後。
 
 `--max-memory` 寫在 `-c` 之後。`--heap-cells` 寫在 `-c` 之前或之後都可以，這時它是執行檔的 cons 區域的容量。cons 區域也計入記憶體上限，所以指定了放不下區域的上限時，程式會在開始之前停止。
 

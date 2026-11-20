@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ a36274f320d8c5d5cb4466ab6e64fa298bc602c3 -->
+<!-- translated-from: docs/ja/guide/compile.md @ 3394dc00d5681022b29cf8e2f0ac2199e52846b5 -->
 # Kompilasi
 
 Jika Anda tidak melakukan apa-apa lagi, program typelisp berjalan di interpreter. Selain itu ada dua
@@ -169,10 +169,12 @@ salin lagi.
 ```sh
 $ typl --heap-cells 100000 -c hello.typl    # tetapkan arena cons pada 100000 sel
 $ typl -c hello.typl --max-memory 64M       # alokasikan paling banyak 64 MiB
+$ typl -c hello.typl --no-cons              # tidak memakai sel cons
 ```
 
 - `--heap-cells N` menetapkan kapasitas arena sel cons pada `N` sel. Arena tidak tumbuh melebihinya: jika pengumpulan sampah tidak bisa membebaskan satu sel pun, program berhenti dengan galat waktu jalan. Tanpa opsi ini, arena dimulai dengan 65536 sel dan tumbuh sesuai kebutuhan.
 - `--max-memory SIZE` membatasi total memori yang dialokasikan berkas eksekusi. Semuanya dihitung: arena cons, string, nilai seperti vektor dan tabel hash, serta memori yang dipakai runtime itu sendiri. `SIZE` adalah jumlah byte dan boleh diikuti `K`, `M`, atau `G` (1024, 1024², dan 1024³ kali). Alokasi yang akan melewati batas dilaporkan, dan program keluar dengan kode keluar 1. Keluar seperti ini tidak dapat ditangkap dengan `catch`. Tanpa opsi ini, tidak ada batas.
+- `--no-cons` membuat berkas eksekusi yang tidak memakai sel cons. Ia tidak punya arena cons, jadi program yang melakukan sesuatu yang memerlukan sel cons menjadi **galat kompilasi**, yang menampilkan operasi itu dan rangkaian fungsi dari `main` yang mencapainya. Sel cons diperlukan untuk membuat list `Sexpr` (termasuk list yang di-quote dan yang dibuat dengan quasiquote) atau argumen `&rest`, serta oleh `read`, `eval`, dan `macroexpand`. Operasi pada angka, string, vektor, tabel hash, struct, kanal, dan sejenisnya, serta `print`/`println`/`format`, tidak memakainya. Tidak dapat diberikan bersama `--heap-cells`, dan ditulis setelah `-c`.
 
 `--max-memory` ditulis setelah `-c`. `--heap-cells` boleh ditulis sebelum atau setelah `-c`, dan menjadi kapasitas arena cons berkas eksekusi. Arena cons ikut dihitung dalam batas memori, jadi dengan batas yang tidak memuat arena, program berhenti sebelum mulai.
 

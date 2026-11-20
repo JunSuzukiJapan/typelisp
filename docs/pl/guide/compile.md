@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ a36274f320d8c5d5cb4466ab6e64fa298bc602c3 -->
+<!-- translated-from: docs/ja/guide/compile.md @ 3394dc00d5681022b29cf8e2f0ac2199e52846b5 -->
 # Kompilacja
 
 O ile nie zrobisz nic więcej, programy typelisp działają w interpreterze. Ponadto istnieją dwa
@@ -164,10 +164,12 @@ z `typl` zbudowanym razem z nim. Po przebudowaniu `typl` skopiuj go ponownie.
 ```sh
 $ typl --heap-cells 100000 -c hello.typl    # ustala arenę cons na 100000 komórek
 $ typl -c hello.typl --max-memory 64M       # przydziela najwyżej 64 MiB
+$ typl -c hello.typl --no-cons              # nie używa komórek cons
 ```
 
 - `--heap-cells N` ustala pojemność areny komórek cons na `N` komórek. Arena ponad to nie rośnie: jeśli odśmiecanie nie zwolni żadnej komórki, program zatrzymuje się z błędem wykonania. Bez tej opcji arena zaczyna od 65536 komórek i rośnie w miarę potrzeby.
 - `--max-memory SIZE` ogranicza całkowitą pamięć przydzielaną przez plik wykonywalny. Liczy się wszystko: arena cons, napisy, wartości takie jak wektory i tablice haszujące oraz pamięć samego środowiska uruchomieniowego. `SIZE` to liczba bajtów, po której może stać `K`, `M` lub `G` (1024, 1024² i 1024³ razy). Przydział, który przekroczyłby granicę, jest zgłaszany, a program kończy się z kodem wyjścia 1. Tego zakończenia nie da się przechwycić przez `catch`. Bez tej opcji nie ma granicy.
+- `--no-cons` tworzy plik wykonywalny, który nie używa komórek cons. Nie ma areny cons, więc program robiący coś, co wymaga komórek cons, jest **błędem kompilacji**, który pokazuje tę operację i łańcuch funkcji od `main`, który do niej prowadzi. Komórki cons są potrzebne do zbudowania listy `Sexpr` (także listy cytowanej i zbudowanej przez quasi-cytowanie) lub argumentu `&rest`, a także przez `read`, `eval` i `macroexpand`. Operacje na liczbach, napisach, wektorach, tablicach haszujących, strukturach, kanałach itp. oraz `print`/`println`/`format` ich nie używają. Nie można podać razem z `--heap-cells`; pisze się po `-c`.
 
 `--max-memory` pisze się po `-c`. `--heap-cells` można napisać przed `-c` lub po nim i jest wtedy pojemnością areny cons pliku wykonywalnego. Arena cons wlicza się do granicy pamięci, więc przy granicy, w której arena się nie mieści, program zatrzymuje się, zanim się zacznie.
 

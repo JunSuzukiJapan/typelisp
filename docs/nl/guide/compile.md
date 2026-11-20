@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ a36274f320d8c5d5cb4466ab6e64fa298bc602c3 -->
+<!-- translated-from: docs/ja/guide/compile.md @ 3394dc00d5681022b29cf8e2f0ac2199e52846b5 -->
 # Compileren
 
 Tenzij je iets anders doet, draaien typelisp-programma's in de interpreter. Daarnaast zijn er twee
@@ -174,10 +174,12 @@ gebouwd.
 ```sh
 $ typl --heap-cells 100000 -c hello.typl    # zet de cons-arena vast op 100000 cellen
 $ typl -c hello.typl --max-memory 64M       # alloceer hoogstens 64 MiB
+$ typl -c hello.typl --no-cons              # gebruik geen cons-cellen
 ```
 
 - `--heap-cells N` zet de capaciteit van de arena van cons-cellen vast op `N` cellen. De arena groeit daar niet voorbij: kan de garbage collection geen cel vrijmaken, dan stopt het programma met een runtimefout. Zonder de optie begint de arena met 65536 cellen en groeit ze naar behoefte.
 - `--max-memory SIZE` begrenst het totale geheugen dat het uitvoerbare bestand alloceert. Alles telt mee: de cons-arena, strings, waarden zoals vectoren en hashtabellen, en het geheugen van de runtime zelf. `SIZE` is een aantal bytes, eventueel gevolgd door `K`, `M` of `G` (1024, 1024² en 1024³ keer). Een allocatie die over de grens zou gaan wordt gemeld, en het programma eindigt met exitcode 1. Dit einde is niet met `catch` op te vangen. Zonder de optie is er geen grens.
+- `--no-cons` maakt een uitvoerbaar bestand dat geen cons-cellen gebruikt. Het heeft geen cons-arena, dus een programma dat iets doet waarvoor cons-cellen nodig zijn is een **compileerfout**, die die bewerking toont en de keten van functies vanaf `main` die haar bereikt. Cons-cellen zijn nodig om een `Sexpr`-lijst (ook een gequote lijst of een die met quasiquote is gebouwd) of een `&rest`-argument te bouwen, en voor `read`, `eval` en `macroexpand`. Bewerkingen op getallen, strings, vectoren, hashtabellen, structs, kanalen en dergelijke, en `print`/`println`/`format`, gebruiken er geen. Kan niet samen met `--heap-cells` worden opgegeven en staat na `-c`.
 
 `--max-memory` schrijf je na `-c`. `--heap-cells` mag voor of na `-c` staan en is dan de capaciteit van de cons-arena van het uitvoerbare bestand. De cons-arena telt mee voor de geheugengrens: bij een grens waar de arena niet in past, stopt het programma voordat het begint.
 

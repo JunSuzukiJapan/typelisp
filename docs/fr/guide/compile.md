@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ a36274f320d8c5d5cb4466ab6e64fa298bc602c3 -->
+<!-- translated-from: docs/ja/guide/compile.md @ 3394dc00d5681022b29cf8e2f0ac2199e52846b5 -->
 # Compilation
 
 Sauf indication contraire, les programmes typelisp s'exécutent dans l'interpréteur. Il existe en outre deux façons
@@ -168,10 +168,12 @@ nouveau.
 ```sh
 $ typl --heap-cells 100000 -c hello.typl    # fixe l'arène cons à 100000 cellules
 $ typl -c hello.typl --max-memory 64M       # alloue au plus 64 Mio
+$ typl -c hello.typl --no-cons              # n'utilise aucune cellule cons
 ```
 
 - `--heap-cells N` fixe la capacité de l'arène des cellules cons à `N` cellules. L'arène ne grandit pas au-delà : si le ramasse-miettes ne peut libérer aucune cellule, le programme s'arrête sur une erreur d'exécution. Sans l'option, l'arène commence à 65536 cellules et grandit selon les besoins.
 - `--max-memory SIZE` borne la mémoire totale que l'exécutable alloue. Tout compte : l'arène cons, les chaînes, les valeurs comme les vecteurs et les tables de hachage, et la mémoire du runtime lui-même. `SIZE` est un nombre d'octets, éventuellement suivi de `K`, `M` ou `G` (1024, 1024² et 1024³ fois). Une allocation qui dépasserait la borne est signalée, et le programme se termine avec le code de sortie 1. Cette sortie ne peut pas être interceptée par `catch`. Sans l'option, il n'y a pas de borne.
+- `--no-cons` produit un exécutable qui n'utilise aucune cellule cons. Il n'a pas d'arène cons : un programme qui fait quelque chose nécessitant des cellules cons est donc une **erreur de compilation**, qui montre cette opération et la chaîne de fonctions depuis `main` qui y mène. Les cellules cons sont nécessaires pour construire une liste `Sexpr` (y compris une liste quotée ou construite par quasi-quote) ou un argument `&rest`, ainsi que pour `read`, `eval` et `macroexpand`. Les opérations sur les nombres, chaînes, vecteurs, tables de hachage, structures, canaux, etc., et `print`/`println`/`format` n'en utilisent aucune. Ne peut pas être donné avec `--heap-cells`, et s'écrit après `-c`.
 
 `--max-memory` s'écrit après `-c`. `--heap-cells` peut s'écrire avant ou après `-c`, et donne alors la capacité de l'arène cons de l'exécutable. L'arène cons compte dans la borne de mémoire : avec une borne où l'arène ne tient pas, le programme s'arrête avant de commencer.
 
