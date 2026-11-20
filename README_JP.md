@@ -303,6 +303,10 @@ Apple Silicon では macOS 26 以降、Intel では macOS 15 以降で動きま�
 前の macOS では、起動時に警告が 1 行出ます。そのまま使えますが、`typl` が実行中にコンパイルした
 コードの中で `panic`・`throw`・`unwind-protect` を使うと、異常終了することがあります。
 
+ビルド済みの `typl` は WebAssembly 向けのコンパイル（`typl -c --target wasm32-wasip1` など）にも
+対応しています。リンクに rustup の toolchain のリンカを使うので、`--target` を使うときは rustup が
+要ります。
+
 インストール先は環境変数 `TYPELISP_HOME` で、バージョンは `TYPELISP_VERSION` で指定できます
 （指定しなければ最新のリリース）。
 

@@ -214,3 +214,10 @@ jobs:
           printf '(defun main () i32 (println "ok") 0)\n' > aot.typl
           "$typl" -c aot.typl -o aot
           [ "$(./aot)" = ok ]
+      # The runner's rustup gives the linker (rust-lld), and its Node runs the
+      # module with the loader typl writes beside it.
+      - name: Check a WebAssembly module
+        run: |
+          cd "$RUNNER_TEMP"
+          "$HOME/.typelisp/bin/typl" -c aot.typl -o aot.wasm --target wasm32-unknown-unknown
+          [ "$(node aot.mjs)" = ok ]

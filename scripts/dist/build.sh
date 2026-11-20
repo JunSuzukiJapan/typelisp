@@ -40,6 +40,12 @@
 #   for: the toolchain's std, LLVM and zstd. A binary that claims a lower one
 #   would start on a macOS its code was not built for.
 #
+# - Built with `--features wasm`: typl holds the runtimes `typl -c --target
+#   wasm32-wasip1` and `--target wasm32-unknown-unknown` link, so the toolchain
+#   this runs with is a rustup one with both targets added
+#   (`rustup target add wasm32-wasip1 wasm32-unknown-unknown`). The checks at
+#   the end run the modules under Node.
+#
 # A cargo of its own in target/dist/build, so the ordinary release build in
 # target/release is left as it was.
 set -euo pipefail
@@ -53,8 +59,8 @@ if [ "$(uname -s)" != Darwin ]; then
 fi
 arch="$(uname -m)"
 case "$arch" in
-    arm64) tools="otool ar curl shasum tar make" ;;
-    x86_64) tools="otool ar brew" ;;
+    arm64) tools="otool ar curl shasum tar make rustup node" ;;
+    x86_64) tools="otool ar brew rustup node" ;;
     *) echo "error: no distribution build for $arch" >&2; exit 1 ;;
 esac
 for tool in $tools; do
@@ -170,7 +176,7 @@ pinned=(
     --config "env.MACOSX_DEPLOYMENT_TARGET.value=\"$minos\"" --config env.MACOSX_DEPLOYMENT_TARGET.force=true
 )
 for bin in typl typl-lsp; do
-    cargo "${pinned[@]}" rustc --locked --release --target-dir "$dist/build" --bin "$bin" -- -L "native=$static_zstd"
+    cargo "${pinned[@]}" rustc --locked --release --features wasm --target-dir "$dist/build" --bin "$bin" -- -L "native=$static_zstd"
 done
 
 typl="$dist/build/release/typl"
@@ -202,6 +208,11 @@ SRC
 printf '(defun main () i32 (println "ok") 0)\n' > "$work/aot.typl"
 "$typl" -c "$work/aot.typl" -o "$work/aot"
 [ "$("$work/aot")" = ok ] || { echo "error: the AOT check failed" >&2; exit 1; }
+# And WebAssembly modules compiled with it, for both targets.
+"$typl" -c "$work/aot.typl" -o "$work/aot-wasi.wasm" --target wasm32-wasip1
+[ "$(node --no-warnings scripts/run-wasi.mjs "$work/aot-wasi.wasm")" = ok ] || { echo "error: the wasm32-wasip1 check failed" >&2; exit 1; }
+"$typl" -c "$work/aot.typl" -o "$work/aot-js.wasm" --target wasm32-unknown-unknown
+[ "$(node "$work/aot-js.mjs")" = ok ] || { echo "error: the wasm32-unknown-unknown check failed" >&2; exit 1; }
 
 version="$("$typl" --version | awk '{ print $2 }')"
 name="typelisp-$version-$arch"

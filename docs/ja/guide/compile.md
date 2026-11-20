@@ -208,9 +208,9 @@ args: #(hello.wasm a b)
 fib(25) = 75025
 ```
 
-- 準備がいります（3.7 節の準備も兼ねます）。まず rustup で
-  `rustup target add wasm32-wasip1 wasm32-unknown-unknown` を実行します。そのうえで、`cargo install` で
-  入れる `typl` は `--features wasm` を付けてインストールします（`cargo install --locked --path . --features wasm`）。
+- `install.sh` で入れた `typl` は、そのまま使えます。`cargo install` で入れるときは準備がいります
+  （3.7 節の準備も兼ねます）。まず rustup で `rustup target add wasm32-wasip1 wasm32-unknown-unknown` を
+  実行します。そのうえで、`--features wasm` を付けてインストールします（`cargo install --locked --path . --features wasm`）。
   付けずに入れた `typl` は WebAssembly のランタイムを持たないので、`--target` はエラーになります。
   リポジトリのデバッグビルドの `typl` を使うときは、代わりにリポジトリで `scripts/build-wasm-runtime.sh`
   を実行します。
