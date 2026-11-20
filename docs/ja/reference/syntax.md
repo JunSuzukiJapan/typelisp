@@ -983,8 +983,8 @@ docstring を持てる（`(deftrait Name () "doc" (:type ...) (method ...)...)`�
 docstring は書けない——末尾の文字列はそれ自体がデフォルト実装の戻り値になるので、両者を区別できない。
 
 標準ライブラリが提供するトレイト: **`Iter`**（`next`／関連型 `Item`。`doiter`／シーケンス関数の
-基盤）・**`Equal`**（`equal` が使うトレイト）・**`Ord`**（`Equal` を継承。`less` のみ
-実装必須で `less-equal`／`greater`／`greater-equal` はデフォルト実装）・**`Error`**（`message`／
+基盤）・**`Equal`**（`equal` が使うトレイト）・**`Ord`**（`Equal` を継承。`<` のみ
+実装必須で `<=`／`>`／`>=` はデフォルト実装）・**`Error`**（`message`／
 `source`。エラー型を一様に扱うための `:dyn Error`）・**`print-object`**（型ごとの印字表現）・
 **`Pathish`**（パス名指定子＝文字列 or `pathname`）・ストリーム階層 **`Stream`** →
 **`InputStream`**／**`OutputStream`** → **`CharInput`**／**`CharOutput`** → **`PeekInput`**。
