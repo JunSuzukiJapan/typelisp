@@ -47,6 +47,7 @@ pub use typelisp_read;
 pub mod coroutine;
 
 pub mod equality;
+pub mod mem_limit;
 pub mod c_mem;
 pub mod ffi_callback;
 pub mod integer;

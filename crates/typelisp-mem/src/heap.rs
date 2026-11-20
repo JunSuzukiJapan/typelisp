@@ -10,13 +10,12 @@
 //!   cannot leak.
 //! * **Free list.** Unused cells are chained through `Cell::next_free`.
 //!   Allocation pops the head; if the list is empty it runs a GC and retries.
-//! * **Growth is opt-in and bounded.** By default the arena never grows: a GC
-//!   that frees nothing makes allocation return [`Error::HeapExhausted`], which
-//!   is what turns a runaway leak into a loud error rather than an out-of-memory
-//!   kill. A driver that genuinely cannot size its heap up front — the
-//!   interpreter, once function bodies are themselves cons structure — calls
-//!   [`Heap::set_growth_limit`] to permit appending chunks up to a ceiling;
-//!   exhaustion is then reported at that ceiling instead.
+//! * **Growth is bounded.** The arena grows by appending chunks up to
+//!   [`GROWTH_FACTOR`] times its initial capacity; past that ceiling, a GC
+//!   that frees nothing makes allocation return [`Error::HeapExhausted`],
+//!   which is what turns a runaway leak into a loud error rather than an
+//!   out-of-memory kill. [`Heap::set_growth_limit`] moves the ceiling, and
+//!   `set_growth_limit(0)` fixes the arena at the capacity it has.
 //! * **Symbols** are interned (name -> [`SymRef`]) and never collected — they are
 //!   few and live for the heap's lifetime, like CL symbols in a package.
 //! * **Strings** live in a slot store and ARE collected: the mark phase marks
@@ -144,9 +143,8 @@ struct RootStack {
 struct Arena {
     chunks: Vec<Chunk>,
     cap: usize, // sum of every chunk's `len`
-    // Ceiling on `cap` for growth, in cells. `0` (the default) means the arena
-    // is fixed at its initial capacity and exhaustion is an error — see the
-    // module doc comment.
+    // Ceiling on `cap` for growth, in cells. At or below `cap` (`0`, say) the
+    // arena is fixed and exhaustion is an error — see the module doc comment.
     growth_limit: usize,
     free: *mut Cell, // head of the free list (null when empty)
     free_count: usize,

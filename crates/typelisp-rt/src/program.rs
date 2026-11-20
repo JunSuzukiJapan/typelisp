@@ -10,7 +10,7 @@ use crate::closure::APPLY_INTERPRETED;
 /// at startup (see [`rt_heap_init`]) when its `main` doesn't otherwise say
 /// — matches the capacity `compile-file` itself already uses for the
 /// *compiler's own* (unrelated) `Heap` in `typelisp::compile::aot::compile_file`.
-const DEFAULT_AOT_HEAP_CAPACITY: usize = 1 << 16;
+pub const DEFAULT_AOT_HEAP_CAPACITY: usize = 1 << 16;
 
 /// AOT's counterpart to the JIT path's [`set_active_heap`]: an AOT-compiled
 /// executable is its own standalone process with no embedding Rust caller
@@ -20,7 +20,12 @@ const DEFAULT_AOT_HEAP_CAPACITY: usize = 1 << 16;
 /// file's own `tl_main`.
 ///
 /// Reads the desired capacity from `args[0]` if `argc >= 1`, otherwise uses
-/// [`DEFAULT_AOT_HEAP_CAPACITY`]. The allocated `Heap` is deliberately
+/// [`DEFAULT_AOT_HEAP_CAPACITY`]. `args[1]`, if `argc >= 2` and not 0, is the
+/// bound on the bytes the whole process allocates (`typl -c --max-memory`,
+/// [`crate::mem_limit`]); it is set before the arena is allocated, so the
+/// arena counts toward it. `args[2]`, if `argc >= 3` and not 0, fixes the
+/// arena at its capacity (`typl -c --heap-cells`); otherwise it grows as
+/// [`Heap::with_capacity`] lets it. The allocated `Heap` is deliberately
 /// never freed — it must outlive every other compiled function in the
 /// process, i.e. live until the OS reclaims everything at process exit, the
 /// same trade-off [`rt_push_permanent_sexpr_root`] already accepts for values
@@ -28,12 +33,18 @@ const DEFAULT_AOT_HEAP_CAPACITY: usize = 1 << 16;
 ///
 /// # Safety
 ///
-/// Same as [`rt_ping`]: if `argc >= 1`, `args` must point to at least one
-/// valid, readable `i64`.
+/// Same as [`rt_ping`]: `args` must point to at least `argc` valid,
+/// readable `i64`s.
 #[no_mangle]
 pub unsafe extern "C" fn rt_heap_init(args: *const i64, argc: u32) -> i64 {
     let capacity = if argc >= 1 { *args as usize } else { DEFAULT_AOT_HEAP_CAPACITY };
-    let heap = Box::new(Heap::with_capacity(capacity));
+    if argc >= 2 && *args.add(1) != 0 {
+        crate::mem_limit::set_memory_limit(*args.add(1) as usize);
+    }
+    let mut heap = Box::new(Heap::with_capacity(capacity));
+    if argc >= 3 && *args.add(2) != 0 {
+        heap.set_growth_limit(0);
+    }
     set_active_heap(Box::into_raw(heap));
     0
 }

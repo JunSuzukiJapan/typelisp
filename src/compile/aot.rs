@@ -272,6 +272,27 @@ pub fn compile_file_on_own_thread(source_path: &str, output_path: &str) -> Resul
 /// checker leaves `eprint`/`eprintln` out, and the executable carries the
 /// flag for whatever it `eval`s.
 pub fn compile_file(source_path: &str, output_path: &str) -> Result<(), String> {
+    compile_file_with(source_path, output_path, &BuildOptions::default())
+}
+
+/// What `typl -c` sets about the executable it builds, beyond the code: the
+/// resources it may use at run time. The default is what
+/// `(compile-file ...)` builds with.
+#[derive(Clone, Debug, Default)]
+pub struct BuildOptions {
+    /// The cons arena's capacity, in cells (`--heap-cells`); the arena is
+    /// fixed at it. `None` is the program's default: an arena of
+    /// [`typelisp_rt::DEFAULT_AOT_HEAP_CAPACITY`] cells, or
+    /// [`EVAL_HEAP_CAPACITY`] for a program that calls `eval`, that grows as
+    /// `Heap::with_capacity` lets it.
+    pub heap_cells: Option<usize>,
+    /// The bound on the bytes the running executable allocates
+    /// (`--max-memory`, `typelisp_rt::mem_limit`). `None` is no bound.
+    pub max_memory: Option<usize>,
+}
+
+/// [`compile_file`] with the run-time resources `options` gives.
+pub fn compile_file_with(source_path: &str, output_path: &str, options: &BuildOptions) -> Result<(), String> {
     crate::compile::driver::emitted_layout_is_runnable()?;
     let source =
         fs::read_to_string(source_path).map_err(|e| format!("failed to read \"{}\": {}", source_path, e))?;
@@ -655,6 +676,15 @@ pub fn compile_file(source_path: &str, output_path: &str) -> Result<(), String> 
             &callback_entries,
             eval_env.as_deref().map(|bytes| (bytes, eval_ns, crate::release::is_release())),
             main_returns_int,
+            HeapInit {
+                cells: options.heap_cells.unwrap_or(if eval_env.is_some() {
+                    EVAL_HEAP_CAPACITY
+                } else {
+                    typelisp_rt::DEFAULT_AOT_HEAP_CAPACITY
+                }),
+                fixed: options.heap_cells.is_some(),
+                max_memory: options.max_memory,
+            },
         )
             .and_then(|()| m.verify().map_err(|e| format!("module failed verification: {}", e)))
             .and_then(|()| write_executable(&m, output_path, &link_libraries, &items))
@@ -714,8 +744,7 @@ fn print_object_receiver(target: &CompileTarget) -> Option<typelisp_mem::TypeId>
 ///
 /// `eval_env` is `Some` only for a program that calls `eval`: the
 /// environment, already built and serialized (`typelisp_front::dump`), for
-/// the startup to read back into [`EVAL_HEAP_CAPACITY`] cells before `main`
-/// proper begins, the module an eval'd form is checked in, and whether this
+/// the startup to read back into the heap before `main` proper begins, the module an eval'd form is checked in, and whether this
 /// is a release build.
 fn build_main_wrapper(
     ctx: &'static Context,
@@ -733,6 +762,7 @@ fn build_main_wrapper(
     callback_entries: &[(typelisp_front::ffi_callback::CallbackSig, inkwell::values::FunctionValue<'static>)],
     eval_env: Option<(&[u8], typelisp_mem::NsId, bool)>,
     main_returns_int: bool,
+    heap: HeapInit,
 ) -> Result<(), String> {
     let tl_main = module
         .get_function(entry_symbol)
@@ -741,7 +771,7 @@ fn build_main_wrapper(
     let i32_type = ctx.i32_type();
     let ptr_ty = ctx.ptr_type(AddressSpace::default());
     let fn_ty = ctx.i64_type().fn_type(&[ptr_ty.into(), ctx.i32_type().into()], false);
-    let rt_heap_init = module.add_function("rt_heap_init", fn_ty, None);
+    module.add_function("rt_heap_init", fn_ty, None);
     let main_fn = module.add_function(ENTRY_POINT_NAME, i32_type.fn_type(&[], false), None);
     let entry_block = ctx.append_basic_block(main_fn, "entry");
     let builder = ctx.create_builder();
@@ -760,8 +790,6 @@ fn build_main_wrapper(
         .set_volatile(true)
         .map_err(|e| format!("failed to mark the ABI marker load volatile: {:?}", e))?;
 
-    let null_args = ctx.ptr_type(AddressSpace::default()).const_null();
-    let argc_zero = ctx.i32_type().const_int(0, false);
 
     // Trait-object vtables. Ordered before `rt_heap_init` only
     // because nothing here touches the heap; what matters is that every
@@ -998,21 +1026,19 @@ fn build_main_wrapper(
     // has to create and register its own `Heap` here instead. Must run
     // before `tl_main` (or anything it calls) touches the heap at all.
     //
-    // With `eval` in the program the capacity is given explicitly: the
-    // environment built two lines down reads, checks and runs the prelude and
-    // the program's own definitions into this same heap, which does not fit in
-    // `rt_heap_init`'s default. The figure is the one the prelude's own
-    // generator sizes its heap at (`prelude_bootstrap::build_prelude_bitcode`).
-    match eval_env {
-        None => {
-            builder
-                .build_call(rt_heap_init, &[null_args.into(), argc_zero.into()], "heap_init_result")
-                .map_err(|e| format!("failed to build rt_heap_init call: {}", e))?;
-        }
-        Some(_) => {
-            call_shim(ctx, module, &builder, "rt_heap_init", &[ctx.i64_type().const_int(EVAL_HEAP_CAPACITY as u64, false)])?;
-        }
-    }
+    // The bound on memory is set by the same call, before the arena is
+    // allocated, so the arena counts toward it (0 is no bound).
+    call_shim(
+        ctx,
+        module,
+        &builder,
+        "rt_heap_init",
+        &[
+            ctx.i64_type().const_int(heap.cells as u64, false),
+            ctx.i64_type().const_int(heap.max_memory.unwrap_or(0) as u64, false),
+            ctx.i64_type().const_int(heap.fixed as u64, false),
+        ],
+    )?;
     // Between the heap and the global inits, and that position is forced:
     // `rt_eval_init` builds an `Interp`, and `Interp::new` resets the runtime
     // global table — after the inits it would wipe the slots the machine code
@@ -1135,6 +1161,15 @@ fn build_main_wrapper(
         builder.build_call(f, &[], "").map_err(|e| format!("failed to build the call to `{}`: {}", init, e))?;
     }
     Ok(())
+}
+
+/// What the generated `main` asks `rt_heap_init` for: the cons arena's
+/// capacity, whether it stays at that capacity, and the bound on the
+/// process's allocations.
+struct HeapInit {
+    cells: usize,
+    fixed: bool,
+    max_memory: Option<usize>,
 }
 
 /// The cons-cell arena an `eval`-carrying executable asks `rt_heap_init` for.
@@ -1431,7 +1466,7 @@ mod tests {
         builder.build_call(exit, &[code.into()], "").unwrap();
         builder.build_unreachable().unwrap();
 
-        build_main_wrapper(ctx, &module, "tl_main", &[], &[], &[], &[], &[], &[], &[], &[], &[], &[], None, false).expect("build_main_wrapper failed");
+        build_main_wrapper(ctx, &module, "tl_main", &[], &[], &[], &[], &[], &[], &[], &[], &[], &[], None, false, super::HeapInit { cells: typelisp_rt::DEFAULT_AOT_HEAP_CAPACITY, fixed: false, max_memory: None }).expect("build_main_wrapper failed");
         module.verify().expect("module failed verification");
 
         let out_path = tmp_path("rt_ping_test");
@@ -1470,7 +1505,7 @@ mod tests {
         };
         builder.build_return(Some(&result)).unwrap();
 
-        build_main_wrapper(ctx, &module, "tl_main", &[], &[], &[], &[], &[], &[], &[], &[], &[], &[], None, false).expect("build_main_wrapper failed");
+        build_main_wrapper(ctx, &module, "tl_main", &[], &[], &[], &[], &[], &[], &[], &[], &[], &[], None, false, super::HeapInit { cells: typelisp_rt::DEFAULT_AOT_HEAP_CAPACITY, fixed: false, max_memory: None }).expect("build_main_wrapper failed");
         module.verify().expect("module failed verification");
 
         let out_path = tmp_path("rt_heap_init_test");

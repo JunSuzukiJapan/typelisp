@@ -36,7 +36,8 @@ const HELP: &str = "\
 Usage:
   typl [OPTIONS]                                 start the REPL
   typl [OPTIONS] FILE [ARGS...]                  run FILE; ARGS are its (command-line-args)
-  typl [--lib-dir DIR] [-O<N>] -c SOURCE [-o OUTPUT]
+  typl [--lib-dir DIR] [-O<N>] -c SOURCE [-o OUTPUT] [--heap-cells N]
+       [--max-memory SIZE]
                                                  compile SOURCE to an executable
   typl [OPTIONS] test [FILE.typl] [FILTER]       run the #[test] functions of the
                                                  project here (or of FILE) whose
@@ -55,7 +56,10 @@ Options:
                          it to $TYPELISP_HOME/lib, ~/.typelisp/lib if unset;
                          a debug typl uses the one in the tree it was built in)
   --image FILE           start from a dump written by (dump ...)
-  --heap-cells N         initial capacity of the cons arena, in cells
+  --heap-cells N         initial capacity of the cons arena, in cells; with -c,
+                         the capacity of the executable's arena (default 65536)
+  --max-memory SIZE      after -c: the most the executable may allocate, in
+                         bytes (K, M or G may follow); more is a runtime error
   --feature NAME         add a feature for #+/#- (repeatable)
   --on-redefine=POLICY   on redefinition: warn (default), error or silent
   --remove-lib           remove the library this typl wrote for compiled
@@ -67,7 +71,7 @@ Options:
 
 --help, --version, --remove-lib, --others and --all after FILE are passed to
 the program.
---image, --heap-cells and --feature cannot be combined with -c.
+--image and --feature cannot be combined with -c.
 ";
 
 fn main() -> rustyline::Result<()> {
@@ -175,13 +179,16 @@ fn main() -> rustyline::Result<()> {
         // The executable is compiled in an environment of its own
         // (`compile::aot::compile_file`), which none of these flags reach;
         // refused rather than accepted and ignored.
-        for (given, given_flag) in [(heap_cells.is_some(), "--heap-cells"), (!features.is_empty(), "--feature"), (image.is_some(), "--image")] {
+        //
+        // `--heap-cells` is the exception: with `-c` it sizes the
+        // executable's cons arena instead.
+        for (given, given_flag) in [(!features.is_empty(), "--feature"), (image.is_some(), "--image")] {
             if given {
                 eprintln!("{}: {} has no effect on compilation", flag, given_flag);
                 std::process::exit(1);
             }
         }
-        std::process::exit(compile_command(flag, &args[1..]));
+        std::process::exit(compile_command(flag, &args[1..], heap_cells));
     }
     let heap_cells = heap_cells.unwrap_or(DEFAULT_HEAP_CELLS);
     if args.first().is_some_and(|a| a == "test") {
@@ -211,14 +218,28 @@ fn main() -> rustyline::Result<()> {
 /// `typl -c SOURCE [-o OUTPUT]`: `args` is what follows the `-c` (or
 /// `--compile`, which `flag` names for the diagnostics). Without `-o`, the
 /// executable is `SOURCE` with its `.typl` extension removed. A `--release`
-/// or `-O<N>` among them is the global one, written after `-c`. Returns the
-/// process exit code.
-fn compile_command(flag: &str, args: &[String]) -> i32 {
+/// or `-O<N>` among them is the global one, written after `-c`. `heap_cells`
+/// is the global `--heap-cells`, which here sizes the executable's cons
+/// arena. Returns the process exit code.
+fn compile_command(flag: &str, args: &[String], heap_cells: Option<usize>) -> i32 {
     let mut source = None;
     let mut output = None;
+    let mut options = typelisp::compile::aot::BuildOptions { heap_cells, ..Default::default() };
     let mut it = args.iter();
     while let Some(a) = it.next() {
-        if a == "--release" {
+        if let Some(v) = flag_value(a, "--max-memory", &mut it) {
+            let Some(v) = v else {
+                eprintln!("--max-memory: needs a size in bytes (K, M or G may follow)");
+                return 1;
+            };
+            match parse_memory_size(v) {
+                Ok(bytes) => options.max_memory = Some(bytes),
+                Err(e) => {
+                    eprintln!("--max-memory: {}", e);
+                    return 1;
+                }
+            }
+        } else if a == "--release" {
             typelisp::release::set_release(true);
         } else if let Some(level) = typelisp::opt_level::parse_flag(a) {
             match level {
@@ -239,12 +260,12 @@ fn compile_command(flag: &str, args: &[String]) -> i32 {
         } else if source.is_none() && !a.starts_with('-') {
             source = Some(PathBuf::from(a));
         } else {
-            eprintln!("{}: unexpected argument `{}` (usage: typl {} SOURCE [-o OUTPUT] [--release] [-O<N>])", flag, a, flag);
+            eprintln!("{}: unexpected argument `{}` (usage: typl {} SOURCE [-o OUTPUT] [--release] [-O<N>] [--max-memory SIZE])", flag, a, flag);
             return 1;
         }
     }
     let Some(source) = source else {
-        eprintln!("{}: needs a source file (usage: typl {} SOURCE [-o OUTPUT] [--release] [-O<N>])", flag, flag);
+        eprintln!("{}: needs a source file (usage: typl {} SOURCE [-o OUTPUT] [--release] [-O<N>] [--max-memory SIZE])", flag, flag);
         return 1;
     };
     let output = match output {
@@ -255,7 +276,7 @@ fn compile_command(flag: &str, args: &[String]) -> i32 {
             return 1;
         }
     };
-    match typelisp::compile::aot::compile_file(&source.to_string_lossy(), &output.to_string_lossy()) {
+    match typelisp::compile::aot::compile_file_with(&source.to_string_lossy(), &output.to_string_lossy(), &options) {
         Ok(()) => 0,
         Err(e) => {
             eprintln!("error: {}", e);
@@ -331,6 +352,31 @@ fn parse_heap_cells(args: Vec<String>) -> (Option<usize>, Vec<String>) {
         cells = Some(parse_heap_cells_value(v));
     }
     (cells, rest)
+}
+
+/// `FLAG VALUE` or `FLAG=VALUE` at `a`: `None` when `a` is not `flag`, and
+/// `Some(None)` when it is but no value follows.
+fn flag_value<'a>(a: &'a str, flag: &str, rest: &mut std::slice::Iter<'a, String>) -> Option<Option<&'a str>> {
+    if a == flag {
+        Some(rest.next().map(String::as_str))
+    } else {
+        a.strip_prefix(flag).and_then(|r| r.strip_prefix('=')).map(Some)
+    }
+}
+
+/// `--max-memory`'s size: a positive number of bytes, optionally followed by
+/// `K`, `M` or `G` (powers of 1024).
+fn parse_memory_size(v: &str) -> Result<usize, String> {
+    let (digits, unit) = match v.char_indices().last() {
+        Some((i, 'K' | 'k')) => (&v[..i], 1usize << 10),
+        Some((i, 'M' | 'm')) => (&v[..i], 1 << 20),
+        Some((i, 'G' | 'g')) => (&v[..i], 1 << 30),
+        _ => (v, 1),
+    };
+    match digits.parse::<usize>() {
+        Ok(n) if n > 0 => n.checked_mul(unit).ok_or_else(|| format!("`{}` does not fit in this machine's address space", v)),
+        _ => Err(format!("`{}` is not a positive size in bytes (K, M or G may follow)", v)),
+    }
 }
 
 /// Parses the value half of `--heap-cells`; exits with a diagnostic if it is

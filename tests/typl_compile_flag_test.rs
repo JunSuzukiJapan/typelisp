@@ -104,7 +104,9 @@ fn dash_c_refuses_what_it_cannot_use() {
         &["-c", "noext"][..],
         &["-c", "a.typl", "b.typl"][..],
         &["-c", "a.typl", "-o"][..],
-        &["--heap-cells", "100", "-c", "a.typl"][..],
+        &["-c", "a.typl", "--max-memory"][..],
+        &["-c", "a.typl", "--max-memory", "lots"][..],
+        &["-c", "a.typl", "--max-memory", "0"][..],
         &["--feature", "x", "-c", "a.typl"][..],
         &["--image", "x.typld", "-c", "a.typl"][..],
     ] {
