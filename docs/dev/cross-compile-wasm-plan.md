@@ -57,6 +57,14 @@ typl -c SOURCE [-o OUTPUT] [--target TRIPLE] [--heap-cells N] [--no-cons] [--max
 
 ネイティブも同じ仕組みにする。extern の表と島の SOURCE が変わるので、島の再生成 2 回と prelude の再生成が要る。
 
+実装（ABI 0.3.65）:
+
+- `typelisp_abi::raise`/`raise_payload` は payload を thread-local の `RAISED` に置いて `#[must_use] Raised` を返す。shim は `raise(..).into_word()`（0）で戻る。`take_raised` で取り出す。
+- 確かめるコードは `src/compile/raise_check.rs` の `after_call` 1 か所で出す。呼び出し元は島の `build-call`/`build-call-with-env`、コルーチンの `emit_rt_call`、FFI の thunk と entry。raise しない shim は `externs::NEVER_RAISING_SHIMS` に挙げ、確かめを省く。
+- 抜け方は呼び出し元の型で決まる: `i64 f(i64)`（コルーチン本体）は `STATUS_UNWIND`、それ以外は戻り型のゼロ。ゼロで抜けた関数の呼び出し元も同じ確かめで抜けるので、巻き戻しは活性化の口まで伝わる。
+- ドライバ（`coroutine::activation`）は、状態語が `STATUS_UNWIND` なら退避を取り出して `park_activation_unwind` へ渡す。退避があるのに活性化が普通に戻ったら fatal（確かめの漏れ）。
+- `print-object` のフック、書式の shim、C コールバック、インタプリタからの呼び出し（`crossing::catch_compiled_panic`）は、呼んだあとに `is_raised`/`take_raised` を見る。
+
 ### 段階 4: wasm32-wasip1
 
 - コード生成: `--target` の triple で `TargetMachine` を作る。
