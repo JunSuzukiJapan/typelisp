@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/traits.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
+<!-- translated-from: docs/ja/reference/functions/traits.md @ 1663f849f4e6491e2a654bb9eeaa34635af179ac -->
 # 표준 트레이트
 
 반복, 비교, 산술, 요소의 추가와 꺼내기를 위한 트레이트. 그 밖의 표준 트레이트는 각자의 장에 있다: `Hash`([HashTable](collections.md#4-hashtablekv)),
@@ -74,10 +74,10 @@
 거치지 않는다.
 
 ```lisp
-(deftrait Add () (defmethod add (self (other Self)) Self))
-(deftrait Sub () (defmethod sub (self (other Self)) Self))
-(deftrait Mul () (defmethod mul (self (other Self)) Self))
-(deftrait Div () (:type Output) (defmethod div (self (other Self)) Output))
+(deftrait Add () (defmethod + (self (other Self)) Self))
+(deftrait Sub () (defmethod - (self (other Self)) Self))
+(deftrait Mul () (defmethod * (self (other Self)) Self))
+(deftrait Div () (:type Output) (defmethod / (self (other Self)) Output))
 (deftrait Rem () (defmethod remainder (self (other Self)) Self))
 (deftrait Bits ()
   (defmethod bit-and (self (other Self)) Self)
@@ -88,16 +88,16 @@
 (deftrait Number (Add Sub Mul Rem Ord))                   ; 메서드 없음·5개의 합성
 ```
 
-**경계 안에서는 연산자를 쓸 수 있다.** 받는 쪽이 `:where`로 묶인 타입 변수이면 연산자는 트레이트 메서드로 읽힌다
-(`+`→`add`, `-`→`sub`, `*`→`mul`, `/`→`div`, `rem`→`remainder`, `logand`→`bit-and`, `=`→`equal`, `<`→`less` …).
+**경계 안에서는 연산자를 쓸 수 있다.** `Add`/`Sub`/`Mul`/`Div`의 메서드는 연산자 그 자체다. 다른 트레이트에서는
+받는 쪽이 `:where`로 묶인 타입 변수이면 연산자가 트레이트 메서드로 읽힌다
+(`rem`→`remainder`, `logand`→`bit-and`, `=`→`equal`, `<`→`less` …).
 
 ```lisp
 (defun sum3<T> ((a T) (b T) (c T)) T (:where (Number T))
-  (+ a b c))                                              ; = (add (add a b) c)
+  (+ a b c))                                              ; = (+ (+ a b) c)
 ```
 
-트레이트 메서드의 이름이 `+`가 아닌 것은 `+`가 내장 메서드의 이름이고 `impl`이 그것의 재정의를 거부하기 때문이다
-(`cannot redefine built-in method`). `Neg`는 없다. `(- x)`는 `(- (- x x) x)`로 전개되므로 `Sub`로 충분하다.
+`Neg`는 없다. `(- x)`는 `(- (- x x) x)`로 전개되므로 `Sub`로 충분하다.
 
 구현하는 타입: `Add`/`Sub`/`Mul`/`Div`/`Rem`/`Number`는 모든 수 타입(`complex` 제외), `Bits`는 모든 정수 타입과 `int`.
 

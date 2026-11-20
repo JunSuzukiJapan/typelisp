@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/traits.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
+<!-- translated-from: docs/ja/reference/functions/traits.md @ 1663f849f4e6491e2a654bb9eeaa34635af179ac -->
 # Traity standardowe
 
 Traity do iteracji, porównywania, arytmetyki oraz dodawania i wyjmowania elementów. Pozostałe traity standardowe znajdują się we własnych
@@ -83,10 +83,10 @@ Warstwa pozwalająca kodowi generycznemu wymagać „typu, który można dodawa�
 wbudowanych operatorów** ([Liczby](numbers.md)) i nie przechodzi przez tę warstwę.
 
 ```lisp
-(deftrait Add () (defmethod add (self (other Self)) Self))
-(deftrait Sub () (defmethod sub (self (other Self)) Self))
-(deftrait Mul () (defmethod mul (self (other Self)) Self))
-(deftrait Div () (:type Output) (defmethod div (self (other Self)) Output))
+(deftrait Add () (defmethod + (self (other Self)) Self))
+(deftrait Sub () (defmethod - (self (other Self)) Self))
+(deftrait Mul () (defmethod * (self (other Self)) Self))
+(deftrait Div () (:type Output) (defmethod / (self (other Self)) Output))
 (deftrait Rem () (defmethod remainder (self (other Self)) Self))
 (deftrait Bits ()
   (defmethod bit-and (self (other Self)) Self)
@@ -97,18 +97,16 @@ wbudowanych operatorów** ([Liczby](numbers.md)) i nie przechodzi przez tę wars
 (deftrait Number (Add Sub Mul Rem Ord))                   ; bez metod; połączenie pięciu
 ```
 
-**Wewnątrz ograniczenia można pisać operatory.** Gdy odbiorcą jest zmienna typowa związana przez `:where`,
-operatory są odczytywane jako metody traitu (`+`→`add`, `-`→`sub`, `*`→`mul`, `/`→`div`, `rem`→`remainder`,
-`logand`→`bit-and`, `=`→`equal`, `<`→`less` …):
+**Wewnątrz ograniczenia można pisać operatory.** Metodami `Add`/`Sub`/`Mul`/`Div` są same operatory.
+W pozostałych traitach, gdy odbiorcą jest zmienna typowa związana przez `:where`, operatory są odczytywane
+jako metody traitu (`rem`→`remainder`, `logand`→`bit-and`, `=`→`equal`, `<`→`less` …):
 
 ```lisp
 (defun sum3<T> ((a T) (b T) (c T)) T (:where (Number T))
-  (+ a b c))                                              ; = (add (add a b) c)
+  (+ a b c))                                              ; = (+ (+ a b) c)
 ```
 
-Metoda traitu nie nazywa się `+`, ponieważ `+` to nazwa metody wbudowanej, a `impl` odmawia jej
-redefinicji (`cannot redefine built-in method`). Nie ma `Neg`: `(- x)` rozwija się do
-`(- (- x x) x)`, więc wystarczy `Sub`.
+Nie ma `Neg`: `(- x)` rozwija się do `(- (- x x) x)`, więc wystarczy `Sub`.
 
 Zaimplementowane dla: `Add`/`Sub`/`Mul`/`Div`/`Rem`/`Number` na wszystkich typach liczbowych (poza `complex`) oraz
 `Bits` na wszystkich typach całkowitych i `int`.

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/traits.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
+<!-- translated-from: docs/ja/reference/functions/traits.md @ 1663f849f4e6491e2a654bb9eeaa34635af179ac -->
 # Trait standard
 
 I trait per l'iterazione, il confronto, l'aritmetica e l'aggiunta e la rimozione di elementi. Gli altri trait standard si trovano nei rispettivi
@@ -83,10 +83,10 @@ Uno strato che permette al codice generico di richiedere "un tipo che si possa s
 sui tipi concreti usa gli operatori predefiniti** ([Numeri](numbers.md)) e non passa per questo strato.
 
 ```lisp
-(deftrait Add () (defmethod add (self (other Self)) Self))
-(deftrait Sub () (defmethod sub (self (other Self)) Self))
-(deftrait Mul () (defmethod mul (self (other Self)) Self))
-(deftrait Div () (:type Output) (defmethod div (self (other Self)) Output))
+(deftrait Add () (defmethod + (self (other Self)) Self))
+(deftrait Sub () (defmethod - (self (other Self)) Self))
+(deftrait Mul () (defmethod * (self (other Self)) Self))
+(deftrait Div () (:type Output) (defmethod / (self (other Self)) Output))
 (deftrait Rem () (defmethod remainder (self (other Self)) Self))
 (deftrait Bits ()
   (defmethod bit-and (self (other Self)) Self)
@@ -97,18 +97,16 @@ sui tipi concreti usa gli operatori predefiniti** ([Numeri](numbers.md)) e non p
 (deftrait Number (Add Sub Mul Rem Ord))                   ; nessun metodo; una combinazione di cinque
 ```
 
-**All'interno di un vincolo, puoi scrivere gli operatori.** Quando il ricevitore è una variabile di tipo
-vincolata da `:where`, gli operatori vengono letti come metodi del trait (`+`→`add`, `-`→`sub`,
-`*`→`mul`, `/`→`div`, `rem`→`remainder`, `logand`→`bit-and`, `=`→`equal`, `<`→`less` ...):
+**All'interno di un vincolo, puoi scrivere gli operatori.** I metodi di `Add`/`Sub`/`Mul`/`Div` sono gli
+operatori stessi. Negli altri trait, quando il ricevitore è una variabile di tipo vincolata da `:where`, gli
+operatori vengono letti come metodi del trait (`rem`→`remainder`, `logand`→`bit-and`, `=`→`equal`, `<`→`less` ...):
 
 ```lisp
 (defun sum3<T> ((a T) (b T) (c T)) T (:where (Number T))
-  (+ a b c))                                              ; = (add (add a b) c)
+  (+ a b c))                                              ; = (+ (+ a b) c)
 ```
 
-Il metodo del trait non si chiama `+` perché `+` è il nome di un metodo predefinito e `impl` rifiuta di
-ridefinirlo (`cannot redefine built-in method`). Non esiste `Neg`: `(- x)` si espande in
-`(- (- x x) x)`, quindi basta `Sub`.
+Non esiste `Neg`: `(- x)` si espande in `(- (- x x) x)`, quindi basta `Sub`.
 
 Implementato per: `Add`/`Sub`/`Mul`/`Div`/`Rem`/`Number` su tutti i tipi numerici (tranne `complex`), e
 `Bits` su tutti i tipi interi e su `int`.

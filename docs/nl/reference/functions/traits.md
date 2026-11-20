@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/traits.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
+<!-- translated-from: docs/ja/reference/functions/traits.md @ 1663f849f4e6491e2a654bb9eeaa34635af179ac -->
 # Standaardtraits
 
 De traits voor iteratie, vergelijking, rekenkunde en het toevoegen en uitnemen van elementen. De overige standaardtraits staan in hun eigen
@@ -85,10 +85,10 @@ concrete types gebruikt de ingebouwde operatoren** ([Getallen](numbers.md)) en g
 laag.
 
 ```lisp
-(deftrait Add () (defmethod add (self (other Self)) Self))
-(deftrait Sub () (defmethod sub (self (other Self)) Self))
-(deftrait Mul () (defmethod mul (self (other Self)) Self))
-(deftrait Div () (:type Output) (defmethod div (self (other Self)) Output))
+(deftrait Add () (defmethod + (self (other Self)) Self))
+(deftrait Sub () (defmethod - (self (other Self)) Self))
+(deftrait Mul () (defmethod * (self (other Self)) Self))
+(deftrait Div () (:type Output) (defmethod / (self (other Self)) Output))
 (deftrait Rem () (defmethod remainder (self (other Self)) Self))
 (deftrait Bits ()
   (defmethod bit-and (self (other Self)) Self)
@@ -99,18 +99,16 @@ laag.
 (deftrait Number (Add Sub Mul Rem Ord))                   ; geen methoden; een combinatie van vijf
 ```
 
-**Binnen een bound kun je operatoren schrijven.** Wanneer de ontvanger een typevariabele is die door
-`:where` is gebonden, worden operatoren als traitmethoden gelezen (`+`→`add`, `-`→`sub`, `*`→`mul`,
-`/`→`div`, `rem`→`remainder`, `logand`→`bit-and`, `=`→`equal`, `<`→`less` …):
+**Binnen een bound kun je operatoren schrijven.** De methoden van `Add`/`Sub`/`Mul`/`Div` zijn de operatoren
+zelf. In de andere traits worden operatoren als traitmethoden gelezen wanneer de ontvanger een typevariabele
+is die door `:where` is gebonden (`rem`→`remainder`, `logand`→`bit-and`, `=`→`equal`, `<`→`less` …):
 
 ```lisp
 (defun sum3<T> ((a T) (b T) (c T)) T (:where (Number T))
-  (+ a b c))                                              ; = (add (add a b) c)
+  (+ a b c))                                              ; = (+ (+ a b) c)
 ```
 
-De traitmethode heet niet `+` omdat `+` de naam van een ingebouwde methode is en `impl` weigert die
-opnieuw te definiëren (`cannot redefine built-in method`). Er is geen `Neg`: `(- x)` expandeert naar
-`(- (- x x) x)`, dus `Sub` volstaat.
+Er is geen `Neg`: `(- x)` expandeert naar `(- (- x x) x)`, dus `Sub` volstaat.
 
 Geïmplementeerd voor: `Add`/`Sub`/`Mul`/`Div`/`Rem`/`Number` op alle numerieke types (behalve
 `complex`), en `Bits` op alle gehele types en `int`.

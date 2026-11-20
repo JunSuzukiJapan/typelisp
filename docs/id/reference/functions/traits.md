@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/traits.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
+<!-- translated-from: docs/ja/reference/functions/traits.md @ 1663f849f4e6491e2a654bb9eeaa34635af179ac -->
 # Trait Standar
 
 Trait untuk iterasi, perbandingan, aritmetika, serta penambahan dan pengambilan elemen. Trait standar lainnya ada di bab masing-masing:
@@ -82,10 +82,10 @@ Lapisan agar kode generik dapat mensyaratkan "tipe yang dapat dijumlahkan". **Ar
 konkret memakai operator bawaan** ([Bilangan](numbers.md)) dan tidak melalui lapisan ini.
 
 ```lisp
-(deftrait Add () (defmethod add (self (other Self)) Self))
-(deftrait Sub () (defmethod sub (self (other Self)) Self))
-(deftrait Mul () (defmethod mul (self (other Self)) Self))
-(deftrait Div () (:type Output) (defmethod div (self (other Self)) Output))
+(deftrait Add () (defmethod + (self (other Self)) Self))
+(deftrait Sub () (defmethod - (self (other Self)) Self))
+(deftrait Mul () (defmethod * (self (other Self)) Self))
+(deftrait Div () (:type Output) (defmethod / (self (other Self)) Output))
 (deftrait Rem () (defmethod remainder (self (other Self)) Self))
 (deftrait Bits ()
   (defmethod bit-and (self (other Self)) Self)
@@ -96,18 +96,16 @@ konkret memakai operator bawaan** ([Bilangan](numbers.md)) dan tidak melalui lap
 (deftrait Number (Add Sub Mul Rem Ord))                   ; tanpa metode; gabungan lima
 ```
 
-**Di dalam batas, Anda dapat menulis operator.** Ketika penerimanya adalah variabel tipe yang
-dibatasi oleh `:where`, operator dibaca sebagai metode trait (`+`→`add`, `-`→`sub`, `*`→`mul`,
-`/`→`div`, `rem`→`remainder`, `logand`→`bit-and`, `=`→`equal`, `<`→`less` …):
+**Di dalam batas, Anda dapat menulis operator.** Metode `Add`/`Sub`/`Mul`/`Div` adalah operator itu sendiri.
+Pada trait lainnya, ketika penerimanya adalah variabel tipe yang dibatasi oleh `:where`, operator dibaca
+sebagai metode trait (`rem`→`remainder`, `logand`→`bit-and`, `=`→`equal`, `<`→`less` …):
 
 ```lisp
 (defun sum3<T> ((a T) (b T) (c T)) T (:where (Number T))
-  (+ a b c))                                              ; = (add (add a b) c)
+  (+ a b c))                                              ; = (+ (+ a b) c)
 ```
 
-Metode trait tidak dinamai `+` karena `+` adalah nama metode bawaan dan `impl` menolak
-mendefinisikannya ulang (`cannot redefine built-in method`). Tidak ada `Neg`: `(- x)` diekspansi
-menjadi `(- (- x x) x)`, sehingga `Sub` sudah cukup.
+Tidak ada `Neg`: `(- x)` diekspansi menjadi `(- (- x x) x)`, sehingga `Sub` sudah cukup.
 
 Diimplementasikan untuk: `Add`/`Sub`/`Mul`/`Div`/`Rem`/`Number` pada semua tipe numerik (kecuali
 `complex`), dan `Bits` pada semua tipe bilangan bulat dan `int`.

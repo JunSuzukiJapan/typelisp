@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/traits.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
+<!-- translated-from: docs/ja/reference/functions/traits.md @ 1663f849f4e6491e2a654bb9eeaa34635af179ac -->
 # 标准 trait
 
 用于迭代、比较、算术和存取元素的 trait。其他标准 trait 在各自的章节中：`Hash`（[HashTable](collections.md#4-hashtablekv)）、
@@ -68,10 +68,10 @@
 供泛型代码要求"可以相加的类型"的一层。**具体类型的运算使用内置运算符**（[数值](numbers.md)），不经过这一层。
 
 ```lisp
-(deftrait Add () (defmethod add (self (other Self)) Self))
-(deftrait Sub () (defmethod sub (self (other Self)) Self))
-(deftrait Mul () (defmethod mul (self (other Self)) Self))
-(deftrait Div () (:type Output) (defmethod div (self (other Self)) Output))
+(deftrait Add () (defmethod + (self (other Self)) Self))
+(deftrait Sub () (defmethod - (self (other Self)) Self))
+(deftrait Mul () (defmethod * (self (other Self)) Self))
+(deftrait Div () (:type Output) (defmethod / (self (other Self)) Output))
 (deftrait Rem () (defmethod remainder (self (other Self)) Self))
 (deftrait Bits ()
   (defmethod bit-and (self (other Self)) Self)
@@ -82,16 +82,15 @@
 (deftrait Number (Add Sub Mul Rem Ord))                   ; 没有方法，五个的组合
 ```
 
-**在约束内可以用运算符书写。** 当接收者是由 `:where` 约束的类型变量时，运算符被解读为 trait 方法（`+`→`add`、
-`-`→`sub`、`*`→`mul`、`/`→`div`、`rem`→`remainder`、`logand`→`bit-and`、`=`→`equal`、`<`→`less` …）：
+**在约束内可以用运算符书写。** `Add`/`Sub`/`Mul`/`Div` 的方法就是运算符本身。在其他 trait 中，当接收者是由 `:where`
+约束的类型变量时，运算符被解读为 trait 方法（`rem`→`remainder`、`logand`→`bit-and`、`=`→`equal`、`<`→`less` …）：
 
 ```lisp
 (defun sum3<T> ((a T) (b T) (c T)) T (:where (Number T))
-  (+ a b c))                                              ; = (add (add a b) c)
+  (+ a b c))                                              ; = (+ (+ a b) c)
 ```
 
-trait 一侧的方法名不是 `+`，是因为 `+` 是内置方法名，`impl` 会拒绝重定义（`cannot redefine built-in method`）。没有
-`Neg`——`(- x)` 展开为 `(- (- x x) x)`，所以只需 `Sub`。
+没有 `Neg`——`(- x)` 展开为 `(- (- x x) x)`，所以只需 `Sub`。
 
 已实现：`Add`/`Sub`/`Mul`/`Div`/`Rem`/`Number` 用于所有数值类型（除 `complex` 外），`Bits` 用于所有整数类型和 `int`。
 

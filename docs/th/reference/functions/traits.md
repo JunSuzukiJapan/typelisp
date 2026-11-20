@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/traits.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
+<!-- translated-from: docs/ja/reference/functions/traits.md @ 1663f849f4e6491e2a654bb9eeaa34635af179ac -->
 # Trait มาตรฐาน
 
 trait สำหรับการวนซ้ำ การเปรียบเทียบ การคำนวณ และการเพิ่มและนำสมาชิกออก trait มาตรฐานอื่นอยู่ในบทของตัวเอง:
@@ -79,10 +79,10 @@ implementation ส่งต่อไปยังพวกมัน ตัวด�
 ตัวดำเนินการที่มีให้ในตัว** ([ตัวเลข](numbers.md)) และไม่ผ่านชั้นนี้
 
 ```lisp
-(deftrait Add () (defmethod add (self (other Self)) Self))
-(deftrait Sub () (defmethod sub (self (other Self)) Self))
-(deftrait Mul () (defmethod mul (self (other Self)) Self))
-(deftrait Div () (:type Output) (defmethod div (self (other Self)) Output))
+(deftrait Add () (defmethod + (self (other Self)) Self))
+(deftrait Sub () (defmethod - (self (other Self)) Self))
+(deftrait Mul () (defmethod * (self (other Self)) Self))
+(deftrait Div () (:type Output) (defmethod / (self (other Self)) Output))
 (deftrait Rem () (defmethod remainder (self (other Self)) Self))
 (deftrait Bits ()
   (defmethod bit-and (self (other Self)) Self)
@@ -93,18 +93,16 @@ implementation ส่งต่อไปยังพวกมัน ตัวด�
 (deftrait Number (Add Sub Mul Rem Ord))                   ; ไม่มีเมธอด เป็นการรวมห้าตัว
 ```
 
-**ภายใน bound คุณเขียนตัวดำเนินการได้** เมื่อตัวรับเป็นตัวแปรชนิดที่ถูกผูกด้วย `:where`
-ตัวดำเนินการจะถูกอ่านเป็นเมทอดของ trait (`+`→`add`, `-`→`sub`, `*`→`mul`, `/`→`div`, `rem`→`remainder`,
-`logand`→`bit-and`, `=`→`equal`, `<`→`less` …):
+**ภายใน bound คุณเขียนตัวดำเนินการได้** เมทอดของ `Add`/`Sub`/`Mul`/`Div` คือตัวดำเนินการเอง ใน trait อื่น
+เมื่อตัวรับเป็นตัวแปรชนิดที่ถูกผูกด้วย `:where` ตัวดำเนินการจะถูกอ่านเป็นเมทอดของ trait
+(`rem`→`remainder`, `logand`→`bit-and`, `=`→`equal`, `<`→`less` …):
 
 ```lisp
 (defun sum3<T> ((a T) (b T) (c T)) T (:where (Number T))
-  (+ a b c))                                              ; = (add (add a b) c)
+  (+ a b c))                                              ; = (+ (+ a b) c)
 ```
 
-เมทอดของ trait ไม่ได้ชื่อ `+` เพราะ `+` เป็นชื่อของเมทอดที่มีให้ในตัว และ `impl` ปฏิเสธที่จะ
-นิยามใหม่ (`cannot redefine built-in method`) ไม่มี `Neg`: `(- x)` ขยายเป็น
-`(- (- x x) x)` ดังนั้น `Sub` ก็เพียงพอ
+ไม่มี `Neg`: `(- x)` ขยายเป็น `(- (- x x) x)` ดังนั้น `Sub` ก็เพียงพอ
 
 ถูก implement สำหรับ: `Add`/`Sub`/`Mul`/`Div`/`Rem`/`Number` บนชนิดตัวเลขทั้งหมด (ยกเว้น `complex`) และ
 `Bits` บนชนิดจำนวนเต็มทั้งหมดและ `int`

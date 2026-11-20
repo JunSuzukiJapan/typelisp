@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/traits.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
+<!-- translated-from: docs/ja/reference/functions/traits.md @ 1663f849f4e6491e2a654bb9eeaa34635af179ac -->
 # Traits estándar
 
 Los traits para la iteración, la comparación, la aritmética y la adición y extracción de elementos. Los demás traits estándar están en sus propios
@@ -83,10 +83,10 @@ Una capa para que el código genérico exija "un tipo que se pueda sumar". **La 
 concretos usa los operadores incorporados** ([Números](numbers.md)) y no pasa por esta capa.
 
 ```lisp
-(deftrait Add () (defmethod add (self (other Self)) Self))
-(deftrait Sub () (defmethod sub (self (other Self)) Self))
-(deftrait Mul () (defmethod mul (self (other Self)) Self))
-(deftrait Div () (:type Output) (defmethod div (self (other Self)) Output))
+(deftrait Add () (defmethod + (self (other Self)) Self))
+(deftrait Sub () (defmethod - (self (other Self)) Self))
+(deftrait Mul () (defmethod * (self (other Self)) Self))
+(deftrait Div () (:type Output) (defmethod / (self (other Self)) Output))
 (deftrait Rem () (defmethod remainder (self (other Self)) Self))
 (deftrait Bits ()
   (defmethod bit-and (self (other Self)) Self)
@@ -97,18 +97,16 @@ concretos usa los operadores incorporados** ([Números](numbers.md)) y no pasa p
 (deftrait Number (Add Sub Mul Rem Ord))                   ; sin métodos; una combinación de cinco
 ```
 
-**Dentro de una restricción se pueden escribir operadores.** Cuando el receptor es una variable de tipo
-ligada por `:where`, los operadores se leen como métodos de trait (`+`→`add`, `-`→`sub`, `*`→`mul`,
-`/`→`div`, `rem`→`remainder`, `logand`→`bit-and`, `=`→`equal`, `<`→`less` …):
+**Dentro de una restricción se pueden escribir operadores.** Los métodos de `Add`/`Sub`/`Mul`/`Div` son los
+propios operadores. En los demás traits, cuando el receptor es una variable de tipo ligada por `:where`, los
+operadores se leen como métodos de trait (`rem`→`remainder`, `logand`→`bit-and`, `=`→`equal`, `<`→`less` …):
 
 ```lisp
 (defun sum3<T> ((a T) (b T) (c T)) T (:where (Number T))
-  (+ a b c))                                              ; = (add (add a b) c)
+  (+ a b c))                                              ; = (+ (+ a b) c)
 ```
 
-El método del trait no se llama `+` porque `+` es el nombre de un método incorporado e `impl` se niega a
-redefinirlo (`cannot redefine built-in method`). No hay `Neg`: `(- x)` se expande a `(- (- x x) x)`, así
-que basta con `Sub`.
+No hay `Neg`: `(- x)` se expande a `(- (- x x) x)`, así que basta con `Sub`.
 
 Implementados para: `Add`/`Sub`/`Mul`/`Div`/`Rem`/`Number` en todos los tipos numéricos (excepto
 `complex`), y `Bits` en todos los tipos enteros y en `int`.

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/traits.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
+<!-- translated-from: docs/ja/reference/functions/traits.md @ 1663f849f4e6491e2a654bb9eeaa34635af179ac -->
 # 標準 trait
 
 用於迭代、比較、算術與存取元素的 trait。其他標準 trait 在各自的章節中：`Hash`（[HashTable](collections.md#4-hashtablekv)）、`Error`
@@ -67,10 +67,10 @@ trait 群與 `Pathish`（[串流與檔案](streams-files.md)）。哪些型別�
 讓泛型程式碼要求「可以相加的型別」的一層。**具體型別的運算使用內建運算子**（[數值](numbers.md)），不經過這一層。
 
 ```lisp
-(deftrait Add () (defmethod add (self (other Self)) Self))
-(deftrait Sub () (defmethod sub (self (other Self)) Self))
-(deftrait Mul () (defmethod mul (self (other Self)) Self))
-(deftrait Div () (:type Output) (defmethod div (self (other Self)) Output))
+(deftrait Add () (defmethod + (self (other Self)) Self))
+(deftrait Sub () (defmethod - (self (other Self)) Self))
+(deftrait Mul () (defmethod * (self (other Self)) Self))
+(deftrait Div () (:type Output) (defmethod / (self (other Self)) Output))
 (deftrait Rem () (defmethod remainder (self (other Self)) Self))
 (deftrait Bits ()
   (defmethod bit-and (self (other Self)) Self)
@@ -81,16 +81,15 @@ trait 群與 `Pathish`（[串流與檔案](streams-files.md)）。哪些型別�
 (deftrait Number (Add Sub Mul Rem Ord))                   ; 沒有方法，五個的組合
 ```
 
-**在約束內可以用運算子書寫。** 當接收者是由 `:where` 約束的型別變數時，運算子會被解讀為 trait 方法（`+`→`add`、`-`→`sub`、`*`→`mul`、
-`/`→`div`、`rem`→`remainder`、`logand`→`bit-and`、`=`→`equal`、`<`→`less` …）：
+**在約束內可以用運算子書寫。** `Add`/`Sub`/`Mul`/`Div` 的方法就是運算子本身。在其他 trait 中，當接收者是由 `:where`
+約束的型別變數時，運算子會被解讀為 trait 方法（`rem`→`remainder`、`logand`→`bit-and`、`=`→`equal`、`<`→`less` …）：
 
 ```lisp
 (defun sum3<T> ((a T) (b T) (c T)) T (:where (Number T))
-  (+ a b c))                                              ; = (add (add a b) c)
+  (+ a b c))                                              ; = (+ (+ a b) c)
 ```
 
-trait 端的方法名稱不是 `+`，是因為 `+` 是內建方法名稱，`impl` 會拒絕重新定義（`cannot redefine built-in method`）。沒有 `Neg`——`(- x)` 展開
-為 `(- (- x x) x)`，所以只需 `Sub`。
+沒有 `Neg`——`(- x)` 展開為 `(- (- x x) x)`，所以只需 `Sub`。
 
 已實作：`Add`/`Sub`/`Mul`/`Div`/`Rem`/`Number` 用於所有數值型別（`complex` 除外），`Bits` 用於所有整數型別與 `int`。
 

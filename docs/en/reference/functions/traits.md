@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/traits.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
+<!-- translated-from: docs/ja/reference/functions/traits.md @ 1663f849f4e6491e2a654bb9eeaa34635af179ac -->
 # Standard Traits
 
 The traits for iteration, comparison, arithmetic, and adding and removing elements. The other standard traits are in their own
@@ -82,10 +82,10 @@ A layer for generic code to require "a type that can be added". **Arithmetic on 
 built-in operators** ([Numbers](numbers.md)) and does not go through this layer.
 
 ```lisp
-(deftrait Add () (defmethod add (self (other Self)) Self))
-(deftrait Sub () (defmethod sub (self (other Self)) Self))
-(deftrait Mul () (defmethod mul (self (other Self)) Self))
-(deftrait Div () (:type Output) (defmethod div (self (other Self)) Output))
+(deftrait Add () (defmethod + (self (other Self)) Self))
+(deftrait Sub () (defmethod - (self (other Self)) Self))
+(deftrait Mul () (defmethod * (self (other Self)) Self))
+(deftrait Div () (:type Output) (defmethod / (self (other Self)) Output))
 (deftrait Rem () (defmethod remainder (self (other Self)) Self))
 (deftrait Bits ()
   (defmethod bit-and (self (other Self)) Self)
@@ -96,18 +96,16 @@ built-in operators** ([Numbers](numbers.md)) and does not go through this layer.
 (deftrait Number (Add Sub Mul Rem Ord))                   ; no methods; a combination of five
 ```
 
-**Inside a bound, you can write operators.** When the receiver is a type variable bound by `:where`,
-operators are read as trait methods (`+`→`add`, `-`→`sub`, `*`→`mul`, `/`→`div`, `rem`→`remainder`,
-`logand`→`bit-and`, `=`→`equal`, `<`→`less` …):
+**Inside a bound, you can write operators.** The methods of `Add`/`Sub`/`Mul`/`Div` are the operators themselves.
+In the other traits, when the receiver is a type variable bound by `:where`, operators are read as trait
+methods (`rem`→`remainder`, `logand`→`bit-and`, `=`→`equal`, `<`→`less` …):
 
 ```lisp
 (defun sum3<T> ((a T) (b T) (c T)) T (:where (Number T))
-  (+ a b c))                                              ; = (add (add a b) c)
+  (+ a b c))                                              ; = (+ (+ a b) c)
 ```
 
-The trait method is not named `+` because `+` is the name of a built-in method and `impl` refuses to
-redefine it (`cannot redefine built-in method`). There is no `Neg`: `(- x)` expands to
-`(- (- x x) x)`, so `Sub` is enough.
+There is no `Neg`: `(- x)` expands to `(- (- x x) x)`, so `Sub` is enough.
 
 Implemented for: `Add`/`Sub`/`Mul`/`Div`/`Rem`/`Number` on all numeric types (except `complex`), and
 `Bits` on all integer types and `int`.

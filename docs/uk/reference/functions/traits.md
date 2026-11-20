@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/traits.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
+<!-- translated-from: docs/ja/reference/functions/traits.md @ 1663f849f4e6491e2a654bb9eeaa34635af179ac -->
 # Стандартні трейти
 
 Трейти для ітерації, порівняння, арифметики, додавання та вилучення елементів. Інші стандартні трейти описано у власних розділах: `Hash`
@@ -81,10 +81,10 @@
 типами використовує вбудовані оператори** ([Числа](numbers.md)) і через цей шар не проходить.
 
 ```lisp
-(deftrait Add () (defmethod add (self (other Self)) Self))
-(deftrait Sub () (defmethod sub (self (other Self)) Self))
-(deftrait Mul () (defmethod mul (self (other Self)) Self))
-(deftrait Div () (:type Output) (defmethod div (self (other Self)) Output))
+(deftrait Add () (defmethod + (self (other Self)) Self))
+(deftrait Sub () (defmethod - (self (other Self)) Self))
+(deftrait Mul () (defmethod * (self (other Self)) Self))
+(deftrait Div () (:type Output) (defmethod / (self (other Self)) Output))
 (deftrait Rem () (defmethod remainder (self (other Self)) Self))
 (deftrait Bits ()
   (defmethod bit-and (self (other Self)) Self)
@@ -95,18 +95,16 @@
 (deftrait Number (Add Sub Mul Rem Ord))                   ; методів немає; поєднання п'яти
 ```
 
-**Всередині обмеження можна писати оператори.** Коли одержувач — змінна типу, обмежена через `:where`,
-оператори читаються як методи трейта (`+`→`add`, `-`→`sub`, `*`→`mul`, `/`→`div`, `rem`→`remainder`,
-`logand`→`bit-and`, `=`→`equal`, `<`→`less` …):
+**Всередині обмеження можна писати оператори.** Методи `Add`/`Sub`/`Mul`/`Div` — це самі оператори. В інших
+трейтах, коли одержувач — змінна типу, обмежена через `:where`, оператори читаються як методи трейта
+(`rem`→`remainder`, `logand`→`bit-and`, `=`→`equal`, `<`→`less` …):
 
 ```lisp
 (defun sum3<T> ((a T) (b T) (c T)) T (:where (Number T))
-  (+ a b c))                                              ; = (add (add a b) c)
+  (+ a b c))                                              ; = (+ (+ a b) c)
 ```
 
-Метод трейта не названо `+`, бо `+` — це назва вбудованого методу, а `impl` відмовляється його
-перевизначати (`cannot redefine built-in method`). `Neg` немає: `(- x)` розгортається в
-`(- (- x x) x)`, тож `Sub` достатньо.
+`Neg` немає: `(- x)` розгортається в `(- (- x x) x)`, тож `Sub` достатньо.
 
 Реалізовано для: `Add`/`Sub`/`Mul`/`Div`/`Rem`/`Number` для всіх числових типів (крім `complex`) і
 `Bits` для всіх цілих типів та `int`.

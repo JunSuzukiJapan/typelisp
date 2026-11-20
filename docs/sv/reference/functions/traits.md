@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/traits.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
+<!-- translated-from: docs/ja/reference/functions/traits.md @ 1663f849f4e6491e2a654bb9eeaa34635af179ac -->
 # Standardtraits
 
 Traits för iteration, jämförelse, aritmetik och att lägga till och ta ut element. De andra standardtraits finns i sina egna kapitel: `Hash`
@@ -81,10 +81,10 @@ Ett lager för generisk kod att kräva "en typ som kan adderas". **Aritmetik på
 inbyggda operatorerna** ([Tal](numbers.md)) och går inte genom det här lagret.
 
 ```lisp
-(deftrait Add () (defmethod add (self (other Self)) Self))
-(deftrait Sub () (defmethod sub (self (other Self)) Self))
-(deftrait Mul () (defmethod mul (self (other Self)) Self))
-(deftrait Div () (:type Output) (defmethod div (self (other Self)) Output))
+(deftrait Add () (defmethod + (self (other Self)) Self))
+(deftrait Sub () (defmethod - (self (other Self)) Self))
+(deftrait Mul () (defmethod * (self (other Self)) Self))
+(deftrait Div () (:type Output) (defmethod / (self (other Self)) Output))
 (deftrait Rem () (defmethod remainder (self (other Self)) Self))
 (deftrait Bits ()
   (defmethod bit-and (self (other Self)) Self)
@@ -95,18 +95,16 @@ inbyggda operatorerna** ([Tal](numbers.md)) och går inte genom det här lagret.
 (deftrait Number (Add Sub Mul Rem Ord))                   ; inga metoder; en kombination av fem
 ```
 
-**Inuti en gräns kan man skriva operatorer.** När mottagaren är en typvariabel bunden av `:where` läses
-operatorer som trait-metoder (`+`→`add`, `-`→`sub`, `*`→`mul`, `/`→`div`, `rem`→`remainder`,
-`logand`→`bit-and`, `=`→`equal`, `<`→`less` …):
+**Inuti en gräns kan man skriva operatorer.** Metoderna i `Add`/`Sub`/`Mul`/`Div` är operatorerna själva.
+I de andra traitsen läses operatorer som trait-metoder när mottagaren är en typvariabel bunden av `:where`
+(`rem`→`remainder`, `logand`→`bit-and`, `=`→`equal`, `<`→`less` …):
 
 ```lisp
 (defun sum3<T> ((a T) (b T) (c T)) T (:where (Number T))
-  (+ a b c))                                              ; = (add (add a b) c)
+  (+ a b c))                                              ; = (+ (+ a b) c)
 ```
 
-Trait-metoden heter inte `+` eftersom `+` är namnet på en inbyggd metod och `impl` vägrar omdefiniera
-den (`cannot redefine built-in method`). Det finns ingen `Neg`: `(- x)` expanderar till
-`(- (- x x) x)`, så `Sub` räcker.
+Det finns ingen `Neg`: `(- x)` expanderar till `(- (- x x) x)`, så `Sub` räcker.
 
 Implementerat för: `Add`/`Sub`/`Mul`/`Div`/`Rem`/`Number` på alla numeriska typer (utom `complex`), och
 `Bits` på alla heltalstyper och `int`.

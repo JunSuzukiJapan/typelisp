@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/traits.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
+<!-- translated-from: docs/ja/reference/functions/traits.md @ 1663f849f4e6491e2a654bb9eeaa34635af179ac -->
 # Standart Trait'ler
 
 Yineleme, karşılaştırma, aritmetik ve öğe ekleme ile çıkarma için trait'ler. Diğer standart trait'ler kendi bölümlerindedir:
@@ -83,10 +83,10 @@ Jenerik kodun "toplanabilen bir tür" istemesi için bir katman. **Somut türler
 yerleşik işleçleri kullanır** ([Sayılar](numbers.md)) ve bu katmandan geçmez.
 
 ```lisp
-(deftrait Add () (defmethod add (self (other Self)) Self))
-(deftrait Sub () (defmethod sub (self (other Self)) Self))
-(deftrait Mul () (defmethod mul (self (other Self)) Self))
-(deftrait Div () (:type Output) (defmethod div (self (other Self)) Output))
+(deftrait Add () (defmethod + (self (other Self)) Self))
+(deftrait Sub () (defmethod - (self (other Self)) Self))
+(deftrait Mul () (defmethod * (self (other Self)) Self))
+(deftrait Div () (:type Output) (defmethod / (self (other Self)) Output))
 (deftrait Rem () (defmethod remainder (self (other Self)) Self))
 (deftrait Bits ()
   (defmethod bit-and (self (other Self)) Self)
@@ -97,18 +97,16 @@ yerleşik işleçleri kullanır** ([Sayılar](numbers.md)) ve bu katmandan geçm
 (deftrait Number (Add Sub Mul Rem Ord))                   ; metot yok; beşinin birleşimi
 ```
 
-**Bir sınırın içinde işleç yazabilirsiniz.** Alıcı, `:where` ile bağlanmış bir tür değişkeni olduğunda
-işleçler trait metotları olarak okunur (`+`→`add`, `-`→`sub`, `*`→`mul`, `/`→`div`, `rem`→`remainder`,
-`logand`→`bit-and`, `=`→`equal`, `<`→`less` …):
+**Bir sınırın içinde işleç yazabilirsiniz.** `Add`/`Sub`/`Mul`/`Div`'in metotları işleçlerin kendisidir.
+Diğer trait'lerde alıcı, `:where` ile bağlanmış bir tür değişkeni olduğunda işleçler trait metotları olarak
+okunur (`rem`→`remainder`, `logand`→`bit-and`, `=`→`equal`, `<`→`less` …):
 
 ```lisp
 (defun sum3<T> ((a T) (b T) (c T)) T (:where (Number T))
-  (+ a b c))                                              ; = (add (add a b) c)
+  (+ a b c))                                              ; = (+ (+ a b) c)
 ```
 
-Trait metodu `+` olarak adlandırılmamıştır; çünkü `+`, yerleşik bir metodun adıdır ve `impl` onu yeniden
-tanımlamayı reddeder (`cannot redefine built-in method`). `Neg` yoktur: `(- x)`, `(- (- x x) x)`'e açılır;
-bu yüzden `Sub` yeterlidir.
+`Neg` yoktur: `(- x)`, `(- (- x x) x)`'e açılır; bu yüzden `Sub` yeterlidir.
 
 Şunlar için gerçekleştirilmiştir: tüm sayısal türlerde (`complex` hariç) `Add`/`Sub`/`Mul`/`Div`/`Rem`/
 `Number` ve tüm tamsayı türlerinde ve `int`'te `Bits`.
