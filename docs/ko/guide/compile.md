@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ 2951f1d504da73ac227a8215a24999037882fcbc -->
+<!-- translated-from: docs/ja/guide/compile.md @ 3a6ff5cd72bee55134721d600c276c160f556bb9 -->
 # 컴파일
 
 아무것도 하지 않으면 typelisp 프로그램은 인터프리터에서 실행된다. 그 밖에 네이티브 코드로 컴파일하는 방법이 두 가지,
@@ -178,8 +178,9 @@ args: #(hello.wasm a b)
 fib(25) = 75025
 ```
 
-- 준비가 필요합니다. 이 기능은 저장소에서 빌드한 디버그 빌드 `typl`에서만 쓸 수 있습니다.
-  rustup으로 `rustup target add wasm32-wasip1 wasm32-unknown-unknown`을 실행한 뒤, 저장소에서 `scripts/build-wasm-runtime.sh`를 실행하세요. 3.7절의 준비도 겸합니다.
+- 준비가 필요합니다(3.7절의 준비도 겸합니다). 먼저 rustup으로 `rustup target add wasm32-wasip1 wasm32-unknown-unknown`을 실행합니다. 그다음 `cargo install`로 설치하는 `typl`은 `--features wasm`을 붙여 설치합니다(`cargo install --locked --path . --features wasm`).
+  붙이지 않고 설치한 `typl`은 WebAssembly 런타임이 없으므로 `--target`은 오류가 됩니다. 저장소의 디버그 빌드 `typl`을 쓸 때는 대신 저장소에서 `scripts/build-wasm-runtime.sh`를 실행합니다.
+- 링크에는 rustup toolchain의 링커(`rust-lld`)를 쓰므로, 컴파일할 때도 rustup이 필요합니다.
 - 실행 파일과 똑같이 동작합니다. 표준 출력, 표준 오류, 종료 코드, `(command-line-args)`,
   파일 읽기와 쓰기, `throw`/`catch`/`panic`, 태스크, 채널, `sleep`, `eval`을 쓸 수 있습니다.
   태스크는 하나의 스레드에서 차례로 실행됩니다. 파일은 실행 환경이 모듈에 보여 주는

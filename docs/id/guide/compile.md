@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ 2951f1d504da73ac227a8215a24999037882fcbc -->
+<!-- translated-from: docs/ja/guide/compile.md @ 3a6ff5cd72bee55134721d600c276c160f556bb9 -->
 # Kompilasi
 
 Jika Anda tidak melakukan apa-apa lagi, program typelisp berjalan di interpreter. Selain itu ada dua
@@ -189,8 +189,9 @@ args: #(hello.wasm a b)
 fib(25) = 75025
 ```
 
-- Ini memerlukan persiapan dan hanya bekerja dengan build debug `typl` yang dibangun di repositori.
-  Jalankan `rustup target add wasm32-wasip1 wasm32-unknown-unknown` dengan rustup, lalu jalankan `scripts/build-wasm-runtime.sh` di repositori. Ini juga menyiapkan bagian 3.7.
+- Ini memerlukan persiapan (yang juga berlaku untuk bagian 3.7). Pertama jalankan `rustup target add wasm32-wasip1 wasm32-unknown-unknown` dengan rustup. Lalu, saat memasang `typl` dengan `cargo install`, pasang dengan `--features wasm` (`cargo install --locked --path . --features wasm`).
+  `typl` yang dipasang tanpanya tidak memiliki runtime WebAssembly, dan `--target` menjadi galat. Untuk build debug `typl` di repositori, jalankan `scripts/build-wasm-runtime.sh` di repositori sebagai gantinya.
+- Penautan memakai linker dari toolchain rustup (`rust-lld`), jadi rustup juga diperlukan saat mengompilasi.
 - Modul berperilaku seperti berkas eksekusi: keluaran standar, galat standar, dan kode keluar, `(command-line-args)`,
   membaca dan menulis berkas, `throw`/`catch`/`panic`, tugas, kanal, dan `sleep`, serta `eval` berfungsi.
   Tugas berjalan bergantian dalam satu thread. Berkas hanya bisa dibaca dan ditulis di dalam direktori

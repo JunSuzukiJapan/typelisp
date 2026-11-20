@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ 2951f1d504da73ac227a8215a24999037882fcbc -->
+<!-- translated-from: docs/ja/guide/compile.md @ 3a6ff5cd72bee55134721d600c276c160f556bb9 -->
 # Kompilierung
 
 Ohne weiteres Zutun laufen typelisp-Programme im Interpreter. Darüber hinaus gibt es zwei Wege, in nativen
@@ -190,8 +190,9 @@ args: #(hello.wasm a b)
 fib(25) = 75025
 ```
 
-- Das braucht Vorbereitung und geht nur mit einem im Repository gebauten Debug-Build von `typl`.
-  Führen Sie mit rustup `rustup target add wasm32-wasip1 wasm32-unknown-unknown` aus und danach im Repository `scripts/build-wasm-runtime.sh`. Das bereitet auch Abschnitt 3.7 vor.
+- Das braucht Vorbereitung (die auch Abschnitt 3.7 abdeckt). Führen Sie zuerst mit rustup `rustup target add wasm32-wasip1 wasm32-unknown-unknown` aus. Installieren Sie `typl` mit `cargo install` dann mit `--features wasm` (`cargo install --locked --path . --features wasm`).
+  Ein ohne es installiertes `typl` hat keine WebAssembly-Laufzeit, und `--target` ist ein Fehler. Für einen Debug-Build von `typl` im Repository führen Sie stattdessen im Repository `scripts/build-wasm-runtime.sh` aus.
+- Gelinkt wird mit dem Linker der rustup-Toolchain (`rust-lld`); rustup wird also auch beim Kompilieren gebraucht.
 - Das Modul verhält sich wie das ausführbare Programm: Standardausgabe, Standardfehler und Exit-Code, `(command-line-args)`,
   Dateien lesen und schreiben, `throw`/`catch`/`panic`, Tasks, Kanäle und `sleep` sowie `eval` funktionieren.
   Tasks laufen nacheinander in einem einzigen Thread. Dateien lassen sich nur in den Verzeichnissen lesen und

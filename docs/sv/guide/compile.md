@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ 2951f1d504da73ac227a8215a24999037882fcbc -->
+<!-- translated-from: docs/ja/guide/compile.md @ 3a6ff5cd72bee55134721d600c276c160f556bb9 -->
 # Kompilering
 
 Om du inte gör något annat körs typelisp-program i tolken. Dessutom finns två sätt att kompilera till
@@ -187,8 +187,9 @@ args: #(hello.wasm a b)
 fib(25) = 75025
 ```
 
-- Det kräver förberedelse och fungerar bara med en debug-version av `typl` byggd i repot.
-  Kör `rustup target add wasm32-wasip1 wasm32-unknown-unknown` med rustup och sedan `scripts/build-wasm-runtime.sh` i repot. Det förbereder också avsnitt 3.7.
+- Det kräver förberedelse (som också täcker avsnitt 3.7). Kör först `rustup target add wasm32-wasip1 wasm32-unknown-unknown` med rustup. Installera sedan `typl` med `--features wasm` när du installerar det med `cargo install` (`cargo install --locked --path . --features wasm`).
+  En `typl` installerad utan det saknar WebAssembly-körtid, och `--target` ger ett fel. För en debug-version av `typl` i repot kör du i stället `scripts/build-wasm-runtime.sh` i repot.
+- Länkningen använder rustup-verktygskedjans länkare (`rust-lld`), så rustup behövs också vid kompilering.
 - Modulen beter sig som den körbara filen: standard ut, standard fel och slutkod, `(command-line-args)`,
   läsa och skriva filer, `throw`/`catch`/`panic`, uppgifter, kanaler och `sleep`, och `eval` fungerar.
   Uppgifterna körs efter varandra i en enda tråd. Filer kan bara läsas och skrivas i de kataloger

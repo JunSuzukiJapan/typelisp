@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ 2951f1d504da73ac227a8215a24999037882fcbc -->
+<!-- translated-from: docs/ja/guide/compile.md @ 3a6ff5cd72bee55134721d600c276c160f556bb9 -->
 # Compiling
 
 Unless you do anything else, typelisp programs run in the interpreter. In addition there are two
@@ -193,8 +193,9 @@ args: #(hello.wasm a b)
 fib(25) = 75025
 ```
 
-- This needs preparation, and works only with a debug build of `typl` built in the repository.
-  Run `rustup target add wasm32-wasip1 wasm32-unknown-unknown` with rustup, then run `scripts/build-wasm-runtime.sh` in the repository. This also prepares for section 3.7.
+- This needs preparation (which also covers section 3.7). First run `rustup target add wasm32-wasip1 wasm32-unknown-unknown` with rustup. Then install `typl` with `--features wasm` when you install it with `cargo install` (`cargo install --locked --path . --features wasm`).
+  A `typl` installed without it has no WebAssembly runtime, and `--target` is an error. To use a debug build of `typl` in the repository, run `scripts/build-wasm-runtime.sh` in the repository instead.
+- Linking uses the linker of the rustup toolchain (`rust-lld`), so rustup is needed when compiling too.
 - The module behaves as the executable does: standard output, standard error and the exit code, `(command-line-args)`,
   reading and writing files, `throw`/`catch`/`panic`, tasks, channels and `sleep`, and `eval` all work.
   Tasks run one after another on a single thread. Files can be read and written only inside the directories

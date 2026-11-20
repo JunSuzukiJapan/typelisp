@@ -1,4 +1,4 @@
-<!-- translated-from: README_JP.md @ d339ad2573266dc5a5ea05c31f50d3e4a9cd805f -->
+<!-- translated-from: README_JP.md @ 3a6ff5cd72bee55134721d600c276c160f556bb9 -->
 # TypeLisp
 
 English | [日本語](README_JP.md) | [简体中文](docs/zh-CN/README.md) | [繁體中文](docs/zh-TW/README.md) | [한국어](docs/ko/README.md) | [Español](docs/es/README.md) | [Português (Brasil)](docs/pt-BR/README.md) | [Deutsch](docs/de/README.md) | [Français](docs/fr/README.md) | [Русский](docs/ru/README.md) | [العربية](docs/ar/README.md) | [Italiano](docs/it/README.md) | [हिन्दी](docs/hi/README.md) | [Türkçe](docs/tr/README.md) | [Tiếng Việt](docs/vi/README.md) | [Bahasa Indonesia](docs/id/README.md) | [Polski](docs/pl/README.md) | [ภาษาไทย](docs/th/README.md) | [Українська](docs/uk/README.md) | [Nederlands](docs/nl/README.md) | [Svenska](docs/sv/README.md)
@@ -402,6 +402,15 @@ not use Homebrew, set `LLVM_SYS_221_PREFIX` and then run `cargo install --locked
 
 The installed `typl` carries the static library it needs for compiling, so `-c` and `compile-file`
 keep working even if you move or delete the repository afterwards (see "Compiling a file" below).
+
+To also compile for WebAssembly (`typl -c --target wasm32-wasip1` and so on), run
+`rustup target add wasm32-wasip1 wasm32-unknown-unknown` with rustup, then install with `--features wasm`.
+
+```sh
+cargo install --locked --path . --features wasm
+```
+
+Without it, nothing for WebAssembly is built, and nothing of it goes into `typl`.
 
 ## Running
 

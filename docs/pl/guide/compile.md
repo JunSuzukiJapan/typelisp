@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ 2951f1d504da73ac227a8215a24999037882fcbc -->
+<!-- translated-from: docs/ja/guide/compile.md @ 3a6ff5cd72bee55134721d600c276c160f556bb9 -->
 # Kompilacja
 
 O ile nie zrobisz nic więcej, programy typelisp działają w interpreterze. Ponadto istnieją dwa
@@ -184,8 +184,9 @@ args: #(hello.wasm a b)
 fib(25) = 75025
 ```
 
-- Wymaga to przygotowania i działa tylko z wersją debug `typl` zbudowaną w repozytorium.
-  Uruchom `rustup target add wasm32-wasip1 wasm32-unknown-unknown` przez rustup, a potem `scripts/build-wasm-runtime.sh` w repozytorium. To przygotowuje też do podrozdziału 3.7.
+- Wymaga to przygotowania (obejmującego też podrozdział 3.7). Najpierw uruchom `rustup target add wasm32-wasip1 wasm32-unknown-unknown` przez rustup. Następnie, instalując `typl` przez `cargo install`, dodaj `--features wasm` (`cargo install --locked --path . --features wasm`).
+  `typl` zainstalowany bez tego nie ma środowiska uruchomieniowego WebAssembly i `--target` kończy się błędem. Dla wersji debug `typl` w repozytorium uruchom zamiast tego `scripts/build-wasm-runtime.sh` w repozytorium.
+- Do linkowania używany jest linker z toolchaina rustup (`rust-lld`), więc rustup jest potrzebny także podczas kompilacji.
 - Moduł zachowuje się jak plik wykonywalny: standardowe wyjście, standardowe wyjście błędów i kod wyjścia, `(command-line-args)`,
   odczyt i zapis plików, `throw`/`catch`/`panic`, zadania, kanały i `sleep` oraz `eval` działają.
   Zadania wykonują się po kolei w jednym wątku. Pliki można czytać i zapisywać tylko w katalogach,

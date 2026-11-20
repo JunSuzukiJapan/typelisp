@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ 2951f1d504da73ac227a8215a24999037882fcbc -->
+<!-- translated-from: docs/ja/guide/compile.md @ 3a6ff5cd72bee55134721d600c276c160f556bb9 -->
 # การคอมไพล์
 
 หากไม่ทำอะไรเพิ่ม โปรแกรม typelisp จะรันในอินเทอร์พรีเตอร์ นอกจากนี้ยังมีวิธีคอมไพล์เป็นโค้ดเนทีฟ
@@ -185,8 +185,9 @@ args: #(hello.wasm a b)
 fib(25) = 75025
 ```
 
-- ต้องเตรียมการก่อน และใช้ได้เฉพาะกับ `typl` แบบ debug build ที่บิลด์ในรีโพสิทอรีเท่านั้น
-  รัน `rustup target add wasm32-wasip1 wasm32-unknown-unknown` ด้วย rustup แล้วรัน `scripts/build-wasm-runtime.sh` ในรีโพสิทอรี ขั้นตอนนี้ยังเป็นการเตรียมสำหรับหัวข้อ 3.7 ด้วย
+- ต้องเตรียมการก่อน (ซึ่งใช้กับหัวข้อ 3.7 ด้วย) ก่อนอื่นรัน `rustup target add wasm32-wasip1 wasm32-unknown-unknown` ด้วย rustup จากนั้นเมื่อติดตั้ง `typl` ด้วย `cargo install` ให้ใส่ `--features wasm` (`cargo install --locked --path . --features wasm`)
+  `typl` ที่ติดตั้งโดยไม่ใส่จะไม่มีรันไทม์ WebAssembly และ `--target` จะเป็นข้อผิดพลาด ถ้าใช้ `typl` แบบ debug build ในรีโพสิทอรี ให้รัน `scripts/build-wasm-runtime.sh` ในรีโพสิทอรีแทน
+- การลิงก์ใช้ลิงเกอร์ของ toolchain ของ rustup (`rust-lld`) จึงต้องมี rustup ตอนคอมไพล์ด้วย
 - โมดูลทำงานเหมือนไฟล์ปฏิบัติการ: เอาต์พุตมาตรฐาน ข้อผิดพลาดมาตรฐาน และรหัสออก, `(command-line-args)`,
   การอ่านเขียนไฟล์, `throw`/`catch`/`panic`, งาน แชนเนล และ `sleep` รวมถึง `eval` ใช้ได้
   งานจะรันทีละงานบนเธรดเดียว อ่านเขียนไฟล์ได้เฉพาะในไดเรกทอรีที่สภาพแวดล้อมเปิดให้โมดูลเห็น

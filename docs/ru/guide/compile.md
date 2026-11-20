@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ 2951f1d504da73ac227a8215a24999037882fcbc -->
+<!-- translated-from: docs/ja/guide/compile.md @ 3a6ff5cd72bee55134721d600c276c160f556bb9 -->
 # Компиляция
 
 Если ничего специально не делать, программы typelisp выполняются интерпретатором. Кроме того, есть два способа
@@ -183,8 +183,9 @@ args: #(hello.wasm a b)
 fib(25) = 75025
 ```
 
-- Нужна подготовка, и работает это только с отладочной сборкой `typl`, собранной в репозитории.
-  Выполните `rustup target add wasm32-wasip1 wasm32-unknown-unknown` через rustup, затем `scripts/build-wasm-runtime.sh` в репозитории. Это также подготовка к разделу 3.7.
+- Нужна подготовка (она же годится для раздела 3.7). Сначала выполните `rustup target add wasm32-wasip1 wasm32-unknown-unknown` через rustup. Затем, устанавливая `typl` через `cargo install`, добавьте `--features wasm` (`cargo install --locked --path . --features wasm`).
+  У `typl`, установленного без этого, нет среды выполнения WebAssembly, и `--target` даёт ошибку. Для отладочной сборки `typl` в репозитории вместо этого выполните `scripts/build-wasm-runtime.sh` в репозитории.
+- Компоновка использует компоновщик тулчейна rustup (`rust-lld`), поэтому rustup нужен и при компиляции.
 - Модуль ведёт себя как исполняемый файл: стандартный вывод, стандартный поток ошибок и код выхода, `(command-line-args)`,
   чтение и запись файлов, `throw`/`catch`/`panic`, задачи, каналы и `sleep`, а также `eval` работают.
   Задачи выполняются по очереди в одном потоке. Читать и писать файлы можно только в каталогах,

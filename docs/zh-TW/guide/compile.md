@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ 2951f1d504da73ac227a8215a24999037882fcbc -->
+<!-- translated-from: docs/ja/guide/compile.md @ 3a6ff5cd72bee55134721d600c276c160f556bb9 -->
 # 編譯
 
 不做任何處理的話，typelisp 程式由直譯器執行。此外還有兩種編譯為原生碼的方法，以及一種保存環境的方法。規格的詳情見
@@ -170,8 +170,9 @@ args: #(hello.wasm a b)
 fib(25) = 75025
 ```
 
-- 需要準備，且只能用在儲存庫中建置的除錯版 `typl`。
-  先用 rustup 執行 `rustup target add wasm32-wasip1 wasm32-unknown-unknown`，再在儲存庫中執行 `scripts/build-wasm-runtime.sh`。這也同時完成了 3.7 節的準備。
+- 需要準備（同時也是 3.7 節的準備）。首先用 rustup 執行 `rustup target add wasm32-wasip1 wasm32-unknown-unknown`。然後，用 `cargo install` 安裝 `typl` 時加上 `--features wasm`（`cargo install --locked --path . --features wasm`）。
+  不加此項安裝的 `typl` 沒有 WebAssembly 執行環境，`--target` 會出錯。使用儲存庫中的除錯版 `typl` 時，改為在儲存庫中執行 `scripts/build-wasm-runtime.sh`。
+- 連結使用 rustup 工具鏈的連結器（`rust-lld`），因此編譯時也需要 rustup。
 - 模組的行為與執行檔相同：標準輸出、標準錯誤和結束碼、`(command-line-args)`、
   檔案讀寫、`throw`/`catch`/`panic`、任務、通道和 `sleep`，以及 `eval` 都可以使用。
   任務在一個執行緒上依序執行。檔案只能在執行環境向模組公開的目錄中讀寫
