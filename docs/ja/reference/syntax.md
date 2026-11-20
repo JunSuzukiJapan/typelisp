@@ -967,7 +967,7 @@ REPL でも逐次 `load` でも決定的に判定できる唯一の形で、Rust
 ```lisp
 (deftrait Clamp (Ord)
   (defmethod clamp (self (lo Self) (hi Self)) Self
-    (if (less self lo) lo (if (less hi self) hi self))))
+    (if (< self lo) lo (if (< hi self) hi self))))
 (impl<T> Clamp T (:where (Ord T)))          ; 本体ゼロ — 全部デフォルト
 ```
 
@@ -975,7 +975,7 @@ REPL でも逐次 `load` でも決定的に判定できる唯一の形で、Rust
 1つのトレイトにブランケット実装は1つまで。同じ型に明示 `impl` があればそちらが優先される。
 本体の型検査は生成とは別で、宣言の時点で1回**対象を型変数のまま**行う（Rust と同じ）——
 一度も使われない実装でも、宣言した境界でどの対象にも通らない誤りはそこで弾かれる。
-境界が正当化する呼び出し（`(:where (Ord T))` 下の `(less self other)` 等）は、ジェネリック
+境界が正当化する呼び出し（`(:where (Ord T))` 下の `(< self other)` 等）は、ジェネリック
 `defun` の本体と同じ扱いで通る。
 
 **docstring**: `deftrait` は継承リストの直後、アイテム列の前に文字列リテラルを置くとトレイト全体に1つ

@@ -155,8 +155,8 @@ function types; `&optional' and `&key' are `defmacro'-only.")
     "join" "spawn" "current-id" "available-parallelism"
     "send" "recv" "cap" "after"
     ;; the `sync' layer: a wait group's three, and a mutex's two plus the
-    ;; macro that pairs them (`add'/`make' are shared with other types)
-    "done" "lock" "unlock" "with-lock"
+    ;; macro that pairs them (`make' is shared with other types)
+    "add" "done" "lock" "unlock" "with-lock"
     ;; Context
     "background" "with-cancel" "with-timeout" "cancel" "is-cancelled"
     ;; the readtable (docs/ja/reference/syntax.md §11)
@@ -296,27 +296,19 @@ function types; `&optional' and `&key' are `defmacro'-only.")
     "nreverse" "nconc" "nreconc" "nbutlast" "nsubstitute" "nsubstitute-if"
     "delete" "delete-if" "delete-if-not" "delete-duplicates" "fill" "replace"
     "map-into" "set-contents" "rplaca" "rplacd"
-    ;; Ord trait methods
-    "less" "less-equal" "greater" "greater-equal"
     ;; the `Hash' trait and the hash-table methods that came with it (Phase 6a)
     "sxhash" "sxhash-string" "maphash" "size"
     ;; complex numbers (Phase 1d).  `complex' is both the type and CL's
     ;; constructor function, so it appears in both lists.
     "complex" "realpart" "imagpart" "conjugate" "phase" "cis" "atan2"
-    ;; the arithmetic traits' methods (Phase 1a).  The operators themselves
-    ;; are builtins; these are what a `where'-bounded type variable spells
-    ;; them as.
-    "add" "sub" "mul" "div" "remainder"
-    "bit-and" "bit-or" "bit-xor" "bit-not" "shift"
     ;; `Array<T>' (Phase 6b).  `aref' is checker sugar rather than a
     ;; registered name, so it is here for highlighting only.
     "make" "aref" "rank" "dimension" "dimensions" "total-size"
     "in-bounds" "row-major-index" "row-major-get" "row-major-set"
     "adjust" "push-extend" "fill-pointer"
-    ;; `BitVector' (Phase 6c).  `bit-and'/`bit-xor'/`bit-not' are already
-    ;; above as the `Bits' trait's methods.
+    ;; `BitVector' (Phase 6c).
     "bit" "sbit" "set-bit" "set-sbit"
-    "bit-ior" "bit-eqv" "bit-nand" "bit-nor"
+    "bit-and" "bit-ior" "bit-xor" "bit-not" "bit-eqv" "bit-nand" "bit-nor"
     "bit-andc1" "bit-andc2" "bit-orc1" "bit-orc2"
     ;; errors and dynamic rebinding (Phase 7).  `assert'/`assert-equal'/`warn'/
     ;; `dlet'/`with-standard-io-syntax' are macros, not functions, but they

@@ -88,7 +88,7 @@ impl TraitBound {
 pub(crate) struct BoundMethod<'r> {
     pub(crate) trait_path: Path,
     /// The trait's name of the method: an operator's is the trait method it
-    /// spells (`<` is `Ord`'s `less`).
+    /// spells (`=` is `Equal`'s `equal`).
     pub(crate) method: typelisp_mem::SymRef,
     pub(crate) sig: &'r FnDef,
     /// The trait's `Self` and associated types at the bound; `None` for an
@@ -434,27 +434,14 @@ fn trait_at(reg: &Registry, from: Path, at: Vec<Option<Type>>, want: &Path, dept
 }
 
 /// The trait method an operator spells when its receiver is a `where`-bounded
-/// type variable — `rem` is `Rem`'s `remainder`, `<` is `Ord`'s `less`.
+/// type variable: `=` is `Equal`'s `equal`, CL's name for the comparison
+/// (`/=` is its negation, `expr::check_call`).
 ///
-/// One table, not a rule: the prelude's traits pick these names, and this is
-/// the other half of that choice. A name absent from the table is passed
-/// through unchanged, and so is one a bound declares itself (`Add`'s `+`).
+/// One table, not a rule. A name absent from the table is passed through
+/// unchanged, and so is one a bound declares itself (`Add`'s `+`, `Ord`'s
+/// `<`).
 pub(crate) fn trait_operator_method(op: SymRef) -> Option<SymRef> {
-    const TABLE: [(&str, &str); 10] = [
-        ("rem", "remainder"),
-        ("logand", "bit-and"),
-        ("logior", "bit-or"),
-        ("logxor", "bit-xor"),
-        ("lognot", "bit-not"),
-        // `=` is `Equal`'s `equal`; `/=` is its negation
-        // (`expr::check_call`). `Ord` predates the arithmetic traits and
-        // already had these four under spelled-out names.
-        ("=", "equal"),
-        ("<", "less"),
-        ("<=", "less-equal"),
-        (">", "greater"),
-        (">=", "greater-equal"),
-    ];
+    const TABLE: [(&str, &str); 1] = [("=", "equal")];
     static MEMBERS: std::sync::OnceLock<Vec<(SymRef, SymRef)>> = std::sync::OnceLock::new();
     let members = MEMBERS.get_or_init(|| {
         TABLE

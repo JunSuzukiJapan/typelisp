@@ -81,7 +81,7 @@ fn an_impl_s_type_variables_are_its_target_s_and_its_own() {
         "{defs}
          (impl<T> Show box<T> (defmethod show (self) string (let ((x (the T self::v))) \"b\")))
          (deftrait Clamp (Ord) (defmethod clamp (self (lo Self) (hi Self)) Self
-           (if (less self lo) lo (if (less hi self) hi self))))
+           (if (< self lo) lo (if (< hi self) hi self))))
          (impl<T> Clamp T (:where (Ord T)))
          (+ (length (show (make-instance 'box :v 1))) (clamp 5 1 3))"
     );

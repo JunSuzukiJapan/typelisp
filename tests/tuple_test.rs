@@ -67,8 +67,8 @@ fn tuples_compare_and_hash_by_their_elements() {
              (set h (tuple 1 "x") 10)
              (format false "~a ~a ~a ~a"
                (equal (tuple 1 "x") #{1 "x"})
-               (less (tuple 1 "b") (tuple 1 "c"))
-               (less (tuple 2 "a") (tuple 1 "z"))
+               (< (tuple 1 "b") (tuple 1 "c"))
+               (< (tuple 2 "a") (tuple 1 "z"))
                (unwrap (get h (tuple 1 "x")))))"##,
         "true true false 10",
     );

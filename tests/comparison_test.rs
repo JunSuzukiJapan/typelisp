@@ -1,16 +1,15 @@
 //! Tests for the `char`/`string` comparison operators (`< <= > >=`, overloaded
 //! by receiver type like the numeric ones) and the expanded Rust-modelled
 //! comparison traits — `Equal` (`equal`, ≈ `PartialEq`) and `Ord`
-//! (`less`/`less-equal`/`greater`/`greater-equal`, ≈ `PartialOrd`).
+//! (`<`/`<=`/`>`/`>=`, ≈ `PartialOrd`).
 //!
-//! The operators are builtin instance methods (`registry::char_assoc`/
-//! `string_assoc`, evaluated in `eval/interp.rs`); the trait methods are the
-//! prelude's scalar impls that delegate to them. The prelude is loaded so the
-//! trait methods are available.
+//! The operators are builtin instance methods, and on a scalar they are the
+//! trait's methods too. The prelude is loaded so the traits are available.
 
 extern crate typelisp;
 mod common;
-use common::{run};
+use common::{run, Load, Session};
+use typelisp::Error;
 use typelisp::Value;
 
 fn b(src: &str) -> bool {
@@ -109,28 +108,43 @@ fn eq_and_eql_compare_any_type_by_identity() {
     }
 }
 
-// ---- expanded Ord trait (less-equal / greater / greater-equal) --------------
-
-#[test]
-fn expanded_ord_methods_on_scalars() {
-    assert!(b("(less-equal 3 3)"));
-    assert!(b("(greater 5 2)"));
-    assert!(!b("(greater-equal 2 5)"));
-    assert!(b(r"(less-equal #\a #\a)"));
-    assert!(b(r#"(greater "b" "a")"#));
-    assert!(b(r#"(greater-equal "ab" "ab")"#));
-}
-
 // ---- generic use through an Ord bound ---------------------------------------
 
 #[test]
 fn a_generic_function_uses_the_expanded_ord_methods() {
-    // `in-order` is generic over any `Ord` type and calls the new `less-equal`
-    // — exercising the trait method (not the builtin operator) generically,
+    // `in-order` is generic over any `Ord` type and calls the trait's `<=`,
     // then monomorphized to int/char/string.
-    let prog = "(defun in-order<T> ((a T) (b T)) bool (:where (Ord T)) (less-equal a b))";
+    let prog = "(defun in-order<T> ((a T) (b T)) bool (:where (Ord T)) (<= a b))";
     assert!(b(&format!("{} (in-order 1 2)", prog)));
     assert!(!b(&format!("{} (in-order 2 1)", prog)));
     assert!(b(&format!(r"{} (in-order #\a #\b)", prog)));
     assert!(!b(&format!(r#"{} (in-order "b" "a")"#, prog)));
+}
+
+// ---- a user type that writes only `<` ---------------------------------------
+
+const MONEY: &str = "(defstruct money (yen int))
+     (impl Equal money (defmethod equal (self (other Self)) bool (= self::yen other::yen)))
+     (impl Ord money (defmethod < (self (other Self)) bool (< self::yen other::yen)))
+     (defun yen ((n int)) money (make-instance 'money :yen n))";
+
+#[test]
+fn a_user_type_gets_the_other_three_comparisons_from_ord() {
+    assert!(b(&format!("{MONEY} (> (yen 5) (yen 3))")));
+    assert!(b(&format!("{MONEY} (<= (yen 3) (yen 3))")));
+    assert!(!b(&format!("{MONEY} (>= (yen 2) (yen 3))")));
+    let prog = "(defun in-order<T> ((a T) (b T)) bool (:where (Ord T)) (<= a b))";
+    assert!(b(&format!("{MONEY} {prog} (in-order (yen 1) (yen 2))")));
+}
+
+/// The trait's methods are the operators: there is no second name for them.
+#[test]
+fn ord_has_no_spelled_out_method_names() {
+    for name in ["less", "less-equal", "greater", "greater-equal"] {
+        match Session::new(Load::Prelude).check_all(&format!("({name} 1 2)")) {
+            Err(Error::At(_, e)) if matches!(&*e, Error::NoSuchFunction(n) if n == name) => {}
+            Err(Error::NoSuchFunction(n)) if n == name => {}
+            other => panic!("`{name}`: expected NoSuchFunction, got {:?}", other),
+        }
+    }
 }

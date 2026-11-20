@@ -3469,57 +3469,50 @@ fn compile_dispatches_a_user_method_on_a_primitive_receiver() {
     assert_eq!(v, Value::Bool(true));
 }
 
-/// The `Ord` counterpart of the previous test: `i32::less` (body
-/// `(< self other)`) compiles natively and a compiled caller reaches it
-/// through `compile-assoc-user`'s mangled-name call.
+/// The same on a narrow integer: the prelude's `i8::rem` (body
+/// `(- self (* b (/ self b)))`) compiles natively and a compiled caller
+/// reaches it through `compile-assoc-user`'s mangled-name call.
 #[test]
-fn compile_dispatches_less_on_a_primitive_receiver() {
+fn compile_dispatches_rem_on_a_narrow_integer_receiver() {
     let v = run_with_compiler_and_prelude(
         r#"
-        (compile i32::less)
-        (defun strictly-between ((lo int) (x int) (hi int)) bool
-          (if (less lo x) (less x hi) false))
-        (compile strictly-between)
-        (if (strictly-between 1 5 9) (if (strictly-between 1 9 5) false true) false)
+        (compile i8::rem)
+        (defun rem-sum ((a i8) (b i8) (c i8)) i8 (+ (rem a c) (rem b c)))
+        (compile rem-sum)
+        (rem-sum (the i8 7) (the i8 -8) (the i8 3))
         "#,
     )
     .expect("eval failed");
-    assert_eq!(v, Value::Bool(true));
+    assert_eq!(v, Value::Int(-1));
 }
 
-/// A user method on a *primitive* receiver (the prelude's `impl Ord int` ->
-/// `int::less`) is transitively compiled too (Stage B): `(compile run)`
-/// pulls in `int::less` on demand. Its own body delegates to the native `<`
-/// (lowered in-place by `compile-assoc`, no further call), so the recursion
-/// bottoms out immediately. (A *builtin* method with no body —
-/// e.g. an `f64`/`char` builtin — still errors clearly; only methods with a
-/// real registered body are auto-compiled.)
+/// A user method on a *primitive* receiver (the prelude's `u8::rem`) is
+/// transitively compiled too: `(compile run)` pulls in `u8::rem` on demand.
+/// Its own body is native arithmetic (lowered in-place by `compile-assoc`,
+/// no further call), so the recursion bottoms out immediately.
 #[test]
 fn compile_transitively_compiles_a_called_primitive_receiver_method() {
     let v = run_with_compiler_and_prelude(
         r#"
-        (defun lt2 ((a int) (b int)) bool (less a b))
-        (defun run () int (if (lt2 5 6) (if (lt2 5 5) 0 1) 0))
+        (defun rem2 ((a u8) (b u8)) u8 (rem a b))
+        (defun run () int (if (= (rem2 (the u8 7) (the u8 3)) (the u8 1)) (if (= (rem2 (the u8 6) (the u8 3)) (the u8 0)) 1 0) 0))
         (compile run)
         (run)
         "#,
     )
-    .expect("transitive compile of `int::less` should succeed");
-    assert_eq!(v, Value::Int(1), "lt2(5,6) true and lt2(5,5) false, with `int::less` auto-compiled");
+    .expect("transitive compile of `u8::rem` should succeed");
+    assert_eq!(v, Value::Int(1), "rem2(7,3) is 1 and rem2(6,3) is 0, with `u8::rem` auto-compiled");
 }
 
-/// The `string` counterpart: `string`'s builtin `equal` (content
-/// comparison, `rt_str_eq`) is `Equal`'s, and `string::less`'s body is
-/// `(< self other)` (lexicographic, `rt_str_lt`) — both on
-/// `string-native-method?`'s list, so the impl body compiles and a compiled
-/// caller reaches both.
+/// `string`'s builtin `equal` (content comparison, `rt_str_eq`) and `<`
+/// (lexicographic, `rt_str_lt`) — both on `string-native-method?`'s list, so
+/// a compiled caller reaches both.
 #[test]
 fn compile_dispatches_string_equal_and_less() {
     let v = run_with_compiler_and_prelude(
         r#"
-        (compile string::less)
         (defun str-cmp ((a string) (b string)) int
-          (if (equal a b) 0 (if (less a b) -1 1)))
+          (if (equal a b) 0 (if (< a b) -1 1)))
         (compile str-cmp)
         (+ (str-cmp (append "ab" "c") "abc")
            (+ (* (str-cmp "abc" "abd") 10)
@@ -3573,15 +3566,14 @@ fn compile_dispatches_option_equals() {
 }
 
 /// And `char`: a compiled `char` is a raw `i64` code point, so `char`'s
-/// builtin `equal` and `char::less` (body `(< self other)`) lower to plain
-/// integer `icmp`s via the char-native branch.
+/// builtin `equal` and `<` lower to plain integer `icmp`s via the char-native
+/// branch.
 #[test]
 fn compile_dispatches_char_equal_and_less() {
     let v = run_with_compiler_and_prelude(
         r#"
-        (compile char::less)
         (defun char-cmp ((a char) (b char)) int
-          (if (equal a b) 0 (if (less a b) -1 1)))
+          (if (equal a b) 0 (if (< a b) -1 1)))
         (compile char-cmp)
         (+ (char-cmp (ref "xa" 1) (ref "ya" 1))
            (+ (* (char-cmp (ref "a" 0) (ref "b" 0)) 10)
