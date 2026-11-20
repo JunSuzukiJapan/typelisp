@@ -208,9 +208,13 @@ args: #(hello.wasm a b)
 fib(25) = 75025
 ```
 
-- 準備がいります。この機能は、リポジトリでビルドしたデバッグビルドの `typl` でだけ使えます。
-  rustup で `rustup target add wasm32-wasip1 wasm32-unknown-unknown` を実行してから、リポジトリで
-  `scripts/build-wasm-runtime.sh` を実行してください（3.7 節の準備も兼ねます）。
+- 準備がいります（3.7 節の準備も兼ねます）。まず rustup で
+  `rustup target add wasm32-wasip1 wasm32-unknown-unknown` を実行します。そのうえで、`cargo install` で
+  入れる `typl` は `--features wasm` を付けてインストールします（`cargo install --locked --path . --features wasm`）。
+  付けずに入れた `typl` は WebAssembly のランタイムを持たないので、`--target` はエラーになります。
+  リポジトリのデバッグビルドの `typl` を使うときは、代わりにリポジトリで `scripts/build-wasm-runtime.sh`
+  を実行します。
+- リンクには rustup の toolchain のリンカ（`rust-lld`）を使うので、コンパイルするときにも rustup が要ります。
 - 実行ファイルと同じに振る舞います。標準出力・標準エラー・終了コード、`(command-line-args)`、
   ファイルの読み書き、`throw`/`catch`/`panic`、タスク・チャネル・`sleep`、`eval` が使えます。
   タスクは 1 つのスレッドで順に実行されます。ファイルは、実行環境がモジュールに見せている

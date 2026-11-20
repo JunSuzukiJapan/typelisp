@@ -25,7 +25,7 @@ use inkwell::llvm_sys::LLVMOpcode;
 use inkwell::module::Module;
 use inkwell::targets::{CodeModel, FileType, InitializationConfig, RelocMode, Target, TargetMachine, TargetTriple};
 
-use super::{wasm_runtime_dir, ENTRY_POINT_NAME, STATICLIB_NAME};
+use super::{wasm_linker, wasm_runtime_dir, ENTRY_POINT_NAME, STATICLIB_NAME};
 use crate::CompileTarget;
 
 /// What WASI's start file (`crt1-command.o`) calls: `main` taking no
@@ -82,6 +82,7 @@ pub(super) fn write_module(
         _ => None,
     };
     let runtime = wasm_runtime_dir(target.name())?;
+    let linker = wasm_linker(&runtime)?;
     let tm = target_machine(llvm_triple)?;
     module.set_triple(&tm.get_triple());
     module.set_data_layout(&tm.get_target_data().get_data_layout());
@@ -101,7 +102,8 @@ pub(super) fn write_module(
         eprintln!("{}", warning);
     }
 
-    let mut link = Command::new(runtime.join("wasm-ld"));
+    let mut link = Command::new(&linker);
+    link.args(["-flavor", "wasm"]);
     match target {
         super::Target::Wasip1 => {
             link.arg(runtime.join("crt1-command.o"))
@@ -122,7 +124,7 @@ pub(super) fn write_module(
         .arg("-o")
         .arg(output_path)
         .status()
-        .map_err(|e| format!("failed to invoke {}: {}", runtime.join("wasm-ld").display(), e));
+        .map_err(|e| format!("failed to invoke {}: {}", linker.display(), e));
     let _ = fs::remove_file(&object_path);
     let status = status?;
     if !status.success() {

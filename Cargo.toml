@@ -73,6 +73,11 @@ serde_json = "1"
 # that run them turn it on.
 [features]
 dev-tools = []
+# A release `typl` that carries the WebAssembly runtimes, for `typl -c
+# --target wasm32-wasip1` / `wasm32-unknown-unknown` (build.rs's
+# `bundled_wasm`). Needs both targets in the rustup toolchain building it.
+# Without it nothing for WebAssembly is built or carried.
+wasm = []
 
 [[bin]]
 name = "typl"

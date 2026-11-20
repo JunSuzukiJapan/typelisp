@@ -83,7 +83,7 @@ typl -c SOURCE [-o OUTPUT] [--target TRIPLE] [--heap-cells N] [--no-cons] [--max
 - リンク: rustup の toolchain の `rust-lld` を `wasm-ld` という名前で起動する。`crt1-command.o`、`libc.a` と並べて、`scripts/build-wasm-runtime.sh` が `<target>/wasm-runtime/<profile>/wasm32-wasip1/` に置く（Homebrew の LLVM 22 には lld が無く、Homebrew の rust には wasm のターゲットが無い）。スタックは 8MiB。
 - ランタイム: wasm では `net`、`net/tls`、`x509`、`net_builtin`、`rt_net_*` の shim、ストリームのソケットの変種を cfg で外す（rustls/ring は wasm 以外だけの依存）。スケジューラはスレッドが 1 本: `thread_count` は 1、時間つきの待ちは眠るだけ、時間なしの待ちは fatal、`SelfPipe` は作れるだけで触れたら unreachable。インタプリタ（`eval`）からのソケットは panic。
 - 使えないもののコンパイル時の検出は段階 2 の到達判定を一般化した `src/compile/aot/reach.rs` で行う。表は `externs::WASM_UNAVAILABLE_SHIMS` と `rt_net_` の接頭辞。C の関数は `defffi` の記号で判定する。
-- 未対応: リリースビルドの `typl` は wasm のランタイムを中に持たない（`wasm_runtime_dir` が断る）。持たせるには build.rs が wasm ターゲットを要求することになる。
+- リリースビルド: feature `wasm` を付けたときだけ、build.rs の `bundled_wasm` が 2 つのターゲットのランタイムと wasi-libc（`crt1-command.o`、`libc.a`）を入れ子の cargo でビルドして埋め込む（ユーザー決定: 指定されない限り何も埋め込まない）。書き出し先は `$TYPELISP_HOME/lib/<ビルドID>/<triple>/` で、ビルドID は wasm のものも含めたハッシュ。付けなかったリリースビルドの `--target` はエラー。`rust-lld` は toolchain の `libLLVM.dylib` に依存し単体で動かないので埋め込まず、リリースビルドは実行時に `rustup which rustc` の sysroot の `rust-lld` を `-flavor wasm` で使う（デバッグビルドはスクリプトが置いたシンボリックリンク）。
 - テスト: `tests/aot_wasm_test.rs`。`scripts/run-wasi.mjs`（node の `node:wasi`、`/` だけを開く。`.` も開くと絶対パスの解決が `.` に引かれて失敗する）で実行し、ネイティブの実行ファイルと出力・終了コードを比べる。
 
 ### 段階 5: wasm32-unknown-unknown

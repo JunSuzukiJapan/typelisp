@@ -1,6 +1,7 @@
 fn main() {
     println!("cargo:rerun-if-changed=build.rs");
     println!("cargo::rustc-check-cfg=cfg(typelisp_bundled_runtime)");
+    println!("cargo::rustc-check-cfg=cfg(typelisp_bundled_wasm)");
     let deployment = deployment_target();
     bundled_runtime(deployment.as_deref());
     profile_dir();
@@ -108,14 +109,75 @@ fn bundled_runtime(deployment: Option<&str>) {
     assert!(archive.is_file(), "build.rs: {} was not built", archive.display());
     println!("cargo:rustc-env=TYPELISP_BUNDLED_STATICLIB={}", archive.display());
     // The name of the folder `typl` writes the archive to: a hash of its
-    // bytes, so a `typl` built again never links an archive another build
-    // wrote. Only compared for equality, within one machine, so `std`'s hasher
-    // is enough — the value is fixed here and carried in the binary.
+    // bytes (and of the WebAssembly runtimes', when it carries them), so a
+    // `typl` built again never links an archive another build wrote. Only
+    // compared for equality, within one machine, so `std`'s hasher is enough —
+    // the value is fixed here and carried in the binary.
     let bytes = std::fs::read(&archive).unwrap_or_else(|e| panic!("build.rs: failed to read {}: {}", archive.display(), e));
     let mut hasher = std::hash::DefaultHasher::new();
     std::hash::Hasher::write(&mut hasher, &bytes);
+    bundled_wasm(&cargo, &manifest_dir, &target_dir, &mut hasher);
     println!("cargo:rustc-env=TYPELISP_BUNDLED_STATICLIB_ID={:016x}", std::hash::Hasher::finish(&hasher));
     println!("cargo:rustc-cfg=typelisp_bundled_runtime");
+}
+
+// With the `wasm` feature, a release `typl` also carries what `typl -c
+// --target <triple>` links a WebAssembly module with: the runtime built for
+// each of the two triples, and for wasm32-wasip1 WASI's start file and C
+// library, from the toolchain building this. Without the feature it carries
+// none of it — nothing is built and nothing is asked of the toolchain.
+//
+// The linker is not carried: `rust-lld` is linked against the toolchain's own
+// `libLLVM`, so a copy of it alone does not run. `typl` runs the one in the
+// rustup toolchain it finds when it links (`compile::aot::wasm_linker`) — a
+// toolchain with these targets is what building with the feature needed.
+fn bundled_wasm(cargo: &str, manifest_dir: &std::path::Path, target_dir: &std::path::Path, hasher: &mut std::hash::DefaultHasher) {
+    if std::env::var_os("CARGO_FEATURE_WASM").is_none() {
+        return;
+    }
+    let rustc = std::env::var("RUSTC").expect("cargo sets RUSTC");
+    let sysroot = std::process::Command::new(&rustc)
+        .args(["--print", "sysroot"])
+        .output()
+        .unwrap_or_else(|e| panic!("build.rs: failed to run {} --print sysroot: {}", rustc, e));
+    assert!(sysroot.status.success(), "build.rs: {} --print sysroot failed", rustc);
+    let sysroot = std::path::PathBuf::from(String::from_utf8_lossy(&sysroot.stdout).trim());
+    for (triple, key) in [("wasm32-wasip1", "WASIP1"), ("wasm32-unknown-unknown", "UNKNOWN")] {
+        assert!(
+            sysroot.join("lib").join("rustlib").join(triple).is_dir(),
+            "build.rs: the `wasm` feature needs the {} target in the toolchain at {}: run `rustup target add {}`",
+            triple,
+            sysroot.display(),
+            triple
+        );
+        let status = std::process::Command::new(cargo)
+            .arg("build")
+            .arg("--release")
+            .arg("--locked")
+            .args(["-p", "typelisp-front"])
+            .arg("--manifest-path")
+            .arg(manifest_dir.join("Cargo.toml"))
+            .arg("--target")
+            .arg(triple)
+            .arg("--target-dir")
+            .arg(target_dir)
+            .status()
+            .unwrap_or_else(|e| panic!("build.rs: failed to run {} to build the {} runtime: {}", cargo, triple, e));
+        assert!(status.success(), "build.rs: building the {} runtime failed ({})", triple, status);
+        let archive = target_dir.join(triple).join("release").join("libtypelisp_front.a");
+        bundle_file(&format!("TYPELISP_BUNDLED_WASM_{}_STATICLIB", key), &archive, hasher);
+    }
+    let self_contained = sysroot.join("lib").join("rustlib").join("wasm32-wasip1").join("lib").join("self-contained");
+    bundle_file("TYPELISP_BUNDLED_WASIP1_CRT1", &self_contained.join("crt1-command.o"), hasher);
+    bundle_file("TYPELISP_BUNDLED_WASIP1_LIBC", &self_contained.join("libc.a"), hasher);
+    println!("cargo:rustc-cfg=typelisp_bundled_wasm");
+}
+
+// `path` for `include_bytes!(env!(name))`, and its bytes into the build id.
+fn bundle_file(name: &str, path: &std::path::Path, hasher: &mut std::hash::DefaultHasher) {
+    let bytes = std::fs::read(path).unwrap_or_else(|e| panic!("build.rs: failed to read {}: {}", path.display(), e));
+    std::hash::Hasher::write(hasher, &bytes);
+    println!("cargo:rustc-env={}={}", name, path.display());
 }
 
 // Four things name a minimum macOS version, and they only agree when

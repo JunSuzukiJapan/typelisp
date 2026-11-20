@@ -113,7 +113,14 @@ fn typelisp_home() -> Result<std::path::PathBuf, String> {
 /// final name, and two writing at once each rename a whole one.
 #[cfg(any(typelisp_bundled_runtime, test))]
 pub(super) fn write_archive_once(dir: &std::path::Path, bytes: &[u8]) -> Result<std::path::PathBuf, String> {
-    let path = dir.join(STATICLIB_NAME);
+    write_file_once(dir, STATICLIB_NAME, bytes)
+}
+
+/// [`write_archive_once`] for any of the files a build carries: `dir/name`
+/// holding `bytes`, written once.
+#[cfg(any(typelisp_bundled_runtime, test))]
+pub(super) fn write_file_once(dir: &std::path::Path, name: &str, bytes: &[u8]) -> Result<std::path::PathBuf, String> {
+    let path = dir.join(name);
     if path.is_file() {
         return Ok(path);
     }
@@ -121,7 +128,7 @@ pub(super) fn write_archive_once(dir: &std::path::Path, bytes: &[u8]) -> Result<
     static WRITES: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
     let partial = dir.join(format!(
         ".{}.{}.{}",
-        STATICLIB_NAME,
+        name,
         std::process::id(),
         WRITES.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
     ));
@@ -235,28 +242,86 @@ pub fn set_lib_dir(dir: std::path::PathBuf) -> Result<(), String> {
 }
 
 /// The folder holding what a WebAssembly module for `triple` links: the
-/// runtime archive built for that target, and the linker — and for
-/// `wasm32-wasip1`, WASI's C library and start file from the same Rust
-/// toolchain (`scripts/build-wasm-runtime.sh` puts them there).
+/// runtime archive built for that target, and for `wasm32-wasip1` WASI's C
+/// library and start file from the same Rust toolchain.
 ///
-/// `<target dir>/wasm-runtime/<profile>/<triple>/`, beside the native
-/// archive of the same profile. A release `typl` carries no WebAssembly
-/// runtime, so there is no folder for it to name.
+/// Where it is depends on how `typl` was built, as for the native archive
+/// ([`link_archive`]):
+///
+/// - A release build with the `wasm` feature carries them and writes them
+///   out once, to `$TYPELISP_HOME/lib/<build id>/<triple>/`.
+/// - A release build without it carries none, and `--target` is refused.
+/// - A debug build links the ones `scripts/build-wasm-runtime.sh` built in its
+///   tree, `<target dir>/wasm-runtime/<profile>/<triple>/`, beside which the
+///   script also links the toolchain's linker ([`wasm_linker`]).
 pub(super) fn wasm_runtime_dir(triple: &str) -> Result<std::path::PathBuf, String> {
-    if cfg!(typelisp_bundled_runtime) {
-        return Err("this typl carries no WebAssembly runtime: --target needs a debug build of typl, which links the runtimes of its source tree".to_string());
+    #[cfg(typelisp_bundled_wasm)]
+    {
+        let dir = bundled_archive_dir()?.join(triple);
+        match triple {
+            "wasm32-wasip1" => {
+                write_file_once(&dir, STATICLIB_NAME, include_bytes!(env!("TYPELISP_BUNDLED_WASM_WASIP1_STATICLIB")))?;
+                write_file_once(&dir, "crt1-command.o", include_bytes!(env!("TYPELISP_BUNDLED_WASIP1_CRT1")))?;
+                write_file_once(&dir, "libc.a", include_bytes!(env!("TYPELISP_BUNDLED_WASIP1_LIBC")))?;
+            }
+            "wasm32-unknown-unknown" => {
+                write_file_once(&dir, STATICLIB_NAME, include_bytes!(env!("TYPELISP_BUNDLED_WASM_UNKNOWN_STATICLIB")))?;
+            }
+            _ => return Err(format!("internal error: no WebAssembly runtime for {}", triple)),
+        }
+        Ok(dir)
     }
-    let profile_dir = std::path::Path::new(env!("TYPELISP_PROFILE_DIR"));
-    let (Some(target_dir), Some(profile)) = (profile_dir.parent(), profile_dir.file_name()) else {
-        return Err(format!("internal error: {} is not <target dir>/<profile>", profile_dir.display()));
+    #[cfg(all(typelisp_bundled_runtime, not(typelisp_bundled_wasm)))]
+    {
+        let _ = triple;
+        Err("this typl was built without WebAssembly support: --target needs one built with `--features wasm` \
+             (`cargo install --features wasm ...`)"
+            .to_string())
+    }
+    #[cfg(not(typelisp_bundled_runtime))]
+    {
+        let profile_dir = std::path::Path::new(env!("TYPELISP_PROFILE_DIR"));
+        let (Some(target_dir), Some(profile)) = (profile_dir.parent(), profile_dir.file_name()) else {
+            return Err(format!("internal error: {} is not <target dir>/<profile>", profile_dir.display()));
+        };
+        let dir = target_dir.join("wasm-runtime").join(profile).join(triple);
+        if !dir.join(STATICLIB_NAME).is_file() {
+            return Err(format!(
+                "{} has no WebAssembly runtime; build it with scripts/build-wasm-runtime.sh {}",
+                dir.display(),
+                profile.to_string_lossy()
+            ));
+        }
+        Ok(dir)
+    }
+}
+
+/// The linker for a WebAssembly module whose runtime is in `runtime`
+/// ([`wasm_runtime_dir`]), run with `-flavor wasm`.
+///
+/// `rust-lld`, which no build carries: it is linked against its toolchain's
+/// own `libLLVM` and does not run apart from it. A debug build's runtime
+/// folder has the one of the toolchain that built the runtime beside it
+/// (`scripts/build-wasm-runtime.sh`); a release build's has none, and the
+/// one of rustup's default toolchain is run — a toolchain with these targets
+/// is what building with the `wasm` feature took.
+pub(super) fn wasm_linker(runtime: &std::path::Path) -> Result<std::path::PathBuf, String> {
+    if !cfg!(typelisp_bundled_runtime) {
+        return Ok(runtime.join("wasm-ld"));
+    }
+    let run = |cmd: &mut std::process::Command, what: &str| -> Result<String, String> {
+        let out = cmd.output().map_err(|e| format!("--target needs rustup to find its linker (rust-lld): {}: {}", what, e))?;
+        if !out.status.success() {
+            return Err(format!("--target needs rustup to find its linker (rust-lld): {} failed: {}", what, String::from_utf8_lossy(&out.stderr).trim()));
+        }
+        Ok(String::from_utf8_lossy(&out.stdout).trim().to_string())
     };
-    let dir = target_dir.join("wasm-runtime").join(profile).join(triple);
-    if !dir.join(STATICLIB_NAME).is_file() {
-        return Err(format!(
-            "{} has no WebAssembly runtime; build it with scripts/build-wasm-runtime.sh {}",
-            dir.display(),
-            profile.to_string_lossy()
-        ));
+    let rustc = run(std::process::Command::new("rustup").args(["which", "rustc"]), "rustup which rustc")?;
+    let sysroot = run(std::process::Command::new(&rustc).args(["--print", "sysroot"]), "rustc --print sysroot")?;
+    let host = run(std::process::Command::new(&rustc).args(["--print", "host-tuple"]), "rustc --print host-tuple")?;
+    let lld = std::path::Path::new(&sysroot).join("lib").join("rustlib").join(&host).join("bin").join("rust-lld");
+    if !lld.is_file() {
+        return Err(format!("the rustup toolchain at {} has no linker for WebAssembly ({})", sysroot, lld.display()));
     }
-    Ok(dir)
+    Ok(lld)
 }

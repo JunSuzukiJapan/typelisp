@@ -406,6 +406,16 @@ Homebrew を使わない場合は、`LLVM_SYS_221_PREFIX` を設定してから 
 リポジトリを移動・削除しても `-c` や `compile-file` が使えます（次の「ファイルをコンパイルする」を
 参照）。
 
+WebAssembly 向けのコンパイル（`typl -c --target wasm32-wasip1` など）も使うときは、rustup で
+`rustup target add wasm32-wasip1 wasm32-unknown-unknown` を実行してから、`--features wasm` を付けて
+インストールします。
+
+```sh
+cargo install --locked --path . --features wasm
+```
+
+付けないときは、WebAssembly のためのものは何もビルドせず、`typl` にも入れません。
+
 ## 実行方法
 
 `typl` の起動のしかたは次の3通りです。以下の例では、`typl` にパスが通っているものとします
