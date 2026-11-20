@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 398532233e28225bb121ed5b18609d41ea1bf813 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ ac5a6b3adada21a0a55e0e1c4b0e1fabf4854908 -->
 # typelisp 語法參考
 
 typelisp 是一種靜態型別的 Lisp，語法採用 S 運算式。內建函式與方法的一覽見[內建函式](functions/README.md)，型別一覽見 [types.md](types.md)，
@@ -802,19 +802,19 @@ trait 的 `impl` 的方法即使不寫 `pub` 也總是公開的。trait 在泛�
 ```lisp
 (deftrait Clamp (Ord)
   (defmethod clamp (self (lo Self) (hi Self)) Self
-    (if (less self lo) lo (if (less hi self) hi self))))
+    (if (< self lo) lo (if (< hi self) hi self))))
 (impl<T> Clamp T (:where (Ord T)))          ; 沒有本體——全部使用預設實作
 ```
 
 **在具體型別實際使用之前不會產生程式碼**（每種型別一次，與一般單型化相同的機制）。一個 trait 最多一個全面實作。同一型別有明確的 `impl` 時，那個
 優先。本體的型別檢查與產生是分開的，在宣告時**保持對象為型別變數**進行一次（與 Rust 相同）——即使是一次也沒被使用的實作，在宣告的約束下對任何
-對象都通不過的錯誤也會在那裡被排除。約束所允許的呼叫（`(:where (Ord T))` 下的 `(less self other)` 等）與泛型 `defun` 的本體同樣對待，可以通過。
+對象都通不過的錯誤也會在那裡被排除。約束所允許的呼叫（`(:where (Ord T))` 下的 `(< self other)` 等）與泛型 `defun` 的本體同樣對待，可以通過。
 
 **文件字串**：`deftrait` 在繼承清單之後、項目清單之前放置字串字面值，整個 trait 就能有一個文件字串（`(deftrait Name () "doc" (:type ...)
 (method ...)...)`）。沒有本體的簽章不能寫文件字串——結尾的字串本身會成為預設實作的回傳值，兩者無法區分。
 
 標準函式庫提供的 trait：**`Iter`**（`next`／關聯型別 `Item`。`doiter`／序列函式的基礎）、**`Equal`** （`equal` 所用的 trait）、
-**`Ord`**（繼承 `Equal`。只有 `less` 必須實作，`less-equal`／`greater`／`greater-equal` 是預設實作）、**`Error`**（`message`／`source`。統一
+**`Ord`**（繼承 `Equal`。只有 `<` 必須實作，`<=`／`>`／`>=` 是預設實作）、**`Error`**（`message`／`source`。統一
 處理錯誤型別的 `:dyn Error`）、**`print-object`**（依型別的列印表示）、**`Pathish`**（路徑名稱指定子＝字串或 `pathname`）、串流的階層
 **`Stream`** → **`InputStream`**／**`OutputStream`** → **`CharInput`**／**`CharOutput`** → **`PeekInput`**。哪些型別實作了哪些 trait 見
 [types.md](types.md)，各 trait 的方法見[標準 trait](functions/traits.md)、[錯誤型別](functions/option-result.md#3-錯誤型別與-error-trait)、

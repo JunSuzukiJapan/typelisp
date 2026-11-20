@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 398532233e28225bb121ed5b18609d41ea1bf813 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ ac5a6b3adada21a0a55e0e1c4b0e1fabf4854908 -->
 # typelisp 语法参考
 
 typelisp 是一种静态类型的 Lisp，语法采用 S 表达式。内置函数和方法的一览见[内置函数](functions/README.md)，类型一览见
@@ -816,20 +816,20 @@ trait 的 `impl` 的方法即使不写 `pub` 也总是公开的。trait 在泛�
 ```lisp
 (deftrait Clamp (Ord)
   (defmethod clamp (self (lo Self) (hi Self)) Self
-    (if (less self lo) lo (if (less hi self) hi self))))
+    (if (< self lo) lo (if (< hi self) hi self))))
 (impl<T> Clamp T (:where (Ord T)))          ; 没有函数体——全部使用默认实现
 ```
 
 **在具体类型实际使用之前不会生成代码**（每种类型一次，与普通单态化相同的机制）。一个 trait 最多一个全面实现。同一类型有显式
 `impl` 时，那个优先。函数体的类型检查与生成是分开的，在声明时**保持对象为类型变量**进行一次（与 Rust 相同）——即使是一次也没被
 使用的实现，在声明的约束下对任何对象都通不过的错误也会在那里被排除。约束所允许的调用（`(:where (Ord T))` 下的
-`(less self other)` 等）与泛型 `defun` 的函数体同样对待，可以通过。
+`(< self other)` 等）与泛型 `defun` 的函数体同样对待，可以通过。
 
 **文档字符串**：`deftrait` 在继承列表之后、项目列表之前放置字符串字面量，整个 trait 就能有一个文档字符串
 （`(deftrait Name () "doc" (:type ...) (method ...)...)`）。没有函数体的签名不能写文档字符串——末尾的字符串本身会成为默认实现的
 返回值，两者无法区分。
 
-标准库提供的 trait：**`Iter`**（`next`／关联类型 `Item`。`doiter`／序列函数的基础）、**`Equal`** （`equal` 所用的 trait）、**`Ord`**（继承 `Equal`。只有 `less` 必须实现，`less-equal`／`greater`／`greater-equal` 是默认实现）、**`Error`**
+标准库提供的 trait：**`Iter`**（`next`／关联类型 `Item`。`doiter`／序列函数的基础）、**`Equal`** （`equal` 所用的 trait）、**`Ord`**（继承 `Equal`。只有 `<` 必须实现，`<=`／`>`／`>=` 是默认实现）、**`Error`**
 （`message`／`source`。统一处理错误类型的 `:dyn Error`）、**`print-object`**（按类型的打印表示）、**`Pathish`**（路径名指定符＝
 字符串或 `pathname`）、流的层次 **`Stream`** → **`InputStream`**／**`OutputStream`** → **`CharInput`**／**`CharOutput`** →
 **`PeekInput`**。哪些类型实现了哪些 trait 见 [types.md](types.md)，各 trait 的方法见[标准 trait](functions/traits.md)、

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 398532233e28225bb121ed5b18609d41ea1bf813 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ ac5a6b3adada21a0a55e0e1c4b0e1fabf4854908 -->
 # Referência de sintaxe do typelisp
 
 typelisp é um Lisp com tipagem estática, escrito em expressões S. Para a lista de funções e métodos embutidos,
@@ -1004,7 +1004,7 @@ tipo que atenda às restrições.
 ```lisp
 (deftrait Clamp (Ord)
   (defmethod clamp (self (lo Self) (hi Self)) Self
-    (if (less self lo) lo (if (less hi self) hi self))))
+    (if (< self lo) lo (if (< hi self) hi self))))
 (impl<T> Clamp T (:where (Ord T)))          ; sem corpo nenhum; tudo é a implementação padrão
 ```
 
@@ -1013,7 +1013,7 @@ monomorfização comum). Um trait pode ter no máximo uma implementação geral.
 esse tem prioridade. A verificação de tipos do corpo é separada da geração: é feita uma vez no ponto de
 declaração, **com o alvo deixado como variável de tipo** (como no Rust), então até uma implementação que nunca é
 usada tem seus erros pegos ali se eles falhassem para todo alvo sob as restrições declaradas. As chamadas
-justificadas pelas restrições (`(less self other)` sob `(:where (Ord T))` etc.) passam, como no corpo de um
+justificadas pelas restrições (`(< self other)` sob `(:where (Ord T))` etc.) passam, como no corpo de um
 `defun` genérico.
 
 **Docstrings**: um `deftrait` pode ter uma docstring para o trait inteiro, como literal de string logo depois da
@@ -1023,7 +1023,7 @@ então as duas não poderiam ser distinguidas.
 
 Os traits que a biblioteca padrão oferece: **`Iter`** (`next` / tipo associado `Item`; a base de `doiter` e das
 funções de sequência), **`Equal`** (o trait que `equal` usa), **`Ord`** (herda `Equal`; só
-`less` precisa ser implementado, e `less-equal` / `greater` / `greater-equal` são implementações padrão),
+`<` precisa ser implementado, e `<=` / `>` / `>=` são implementações padrão),
 **`Error`** (`message` / `source`; `:dyn Error` para tratar os tipos de erro de modo uniforme),
 **`print-object`** (uma representação impressa por tipo), **`Pathish`** (designadores de nome de caminho: uma
 string ou um `pathname`), e a hierarquia de streams **`Stream`** → **`InputStream`** / **`OutputStream`** →

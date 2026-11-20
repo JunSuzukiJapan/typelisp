@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/traits.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
+<!-- translated-from: docs/ja/tutorial/traits.md @ 6271c6d8b68694e1d27dd2e349b08117d2ef2bfb -->
 # السمات (Traits)
 
 السمة (trait) وعد بأن "هذا النوع يدعم هذه العمليات". تتيح السمات لعدة أنواع أن تشترك في عمليات بالاسم
@@ -97,7 +97,7 @@ error: ...: type error: report: type `int` does not implement trait `shape` requ
 | السمة | التوابع الواجب تنفيذها | ما تتيحه |
 |---|---|---|
 | `Equal` | `equal` | `equal` و`=` و`assert-equal` ونمط `(:= تعبير)` في `match` و`member` مع `:test equal` وغيرها |
-| `Ord` | `less` | `less-equal` و`greater` وغيرها. وترث `Ord` من `Equal` |
+| `Ord` | `<` | `<=` و`>` و`>=`. وترث `Ord` من `Equal` |
 | `print-object` | `print-object` | كيف تعرض `println` وأخواتها القيم |
 | `Iter` | `next` | `doiter` و`map` و`filter` و`sort` وغيرها |
 | `Error` | `message` و`source` | الاستخدام كنوع خطأ ([معالجة الأخطاء](errors.md)) |
@@ -112,9 +112,9 @@ error: ...: type error: report: type `int` does not implement trait `shape` requ
   (defmethod equal (self (other Self)) bool (= self::yen other::yen)))
 
 (impl Ord money
-  (defmethod less (self (other Self)) bool (< self::yen other::yen)))
+  (defmethod < (self (other Self)) bool (< self::yen other::yen)))
 
-(greater (make-instance 'money :yen 5) (make-instance 'money :yen 3))     ; => true (التنفيذ الافتراضي في Ord)
+(> (make-instance 'money :yen 5) (make-instance 'money :yen 3))     ; => true (التنفيذ الافتراضي في Ord)
 ```
 
 تنفيذ `print-object` يقرر كيف تعرض `println` القيمة. ويكون وسيط `escape` هو `true` عندما تُطلب صورة
@@ -136,7 +136,7 @@ error: ...: type error: report: type `int` does not implement trait `shape` requ
   (foldl (iter v)
          (lambda ((best Option<T>) (x T)) Option<T>
            (match best
-             ((Some b) (if (less b x) (Option::Some x) best))
+             ((Some b) (if (< b x) (Option::Some x) best))
              ((None) (Option::Some x))))
          (Option::None)))
 ```

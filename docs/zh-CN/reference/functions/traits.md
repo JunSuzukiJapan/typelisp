@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/traits.md @ 1663f849f4e6491e2a654bb9eeaa34635af179ac -->
+<!-- translated-from: docs/ja/reference/functions/traits.md @ 6271c6d8b68694e1d27dd2e349b08117d2ef2bfb -->
 # 标准 trait
 
 用于迭代、比较、算术和存取元素的 trait。其他标准 trait 在各自的章节中：`Hash`（[HashTable](collections.md#4-hashtablekv)）、
@@ -28,13 +28,13 @@
 (deftrait Equal ()
   (defmethod equal (self (other Self)) bool))                ; 必须实现
 (deftrait Ord (Equal)                                     ; 继承 Equal
-  (defmethod less (self (other Self)) bool)                  ; 必须实现
-  (defmethod less-equal (self (other Self)) bool (not (less other self)))
-  (defmethod greater (self (other Self)) bool (less other self))
-  (defmethod greater-equal (self (other Self)) bool (not (less self other))))
+  (defmethod < (self (other Self)) bool)                     ; 必须实现
+  (defmethod <= (self (other Self)) bool (not (< other self)))
+  (defmethod > (self (other Self)) bool (< other self))
+  (defmethod >= (self (other Self)) bool (not (< self other))))
 ```
 
-实现 `Equal` 要写 `equal`，实现 `Ord` 只需写 `less`。`Ord` 的其余部分由默认实现补上。`Ord` 继承 `Equal`，
+实现 `Equal` 要写 `equal`，实现 `Ord` 只需写 `<`。`Ord` 的其余部分由默认实现补上。`Ord` 继承 `Equal`，
 所以 `impl Ord X` 之前需要 `impl Equal X`。
 
 `(equal a b)` 调用 `a` 的类型的 `Equal` 实现。对未实现 `Equal` 的类型写它会是类型错误。按同一性比较用
@@ -45,10 +45,10 @@
 | 名称 | 形式 | 类型 | 说明 |
 |---|---|---|---|
 | `equal` | `(equal a b)` | `(A,A)→bool` where `Equal A` | 是否相等（Rust 的 `==`） |
-| `less` | `(less a b)` | `(A,A)→bool` where `Ord A` | `a < b` |
-| `less-equal` | `(less-equal a b)` | `(A,A)→bool` where `Ord A` | `a <= b` |
-| `greater` | `(greater a b)` | `(A,A)→bool` where `Ord A` | `a > b` |
-| `greater-equal` | `(greater-equal a b)` | `(A,A)→bool` where `Ord A` | `a >= b` |
+| `<` | `(< a b)` | `(A,A)→bool` where `Ord A` | 小于 |
+| `<=` | `(<= a b)` | `(A,A)→bool` where `Ord A` | 小于等于 |
+| `>` | `(> a b)` | `(A,A)→bool` where `Ord A` | 大于 |
+| `>=` | `(>= a b)` | `(A,A)→bool` where `Ord A` | 大于等于 |
 
 已实现 `Equal` 的：所有数值类型（`i8`〜`u32` / `f32` / `f64` / `int` / `ratio`）与 `bool` `char` `string`
 `symbol` `complex`、`Sexpr`、`cons-cell<A,B>` 和元组（元素为 `Equal` 时逐元素比较）、`Option<T>` 与
@@ -59,9 +59,8 @@
 列表（`Sexpr`）的 `equal` 是 CL 的 `equal`：cons 按结构、字符串按内容、其余原子用 `eql` 比较。这种比较在运行时
 遍历值，不调用任何方法。因此列表中的结构体与 CL 一样按同一性比较，与其类型的 `impl Equal` 无关。
 
-`Ord` 的方法名不与内置运算符（`< <= > >=`）或 `lt` 重名，是因为内置的无法重定义，而各实现都委托给它们。
-标量比较运算符本身是按接收者类型的内置方法（[数值](numbers.md)・[字符串与字符](collections.md)）。在约束内
-写运算符，会被读作 trait 的方法（第 3 章）。`=` 变为 `equal`，`/=` 变为 `(not (equal a b))`。
+标量比较运算符是按接收者类型的内置方法（[数值](numbers.md)・[字符串与字符](collections.md)），它们本身就是 `Ord` 的实现。在约束内，
+`=` 变为 `equal`，`/=` 变为 `(not (equal a b))`。
 
 ## 3. 算术 trait（`Add` / `Sub` / `Mul` / `Div` / `Rem` / `Bits` / `Number`）
 
@@ -72,18 +71,18 @@
 (deftrait Sub () (defmethod - (self (other Self)) Self))
 (deftrait Mul () (defmethod * (self (other Self)) Self))
 (deftrait Div () (:type Output) (defmethod / (self (other Self)) Output))
-(deftrait Rem () (defmethod remainder (self (other Self)) Self))
+(deftrait Rem () (defmethod rem (self (other Self)) Self))
 (deftrait Bits ()
-  (defmethod bit-and (self (other Self)) Self)
-  (defmethod bit-or  (self (other Self)) Self)
-  (defmethod bit-xor (self (other Self)) Self)
-  (defmethod bit-not (self) Self)
-  (defmethod shift (self (count int)) Self))                 ; 距离总是 int（与 ash 相同）
+  (defmethod logand (self (other Self)) Self)
+  (defmethod logior (self (other Self)) Self)
+  (defmethod logxor (self (other Self)) Self)
+  (defmethod lognot (self) Self)
+  (defmethod ash (self (count int)) Self))                   ; 距离总是 int
 (deftrait Number (Add Sub Mul Rem Ord))                   ; 没有方法，五个的组合
 ```
 
-**在约束内可以用运算符书写。** `Add`/`Sub`/`Mul`/`Div` 的方法就是运算符本身。在其他 trait 中，当接收者是由 `:where`
-约束的类型变量时，运算符被解读为 trait 方法（`rem`→`remainder`、`logand`→`bit-and`、`=`→`equal`、`<`→`less` …）：
+**在约束内可以用运算符书写。** 每个 trait 的方法都与具体类型上使用的运算符、内置函数同名，所以当接收者是由
+`:where` 约束的类型变量时，也照样书写：
 
 ```lisp
 (defun sum3<T> ((a T) (b T) (c T)) T (:where (Number T))

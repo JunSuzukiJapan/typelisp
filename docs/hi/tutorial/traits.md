@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/traits.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
+<!-- translated-from: docs/ja/tutorial/traits.md @ 6271c6d8b68694e1d27dd2e349b08117d2ef2bfb -->
 # Trait
 
 Trait एक वादा है कि "यह टाइप ये ऑपरेशन सपोर्ट करता है"। Trait कई टाइप को एक ही नाम के ऑपरेशन साझा करने देते हैं, ताकि उन्हें इस्तेमाल करने वाले फ़ंक्शन को हर टाइप के लिए अलग-अलग न लिखना पड़े। वे लगभग ठीक Rust के trait की तरह काम करते हैं। यह अध्याय मानकर चलता है कि आपने [टाइप की बुनियादी बातें](types.md) पढ़ ली हैं।
@@ -92,7 +92,7 @@ error: ...: type error: report: type `int` does not implement trait `shape` requ
 | Trait | लागू करने वाले मेथड | यह क्या सक्षम करता है |
 |---|---|---|
 | `Equal` | `equal` | `equal`, `=`, `assert-equal`, `match` का `(:= व्यंजक)` पैटर्न, `:test equal` दिया गया `member` आदि |
-| `Ord` | `less` | `less-equal`, `greater` आदि। `Ord`, `Equal` से विरासत लेता है |
+| `Ord` | `<` | `<=`, `>`, `>=`। `Ord`, `Equal` से विरासत लेता है |
 | `print-object` | `print-object` | `println` और उसके साथियों द्वारा मान कैसे दिखाए जाते हैं |
 | `Iter` | `next` | `doiter`, `map`, `filter`, `sort` आदि |
 | `Error` | `message`, `source` | त्रुटि टाइप के रूप में उपयोग ([त्रुटि प्रबंधन](errors.md)) |
@@ -106,9 +106,9 @@ error: ...: type error: report: type `int` does not implement trait `shape` requ
   (defmethod equal (self (other Self)) bool (= self::yen other::yen)))
 
 (impl Ord money
-  (defmethod less (self (other Self)) bool (< self::yen other::yen)))
+  (defmethod < (self (other Self)) bool (< self::yen other::yen)))
 
-(greater (make-instance 'money :yen 5) (make-instance 'money :yen 3))     ; => true (Ord का डिफ़ॉल्ट इम्प्लीमेंटेशन)
+(> (make-instance 'money :yen 5) (make-instance 'money :yen 3))     ; => true (Ord का डिफ़ॉल्ट इम्प्लीमेंटेशन)
 ```
 
 `print-object` लागू करने से तय होता है कि `println` मान को कैसे दिखाता है। `escape` आर्ग्युमेंट तब `true` होता है जब `~s` की तरह वापस पढ़ा जा सकने वाला रूप माँगा गया हो।
@@ -129,7 +129,7 @@ trait बाउंड के साथ मिलाकर आप ऐसा फ�
   (foldl (iter v)
          (lambda ((best Option<T>) (x T)) Option<T>
            (match best
-             ((Some b) (if (less b x) (Option::Some x) best))
+             ((Some b) (if (< b x) (Option::Some x) best))
              ((None) (Option::Some x))))
          (Option::None)))
 ```

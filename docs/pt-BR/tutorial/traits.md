@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/traits.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
+<!-- translated-from: docs/ja/tutorial/traits.md @ 6271c6d8b68694e1d27dd2e349b08117d2ef2bfb -->
 # Traits
 
 Um trait é uma promessa de que "este tipo suporta estas operações". Os traits permitem que vários tipos
@@ -100,7 +100,7 @@ que o usam.
 | Trait | Métodos a implementar | O que ele permite |
 |---|---|---|
 | `Equal` | `equal` | `equal`, `=`, `assert-equal`, o padrão `(:= expr)` de `match`, `member` com `:test equal` etc. |
-| `Ord` | `less` | `less-equal`, `greater` etc. `Ord` herda de `Equal` |
+| `Ord` | `<` | `<=`, `>`, `>=`. `Ord` herda de `Equal` |
 | `print-object` | `print-object` | Como `println` e afins mostram os valores |
 | `Iter` | `next` | `doiter`, `map`, `filter`, `sort` etc. |
 | `Error` | `message`, `source` | Usá-lo como tipo de erro ([Tratamento de erros](errors.md)) |
@@ -115,9 +115,9 @@ o `impl` de `Equal` tem de vir primeiro.
   (defmethod equal (self (other Self)) bool (= self::yen other::yen)))
 
 (impl Ord money
-  (defmethod less (self (other Self)) bool (< self::yen other::yen)))
+  (defmethod < (self (other Self)) bool (< self::yen other::yen)))
 
-(greater (make-instance 'money :yen 5) (make-instance 'money :yen 3))     ; => true (a implementação padrão de Ord)
+(> (make-instance 'money :yen 5) (make-instance 'money :yen 3))     ; => true (a implementação padrão de Ord)
 ```
 
 Implementar `print-object` decide como `println` mostra o valor. O argumento `escape` é `true` quando se pede
@@ -140,7 +140,7 @@ implemente `Ord`.
   (foldl (iter v)
          (lambda ((best Option<T>) (x T)) Option<T>
            (match best
-             ((Some b) (if (less b x) (Option::Some x) best))
+             ((Some b) (if (< b x) (Option::Some x) best))
              ((None) (Option::Some x))))
          (Option::None)))
 ```

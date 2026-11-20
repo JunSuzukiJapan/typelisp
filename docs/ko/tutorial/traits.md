@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/traits.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
+<!-- translated-from: docs/ja/tutorial/traits.md @ 6271c6d8b68694e1d27dd2e349b08117d2ef2bfb -->
 # 트레이트
 
 트레이트는 "이 타입은 이런 연산을 지원한다"는 약속이다. 트레이트를 쓰면 여러 타입이 같은 이름의 연산을 공유할 수
@@ -95,7 +95,7 @@ error: ...: type error: report: type `int` does not implement trait `shape` requ
 | 트레이트 | 구현할 메서드 | 쓸 수 있게 되는 것 |
 |---|---|---|
 | `Equal` | `equal` | `equal`, `=`, `assert-equal`, `match`의 `(:= 식)` 패턴, `:test equal`을 준 `member` 등 |
-| `Ord` | `less` | `less-equal`, `greater` 등. `Ord`는 `Equal`를 상속한다 |
+| `Ord` | `<` | `<=`, `>`, `>=`. `Ord`는 `Equal`를 상속한다 |
 | `print-object` | `print-object` | `println` 등에서 값이 표시되는 방식 |
 | `Iter` | `next` | `doiter`, `map`, `filter`, `sort` 등 |
 | `Error` | `message`, `source` | 오류 타입으로 쓰기([오류 처리](errors.md)) |
@@ -109,9 +109,9 @@ error: ...: type error: report: type `int` does not implement trait `shape` requ
   (defmethod equal (self (other Self)) bool (= self::yen other::yen)))
 
 (impl Ord money
-  (defmethod less (self (other Self)) bool (< self::yen other::yen)))
+  (defmethod < (self (other Self)) bool (< self::yen other::yen)))
 
-(greater (make-instance 'money :yen 5) (make-instance 'money :yen 3))     ; => true (Ord의 기본 구현)
+(> (make-instance 'money :yen 5) (make-instance 'money :yen 3))     ; => true (Ord의 기본 구현)
 ```
 
 `print-object`를 구현하면 `println`이 값을 표시하는 방식이 정해진다. 인수 `escape`는 `~s`처럼 다시 읽어 들일 수
@@ -133,7 +133,7 @@ error: ...: type error: report: type `int` does not implement trait `shape` requ
   (foldl (iter v)
          (lambda ((best Option<T>) (x T)) Option<T>
            (match best
-             ((Some b) (if (less b x) (Option::Some x) best))
+             ((Some b) (if (< b x) (Option::Some x) best))
              ((None) (Option::Some x))))
          (Option::None)))
 ```

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/traits.md @ 1663f849f4e6491e2a654bb9eeaa34635af179ac -->
+<!-- translated-from: docs/ja/reference/functions/traits.md @ 6271c6d8b68694e1d27dd2e349b08117d2ef2bfb -->
 # 標準 trait
 
 用於迭代、比較、算術與存取元素的 trait。其他標準 trait 在各自的章節中：`Hash`（[HashTable](collections.md#4-hashtablekv)）、`Error`
@@ -27,13 +27,13 @@ trait 群與 `Pathish`（[串流與檔案](streams-files.md)）。哪些型別�
 (deftrait Equal ()
   (defmethod equal (self (other Self)) bool))                ; 必須實作
 (deftrait Ord (Equal)                                     ; 繼承 Equal
-  (defmethod less (self (other Self)) bool)                  ; 必須實作
-  (defmethod less-equal (self (other Self)) bool (not (less other self)))
-  (defmethod greater (self (other Self)) bool (less other self))
-  (defmethod greater-equal (self (other Self)) bool (not (less self other))))
+  (defmethod < (self (other Self)) bool)                     ; 必須實作
+  (defmethod <= (self (other Self)) bool (not (< other self)))
+  (defmethod > (self (other Self)) bool (< other self))
+  (defmethod >= (self (other Self)) bool (not (< self other))))
 ```
 
-實作 `Equal` 要寫 `equal`，實作 `Ord` 只需寫 `less`。`Ord` 的其餘部分由預設實作補上。`Ord` 繼承 `Equal`，
+實作 `Equal` 要寫 `equal`，實作 `Ord` 只需寫 `<`。`Ord` 的其餘部分由預設實作補上。`Ord` 繼承 `Equal`，
 所以 `impl Ord X` 之前需要 `impl Equal X`。
 
 `(equal a b)` 呼叫 `a` 的型別的 `Equal` 實作。對未實作 `Equal` 的型別寫它會是型別錯誤。依同一性比較用
@@ -44,10 +44,10 @@ trait 群與 `Pathish`（[串流與檔案](streams-files.md)）。哪些型別�
 | 名稱 | 形式 | 型別 | 說明 |
 |---|---|---|---|
 | `equal` | `(equal a b)` | `(A,A)→bool` where `Equal A` | 是否相等（Rust 的 `==`） |
-| `less` | `(less a b)` | `(A,A)→bool` where `Ord A` | `a < b` |
-| `less-equal` | `(less-equal a b)` | `(A,A)→bool` where `Ord A` | `a <= b` |
-| `greater` | `(greater a b)` | `(A,A)→bool` where `Ord A` | `a > b` |
-| `greater-equal` | `(greater-equal a b)` | `(A,A)→bool` where `Ord A` | `a >= b` |
+| `<` | `(< a b)` | `(A,A)→bool` where `Ord A` | 小於 |
+| `<=` | `(<= a b)` | `(A,A)→bool` where `Ord A` | 小於等於 |
+| `>` | `(> a b)` | `(A,A)→bool` where `Ord A` | 大於 |
+| `>=` | `(>= a b)` | `(A,A)→bool` where `Ord A` | 大於等於 |
 
 已實作 `Equal` 的：所有數值型別（`i8`〜`u32` / `f32` / `f64` / `int` / `ratio`）與 `bool` `char` `string`
 `symbol` `complex`、`Sexpr`、`cons-cell<A,B>` 和元組（元素為 `Equal` 時逐元素比較）、`Option<T>` 與
@@ -58,9 +58,8 @@ trait 群與 `Pathish`（[串流與檔案](streams-files.md)）。哪些型別�
 串列（`Sexpr`）的 `equal` 是 CL 的 `equal`：cons 依結構、字串依內容、其餘原子用 `eql` 比較。這種比較在執行時
 走訪值，不呼叫任何方法。因此串列中的結構體與 CL 一樣依同一性比較，與其型別的 `impl Equal` 無關。
 
-`Ord` 的方法名不與內建運算子（`< <= > >=`）或 `lt` 重名，是因為內建的無法重新定義，而各實作都委派給它們。
-純量比較運算子本身是依接收者型別的內建方法（[數值](numbers.md)・[字串與字元](collections.md)）。在約束內
-寫運算子，會被讀作 trait 的方法（第 3 章）。`=` 變為 `equal`，`/=` 變為 `(not (equal a b))`。
+純量比較運算子是依接收者型別的內建方法（[數值](numbers.md)・[字串與字元](collections.md)），它們本身就是 `Ord` 的實作。在約束內，
+`=` 變為 `equal`，`/=` 變為 `(not (equal a b))`。
 
 ## 3. 算術 trait（`Add` / `Sub` / `Mul` / `Div` / `Rem` / `Bits` / `Number`）
 
@@ -71,18 +70,18 @@ trait 群與 `Pathish`（[串流與檔案](streams-files.md)）。哪些型別�
 (deftrait Sub () (defmethod - (self (other Self)) Self))
 (deftrait Mul () (defmethod * (self (other Self)) Self))
 (deftrait Div () (:type Output) (defmethod / (self (other Self)) Output))
-(deftrait Rem () (defmethod remainder (self (other Self)) Self))
+(deftrait Rem () (defmethod rem (self (other Self)) Self))
 (deftrait Bits ()
-  (defmethod bit-and (self (other Self)) Self)
-  (defmethod bit-or  (self (other Self)) Self)
-  (defmethod bit-xor (self (other Self)) Self)
-  (defmethod bit-not (self) Self)
-  (defmethod shift (self (count int)) Self))                 ; 距離一律是 int（與 ash 相同）
+  (defmethod logand (self (other Self)) Self)
+  (defmethod logior (self (other Self)) Self)
+  (defmethod logxor (self (other Self)) Self)
+  (defmethod lognot (self) Self)
+  (defmethod ash (self (count int)) Self))                   ; 距離一律是 int
 (deftrait Number (Add Sub Mul Rem Ord))                   ; 沒有方法，五個的組合
 ```
 
-**在約束內可以用運算子書寫。** `Add`/`Sub`/`Mul`/`Div` 的方法就是運算子本身。在其他 trait 中，當接收者是由 `:where`
-約束的型別變數時，運算子會被解讀為 trait 方法（`rem`→`remainder`、`logand`→`bit-and`、`=`→`equal`、`<`→`less` …）：
+**在約束內可以用運算子書寫。** 每個 trait 的方法都與具體型別上使用的運算子、內建函式同名，所以當接收者是由
+`:where` 約束的型別變數時，也照樣書寫：
 
 ```lisp
 (defun sum3<T> ((a T) (b T) (c T)) T (:where (Number T))

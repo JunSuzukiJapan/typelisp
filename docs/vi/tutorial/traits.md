@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/traits.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
+<!-- translated-from: docs/ja/tutorial/traits.md @ 6271c6d8b68694e1d27dd2e349b08117d2ef2bfb -->
 # Trait
 
 Trait là một lời hứa rằng "kiểu này hỗ trợ những thao tác này". Trait cho phép nhiều kiểu chia sẻ các
@@ -98,7 +98,7 @@ cho kiểu của bạn.
 | Trait | Phương thức cần triển khai | Nó cho phép gì |
 |---|---|---|
 | `Equal` | `equal` | `equal`, `=`, `assert-equal`, mẫu `(:= biểu thức)` của `match`, `member` với `:test equal`, v.v. |
-| `Ord` | `less` | `less-equal`, `greater`, v.v. `Ord` kế thừa từ `Equal` |
+| `Ord` | `<` | `<=`, `>`, `>=`. `Ord` kế thừa từ `Equal` |
 | `print-object` | `print-object` | Cách `println` và các hàm tương tự hiển thị giá trị |
 | `Iter` | `next` | `doiter`, `map`, `filter`, `sort`, v.v. |
 | `Error` | `message`, `source` | Dùng làm kiểu lỗi ([Xử lý lỗi](errors.md)) |
@@ -113,9 +113,9 @@ của `Equal` phải đứng trước.
   (defmethod equal (self (other Self)) bool (= self::yen other::yen)))
 
 (impl Ord money
-  (defmethod less (self (other Self)) bool (< self::yen other::yen)))
+  (defmethod < (self (other Self)) bool (< self::yen other::yen)))
 
-(greater (make-instance 'money :yen 5) (make-instance 'money :yen 3))     ; => true (triển khai mặc định trong Ord)
+(> (make-instance 'money :yen 5) (make-instance 'money :yen 3))     ; => true (triển khai mặc định trong Ord)
 ```
 
 Triển khai `print-object` quyết định cách `println` hiển thị giá trị. Đối số `escape` là `true` khi
@@ -137,7 +137,7 @@ Kết hợp với ràng buộc trait, bạn có thể viết một hàm hoạt �
   (foldl (iter v)
          (lambda ((best Option<T>) (x T)) Option<T>
            (match best
-             ((Some b) (if (less b x) (Option::Some x) best))
+             ((Some b) (if (< b x) (Option::Some x) best))
              ((None) (Option::Some x))))
          (Option::None)))
 ```

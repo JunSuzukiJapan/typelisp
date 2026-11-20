@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/traits.md @ 1663f849f4e6491e2a654bb9eeaa34635af179ac -->
+<!-- translated-from: docs/ja/reference/functions/traits.md @ 6271c6d8b68694e1d27dd2e349b08117d2ef2bfb -->
 # Trait Standar
 
 Trait untuk iterasi, perbandingan, aritmetika, serta penambahan dan pengambilan elemen. Trait standar lainnya ada di bab masing-masing:
@@ -34,13 +34,13 @@ elemen dapat dibandingkan.
 (deftrait Equal ()
   (defmethod equal (self (other Self)) bool))                ; wajib diimplementasikan
 (deftrait Ord (Equal)                                     ; mewarisi Equal
-  (defmethod less (self (other Self)) bool)                  ; wajib diimplementasikan
-  (defmethod less-equal (self (other Self)) bool (not (less other self)))
-  (defmethod greater (self (other Self)) bool (less other self))
-  (defmethod greater-equal (self (other Self)) bool (not (less self other))))
+  (defmethod < (self (other Self)) bool)                     ; wajib diimplementasikan
+  (defmethod <= (self (other Self)) bool (not (< other self)))
+  (defmethod > (self (other Self)) bool (< other self))
+  (defmethod >= (self (other Self)) bool (not (< self other))))
 ```
 
-Untuk mengimplementasikan `Equal` tulis `equal`, dan untuk `Ord` cukup `less`. Implementasi bawaan
+Untuk mengimplementasikan `Equal` tulis `equal`, dan untuk `Ord` cukup `<`. Implementasi bawaan
 melengkapi sisa `Ord`. `Ord` mewarisi `Equal`, jadi `impl Equal X` diperlukan sebelum `impl Ord X`.
 
 `(equal a b)` memanggil implementasi `Equal` dari tipe `a`. Menuliskannya untuk tipe yang tidak
@@ -53,10 +53,10 @@ atau pada tipe konkret yang mengimplementasikannya):
 | Nama | Bentuk | Tipe | Deskripsi |
 |---|---|---|---|
 | `equal` | `(equal a b)` | `(A,A)→bool` where `Equal A` | Apakah keduanya sama (`==` di Rust) |
-| `less` | `(less a b)` | `(A,A)→bool` where `Ord A` | `a < b` |
-| `less-equal` | `(less-equal a b)` | `(A,A)→bool` where `Ord A` | `a <= b` |
-| `greater` | `(greater a b)` | `(A,A)→bool` where `Ord A` | `a > b` |
-| `greater-equal` | `(greater-equal a b)` | `(A,A)→bool` where `Ord A` | `a >= b` |
+| `<` | `(< a b)` | `(A,A)→bool` where `Ord A` | kurang dari |
+| `<=` | `(<= a b)` | `(A,A)→bool` where `Ord A` | kurang dari atau sama dengan |
+| `>` | `(> a b)` | `(A,A)→bool` where `Ord A` | lebih dari |
+| `>=` | `(>= a b)` | `(A,A)→bool` where `Ord A` | lebih dari atau sama dengan |
 
 `Equal` diimplementasikan untuk: semua tipe numerik (`i8` sampai `u32` / `f32` / `f64` / `int` / `ratio`),
 `bool` `char` `string` `symbol` `complex`, `Sexpr`, `cons-cell<A,B>` dan tuple (per elemen, bila elemennya
@@ -70,11 +70,8 @@ isi, dan atom lainnya dengan `eql`. Perbandingan ini menelusuri nilai saat runti
 metode apa pun. Jadi struct di dalam list dibandingkan berdasarkan identitas, seperti di CL, apa pun
 `impl Equal` tipenya.
 
-Nama metode `Ord` tidak bertabrakan dengan operator bawaan (`< <= > >=`) atau `lt` karena yang bawaan tidak
-dapat didefinisikan ulang dan setiap implementasi mendelegasikan kepadanya. Operator perbandingan skalar
-sendiri adalah metode bawaan per tipe penerima ([Bilangan](numbers.md), [String dan karakter](collections.md)).
-Di dalam batasan, operator yang ditulis dibaca sebagai metode trait (bab 3). `=` menjadi `equal`, dan `/=`
-menjadi `(not (equal a b))`.
+Operator perbandingan skalar adalah metode bawaan per tipe penerima ([Bilangan](numbers.md), [String dan karakter](collections.md)), dan itulah
+implementasi `Ord` apa adanya. Di dalam batasan, `=` menjadi `equal`, dan `/=` menjadi `(not (equal a b))`.
 
 ## 3. Trait aritmetika (`Add` / `Sub` / `Mul` / `Div` / `Rem` / `Bits` / `Number`)
 
@@ -86,19 +83,19 @@ konkret memakai operator bawaan** ([Bilangan](numbers.md)) dan tidak melalui lap
 (deftrait Sub () (defmethod - (self (other Self)) Self))
 (deftrait Mul () (defmethod * (self (other Self)) Self))
 (deftrait Div () (:type Output) (defmethod / (self (other Self)) Output))
-(deftrait Rem () (defmethod remainder (self (other Self)) Self))
+(deftrait Rem () (defmethod rem (self (other Self)) Self))
 (deftrait Bits ()
-  (defmethod bit-and (self (other Self)) Self)
-  (defmethod bit-or  (self (other Self)) Self)
-  (defmethod bit-xor (self (other Self)) Self)
-  (defmethod bit-not (self) Self)
-  (defmethod shift (self (count int)) Self))                 ; the distance is always int (as with ash)
+  (defmethod logand (self (other Self)) Self)
+  (defmethod logior (self (other Self)) Self)
+  (defmethod logxor (self (other Self)) Self)
+  (defmethod lognot (self) Self)
+  (defmethod ash (self (count int)) Self))                   ; the distance is always int
 (deftrait Number (Add Sub Mul Rem Ord))                   ; tanpa metode; gabungan lima
 ```
 
-**Di dalam batas, Anda dapat menulis operator.** Metode `Add`/`Sub`/`Mul`/`Div` adalah operator itu sendiri.
-Pada trait lainnya, ketika penerimanya adalah variabel tipe yang dibatasi oleh `:where`, operator dibaca
-sebagai metode trait (`rem`→`remainder`, `logand`→`bit-and`, `=`→`equal`, `<`→`less` …):
+**Di dalam batas, Anda dapat menulis operator.** Metode setiap trait bernama sama dengan operator dan fungsi
+bawaan pada tipe konkret, sehingga ditulis dengan cara yang sama ketika penerimanya adalah variabel tipe
+yang dibatasi oleh `:where`:
 
 ```lisp
 (defun sum3<T> ((a T) (b T) (c T)) T (:where (Number T))

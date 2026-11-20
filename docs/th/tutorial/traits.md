@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/traits.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
+<!-- translated-from: docs/ja/tutorial/traits.md @ 6271c6d8b68694e1d27dd2e349b08117d2ef2bfb -->
 # Trait
 
 trait คือคำมั่นสัญญาว่า "ชนิดนี้รองรับการดำเนินการเหล่านี้" trait ทำให้หลายชนิดใช้การดำเนินการ
@@ -100,7 +100,7 @@ error: ...: type error: report: type `int` does not implement trait `shape` requ
 | Trait | เมทอดที่ต้อง implement | สิ่งที่เปิดใช้ได้ |
 |---|---|---|
 | `Equal` | `equal` | `equal`, `=`, `assert-equal`, รูปแบบ `(:= นิพจน์)` ของ `match`, `member` ที่ให้ `:test equal` เป็นต้น |
-| `Ord` | `less` | `less-equal`, `greater` และอื่น ๆ `Ord` สืบทอดจาก `Equal` |
+| `Ord` | `<` | `<=`, `>`, `>=` `Ord` สืบทอดจาก `Equal` |
 | `print-object` | `print-object` | วิธีที่ `println` และพวกเดียวกันแสดงค่า |
 | `Iter` | `next` | `doiter`, `map`, `filter`, `sort` และอื่น ๆ |
 | `Error` | `message`, `source` | ใช้เป็นชนิดข้อผิดพลาด ([การจัดการข้อผิดพลาด](errors.md)) |
@@ -115,9 +115,9 @@ error: ...: type error: report: type `int` does not implement trait `shape` requ
   (defmethod equal (self (other Self)) bool (= self::yen other::yen)))
 
 (impl Ord money
-  (defmethod less (self (other Self)) bool (< self::yen other::yen)))
+  (defmethod < (self (other Self)) bool (< self::yen other::yen)))
 
-(greater (make-instance 'money :yen 5) (make-instance 'money :yen 3))     ; => true (the default implementation in Ord)
+(> (make-instance 'money :yen 5) (make-instance 'money :yen 3))     ; => true (the default implementation in Ord)
 ```
 
 การ implement `print-object` ตัดสินว่า `println` แสดงค่าอย่างไร อาร์กิวเมนต์ `escape` เป็น `true`
@@ -139,7 +139,7 @@ error: ...: type error: report: type `int` does not implement trait `shape` requ
   (foldl (iter v)
          (lambda ((best Option<T>) (x T)) Option<T>
            (match best
-             ((Some b) (if (less b x) (Option::Some x) best))
+             ((Some b) (if (< b x) (Option::Some x) best))
              ((None) (Option::Some x))))
          (Option::None)))
 ```

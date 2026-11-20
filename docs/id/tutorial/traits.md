@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/traits.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
+<!-- translated-from: docs/ja/tutorial/traits.md @ 6271c6d8b68694e1d27dd2e349b08117d2ef2bfb -->
 # Trait
 
 Trait adalah janji bahwa "tipe ini mendukung operasi-operasi ini". Dengan trait, beberapa tipe dapat
@@ -101,7 +101,7 @@ tersedia untuk tipe Anda.
 | Trait | Metode yang diimplementasikan | Yang diaktifkan |
 |---|---|---|
 | `Equal` | `equal` | `equal`, `=`, `assert-equal`, pola `(:= ekspresi)` pada `match`, `member` dengan `:test equal`, dan sebagainya |
-| `Ord` | `less` | `less-equal`, `greater`, dan sebagainya. `Ord` mewarisi `Equal` |
+| `Ord` | `<` | `<=`, `>`, `>=`. `Ord` mewarisi `Equal` |
 | `print-object` | `print-object` | Cara nilai ditampilkan oleh `println` dan sejenisnya |
 | `Iter` | `next` | `doiter`, `map`, `filter`, `sort`, dan sebagainya |
 | `Error` | `message`, `source` | Pemakaian sebagai tipe kesalahan ([Penanganan Kesalahan](errors.md)) |
@@ -116,9 +116,9 @@ Mari implementasikan `Equal` dan `Ord` untuk tipe yang mewakili sejumlah uang. K
   (defmethod equal (self (other Self)) bool (= self::yen other::yen)))
 
 (impl Ord money
-  (defmethod less (self (other Self)) bool (< self::yen other::yen)))
+  (defmethod < (self (other Self)) bool (< self::yen other::yen)))
 
-(greater (make-instance 'money :yen 5) (make-instance 'money :yen 3))     ; => true (the default implementation in Ord)
+(> (make-instance 'money :yen 5) (make-instance 'money :yen 3))     ; => true (the default implementation in Ord)
 ```
 
 Mengimplementasikan `print-object` menentukan cara `println` menampilkan nilai. Argumen `escape`
@@ -141,7 +141,7 @@ mengimplementasikan `Ord`.
   (foldl (iter v)
          (lambda ((best Option<T>) (x T)) Option<T>
            (match best
-             ((Some b) (if (less b x) (Option::Some x) best))
+             ((Some b) (if (< b x) (Option::Some x) best))
              ((None) (Option::Some x))))
          (Option::None)))
 ```

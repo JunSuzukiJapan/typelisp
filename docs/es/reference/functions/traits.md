@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/traits.md @ 1663f849f4e6491e2a654bb9eeaa34635af179ac -->
+<!-- translated-from: docs/ja/reference/functions/traits.md @ 6271c6d8b68694e1d27dd2e349b08117d2ef2bfb -->
 # Traits estándar
 
 Los traits para la iteración, la comparación, la aritmética y la adición y extracción de elementos. Los demás traits estándar están en sus propios
@@ -34,13 +34,13 @@ los elementos pueda compararse.
 (deftrait Equal ()
   (defmethod equal (self (other Self)) bool))                ; obligatorio
 (deftrait Ord (Equal)                                     ; hereda de Equal
-  (defmethod less (self (other Self)) bool)                  ; obligatorio
-  (defmethod less-equal (self (other Self)) bool (not (less other self)))
-  (defmethod greater (self (other Self)) bool (less other self))
-  (defmethod greater-equal (self (other Self)) bool (not (less self other))))
+  (defmethod < (self (other Self)) bool)                     ; obligatorio
+  (defmethod <= (self (other Self)) bool (not (< other self)))
+  (defmethod > (self (other Self)) bool (< other self))
+  (defmethod >= (self (other Self)) bool (not (< self other))))
 ```
 
-Para implementar `Equal` se escribe `equal`, y para `Ord` solo `less`. Las implementaciones por defecto
+Para implementar `Equal` se escribe `equal`, y para `Ord` solo `<`. Las implementaciones por defecto
 completan el resto de `Ord`. `Ord` hereda de `Equal`, así que hace falta `impl Equal X` antes de `impl Ord X`.
 
 `(equal a b)` llama a la implementación de `Equal` del tipo de `a`. Escribirlo para un tipo que no
@@ -53,10 +53,10 @@ Cada método de trait puede llamarse directamente como función (dentro de una c
 | Nombre | Forma | Tipo | Descripción |
 |---|---|---|---|
 | `equal` | `(equal a b)` | `(A,A)→bool` where `Equal A` | Si son iguales (el `==` de Rust) |
-| `less` | `(less a b)` | `(A,A)→bool` where `Ord A` | `a < b` |
-| `less-equal` | `(less-equal a b)` | `(A,A)→bool` where `Ord A` | `a <= b` |
-| `greater` | `(greater a b)` | `(A,A)→bool` where `Ord A` | `a > b` |
-| `greater-equal` | `(greater-equal a b)` | `(A,A)→bool` where `Ord A` | `a >= b` |
+| `<` | `(< a b)` | `(A,A)→bool` where `Ord A` | menor que |
+| `<=` | `(<= a b)` | `(A,A)→bool` where `Ord A` | menor o igual |
+| `>` | `(> a b)` | `(A,A)→bool` where `Ord A` | mayor que |
+| `>=` | `(>= a b)` | `(A,A)→bool` where `Ord A` | mayor o igual |
 
 `Equal` está implementado para: todos los tipos numéricos (`i8` a `u32` / `f32` / `f64` / `int` / `ratio`),
 `bool` `char` `string` `symbol` `complex`, `Sexpr`, `cons-cell<A,B>` y las tuplas (elemento a elemento,
@@ -71,11 +71,8 @@ por contenido y cualquier otro átomo con `eql`. Esta comparación recorre los v
 ejecución y no llama a ningún método. Por eso un struct dentro de una lista se compara por identidad, como
 en CL, sea cual sea el `impl Equal` de su tipo.
 
-Los nombres de los métodos de `Ord` no se solapan con los operadores integrados (`< <= > >=`) ni con `lt`
-porque lo integrado no puede redefinirse y cada implementación delega en ellos. Los operadores de
-comparación escalares son métodos integrados por tipo de receptor ([Números](numbers.md),
-[Cadenas y caracteres](collections.md)). Dentro de una cota, el operador escrito se lee como el método del
-trait (capítulo 3). `=` pasa a ser `equal`, y `/=` pasa a ser `(not (equal a b))`.
+Los operadores de comparación escalares son métodos integrados por tipo de receptor ([Números](numbers.md), [Cadenas y caracteres](collections.md)),
+y son tal cual la implementación de `Ord`. Dentro de una cota, `=` pasa a ser `equal`, y `/=` pasa a ser `(not (equal a b))`.
 
 ## 3. Traits aritméticos (`Add` / `Sub` / `Mul` / `Div` / `Rem` / `Bits` / `Number`)
 
@@ -87,19 +84,19 @@ concretos usa los operadores incorporados** ([Números](numbers.md)) y no pasa p
 (deftrait Sub () (defmethod - (self (other Self)) Self))
 (deftrait Mul () (defmethod * (self (other Self)) Self))
 (deftrait Div () (:type Output) (defmethod / (self (other Self)) Output))
-(deftrait Rem () (defmethod remainder (self (other Self)) Self))
+(deftrait Rem () (defmethod rem (self (other Self)) Self))
 (deftrait Bits ()
-  (defmethod bit-and (self (other Self)) Self)
-  (defmethod bit-or  (self (other Self)) Self)
-  (defmethod bit-xor (self (other Self)) Self)
-  (defmethod bit-not (self) Self)
-  (defmethod shift (self (count int)) Self))                 ; la distancia es siempre int (como en ash)
+  (defmethod logand (self (other Self)) Self)
+  (defmethod logior (self (other Self)) Self)
+  (defmethod logxor (self (other Self)) Self)
+  (defmethod lognot (self) Self)
+  (defmethod ash (self (count int)) Self))                   ; la distancia es siempre int
 (deftrait Number (Add Sub Mul Rem Ord))                   ; sin métodos; una combinación de cinco
 ```
 
-**Dentro de una restricción se pueden escribir operadores.** Los métodos de `Add`/`Sub`/`Mul`/`Div` son los
-propios operadores. En los demás traits, cuando el receptor es una variable de tipo ligada por `:where`, los
-operadores se leen como métodos de trait (`rem`→`remainder`, `logand`→`bit-and`, `=`→`equal`, `<`→`less` …):
+**Dentro de una restricción se pueden escribir operadores.** Los métodos de cada trait se llaman igual que los
+operadores y funciones integradas de los tipos concretos, así que se escriben igual cuando el receptor es una
+variable de tipo ligada por `:where`:
 
 ```lisp
 (defun sum3<T> ((a T) (b T) (c T)) T (:where (Number T))
