@@ -5803,19 +5803,15 @@ const SOURCE_TEMPLATE: &str = r#"
 ;; `Match`/`FieldGet` need — `msg-form` compiles down to
 ;; the exact tagged `Sexpr::Str` representation
 ;; `compile-str` already produces, handed straight to
-;; `rt_panic` — which *unwinds* with the message rather
-;; than returning, so the boundary that entered
-;; compiled code turns it back into the same catchable
-;; `EvalError::Panic` an interpreted `(panic ...)`
-;; produces. Nothing changes on this side for that: the
-;; unwinding is all in `rt_panic`'s own
-;; `extern "C-unwind"` declaration, and a plain `call`
-;; to a function that unwinds needs no landing pad in
-;; this frame — only a frame the unwinder can walk,
-;; which the JIT and the AOT linker both give us (see
-;; `tests/compiled_unwind_test.rs`). `rt_match_fail`
-;; still aborts, but that is a checker-guaranteed
-;; unreachable, not a user-visible failure.
+;; `rt_panic` — which *raises* the message, so the
+;; boundary that entered compiled code turns it back
+;; into the same catchable `EvalError::Panic` an
+;; interpreted `(panic ...)` produces. Nothing here
+;; does that: `build-call` follows every call that can
+;; raise with the check that leaves this activation.
+;; `rt_match_fail` still aborts, but that is a
+;; checker-guaranteed unreachable, not a user-visible
+;; failure.
 ;; `Expr::Panic`'s own checked type is `Never`, so
 ;; nothing downstream ever reads this call's return
 ;; value for real.

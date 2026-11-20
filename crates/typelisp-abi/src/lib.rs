@@ -30,7 +30,7 @@ pub mod dribble;
 // `concat!` takes literals only. `scripts/regen-abi-version.sh` is what
 // rewrites them, and only when that description changed or the typelisp
 // version's MAJOR.MINOR did.
-macro_rules! with_abi_version { ($then:ident) => { $then!(0, 3, 64) }; }
+macro_rules! with_abi_version { ($then:ident) => { $then!(0, 3, 65) }; }
 
 macro_rules! dotted { ($major:literal, $minor:literal, $patch:literal) => { concat!($major, ".", $minor, ".", $patch) }; }
 
@@ -192,65 +192,85 @@ pub struct InterpretedUnwind;
 #[derive(Debug)]
 pub struct CompiledThrow;
 
-/// Makes the default panic hook stay quiet for the two payloads this crate
-/// raises deliberately ([`CompiledPanic`] and [`InterpretedUnwind`]),
-/// installed once on the first such unwind of the process.
-///
-/// Without this, unwinding one of them prints Rust's own
-/// `thread '...' panicked at ...: Box<dyn Any>` line before the interpreter
-/// ever gets to report the error properly. Any other payload — a real bug in
-/// the runtime — still reaches the previous hook untouched, so this hides
-/// nothing that was not raised on purpose as a typelisp-level failure.
-pub fn install_quiet_panic_hook() {
-    static INSTALLED: std::sync::OnceLock<()> = std::sync::OnceLock::new();
-    INSTALLED.get_or_init(|| {
-        let previous = std::panic::take_hook();
-        std::panic::set_hook(Box::new(move |info| {
-            let ours = info.payload().downcast_ref::<CompiledPanic>().is_some()
-                || info.payload().downcast_ref::<InterpretedUnwind>().is_some()
-                || info.payload().downcast_ref::<CompiledThrow>().is_some();
-            if !ours {
-                previous(info);
-            }
-        }));
-    });
+thread_local! {
+    /// The unwind raised on this thread that no driver or boundary has taken
+    /// yet — see [`raise`].
+    static RAISED: std::cell::RefCell<Option<Box<dyn std::any::Any + Send>>> = const { std::cell::RefCell::new(None) };
 }
 
-/// Unwinds out of compiled code with `msg` as a recoverable typelisp-level
-/// failure — the counterpart of [`fatal`] for everything the *language*
-/// defines an error for rather than the runtime.
-///
-/// Caught by [`crate::rt_run_entry`] in an AOT executable and by
-/// `typelisp::compile::catch_compiled_panic` on the JIT side, both of which
-/// turn it back into the `EvalError::Panic` the interpreted path produces for
-/// the same form — so a `catch`/`unwind-protect` region in between sees it,
-/// cleanups run, and the process survives.
-///
-/// **Every function that can reach this must be `extern "C-unwind"`.** A
-/// panic crossing a plain `extern "C"` boundary is defined to abort; see
-/// [`rt_panic`], where that constraint is spelled out in full.
-pub fn raise(msg: String) -> ! {
-    install_quiet_panic_hook();
-    std::panic::panic_any(CompiledPanic { message: msg })
+/// Proof that an unwind has been raised on this thread and is waiting to be
+/// taken ([`take_raised`]). What a function that can raise returns, so the
+/// fact travels in its type up to the shim boundary: a shim that receives
+/// one returns at once, and the compiled code that called it sees the raise
+/// (`rt_unwinding`) and leaves its activation with `STATUS_UNWIND`.
+#[must_use = "a raised unwind must be returned to the caller, not dropped"]
+#[derive(Debug)]
+pub struct Raised(());
+
+impl Raised {
+    /// What a shim returns once it has raised. No compiled code reads it:
+    /// the caller checks for the raise before it uses the value.
+    pub fn into_word(self) -> i64 {
+        0
+    }
 }
 
-/// Unwinds out of compiled code because an interpreted callee failed.
+/// Raises `msg` as a recoverable typelisp-level failure — the counterpart of
+/// [`fatal`] for everything the *language* defines an error for rather than
+/// the runtime.
 ///
-/// The counterpart of [`rt_panic`] for the other direction of the boundary:
-/// compiled code called into the interpreter, and the interpreter failed.
-/// Before this existed, the compiled `apply` and `:dyn` boundaries' interpreter
-/// hooks had nowhere to report to and aborted the process — including for
-/// ordinary, recoverable failures like a `(panic ...)` in an interpreted
-/// callback.
-///
-/// The caller must have parked the error where its catcher will look for it
-/// *before* calling this; see [`InterpretedUnwind`] for why it does not
-/// travel in the payload.
-pub fn unwind_interpreted_error() -> ! {
-    install_quiet_panic_hook();
-    std::panic::panic_any(InterpretedUnwind)
+/// Raising does not leave the function: it parks a [`CompiledPanic`] and
+/// returns. The caller returns the [`Raised`] it gets, and so on up to the
+/// shim, which returns to compiled code; that code checks, and the driver
+/// takes the parked payload and carries it to the `catch`/`unwind-protect`
+/// region that should see it. The boundary that entered compiled code turns
+/// it back into the `EvalError::Panic` the interpreted path produces for the
+/// same form.
+pub fn raise(msg: String) -> Raised {
+    raise_payload(Box::new(CompiledPanic { message: msg }))
 }
 
+/// [`raise`] for an exit whose payload is already made: a [`CompiledThrow`]
+/// or [`InterpretedUnwind`] (whose halves the caller parked first), or one a
+/// driver carried out and hands on unchanged.
+///
+/// An unwind raised while another waits replaces it — a cleanup that fails
+/// while an exit travels wins, as CLHS says.
+pub fn raise_payload(payload: Box<dyn std::any::Any + Send>) -> Raised {
+    RAISED.with(|r| *r.borrow_mut() = Some(payload));
+    Raised(())
+}
+
+/// Whether an unwind is waiting on this thread. Does not take it: the code
+/// that asks only decides to leave, and the driver it returns to takes it.
+pub fn is_raised() -> bool {
+    RAISED.with(|r| r.borrow().is_some())
+}
+
+/// `Err` when an unwind is waiting on this thread: what Rust code asks after
+/// calling something that may have raised and answered with a plain word —
+/// compiled code, or a hook into the interpreter.
+pub fn raised() -> Result<(), Raised> {
+    if is_raised() {
+        Err(Raised(()))
+    } else {
+        Ok(())
+    }
+}
+
+/// Takes the unwind waiting on this thread — what a driver does when an
+/// activation returns, and a boundary when the compiled code it called does.
+pub fn take_raised() -> Option<Box<dyn std::any::Any + Send>> {
+    RAISED.with(|r| r.borrow_mut().take())
+}
+
+/// Raises the exit of an interpreted callee: compiled code called into the
+/// interpreter, and the interpreter failed. The caller must have parked the
+/// error where its catcher will look for it *before* calling this; see
+/// [`InterpretedUnwind`] for why it does not travel in the payload.
+pub fn unwind_interpreted_error() -> Raised {
+    raise_payload(Box::new(InterpretedUnwind))
+}
 
 // ---- the driver protocol (Phase C2) -------------------------------------
 //

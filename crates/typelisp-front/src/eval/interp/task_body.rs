@@ -102,7 +102,7 @@ impl TaskBody for TyplBody {
     fn step(&mut self, heap: &mut Heap, cx: &TyplCx) -> Progress<EvalError> {
         match &mut self.0 {
             Kind::Compiled(t) => {
-                // A foreign unwind out of the chain — an interpreted failure
+                // A raise left waiting by the chain — an interpreted failure
                 // reached through a machine frame on the interpreter's thread
                 // (the printer's door, say) — is the task's failure like any
                 // other, not a crash of the thread stepping it.
@@ -221,7 +221,7 @@ impl Interp {
 ///
 /// Only ever called as `typelisp_rt`'s apply hook.
 unsafe extern "C-unwind" fn refuse_apply_off_main(_closure: i64, _args: *const i64, _argc: u32) -> i64 {
-    typelisp_abi::raise(OFF_MAIN.to_string())
+    typelisp_abi::raise(OFF_MAIN.to_string()).into_word()
 }
 
 /// [`refuse_apply_off_main`] for a `:dyn` call whose method nobody compiled.
@@ -230,7 +230,7 @@ unsafe extern "C-unwind" fn refuse_apply_off_main(_closure: i64, _args: *const i
 ///
 /// Only ever called as `typelisp_rt`'s `:dyn` hook.
 unsafe extern "C-unwind" fn refuse_dyn_off_main(_vtable: u32, _slot: u32) -> i64 {
-    typelisp_abi::raise(OFF_MAIN.to_string())
+    typelisp_abi::raise(OFF_MAIN.to_string()).into_word()
 }
 
 const OFF_MAIN: &str = "an interpreted function was called from compiled code running on a worker thread, \

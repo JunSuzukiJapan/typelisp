@@ -197,9 +197,8 @@ pub trait CompiledBody {
     /// Calls it with `args` already in the compiled representation.
     ///
     /// Provided, not required: the address is the only thing that varies per
-    /// implementor. `extern "C-unwind"`, not `extern "C"`, because a
-    /// `(panic ...)` in a classic body unwinds out through here — see
-    /// `crate::compile::CompiledSignature`.
+    /// implementor. A `(panic ...)` in the body comes back as a raise waiting
+    /// on the thread, which the caller's `catch_compiled_panic` takes.
     fn call(&self, args: &[i64]) -> i64 {
         call_body(self.address(), self.body_abi(), args)
     }

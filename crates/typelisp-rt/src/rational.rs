@@ -120,7 +120,7 @@ pub unsafe extern "C" fn rt_rational_mul(args: *const i64, argc: u32) -> i64 {
 pub unsafe extern "C-unwind" fn rt_rational_div(args: *const i64, argc: u32) -> i64 {
     let (a, b) = rational_pair(args, argc, "rt_rational_div");
     if b.numer().sign() == Sign::NoSign {
-        raise("divide by zero".to_string());
+        return raise("divide by zero".to_string()).into_word();
     }
     answer(a / b)
 }

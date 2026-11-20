@@ -1,7 +1,7 @@
 //! Non-local exits: match failure, `panic`, and `catch`/`throw`.
 
 use std::cell::RefCell;
-use typelisp_abi::{active_heap, decode, encode, fatal, install_quiet_panic_hook, raise, CompiledPanic, CompiledThrow, InterpretedUnwind};
+use typelisp_abi::{active_heap, decode, encode, fatal, raise, CompiledPanic, CompiledThrow, InterpretedUnwind};
 use typelisp_mem::Value;
 
 /// `compiler.rs`'s `compile-match-arms` calls this once every arm's
@@ -22,32 +22,14 @@ pub unsafe extern "C" fn rt_match_fail(_args: *const i64, _argc: u32) -> i64 {
 }
 
 /// `(panic msg)` for compiled code (`core_bridge`'s `panic` arm /
-/// `compiler.rs`'s `compile-panic`): unwinds with a [`CompiledPanic`]
-/// carrying `msg`, so the boundary that entered compiled code can turn it
-/// back into the same recoverable `EvalError::Panic` the interpreted path
-/// produces.
-///
-/// **`extern "C-unwind"`, not `extern "C"`, is what makes this legal.** A
-/// panic reaching a plain `extern "C"` boundary is defined to abort the
-/// process (the Rustonomicon's "FFI and unwinding"), which is exactly what
-/// this function used to do on purpose. Rust 1.71 stabilized the `-unwind`
-/// ABI strings for this case; `tests/compiled_unwind_test.rs` is the probe
-/// that established the rest of the pipeline cooperates — JIT-compiled frames
-/// are walkable by the system unwinder, and no `uwtable` attribute is needed
-/// on the generated functions.
-///
-/// One non-obvious constraint comes with it: **the code being unwound through
-/// must outlive the unwind.** Freeing it mid-unwind can leave the unwinder
-/// unable to finish the *next* unwind. `CompiledFn` frees its code only
-/// through `compile::retire_llvm`, when no compiled chain stands.
+/// `compiler.rs`'s `compile-panic`): raises a [`CompiledPanic`] carrying
+/// `msg`, so the boundary that entered compiled code can turn it back into
+/// the same recoverable `EvalError::Panic` the interpreted path produces.
 ///
 /// # Safety
 ///
 /// `argc` must be `>= 1`, `args[0]` must decode to a `Value::Str`; a `Heap`
-/// must already be registered on this thread. Every frame between this call
-/// and the catching boundary must tolerate being unwound through — for
-/// compiled frames that is what the probe above establishes, and for the
-/// `rt_*` frames in between it is why they are `extern "C-unwind"` too.
+/// must already be registered on this thread.
 #[no_mangle]
 pub unsafe extern "C-unwind" fn rt_panic(args: *const i64, argc: u32) -> i64 {
     if argc < 1 {
@@ -57,40 +39,34 @@ pub unsafe extern "C-unwind" fn rt_panic(args: *const i64, argc: u32) -> i64 {
         Value::Str(id) => active_heap().string(id).to_string(),
         _ => fatal("rt_panic: argument is not a Str"),
     };
-    raise(message)
+    raise(message).into_word()
+}
+
+/// Whether an unwind was raised and is waiting (`typelisp_abi::raise`) —
+/// what generated code asks right after a call that may have raised, before
+/// it uses the answer (`compile::raise_check`). `1` sends it out of its
+/// activation; the driver takes the unwind.
+///
+/// # Safety
+///
+/// None: it reads a thread-local and touches no argument.
+#[no_mangle]
+pub unsafe extern "C" fn rt_unwinding(_args: *const i64, _argc: u32) -> i64 {
+    i64::from(typelisp_abi::is_raised())
 }
 
 // ---- catch / throw / unwind-protect --------------------------------------
 //
-// A `throw` travels as a Rust panic, because that is the only unwind every
-// frame between the throw and its catch can survive: compiled frames are
-// walkable (`tests/compiled_unwind_test.rs`), and the interpreted frames that
-// may sit in between (compiled -> a machine-frame driver -> interpreted ->
-// compiled)
-// are Rust ones, which can only catch Rust panics — a foreign exception
-// reaching `catch_unwind` aborts with "Rust cannot catch foreign exceptions".
+// A `throw` is raised like any other exit (`typelisp_abi::raise_payload`):
+// its tag and value are parked here, a [`CompiledThrow`] says so, and the
+// shim returns. The compiled code that called it leaves its activation with
+// `STATUS_UNWIND`, and the driver (`coroutine::activation`) takes the
+// payload. It can travel no further than that one activation, because a Lisp
+// call is a driver round trip and not a machine call.
 //
-// **Which is also why a `catch` cannot be an LLVM landing pad.** Stopping an
-// unwind means consuming the exception object, and for a Rust panic only
-// `std::panic::catch_unwind` can: the object's own `exception_cleanup` aborts
-// ("Rust panics must be rethrown") and `panic_count` is decremented nowhere
-// else, so a landing pad that swallowed one would leak the allocation and
-// leave `thread::panicking()` true for the rest of the process.
-//
-// So the Rust frame that does the catching is put where a Rust frame can
-// legitimately go, and since C4 there is exactly one such place: the
-// **driver**, at the boundary where it enters a compiled activation
-// (`coroutine::activation`). One catch for the whole tier, rather than one
-// per call inside a protected region, because a Lisp call is a driver round
-// trip and not a machine call — so a panic raised in compiled code can only
-// travel as far as the activation that raised it, and the driver is standing
-// at its exit.
-//
-// Where it goes next is then frame bookkeeping: the driver asks each frame,
+// Where it goes next is frame bookkeeping: the driver asks each frame,
 // innermost first, whether it declares a handler
-// (`typelisp_abi::FRAME_HANDLER_SLOT`), and resumes the first that does. The
-// nine `rt_protected_*` trampolines this section used to hold were the
-// per-call version of that, and C4 deleted them.
+// (`typelisp_abi::FRAME_HANDLER_SLOT`), and resumes the first that does.
 
 thread_local! {
     /// The tag of the throw currently in flight *for whichever task's `step`
@@ -258,11 +234,11 @@ pub unsafe fn park_error_for_chain() {
 
 /// Raises the unwind for a throw already parked by [`park_throw`].
 ///
-/// The counterpart of [`unwind_interpreted_error`] for the throw channel; the
-/// `typelisp` crate calls it after parking an interpreted `EvalError::Throw`.
-pub fn unwind_throw() -> ! {
-    install_quiet_panic_hook();
-    std::panic::panic_any(CompiledThrow)
+/// The counterpart of [`typelisp_abi::unwind_interpreted_error`] for the
+/// throw channel; the `typelisp` crate calls it after parking an interpreted
+/// `EvalError::Throw`.
+pub fn unwind_throw() -> typelisp_abi::Raised {
+    typelisp_abi::raise_payload(Box::new(CompiledThrow))
 }
 
 /// `(throw 'tag value)` for compiled code (`compiler.rs`'s `compile-throw`):
@@ -287,7 +263,7 @@ pub unsafe extern "C-unwind" fn rt_throw(args: *const i64, argc: u32) -> i64 {
     };
     let value = decode(*args.add(1));
     park_throw(tag, value);
-    unwind_throw()
+    unwind_throw().into_word()
 }
 
 /// Whether the throw currently in flight carries tag `args[0]` — a `catch`'s
@@ -336,9 +312,9 @@ pub unsafe extern "C" fn rt_throw_matches(args: *const i64, argc: u32) -> i64 {
 /// other half of a `catch` claiming one, called only after
 /// [`rt_throw_matches`] said yes.
 ///
-/// Dropping the parked panic payload here is what makes the claim final: a
-/// later [`rt_resume_unwind`] has nothing to re-raise, which is exactly right,
-/// since control has rejoined the catching function's ordinary flow.
+/// Dropping the parked payload here is what makes the claim final: nothing
+/// is left to carry on, which is exactly right, since control has rejoined
+/// the catching function's ordinary flow.
 ///
 /// # Safety
 ///
@@ -355,12 +331,12 @@ pub unsafe extern "C" fn rt_throw_take_value(_args: *const i64, _argc: u32) -> i
     }
 }
 
-/// Classifies an unwind caught at a compiled activation's boundary
-/// (`coroutine::activation`) and parks it for the driver to carry on with.
+/// Classifies an unwind a compiled activation raised (`coroutine::activation`)
+/// and parks it for the driver to carry on with.
 ///
-/// Anything that is not one of the runtime's three deliberate payloads keeps
-/// unwinding: a genuine bug in the runtime or in generated code must not come
-/// back as a plausible-looking typelisp condition.
+/// Anything that is not one of the runtime's three deliberate payloads is
+/// fatal: a genuine bug in the runtime must not come back as a
+/// plausible-looking typelisp condition.
 ///
 /// A throw keeps its parked tag and value — its flight is not over, it is
 /// being carried by the driver instead of by the unwinder. Anything else
@@ -378,7 +354,7 @@ pub unsafe extern "C" fn rt_throw_take_value(_args: *const i64, _argc: u32) -> i
 pub(crate) unsafe fn park_activation_unwind(payload: Box<dyn std::any::Any + Send>) {
     let ours = payload.is::<CompiledThrow>() || payload.is::<CompiledPanic>() || payload.is::<InterpretedUnwind>();
     if !ours {
-        std::panic::resume_unwind(payload);
+        fatal("an unwind was raised whose payload the runtime does not raise");
     }
     if !payload.is::<CompiledThrow>() {
         clear_throw();
@@ -394,17 +370,14 @@ pub fn take_activation_unwind() -> Option<Box<dyn std::any::Any + Send>> {
     CAUGHT_UNWIND.with(|cell| cell.borrow_mut().take())
 }
 
-/// Re-raises what [`park_activation_unwind`] parked — what a driver whose
+/// Raises again what [`park_activation_unwind`] parked — what a driver whose
 /// caller is a machine frame does when the unwind passed its outermost frame.
 ///
-/// # Safety
-///
-/// Nothing unsafe happens here; it is `fatal` rather than a panic when
-/// nothing is carried, because reaching it with an empty slot means the
-/// driver reported an unwind that never was.
-pub(crate) fn resume_activation_unwind() -> ! {
+/// It is `fatal` when nothing is carried, because reaching it with an empty
+/// slot means the driver reported an unwind that never was.
+pub(crate) fn resume_activation_unwind() -> typelisp_abi::Raised {
     match take_activation_unwind() {
-        Some(payload) => std::panic::resume_unwind(payload),
+        Some(payload) => typelisp_abi::raise_payload(payload),
         None => fatal("resume_activation_unwind: the driver reported an unwind but none is being carried"),
     }
 }

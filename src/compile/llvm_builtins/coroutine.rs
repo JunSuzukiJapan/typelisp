@@ -248,6 +248,7 @@ fn emit_rt_call(
     let call = b
         .build_call(f, &[arr.into(), ctx.i32_type().const_int(vals.len() as u64, false).into()], name)
         .map_err(|e| err("call", e.to_string()))?;
+    crate::compile::raise_check::after_call(b, f).map_err(|e| err("raise check", e))?;
     Ok(match call.try_as_basic_value() {
         inkwell::values::ValueKind::Basic(v) => Some(v),
         inkwell::values::ValueKind::Instruction(_) => None,

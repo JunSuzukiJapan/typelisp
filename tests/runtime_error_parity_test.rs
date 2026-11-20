@@ -389,8 +389,7 @@ fn a_runtime_failure_unwinds_through_intermediate_compiled_frames() {
 /// And the session goes on afterwards. A REPL that died on its user's first
 /// `(rem 5 0)` was the visible cost of the old behavior; here the same heap,
 /// checker and interpreter keep answering — including after failing twice,
-/// which is where a mishandled unwind shows up (see `compiled_unwind_test`'s
-/// engine-lifetime probe).
+/// which is where a raise left waiting would show up.
 #[test]
 fn a_session_survives_a_compiled_runtime_failure_and_keeps_evaluating() {
     let mut s = Session::new();

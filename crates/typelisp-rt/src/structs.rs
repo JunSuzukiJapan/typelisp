@@ -1,6 +1,6 @@
 //! Boxed structs (`defstruct`, `Vector<T>`): construction and field access.
 
-use typelisp_abi::{active_heap, decode, encode, fatal, raise};
+use typelisp_abi::{active_heap, decode, encode, fatal, raise, Raised};
 use typelisp_mem::{BoxId, TypeId, Value};
 
 // ---- boxed objects (Struct) ------------------------------------------------
@@ -65,11 +65,11 @@ pub unsafe extern "C" fn rt_struct_new(args: *const i64, argc: u32) -> i64 {
 ///
 /// A `Heap` must already be registered on this thread and `id` must name a
 /// live boxed struct in it.
-unsafe fn checked_field_index(id: BoxId, idx: i64) -> usize {
+unsafe fn checked_field_index(id: BoxId, idx: i64) -> Result<usize, Raised> {
     if idx < 0 || idx as usize >= active_heap().struct_field_count(id) {
-        raise(format!("Vector: index {} out of bounds", idx));
+        return Err(raise(format!("Vector: index {} out of bounds", idx)));
     }
-    idx as usize
+    Ok(idx as usize)
 }
 
 /// `(rt-struct-field-get s idx)` for compiled code — the `idx`-th field of
@@ -93,8 +93,10 @@ pub unsafe extern "C-unwind" fn rt_struct_field_get(args: *const i64, argc: u32)
         Value::Boxed(id) => id,
         _ => fatal("rt_struct_field_get: first argument is not a boxed Sexpr"),
     };
-    let idx = checked_field_index(id, *args.add(1));
-    encode(active_heap().struct_field(id, idx))
+    match checked_field_index(id, *args.add(1)) {
+        Ok(idx) => encode(active_heap().struct_field(id, idx)),
+        Err(raised) => raised.into_word(),
+    }
 }
 
 /// `(rt-struct-field-set! s idx val)` for compiled code — overwrites the
@@ -118,7 +120,10 @@ pub unsafe extern "C-unwind" fn rt_struct_field_set(args: *const i64, argc: u32)
         Value::Boxed(id) => id,
         _ => fatal("rt_struct_field_set: first argument is not a boxed Sexpr"),
     };
-    let idx = checked_field_index(id, *args.add(1));
+    let idx = match checked_field_index(id, *args.add(1)) {
+        Ok(idx) => idx,
+        Err(raised) => return raised.into_word(),
+    };
     let val = decode(*args.add(2));
     active_heap().struct_set_field(id, idx, val);
     0

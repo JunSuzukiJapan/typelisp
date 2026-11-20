@@ -277,7 +277,7 @@ pub unsafe extern "C-unwind" fn rt_c_alloc(args: *const i64, argc: u32) -> i64 {
     let positions = a[4..].chunks(2).map(|p| (p[0] as usize, type_arg(p[1], "rt_c_alloc"))).collect();
     match alloc(a[0] as u64, a[1], a[2] as usize, a[3] as usize, positions) {
         Ok(p) => p as i64,
-        Err(msg) => raise(msg),
+        Err(msg) => raise(msg).into_word(),
     }
 }
 
@@ -292,7 +292,7 @@ pub unsafe extern "C-unwind" fn rt_c_ptr_check(args: *const i64, argc: u32) -> i
     let a = args_of(args, argc, 2, "rt_c_ptr_check");
     match check(a[0] as usize, type_arg(a[1], "rt_c_ptr_check")) {
         Ok(()) => a[0],
-        Err(msg) => raise(msg),
+        Err(msg) => raise(msg).into_word(),
     }
 }
 
@@ -307,7 +307,7 @@ pub unsafe extern "C-unwind" fn rt_c_index(args: *const i64, argc: u32) -> i64 {
     let a = args_of(args, argc, 4, "rt_c_index");
     match index(a[0] as usize, a[1], a[2] as usize, type_arg(a[3], "rt_c_index")) {
         Ok(p) => p as i64,
-        Err(msg) => raise(msg),
+        Err(msg) => raise(msg).into_word(),
     }
 }
 

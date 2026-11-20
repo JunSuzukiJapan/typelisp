@@ -14,21 +14,21 @@
 //! ([`rt_ffi_callback_register`]); a session fills it on first use through
 //! the factory the front end installs ([`set_factory`]).
 //!
-//! # Failures never unwind through C
+//! # Failures wait for C to return
 //!
-//! A `panic` or an uncaught `throw` in a callback is a Rust unwind, and C's
-//! frames sit between the callback and whoever could catch it — unwinding
-//! through them is undefined. So the failure is kept on this thread and C is
-//! handed a zero; any further callback while it is kept returns zero at once
-//! without running; and the FFI thunk re-raises it the moment the C function
-//! returns ([`resume_pending`], from `rt_ffi_leave_native`).
+//! A `panic` or an uncaught `throw` in a callback is raised, and C's frames
+//! sit between the callback and whoever could catch it. So the failure is
+//! kept on this thread and C is handed a zero; any further callback while it
+//! is kept returns zero at once without running; and the FFI thunk raises it
+//! again the moment the C function returns ([`resume_pending`], from
+//! `rt_ffi_leave_native`).
 
 use std::any::Any;
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
 
-use typelisp_abi::{active_heap, fatal, raise};
+use typelisp_abi::{active_heap, fatal, raise, Raised};
 use typelisp_mem::{NsId, SymRef, TypeId, Value};
 
 use crate::decode;
@@ -74,12 +74,13 @@ pub fn set_factory(f: fn(Callback) -> Result<usize, String>) {
     let _ = FACTORY.set(f);
 }
 
-/// Re-raises a callback's failure kept while C was running, if there is one.
-/// Called by `rt_ffi_leave_native` once the C function has returned and this
-/// thread is running typelisp again.
-pub fn resume_pending() {
-    if let Some(payload) = PENDING.with(|p| p.borrow_mut().take()) {
-        std::panic::resume_unwind(payload);
+/// Raises again a callback's failure kept while C was running, if there is
+/// one. Called by `rt_ffi_leave_native` once the C function has returned and
+/// this thread is running typelisp again.
+pub fn resume_pending() -> Result<(), Raised> {
+    match PENDING.with(|p| p.borrow_mut().take()) {
+        Some(payload) => Err(typelisp_abi::raise_payload(payload)),
+        None => Ok(()),
     }
 }
 
@@ -110,7 +111,7 @@ pub unsafe extern "C-unwind" fn rt_ffi_callback_address(args: *const i64, argc: 
         // nothing is registered here.
         Some(make) => match make((ns, sym, ty)) {
             Ok(addr) => addr as i64,
-            Err(msg) => raise(msg),
+            Err(msg) => raise(msg).into_word(),
         },
         None => fatal("rt_ffi_callback_address: no entry was registered for this callback at startup"),
     }
@@ -215,30 +216,33 @@ pub unsafe extern "C" fn rt_ffi_callback_invoke(args: *const i64, argc: u32) -> 
     }
     let triples: Vec<(i64, i64, i64)> =
         (0..n).map(|i| (*args.add(2 + 3 * i), *args.add(3 + 3 * i), *args.add(4 + 3 * i))).collect();
-    let run = std::panic::AssertUnwindSafe(|| {
+    let run = || -> Result<i64, Raised> {
         let mut words = Vec::with_capacity(n);
         for (kind, word, aux) in &triples {
             words.push(match kind {
                 0 => *word,
                 // Allocating a string never collects, so the strings made
                 // before the body starts need no roots of their own.
-                1 => callback_string(*word),
+                1 => callback_string(*word)?,
                 2 => {
                     let pointee = TypeId::from_word(*aux)
                         .unwrap_or_else(|| fatal("rt_ffi_callback_invoke: a typed pointer's pointee is not a type"));
                     match crate::c_mem::check(*word as usize, pointee) {
                         Ok(()) => *word,
-                        Err(msg) => raise(msg),
+                        Err(msg) => return Err(raise(msg)),
                     }
                 }
                 k => fatal(&format!("rt_ffi_callback_invoke: unknown argument kind {}", k)),
             });
         }
         crate::drive_to_completion(f, &words, &[], "a C callback")
-    });
-    match std::panic::catch_unwind(run) {
+    };
+    match run() {
         Ok(v) => v,
-        Err(payload) => {
+        // Kept rather than left raised: what C calls next must not see it,
+        // and nothing but the thunk around the C call may raise it again.
+        Err(_raised) => {
+            let payload = typelisp_abi::take_raised().unwrap_or_else(|| fatal("rt_ffi_callback_invoke: a raise with nothing raised"));
             PENDING.with(|p| *p.borrow_mut() = Some(payload));
             0
         }
@@ -248,24 +252,24 @@ pub unsafe extern "C" fn rt_ffi_callback_invoke(args: *const i64, argc: u32) -> 
 /// A C string a callback was handed, copied onto the heap as a tagged string.
 /// Raises — inside the callback, where it is kept like any other failure —
 /// if it is null or not UTF-8.
-unsafe fn callback_string(p: i64) -> i64 {
+unsafe fn callback_string(p: i64) -> Result<i64, Raised> {
     if p == 0 {
-        raise(
+        return Err(raise(
             "ffi: C passed a callback a null pointer where a `string` was declared. Declare the \
              parameter as `ptr` if it can be null."
                 .to_string(),
-        );
+        ));
     }
     let bytes = std::ffi::CStr::from_ptr(p as usize as *const std::ffi::c_char).to_bytes();
     match std::str::from_utf8(bytes) {
         Ok(s) => {
             let s = s.to_string();
-            crate::encode(active_heap().alloc_string(s))
+            Ok(crate::encode(active_heap().alloc_string(s)))
         }
-        Err(_) => raise(
+        Err(_) => Err(raise(
             "ffi: C passed a callback bytes that are not valid UTF-8 where a `string` was \
              declared. Declare the parameter as `ptr` to handle the bytes yourself."
                 .to_string(),
-        ),
+        )),
     }
 }

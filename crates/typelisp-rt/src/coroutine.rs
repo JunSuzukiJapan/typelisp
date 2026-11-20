@@ -50,16 +50,8 @@ use typelisp_mem::{FrameRaw, Heap};
 // decode it (`decode_compiled_return`).
 
 /// A coroutine-ABI compiled function: takes the address of its frame's words
-/// (or `0` on first entry), returns a status word.
-///
-/// `"C-unwind"`, like every other compiled-body pointer type in the tree
-/// (`CompiledSignature`, `ApplyInterpretedFn`, `DynSlotClosureFn`): a body
-/// can reach `rt_panic`/`rt_throw`, which unwind, and a `"C"` pointer
-/// promises the caller they cannot. This said `"C"` from C2c until C4 and
-/// happened to work — the call site LLVM emits for a `nounwind` callee still
-/// has a walkable frame — but it was a promise the callee did not keep, and
-/// `catch_unwind` at the driver's boundary is only meaningful if the unwind
-/// is allowed to get there.
+/// (or `0` on first entry), returns a status word. A raise inside it comes
+/// back as `STATUS_UNWIND` with the unwind waiting (`typelisp_abi::raise`).
 pub type CoroutineFn = unsafe extern "C-unwind" fn(i64) -> i64;
 
 /// Why a drive stopped short of an answer.
@@ -88,7 +80,7 @@ pub enum Paused {
     /// An unwind passed the outermost frame this driver owned without
     /// finding a handler. The chain is gone — every frame of it has been
     /// popped and its roots cut back — and what is unwinding is parked for
-    /// whoever drove to carry on with ([`resume_unwinding`]).
+    /// whoever drove to carry on with ([`resume_unwinding`] raises it again).
     Unwinding,
 }
 
@@ -235,10 +227,9 @@ impl FrameStack {
     /// is asked for a handler, and the walk goes on from there.
     ///
     /// What an *interpreted* callee's non-local exit does when the call came
-    /// from compiled code. Until C5 that travelled as a Rust panic through
-    /// the machine frames in between; there are none left to travel through,
-    /// so the exit is handed to the chain as the status it would have become
-    /// anyway.
+    /// from compiled code, and what an interpreted `apply` on a machine frame
+    /// does when it raised: the exit is handed to the chain as the status a
+    /// compiled raise becomes.
     pub fn raise(&mut self, heap: &mut Heap, base: usize) -> Result<i64, Paused> {
         self.drive(heap, base, STATUS_UNWIND)
     }
@@ -272,24 +263,21 @@ impl FrameStack {
         f: CoroutineFn,
         args: &[i64],
         env: &[i64],
-        apply: impl Fn(i64, &[i64]) -> i64,
+        apply: impl Fn(i64, &[i64]) -> Result<i64, typelisp_abi::Raised>,
     ) -> Result<i64, Paused> {
         let base = self.frames.len();
         let mut outcome = self.run_with_env(heap, f, args, env);
         loop {
             match outcome {
                 Err(Paused::Applying { closure, args }) => {
-                    let v = apply(closure, &args);
-                    self.set_top_value(heap, v);
-                    outcome = self.resume(heap, base);
+                    let answer = apply(closure, &args);
+                    outcome = self.answer_apply(heap, base, answer);
                 }
                 Err(Paused::ApplyingDyn { vtable, slot, args }) => {
                     // SAFETY: the slot is one a compiled `:dyn` site named, in
                     // a vtable this heap's program registered.
-                    let closure = unsafe { crate::reify_dyn_slot(vtable, slot, "a :dyn call") };
-                    let v = apply(closure, &args);
-                    self.set_top_value(heap, v);
-                    outcome = self.resume(heap, base);
+                    let answer = unsafe { crate::reify_dyn_slot(vtable, slot, "a :dyn call") }.and_then(|closure| apply(closure, &args));
+                    outcome = self.answer_apply(heap, base, answer);
                 }
                 Err(Paused::Suspended) => {
                     outcome = match crate::sched::pending_wait(heap) {
@@ -328,6 +316,22 @@ impl FrameStack {
                     };
                 }
                 other => return other,
+            }
+        }
+    }
+
+    /// Hands what an interpreted `apply` on this machine frame answered to the
+    /// frame waiting for it — or, when it raised, raises that into the chain,
+    /// so a `catch` or `unwind-protect` in it sees the callee's exit.
+    fn answer_apply(&mut self, heap: &mut Heap, base: usize, answer: Result<i64, typelisp_abi::Raised>) -> Result<i64, Paused> {
+        match answer {
+            Ok(v) => {
+                self.set_top_value(heap, v);
+                self.resume(heap, base)
+            }
+            Err(_raised) => {
+                park_raised();
+                self.raise(heap, base)
             }
         }
     }
@@ -490,15 +494,10 @@ impl FrameStack {
                         // catch is `activation`'s, for its reason: this is a
                         // compiled activation too.
                         crate::Callee::Classic { f, env } => {
-                            let call = std::panic::AssertUnwindSafe(|| unsafe {
-                                f(args.as_ptr(), args.len() as u32, env.as_ptr(), env.len() as u32)
-                            });
-                            status = match std::panic::catch_unwind(call) {
-                                Ok(v) => self.hand_back(v),
-                                Err(payload) => {
-                                    unsafe { crate::park_activation_unwind(payload) };
-                                    STATUS_UNWIND
-                                }
+                            let v = unsafe { f(args.as_ptr(), args.len() as u32, env.as_ptr(), env.len() as u32) };
+                            status = match typelisp_abi::is_raised() {
+                                true => taken_raise(true, STATUS_UNWIND, "a classic-ABI closure body"),
+                                false => self.hand_back(v),
                             };
                         }
                         crate::Callee::Interpreted => return Err(Paused::Applying { closure, args }),
@@ -523,15 +522,10 @@ impl FrameStack {
                             // SAFETY: as above, under the plain
                             // `compiled_fn_type` signature.
                             let f: crate::ClassicMethodFn = unsafe { std::mem::transmute(ptr) };
-                            let call = std::panic::AssertUnwindSafe(|| unsafe {
-                                f(args.as_ptr(), args.len() as u32)
-                            });
-                            status = match std::panic::catch_unwind(call) {
-                                Ok(v) => self.hand_back(v),
-                                Err(payload) => {
-                                    unsafe { crate::park_activation_unwind(payload) };
-                                    STATUS_UNWIND
-                                }
+                            let v = unsafe { f(args.as_ptr(), args.len() as u32) };
+                            status = match typelisp_abi::is_raised() {
+                                true => taken_raise(true, STATUS_UNWIND, "a classic-ABI method body"),
+                                false => self.hand_back(v),
                             };
                         }
                     }
@@ -610,38 +604,59 @@ unsafe fn activation_on(f: CoroutineFn, raw: FrameRaw) -> i64 {
     activation(f, raw.data() as i64)
 }
 
-/// Runs one compiled activation with the driver's catch around it.
+/// Runs one compiled activation and takes what it raised.
 ///
-/// This is where raising an unwind meets the driver protocol. Compiled code
-/// raises the way it always did — `rt_throw`/`rt_panic` unwind, and so does a
-/// runtime error or an interpreted callee reached on a machine frame —
-/// but the unwind now travels no further than the one activation that raised
-/// it, because Lisp calls are driver round trips and not machine calls. The
-/// driver catches it here and turns it into a status, so the *travelling*
-/// part of an unwind is frame bookkeeping rather than a Rust panic crossing
-/// frames it knows nothing about.
+/// This is where raising an unwind meets the driver protocol. A shim that
+/// raises (`rt_throw`, `rt_panic`, a runtime error, an interpreted callee
+/// reached on a machine frame) parks the unwind and returns
+/// (`typelisp_abi::raise`); the compiled code that called it checks, and
+/// leaves its activation with `STATUS_UNWIND`. The unwind travels no further
+/// than that one activation, because Lisp calls are driver round trips and
+/// not machine calls, and the driver takes it here — so the *travelling* part
+/// of an unwind is frame bookkeeping.
 ///
-/// A payload that is none of the runtime's three deliberate kinds keeps
-/// unwinding untouched (`park_activation_unwind`): a genuine bug in the
-/// runtime or in generated code must not come back as a plausible-looking
-/// typelisp condition.
+/// An activation that comes back with something else while an unwind waits
+/// went on running after a raise, which is a code generation bug: it is
+/// fatal here rather than a wrong answer later.
 unsafe fn activation(f: CoroutineFn, arg: i64) -> i64 {
-    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| f(arg))) {
-        Ok(status) => status,
-        Err(payload) => {
-            crate::park_activation_unwind(payload);
+    let status = f(arg);
+    taken_raise(status & 0b11 == STATUS_UNWIND, status, "a compiled activation")
+}
+
+/// Moves the unwind waiting on this thread to where a frame's pad and the
+/// walk look for it — what a driver does before raising it into its chain.
+pub(crate) fn park_raised() {
+    let payload = typelisp_abi::take_raised().unwrap_or_else(|| typelisp_abi::fatal("a raise was reported with nothing raised"));
+    // SAFETY: a `Heap` is registered on this thread — the chain just ran on it.
+    unsafe { crate::park_activation_unwind(payload) };
+}
+
+/// What a driver does once the compiled code it ran has returned: an unwind
+/// it raised is parked for the walk and the answer is `STATUS_UNWIND`;
+/// otherwise the answer is `status`. `left` is whether the code left because
+/// of it — compiled code that saw the raise always does.
+fn taken_raise(left: bool, status: i64, what: &str) -> i64 {
+    match typelisp_abi::take_raised() {
+        Some(payload) => {
+            if !left {
+                typelisp_abi::fatal(&format!("{} went on running after an unwind was raised in it", what));
+            }
+            // SAFETY: a `Heap` is registered on this thread — the code just ran on it.
+            unsafe { crate::park_activation_unwind(payload) };
             STATUS_UNWIND
         }
+        None => status,
     }
 }
 
-/// Re-raises the unwind a drive carried out as [`Paused::Unwinding`].
+/// Raises again the unwind a drive carried out as [`Paused::Unwinding`].
 ///
 /// Every driver whose caller is a machine frame ends up here: the unwind was
 /// travelling towards a `catch` that is not in this chain, and the boundary
 /// above — `catch_compiled_panic`, another `activation`, the interpreter's
-/// own hook — is the one that knows where it goes next.
-pub fn resume_unwinding() -> ! {
+/// own hook — is the one that knows where it goes next. The caller returns
+/// the [`typelisp_abi::Raised`] to it.
+pub fn resume_unwinding() -> typelisp_abi::Raised {
     crate::resume_activation_unwind()
 }
 

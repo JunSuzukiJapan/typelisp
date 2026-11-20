@@ -656,7 +656,7 @@ fn a_function_can_directly_call_another_function_in_the_same_module() {
 /// interpreted has no answer to give on that frame. It names the closure and
 /// returns `STATUS_CALL` instead, and the *driver* decides who runs it. Here
 /// `resolve_closure` finds a classic body, so the driver takes
-/// `Callee::Classic`: it calls the body itself, catches an unwind out of it,
+/// `Callee::Classic`: it calls the body itself, takes a raise it left,
 /// and hands the answer back through the frame's value slot. **This is the
 /// only test over that arm** — the coroutine and interpreted arms are
 /// covered in `concurrency_test`.

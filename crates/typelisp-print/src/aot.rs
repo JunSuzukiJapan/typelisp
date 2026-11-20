@@ -157,6 +157,17 @@ pub fn set_global_slots(slot_of: fn(usize) -> Option<usize>) {
     *crate::shared::print_shared().global_slot.write() = Some(slot_of);
 }
 
+/// `Err` when the compiled method that just returned raised: printing stops,
+/// and what it raised — which the printing shim keeps rather than the
+/// message here (`shim::run`) — goes on to the `catch` that wants it.
+fn raised_in(heap: &Heap, what: &str, id: typelisp_mem::BoxId) -> Result<(), String> {
+    if !typelisp_abi::is_raised() {
+        return Ok(());
+    }
+    let key = stored_type(heap, id).map_or_else(|| "<untyped box>".to_string(), |ty| typelisp_mem::type_name(ty).to_string());
+    Err(format!("{} on `{}` raised", what, key))
+}
+
 fn aot_print_object(heap: &mut Heap, v: Value, escape: bool) -> Result<Option<String>, String> {
     let Value::Boxed(id) = v else { return Ok(None) };
     if PRINTING.with(|p| p.borrow().contains(&v)) {
@@ -169,8 +180,7 @@ fn aot_print_object(heap: &mut Heap, v: Value, escape: bool) -> Result<Option<St
     // SAFETY: `addr` came from `rt_print_object_method`, whose only caller is
     // the startup sequence `build_main_wrapper` generates, and the address it
     // passes is a `ptrtoint` of a function the same file compiled under the
-    // shared compiled-function ABI. `extern "C-unwind"` because a `(panic
-    // ...)` inside the method unwinds out through here.
+    // shared compiled-function ABI.
     let f: unsafe extern "C-unwind" fn(*const i64, u32) -> i64 = unsafe { std::mem::transmute(addr) };
     let args = [encode(v), i64::from(escape)];
     PRINTING.with(|p| p.borrow_mut().push(v));
@@ -178,6 +188,7 @@ fn aot_print_object(heap: &mut Heap, v: Value, escape: bool) -> Result<Option<St
     PRINTING.with(|p| {
         p.borrow_mut().pop();
     });
+    raised_in(heap, "print-object", id)?;
     match decode(result) {
         Value::Str(id) => Ok(Some(heap.string(id).to_string())),
         other => {
@@ -203,12 +214,15 @@ fn aot_format_call(heap: &mut Heap, name: &str, v: Value, colon: bool, at: bool)
     // `build_main_wrapper` generates, and the address is a `ptrtoint` of a
     // function this file compiled under the shared compiled-function ABI. The
     // checker verified the signature (`(T, bool, bool) -> string`) before
-    // naming it. `extern "C-unwind"` because a `(panic ...)` inside the
-    // definition unwinds out through here.
+    // naming it.
     let (addr, arg) = entry;
     let f: unsafe extern "C-unwind" fn(*const i64, u32) -> i64 = unsafe { std::mem::transmute(addr) };
     let args = [arg.word(heap, v).map_err(|m| format!("format: ~/{}/: {}", name, m))?, i64::from(colon), i64::from(at)];
-    match decode(unsafe { f(args.as_ptr(), 3) }) {
+    let result = unsafe { f(args.as_ptr(), 3) };
+    if typelisp_abi::is_raised() {
+        return Err(format!("format: ~/{}/ raised", name));
+    }
+    match decode(result) {
         Value::Str(id) => Ok(heap.string(id).to_string()),
         other => Err(format!("format: ~/{}/ returned {:?}, not a string", name, other)),
     }

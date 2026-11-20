@@ -185,7 +185,7 @@ pub unsafe extern "C-unwind" fn rt_float_to_int(args: *const i64, argc: u32) -> 
     let f = f64::from_bits(*args as u64);
     match BigInt::from_f64(f) {
         Some(n) => encode(active_heap().int_from_bigint(n)),
-        None => raise(format!("float->int: {} is not finite", f)),
+        None => raise(format!("float->int: {} is not finite", f)).into_word(),
     }
 }
 
@@ -254,7 +254,7 @@ pub unsafe extern "C" fn rt_ratio_mul(args: *const i64, argc: u32) -> i64 {
 pub unsafe extern "C-unwind" fn rt_ratio_div(args: *const i64, argc: u32) -> i64 {
     let (a, b) = ratio_pair(args, argc, "rt_ratio_div");
     if b.numer().sign() == Sign::NoSign {
-        raise("divide by zero".to_string());
+        return raise("divide by zero".to_string()).into_word();
     }
     encode(active_heap().alloc_ratio(a / b))
 }

@@ -312,6 +312,44 @@ pub(crate) fn needs_interpreter(name: &str) -> bool {
     )
 }
 
+/// The shims generated code calls without checking for a raise afterwards
+/// (`compile::raise_check`): ones whose bodies cannot raise, and are called
+/// often enough that the check would be most of the code around them. Every
+/// other call is checked. A shim listed here that does raise is caught by the
+/// driver — an activation that goes on after a raise is fatal there — so a
+/// mistake here is loud, not a wrong answer.
+const NEVER_RAISING_SHIMS: [&str; 24] = [
+    "rt_unwinding",
+    "rt_pending_arg",
+    "rt_frame_open",
+    "rt_frame_call",
+    "rt_str_new",
+    "rt_wk_symbol",
+    "rt_intern_symbol",
+    "rt_push_permanent_sexpr_root",
+    "rt_push_sexpr_root",
+    "rt_pop_sexpr_root",
+    "rt_truncate_sexpr_roots",
+    "rt_print_field_template",
+    "rt_print_field_name",
+    "rt_print_name_import",
+    "rt_global_new",
+    "rt_f64_new",
+    "rt_f64_value",
+    "rt_data_variant",
+    "rt_data_field",
+    "rt_data_new",
+    "rt_struct_new",
+    "rt_cons",
+    "rt_integer_cmp",
+    "rt_loop_safepoint",
+];
+
+/// Whether a call to the function `name` needs no raise check after it.
+pub(crate) fn never_raises(name: &str) -> bool {
+    NEVER_RAISING_SHIMS.contains(&name)
+}
+
 /// The shims that take cells from the cons arena, each with the operation a
 /// program reaches it through: what `typl -c --no-cons` refuses a program
 /// for (`compile::aot::no_cons`).
@@ -589,7 +627,7 @@ pub(crate) fn native_lowered_primitive_methods(ty: u32) -> &'static [u32] {
 /// reference-counted `ClosureBox`, plus the shared binding cells
 /// (`BoxedObj::Cell`) captured names live in so compiled and interpreted
 /// `setf` mutate the very same object.
-pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 345] {
+pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 346] {
     use typelisp_rt::c_mem::{
         rt_c_alloc, rt_c_arena_close, rt_c_arena_open, rt_c_index, rt_c_load, rt_c_offset, rt_c_ptr_check, rt_c_store,
     };
@@ -676,7 +714,7 @@ pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 345] {
         rt_str_length, rt_str_lt, rt_str_new, rt_str_ref, rt_str_substring, rt_str_upcase, rt_str_downcase, rt_int_fits, rt_int_fits_char, rt_f64_fits_f32, rt_struct_field_count, rt_struct_field_get, rt_struct_field_set,
         rt_struct_new, rt_struct_pop_field, rt_struct_push_field, rt_sym_name, rt_symp, rt_truncate_sexpr_roots,
         rt_dyn_new, rt_dyn_upcast, rt_dyn_value, rt_dyn_vtable, rt_types_define, rt_upcast_set, rt_vtable_set,
-        rt_throw, rt_throw_matches, rt_throw_take_value,
+        rt_throw, rt_throw_matches, rt_throw_take_value, rt_unwinding,
         rt_frame_call, rt_frame_open, rt_frame_call_env, rt_frame_apply, rt_frame_dyn_call, rt_pending_arg, rt_pending_argc,
         rt_pending_env, rt_pending_envc,
     };
@@ -824,6 +862,7 @@ pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 345] {
         ("rt_throw", rt_throw as *const () as usize),
         ("rt_throw_matches", rt_throw_matches as *const () as usize),
         ("rt_throw_take_value", rt_throw_take_value as *const () as usize),
+        ("rt_unwinding", rt_unwinding as *const () as usize),
         ("rt_push_sexpr_root", rt_push_sexpr_root as *const () as usize),
         ("rt_pop_sexpr_root", rt_pop_sexpr_root as *const () as usize),
         ("rt_push_permanent_sexpr_root", rt_push_permanent_sexpr_root as *const () as usize),
@@ -1328,6 +1367,14 @@ mod cons_making_shim_tests {
 
     /// A name here that no shim answers to would never match, and the check
     /// would let its operation through.
+    #[test]
+    fn every_never_raising_shim_is_a_shim() {
+        let shims = rt_extern_functions();
+        for name in super::NEVER_RAISING_SHIMS {
+            assert!(shims.iter().any(|(n, _)| *n == name), "{} is not in rt_extern_functions", name);
+        }
+    }
+
     #[test]
     fn every_cons_making_shim_is_a_shim() {
         let shims = rt_extern_functions();

@@ -235,6 +235,21 @@ impl CompiledTask {
         heap.set_root(self.sbase + 1, Value::Empty);
     }
 
+    /// What an interpreted callee applied on this machine frame answered:
+    /// the chain is resumed with the value, or — when it raised — the raise
+    /// is parked for the next step to hand the chain.
+    fn after_apply(&mut self, heap: &mut Heap, answer: Result<i64, typelisp_abi::Raised>) -> Progress<TaskFailure> {
+        self.state = match answer {
+            Ok(v) => CompiledState::Resume(v),
+            Err(_raised) => {
+                crate::coroutine::park_raised();
+                CompiledState::Raise
+            }
+        };
+        self.set_slots(heap);
+        Progress::Running
+    }
+
     /// What a drive that stopped means for the task.
     fn after_drive(&mut self, heap: &mut Heap, outcome: Result<i64, crate::coroutine::Paused>) -> Progress<TaskFailure> {
         match outcome {
@@ -282,21 +297,16 @@ impl CompiledTask {
             Err(crate::coroutine::Paused::Applying { closure, args }) => {
                 // SAFETY: the closure and its arguments came from a compiled
                 // `apply` site in the heap registered on this thread.
-                let v = unsafe { crate::apply_on_this_frame(closure, &args, "a task") };
-                self.state = CompiledState::Resume(v);
-                self.set_slots(heap);
-                Progress::Running
+                let answer = unsafe { crate::apply_on_this_frame(closure, &args, "a task") };
+                self.after_apply(heap, answer)
             }
             Err(crate::coroutine::Paused::ApplyingDyn { vtable, slot, args }) => {
                 // SAFETY: as above, for a `:dyn` site's slot in a vtable this
                 // heap's program registered.
-                let v = unsafe {
-                    let closure = crate::reify_dyn_slot(vtable, slot, "a :dyn call");
-                    crate::apply_on_this_frame(closure, &args, "a task")
+                let answer = unsafe {
+                    crate::reify_dyn_slot(vtable, slot, "a :dyn call").and_then(|closure| crate::apply_on_this_frame(closure, &args, "a task"))
                 };
-                self.state = CompiledState::Resume(v);
-                self.set_slots(heap);
-                Progress::Running
+                self.after_apply(heap, answer)
             }
             // The chain is gone — every frame popped, its roots cut back —
             // and what was unwinding is parked. A program's own failure is
@@ -331,7 +341,7 @@ unsafe fn unwind_failure(payload: Box<dyn std::any::Any + Send>) -> TaskFailure 
                 .unwrap_or_else(|| typelisp_abi::fatal("a compiled throw unwound with no throw in flight"));
             TaskFailure::Throw(tag)
         }
-        Err(other) => std::panic::resume_unwind(other),
+        Err(_) => typelisp_abi::fatal("a task was left by an unwind that is neither a panic nor a throw"),
     }
 }
 

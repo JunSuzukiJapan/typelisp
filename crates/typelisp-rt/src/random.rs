@@ -135,7 +135,7 @@ pub unsafe extern "C-unwind" fn rt_random_state_next(args: *const i64, argc: u32
     let id = random_state_arg(args, 0, "rt_random_state_next");
     let bound = *args.add(1);
     if bound <= 0 {
-        raise(format!("random: bound must be positive, got {}", bound));
+        return raise(format!("random: bound must be positive, got {}", bound)).into_word();
     }
     let heap = active_heap();
     let next = xorshift64_step(heap.random_state_seed(id));

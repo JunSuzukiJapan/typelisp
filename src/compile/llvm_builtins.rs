@@ -1001,6 +1001,7 @@ fn llvm_builder_build_call(args: &[Value]) -> Result<Value, EvalError> {
         .borrow()
         .build_call(target, &[args_ptr.into(), argc_val.into()], "call_result")
         .map_err(|e| EvalError::Internal(format!("build-call: {}", e)))?;
+    crate::compile::raise_check::after_call(&builder.borrow(), target).map_err(|e| EvalError::Internal(format!("build-call: {}", e)))?;
     match call.try_as_basic_value() {
         inkwell::values::ValueKind::Basic(v) => Ok(llvm_value_value(v)),
         inkwell::values::ValueKind::Instruction(_) => Err(EvalError::Internal("build-call: callee produced no value".into())),
@@ -1024,6 +1025,8 @@ fn llvm_builder_build_call_with_env(args: &[Value]) -> Result<Value, EvalError> 
     let call = builder
         .borrow()
         .build_call(target, &[args_ptr.into(), argc_val.into(), env_ptr.into(), env_len_val.into()], "call_result")
+        .map_err(|e| EvalError::Internal(format!("build-call-with-env: {}", e)))?;
+    crate::compile::raise_check::after_call(&builder.borrow(), target)
         .map_err(|e| EvalError::Internal(format!("build-call-with-env: {}", e)))?;
     match call.try_as_basic_value() {
         inkwell::values::ValueKind::Basic(v) => Ok(llvm_value_value(v)),

@@ -87,7 +87,7 @@ pub unsafe extern "C" fn rt_ping(args: *const i64, argc: u32) -> i64 {
 // `typelisp` crate reaches for several of these as `typelisp_rt::...`, which
 // is where they have always been from its point of view.
 pub use typelisp_abi::{
-    active_heap, decode, encode, fatal, install_quiet_panic_hook, raise, set_active_heap, tagged_arg,
+    active_heap, decode, encode, fatal, raise, set_active_heap, tagged_arg,
     unwind_interpreted_error, CompiledPanic, CompiledThrow, InterpretedUnwind,
 };
 

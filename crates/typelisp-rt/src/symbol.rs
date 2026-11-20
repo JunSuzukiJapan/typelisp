@@ -65,7 +65,7 @@ pub unsafe extern "C-unwind" fn rt_intern(args: *const i64, argc: u32) -> i64 {
     };
     let (name, module) = (str_arg(0), str_arg(1));
     let Some(ns) = typelisp_mem::symbols::ns_named(&module) else {
-        raise(format!("intern: no module named `{}`", module))
+        return raise(format!("intern: no module named `{}`", module)).into_word();
     };
     encode(Value::Symbol(active_heap().names().read(ns, &name)))
 }

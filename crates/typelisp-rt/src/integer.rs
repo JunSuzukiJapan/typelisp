@@ -144,14 +144,14 @@ pub unsafe extern "C-unwind" fn rt_integer_div(args: *const i64, argc: u32) -> i
     match integer_pair(args, argc, "rt_integer_div") {
         (IntArg::Fix(a), IntArg::Fix(b)) => {
             if b == 0 {
-                raise("divide by zero".to_string());
+                return raise("divide by zero".to_string()).into_word();
             }
             wide_result(i128::from(a) / i128::from(b))
         }
         (a, b) => {
             let (a, b) = (a.into_big(), b.into_big());
             if b.is_zero() {
-                raise("divide by zero".to_string());
+                return raise("divide by zero".to_string()).into_word();
             }
             int_result(a / b)
         }
@@ -169,7 +169,7 @@ pub unsafe extern "C-unwind" fn rt_integer_mod(args: *const i64, argc: u32) -> i
     match integer_pair(args, argc, "rt_integer_mod") {
         (IntArg::Fix(a), IntArg::Fix(b)) => {
             if b == 0 {
-                raise("mod by zero".to_string());
+                return raise("mod by zero".to_string()).into_word();
             }
             let (a, b) = (i128::from(a), i128::from(b));
             let r = a % b;
@@ -178,7 +178,7 @@ pub unsafe extern "C-unwind" fn rt_integer_mod(args: *const i64, argc: u32) -> i
         (a, b) => {
             let (a, b) = (a.into_big(), b.into_big());
             if b.is_zero() {
-                raise("mod by zero".to_string());
+                return raise("mod by zero".to_string()).into_word();
             }
             int_result(a.mod_floor(&b))
         }
@@ -323,7 +323,7 @@ pub unsafe extern "C-unwind" fn rt_integer_to_char(args: *const i64, argc: u32) 
     let a = integer_single(args, argc, "rt_integer_to_char");
     match scalar_of(&a) {
         Some(c) => i64::from(c),
-        None => raise(format!("int->char: {} is not a valid Unicode scalar value", a.into_big())),
+        None => raise(format!("int->char: {} is not a valid Unicode scalar value", a.into_big())).into_word(),
     }
 }
 
@@ -412,5 +412,5 @@ pub unsafe extern "C" fn rt_integer_from_word(args: *const i64, argc: u32) -> i6
 #[no_mangle]
 pub unsafe extern "C-unwind" fn rt_int_not_fixnum(args: *const i64, argc: u32) -> i64 {
     let a = integer_single(args, argc, "rt_int_not_fixnum");
-    raise(format!("an integer argument does not fit a fixnum: {}", a.into_big()))
+    raise(format!("an integer argument does not fit a fixnum: {}", a.into_big())).into_word()
 }

@@ -50,10 +50,10 @@ pub unsafe extern "C-unwind" fn rt_int_div(args: *const i64, argc: u32) -> i64 {
     let (a, b) = (*args, *args.add(1));
     let (width, signed) = wsig(*args.add(2));
     if b == 0 {
-        raise("divide by zero".to_string());
+        return raise("divide by zero".to_string()).into_word();
     }
     if signed && b == -1 && a == normalize(1i64 << (width - 1), width, true) {
-        raise(format!("arithmetic overflow: {} / {}", a, b));
+        return raise(format!("arithmetic overflow: {} / {}", a, b)).into_word();
     }
     normalize(a / b, width, signed)
 }
@@ -78,7 +78,7 @@ pub unsafe extern "C-unwind" fn rt_int_mod(args: *const i64, argc: u32) -> i64 {
     let (a, b) = (*args, *args.add(1));
     let (width, signed) = wsig(*args.add(2));
     if b == 0 {
-        raise("mod by zero".to_string());
+        return raise("mod by zero".to_string()).into_word();
     }
     let r = a.wrapping_rem(b);
     normalize(if r != 0 && (r < 0) != (b < 0) { r + b } else { r }, width, signed)

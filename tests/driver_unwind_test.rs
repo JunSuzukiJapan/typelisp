@@ -1,22 +1,10 @@
 //! What the driver does with an unwind, in miniature.
 //!
-//! `tests/compiled_unwind_test.rs` established that a Rust panic can travel
-//! *through* JIT frames. Stopping one is the other half, and it cannot be done
-//! with an LLVM landing pad: consuming a Rust panic means freeing its
-//! `_Unwind_Exception` and decrementing `panic_count`, and only
-//! `std::panic::catch_unwind` does either (the object's own `exception_cleanup`
-//! aborts with "Rust panics must be rethrown", and `panic_count::decrease` is
-//! called from nowhere else). A landing pad that swallowed one would leak the
-//! allocation and leave `std::thread::panicking()` true for the rest of the
-//! process.
-//!
-//! Until C4 the catching Rust frame went at every *call* made inside a
-//! protected region (nine `rt_protected_*` trampolines, and this file used to
-//! build that shape). It goes in one place now: the driver, at the boundary
-//! where it enters a compiled activation. It can, because a Lisp call is a
-//! driver round trip and not a machine call, so an unwind raised in compiled
-//! code cannot get past the activation that raised it — and where it goes
-//! next is frame bookkeeping, not unwinder business.
+//! An unwind raised in compiled code is parked and the shim returns
+//! (`typelisp_abi::raise`); the compiled code checks (`rt_unwinding`) and
+//! leaves its activation with `STATUS_UNWIND`. It cannot get past that
+//! activation, because a Lisp call is a driver round trip and not a machine
+//! call — and where it goes next is the driver's frame bookkeeping.
 //!
 //! The bodies here are written in Rust rather than emitted as IR, because
 //! what is being pinned down is the *protocol*: which frame the driver asks,
@@ -95,7 +83,9 @@ unsafe extern "C-unwind" fn raiser(param: i64) -> i64 {
     let tag = call_state::with(|s| s.pending_arg(0)).expect("raiser was passed a tag");
     let args = [tag, encode(Value::Int(THROWN))];
     typelisp_rt::rt_throw(args.as_ptr(), 2);
-    unreachable!("rt_throw does not return")
+    // What generated code does after a call that raised.
+    assert_ne!(typelisp_rt::rt_unwinding(std::ptr::null(), 0), 0, "rt_throw raised nothing");
+    STATUS_UNWIND
 }
 
 /// A body with a region: it calls [`raiser`] with its handler slot naming its

@@ -389,6 +389,7 @@ fn emit_coroutine_entry(
     let out = builder
         .build_call(body, &[args.into(), ctx.i32_type().const_int(argc as u64, false).into()], "ffi_body")
         .map_err(|e| format!("ffi: failed to call the marshalling body: {}", e))?;
+    crate::compile::raise_check::after_call(&builder, body).map_err(|e| format!("ffi: {}", e))?;
     let out = match out.try_as_basic_value() {
         inkwell::values::ValueKind::Basic(v) => v.into_int_value(),
         inkwell::values::ValueKind::Instruction(_) => {
@@ -425,6 +426,7 @@ fn call_shim(
     let call = builder
         .build_call(f, &[scratch.into(), one.into()], name)
         .map_err(|e| format!("ffi: failed to call a runtime shim: {}", e))?;
+    crate::compile::raise_check::after_call(builder, f).map_err(|e| format!("ffi: {}", e))?;
     match call.try_as_basic_value() {
         inkwell::values::ValueKind::Basic(v) => Ok(v.into_int_value()),
         inkwell::values::ValueKind::Instruction(_) => {

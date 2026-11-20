@@ -108,7 +108,7 @@ enum State {
     /// no "at most one throw in flight" assumption.
     ///
     /// `Heap::set_in_flight_throw` is still there for the *compiled* side: a
-    /// compiled `throw` travels as a Rust panic, whose payload the collector
+    /// compiled `throw` travels as a raised payload, which the collector
     /// cannot see, so `typelisp_rt::park_throw` parks the value in that slot.
     /// One slot per task, not one for the whole heap — see `RootStack`'s
     /// `in_flight_throw` field — is what lets two tasks be unwinding on the
@@ -1001,7 +1001,7 @@ impl Interp {
     /// Runs `task` one step.
     ///
     /// A step is one `Eval` decomposition, one frame resumed, or one frame
-    /// unwound through. Between two calls the task holds everything it needs to
+    /// an unwind passes. Between two calls the task holds everything it needs to
     /// continue, so a scheduler may leave it alone and step a different one —
     /// that is what makes a task suspendable.
     fn step_task(&self, heap: &mut Heap, task: &mut Task) -> Progress<EvalError> {
@@ -1210,9 +1210,8 @@ impl Interp {
     ///
     /// The four outcomes are the protocol's own, one level up: an answer ends
     /// the crossing, a suspension parks the task with its chain standing, an
-    /// unwind becomes this task's own `State::Unwind`, and a Rust panic is one
-    /// that got past the driver's catch — which now means only a payload that
-    /// is nobody's on this tier.
+    /// unwind becomes this task's own `State::Unwind`, and an `Err` is a raise
+    /// left waiting after the drive, which `catch_compiled_panic` took.
     fn after_drive(
         &self,
         heap: &mut Heap,
@@ -1278,7 +1277,7 @@ impl Interp {
                 heap.truncate_roots(drive.roots_on_entry);
                 State::Unwind(e)
             }
-            // A compiled `(panic ...)`/`throw` unwound out as a Rust panic and
+            // A compiled `(panic ...)`/`throw` was left raised and
             // `catch_compiled_panic` turned it back into an error. None of the
             // pops that balance the crossing ran, hence the truncate.
             Err(e) => {

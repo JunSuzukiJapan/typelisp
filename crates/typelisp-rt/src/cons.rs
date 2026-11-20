@@ -80,7 +80,7 @@ unsafe fn cons_half(
     }
     match half(active_heap(), arg) {
         Ok(v) => encode(v),
-        Err(_) => raise(format!("{}: not a cons", who)),
+        Err(_) => raise(format!("{}: not a cons", who)).into_word(),
     }
 }
 
@@ -218,7 +218,7 @@ pub unsafe extern "C-unwind" fn rt_sexpr_int(args: *const i64, argc: u32) -> i64
             }
             w
         }
-        _ => raise("sexpr-int: expected an int Sexpr node".to_string()),
+        _ => raise("sexpr-int: expected an int Sexpr node".to_string()).into_word(),
     }
 }
 
@@ -249,7 +249,7 @@ pub unsafe extern "C-unwind" fn rt_sexpr_bool(args: *const i64, argc: u32) -> i6
     }
     match decode(*args) {
         Value::Bool(b) => i64::from(b),
-        _ => raise("sexpr-bool: expected a Bool Sexpr node".to_string()),
+        _ => raise("sexpr-bool: expected a Bool Sexpr node".to_string()).into_word(),
     }
 }
 
@@ -266,7 +266,7 @@ pub unsafe extern "C-unwind" fn rt_sexpr_char(args: *const i64, argc: u32) -> i6
     }
     match decode(*args) {
         Value::Char(c) => c as i64,
-        _ => raise("sexpr-char: expected a Char Sexpr node".to_string()),
+        _ => raise("sexpr-char: expected a Char Sexpr node".to_string()).into_word(),
     }
 }
 
@@ -285,7 +285,7 @@ pub unsafe extern "C-unwind" fn rt_sexpr_str(args: *const i64, argc: u32) -> i64
     }
     match decode(*args) {
         Value::Str(_) => *args,
-        _ => raise("sexpr-str: expected a Str Sexpr node".to_string()),
+        _ => raise("sexpr-str: expected a Str Sexpr node".to_string()).into_word(),
     }
 }
 
@@ -308,6 +308,6 @@ pub unsafe extern "C-unwind" fn rt_sym_name(args: *const i64, argc: u32) -> i64 
             let name = id.name().to_string();
             encode(heap.alloc_string(name))
         }
-        _ => raise("sexpr-sym-name: expected a Sym Sexpr node".to_string()),
+        _ => raise("sexpr-sym-name: expected a Sym Sexpr node".to_string()).into_word(),
     }
 }

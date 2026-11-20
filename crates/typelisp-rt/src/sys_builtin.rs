@@ -777,7 +777,7 @@ pub unsafe extern "C" fn rt_thread_current_id(_args: *const i64, _argc: u32) -> 
 pub unsafe extern "C-unwind" fn rt_thread_available_parallelism(_args: *const i64, _argc: u32) -> i64 {
     match thread_available_parallelism() {
         Ok(n) => n,
-        Err(msg) => typelisp_abi::raise(msg),
+        Err(msg) => typelisp_abi::raise(msg).into_word(),
     }
 }
 

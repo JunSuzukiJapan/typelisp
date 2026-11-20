@@ -44,7 +44,7 @@ pub unsafe extern "C-unwind" fn rt_ffi_cstring_new(args: *const i64, argc: u32) 
             "ffi: a string argument contains a NUL character, which cannot be passed to C — \
              C would see only the part before it"
                 .to_string(),
-        ),
+        ).into_word(),
     }
 }
 
@@ -71,14 +71,16 @@ pub unsafe extern "C" fn rt_ffi_enter_native(_args: *const i64, _argc: u32) -> i
 ///
 /// A `Heap` must be registered on this thread, inside `rt_ffi_enter_native`.
 ///
-/// Also where a callback's failure kept while C was running is re-raised —
-/// the first point after the C call where unwinding is defined again (see
-/// [`ffi_callback`]). Hence `C-unwind`.
+/// Also where a callback's failure kept while C was running is raised again
+/// — the first point after the C call where typelisp runs again (see
+/// [`ffi_callback`]).
 #[no_mangle]
 pub unsafe extern "C-unwind" fn rt_ffi_leave_native(_args: *const i64, _argc: u32) -> i64 {
     active_heap().leave_native();
-    ffi_callback::resume_pending();
-    0
+    match ffi_callback::resume_pending() {
+        Ok(()) => 0,
+        Err(raised) => raised.into_word(),
+    }
 }
 
 /// Frees what [`rt_ffi_cstring_new`] returned.
@@ -119,11 +121,11 @@ pub unsafe extern "C-unwind" fn rt_ffi_string_from_cstr(args: *const i64, argc: 
     if p == 0 {
         // `string` has no value for "there wasn't one". Saying so beats
         // inventing an empty string, and the fix is in the declaration.
-        raise(
+        return raise(
             "ffi: the C function returned a null pointer where a `string` was declared. \
              Declare the result as `ptr` if it can be null."
                 .to_string(),
-        );
+        ).into_word();
     }
     let bytes = std::ffi::CStr::from_ptr(p as *const std::ffi::c_char).to_bytes();
     match std::str::from_utf8(bytes) {
@@ -135,6 +137,6 @@ pub unsafe extern "C-unwind" fn rt_ffi_string_from_cstr(args: *const i64, argc: 
             "ffi: the C function returned bytes that are not valid UTF-8, and a typelisp \
              `string` is text. Declare the result as `ptr` to handle the bytes yourself."
                 .to_string(),
-        ),
+        ).into_word(),
     }
 }

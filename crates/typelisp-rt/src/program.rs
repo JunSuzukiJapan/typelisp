@@ -69,7 +69,7 @@ pub unsafe extern "C" fn rt_heap_live_count(_args: *const i64, _argc: u32) -> i6
 ///
 /// `pub` for `typelisp_front::shim::rt_run_program_interp[_int]`, an
 /// `eval`-carrying AOT executable's own entry, which answers with the same
-/// code for the same reason — see [`run_entry_payload`].
+/// code for the same reason — see [`exit_code`].
 pub const EXIT_CODE_PANIC: i64 = 1;
 
 /// The exit code of a program whose `()`-returning `main` returned normally.
@@ -77,20 +77,15 @@ pub const EXIT_CODE_PANIC: i64 = 1;
 /// `()` is encoded as, which differs between the entry shims' decodings.
 pub const EXIT_CODE_SUCCESS: i64 = 0;
 
-/// Runs an AOT executable's compiled entry point (`tl_main`) with a catch
-/// around it, returning its exit code — or, if a `(panic ...)` unwound out of
-/// it, printing the message and returning [`EXIT_CODE_PANIC`].
+/// Runs an AOT executable's compiled entry point (`tl_main`), returning its
+/// exit code — or, if a `(panic ...)` or an uncaught `throw` was raised out
+/// of it, printing the message and returning [`EXIT_CODE_PANIC`].
 ///
-/// This exists because an AOT executable has nowhere else to put the catch.
-/// In the JIT path the interpreter is a Rust frame that can wrap the call
-/// (`typelisp::compile::catch_compiled_panic`); AOT's `main` is *generated
-/// LLVM code* that calls `rt_heap_init` and then `tl_main` directly
-/// (`compile::aot`'s entry-point builder), with no Rust frame in between. So
-/// the catch moves into the runtime, and the generated `main` calls this
-/// instead of calling `tl_main` itself.
-///
-/// Letting the panic unwind out of `main` instead is not an option: `main` is
-/// the C entry point, and unwinding past it is undefined.
+/// This exists because an AOT executable has nowhere else to look at what
+/// was raised. In the JIT path the interpreter is a Rust frame around the
+/// call (`typelisp::compile::catch_compiled_panic`); AOT's `main` is
+/// *generated LLVM code* that calls `rt_heap_init` and then this, with no
+/// Rust frame in between.
 ///
 /// # Safety
 ///
@@ -105,15 +100,12 @@ pub unsafe extern "C" fn rt_run_entry(entry: i64) -> i64 {
     // Only a `()`-returning `main` reaches this shim (`compile::aot` refuses
     // an `int` one under this ABI), and a `main` that returns normally exits
     // 0 — whatever word its `()` happens to be.
-    let call = std::panic::AssertUnwindSafe(|| {
-        f(std::ptr::null(), 0);
-        EXIT_CODE_SUCCESS
-    });
-    run_entry_payload(std::panic::catch_unwind(call))
+    f(std::ptr::null(), 0);
+    exit_code(EXIT_CODE_SUCCESS)
 }
 
 /// [`rt_run_entry`] for a program built under the coroutine ABI: the same
-/// panic handling with a **scheduler** in front of it, and the program's
+/// handling of what was raised with a **scheduler** in front of it, and the program's
 /// global initialisers run under that same scheduler ahead of `main`.
 ///
 /// `args` is `[inits, n, entry]`: the address of an array of `n`
@@ -147,11 +139,11 @@ pub unsafe extern "C" fn rt_run_program(args: *const i64, argc: u32) -> i64 {
     let program = read_program(args, argc, "rt_run_program");
     // A `()`-returning `main` that returns normally exits 0; the word its
     // `()` is encoded as is not an exit code.
-    let call = std::panic::AssertUnwindSafe(|| match run_program(&program) {
+    let code = match run_program(&program) {
         Ok(_) => EXIT_CODE_SUCCESS,
         Err(code) => code,
-    });
-    run_entry_payload(std::panic::catch_unwind(call))
+    };
+    exit_code(code)
 }
 
 /// [`rt_run_program`] for a `main` declared to return `int`: the answer is
@@ -168,15 +160,15 @@ pub unsafe extern "C" fn rt_run_program(args: *const i64, argc: u32) -> i64 {
 #[no_mangle]
 pub unsafe extern "C" fn rt_run_program_int(args: *const i64, argc: u32) -> i64 {
     let program = read_program(args, argc, "rt_run_program_int");
-    let call = std::panic::AssertUnwindSafe(|| match run_program(&program) {
+    let code = match run_program(&program) {
         Ok(Value::Int(n)) => n,
         Ok(Value::Boxed(id)) if active_heap().is_bignum(id) => {
             fatal(&format!("main returned {}, which is not a process exit code", active_heap().bignum_value(id)))
         }
         Ok(other) => fatal(&format!("main declared to return int answered {:?}", other)),
         Err(code) => code,
-    });
-    run_entry_payload(std::panic::catch_unwind(call))
+    };
+    exit_code(code)
 }
 
 /// What a generated `main` hands the program entry: the initialisers and
@@ -261,7 +253,7 @@ unsafe fn run_program(program: &Program) -> Result<Value, i64> {
         });
         match crate::sched::drive_main(&sched, heap, &(), main) {
             Ok(v) => Ok(v),
-            // The same line `run_entry_payload` prints for a panic that
+            // The same line `exit_code` prints for a panic that
             // reached the entry as a Rust unwind — a task's failure is the
             // program's.
             Err(failure) => {
@@ -303,52 +295,38 @@ pub unsafe extern "C-unwind" fn rt_drive_body(args: *const i64, argc: u32) -> i6
     let callee_args = *args.add(1) as usize as *const i64;
     let callee_argc = *args.add(2);
     let words = collect_words(callee_args, callee_argc);
-    drive_to_completion(f, &words, &[], "rt_drive_body")
+    match drive_to_completion(f, &words, &[], "rt_drive_body") {
+        Ok(v) => v,
+        Err(raised) => raised.into_word(),
+    }
 }
 
 /// Turns whichever entry point ran into an exit code: a typelisp-level
-/// `panic` or an uncaught `throw` that reached it as a Rust unwind is
-/// reported and becomes [`EXIT_CODE_PANIC`]; anything else keeps unwinding.
+/// `panic` or an uncaught `throw` raised out of it is reported and becomes
+/// [`EXIT_CODE_PANIC`]; otherwise the code is `code`.
 ///
 /// `pub` for the interpreter's own program entry (`typelisp_front::shim`),
-/// which puts the same catch around the same kind of run.
+/// which looks at the same kind of run the same way.
 ///
 /// # Safety
 ///
 /// A `Heap` must be registered on this thread (an uncaught throw's tag is
 /// read out of it).
-pub unsafe fn run_entry_payload(outcome: std::thread::Result<i64>) -> i64 {
-    let call = std::panic::AssertUnwindSafe(|| match outcome {
-        Ok(v) => v,
-        Err(payload) => std::panic::resume_unwind(payload),
-    });
-    match std::panic::catch_unwind(call) {
-        Ok(code) => code,
-        // Only a typelisp-level `panic` is turned into an exit code; anything
-        // else is a real bug in the runtime and keeps unwinding, exactly as
-        // `catch_compiled_panic` does on the JIT side.
-        Err(payload) => {
-            let payload = match payload.downcast::<CompiledPanic>() {
-                Ok(p) => {
-                    eprintln!("panic: {}", p.message);
-                    return EXIT_CODE_PANIC;
-                }
-                Err(other) => other,
-            };
-            // A `throw` that found no enclosing `catch` anywhere. Reported
-            // with the same wording `EvalError::Throw`'s `Display` uses, so
-            // the two front ends say the same thing about the same program.
-            match payload.downcast::<CompiledThrow>() {
-                Ok(_) => {
-                    let (tag, _) =
-                        take_throw().unwrap_or_else(|| fatal("a compiled throw unwound with no throw in flight"));
-                    eprintln!("throw: no enclosing (catch '{}) for this throw", tag.spelling());
-                    EXIT_CODE_PANIC
-                }
-                Err(other) => std::panic::resume_unwind(other),
-            }
-        }
+pub unsafe fn exit_code(code: i64) -> i64 {
+    let Some(payload) = typelisp_abi::take_raised() else { return code };
+    if let Some(p) = payload.downcast_ref::<CompiledPanic>() {
+        eprintln!("panic: {}", p.message);
+        return EXIT_CODE_PANIC;
     }
+    // A `throw` that found no enclosing `catch` anywhere. Reported with the
+    // same wording `EvalError::Throw`'s `Display` uses, so the two front ends
+    // say the same thing about the same program.
+    if payload.is::<CompiledThrow>() {
+        let (tag, _) = take_throw().unwrap_or_else(|| fatal("a compiled throw was raised with no throw in flight"));
+        eprintln!("throw: no enclosing (catch '{}) for this throw", tag.spelling());
+        return EXIT_CODE_PANIC;
+    }
+    fatal("the program entry was left by an unwind that is neither a panic nor a throw")
 }
 
 unsafe fn collect_words(p: *const i64, n: i64) -> Vec<i64> {
@@ -360,15 +338,15 @@ unsafe fn collect_words(p: *const i64, n: i64) -> Vec<i64> {
 
 /// What a driver whose caller is a machine frame does with a pause.
 ///
-/// An unwind is re-raised, so it keeps travelling towards a `catch` above
-/// this boundary. Nothing else can come out: every driver standing on a
+/// An unwind is raised again, so it keeps travelling towards a `catch` above
+/// this boundary: the caller returns the [`typelisp_abi::Raised`]. Nothing else can come out: every driver standing on a
 /// machine frame goes through `FrameStack::run_to_end`, which runs an
 /// interpreted `apply` on that frame and resolves a suspension through the
 /// driving scheduler (answering it, or refusing it into the chain as a
 /// panic). What still stands on a machine frame is `rt_drive_body` (the
 /// printer's door); the executable's initialisers and `main` run under a
 /// scheduler (`run_program`).
-unsafe fn pause_on_a_machine_frame(paused: crate::coroutine::Paused, what: &str) -> ! {
+unsafe fn pause_on_a_machine_frame(paused: crate::coroutine::Paused, what: &str) -> typelisp_abi::Raised {
     match paused {
         crate::coroutine::Paused::Unwinding => crate::coroutine::resume_unwinding(),
         // Reaching either means a driver was written to `run`/`resume`
@@ -388,7 +366,8 @@ unsafe fn pause_on_a_machine_frame(paused: crate::coroutine::Paused, what: &str)
 
 /// Applies an interpreted function value on *this* machine frame — what a
 /// driver with no continuation stack behind it does with
-/// [`coroutine::Paused::Applying`].
+/// [`coroutine::Paused::Applying`]. `Err` when the callee failed: what it
+/// raised waits on the thread.
 ///
 /// In an AOT executable there is no interpreter and nothing should produce an
 /// interpreted closure either, so a missing hook is an invariant break rather
@@ -399,9 +378,12 @@ unsafe fn pause_on_a_machine_frame(paused: crate::coroutine::Paused, what: &str)
 /// `closure` must be a tagged interpreted-closure box in the heap registered
 /// on this thread, and `args` its arguments in that closure's own declared
 /// representations.
-pub unsafe fn apply_on_this_frame(closure: i64, args: &[i64], what: &str) -> i64 {
+pub unsafe fn apply_on_this_frame(closure: i64, args: &[i64], what: &str) -> Result<i64, typelisp_abi::Raised> {
     match APPLY_INTERPRETED.with(|cell| cell.get()) {
-        Some(hook) => hook(closure, args.as_ptr(), args.len() as u32),
+        Some(hook) => {
+            let v = hook(closure, args.as_ptr(), args.len() as u32);
+            typelisp_abi::raised().map(|()| v)
+        }
         None => fatal(&format!(
             "{}: a compiled frame applied an interpreted function value and no interpreter is \
              registered on this thread",
@@ -415,12 +397,12 @@ pub(crate) unsafe fn drive_to_completion(
     args: &[i64],
     env: &[i64],
     what: &str,
-) -> i64 {
+) -> Result<i64, typelisp_abi::Raised> {
     let mut stack = crate::coroutine::FrameStack::new();
     match stack.run_to_end(active_heap(), f, args, env, |closure, argv| {
         apply_on_this_frame(closure, argv, what)
     }) {
-        Ok(v) => v,
-        Err(paused) => pause_on_a_machine_frame(paused, what),
+        Ok(v) => Ok(v),
+        Err(paused) => Err(pause_on_a_machine_frame(paused, what)),
     }
 }

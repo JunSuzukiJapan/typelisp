@@ -274,14 +274,16 @@ fn call_coroutine(address: usize, args: &[i64]) -> i64 {
         // break rather than a limitation.
         Err(typelisp_rt::coroutine::Paused::Applying { .. } | typelisp_rt::coroutine::Paused::ApplyingDyn { .. }) => typelisp_abi::raise(
             "a compiled function applied an interpreted value that the drive did not resolve".to_string(),
-        ),
+        )
+        .into_word(),
         // Resolved by `run_to_end` too — answered or refused into the chain.
         Err(typelisp_rt::coroutine::Paused::Suspended) => typelisp_abi::fatal(
             "a compiled function suspended and the drive did not resolve it — a driver on a machine frame must use `run_to_end`",
         ),
         // The unwind was travelling towards a `catch` that is not in this
-        // chain; re-raising puts it back on the path it was on.
-        Err(typelisp_rt::coroutine::Paused::Unwinding) => typelisp_rt::coroutine::resume_unwinding(),
+        // chain; raising it again puts it back on the path it was on, and
+        // the caller's `catch_compiled_panic` takes it.
+        Err(typelisp_rt::coroutine::Paused::Unwinding) => typelisp_rt::coroutine::resume_unwinding().into_word(),
     }
 }
 
@@ -544,9 +546,8 @@ impl Interp {
         // in `compiler.rs`'s `compile-lambda`/`resolve-value` is its only
         // producer) — there is no other way to construct one, so `fn_ptr`
         // always points at a function with this signature.
-        // `extern "C-unwind"`, for the same reason `compile::CompiledSignature`
-        // is: a `(panic ...)` in this closure's body unwinds out through here,
-        // and an `extern "C"` pointer would promise Rust that it cannot.
+        // A `(panic ...)` in this closure's body comes back as a raise
+        // waiting on the thread, for the caller's `catch_compiled_panic`.
         let f: unsafe extern "C-unwind" fn(*const i64, u32, *const i64, u32) -> i64 = unsafe { std::mem::transmute(fn_ptr) };
         unsafe { f(args.as_ptr(), args.len() as u32, env.as_ptr(), env.len() as u32) }
     }
@@ -758,9 +759,7 @@ fn crossing_mismatch(what: &str, got: Value) -> EvalError {
 ///
 /// `args` must point to `argc` valid `i64`s, and both a `Heap`
 /// ([`typelisp_rt::set_active_heap`]) and an `Interp`
-/// ([`Interp::enter_compiled`]) must be registered on this thread. Every
-/// frame between here and the catching boundary must tolerate being unwound
-/// through, which is why this is `extern "C-unwind"`.
+/// ([`Interp::enter_compiled`]) must be registered on this thread.
 unsafe extern "C-unwind" fn rt_apply_interpreted(closure: i64, args: *const i64, argc: u32) -> i64 {
     let interp = ACTIVE_INTERP.with(|cell| cell.get());
     if interp.is_null() {
@@ -771,7 +770,7 @@ unsafe extern "C-unwind" fn rt_apply_interpreted(closure: i64, args: *const i64,
     let argv = std::slice::from_raw_parts(args, argc as usize);
     match interp.apply_interpreted(heap, closure, argv) {
         Ok(w) => w,
-        Err(e) => crate::eval::crossing::unwind_interpreted_failure(e),
+        Err(e) => crate::eval::crossing::unwind_interpreted_failure(e).into_word(),
     }
 }
 
@@ -785,14 +784,13 @@ unsafe extern "C-unwind" fn rt_apply_interpreted(closure: i64, args: *const i64,
 /// Most failures here really are compiler bugs — a slot with no
 /// `(type, method)` behind it, or a method that no longer resolves — but
 /// reifying the closure allocates, so heap exhaustion reaches this arm too,
-/// and that a program can provoke. So errors unwind rather than abort, the
-/// same way [`rt_apply_interpreted`]'s do; an internal one still surfaces
+/// and that a program can provoke. So errors are raised rather than abort,
+/// the same way [`rt_apply_interpreted`]'s are; an internal one still surfaces
 /// intact as `EvalError::Internal` rather than being flattened.
 ///
 /// # Safety
 ///
-/// Both a `Heap` and an `Interp` must be registered on this thread, and every
-/// frame out to the catching boundary must tolerate being unwound through.
+/// Both a `Heap` and an `Interp` must be registered on this thread.
 unsafe extern "C-unwind" fn rt_dyn_slot_closure(vtable: u32, slot: u32) -> i64 {
     let interp = ACTIVE_INTERP.with(|cell| cell.get());
     if interp.is_null() {
@@ -802,6 +800,6 @@ unsafe extern "C-unwind" fn rt_dyn_slot_closure(vtable: u32, slot: u32) -> i64 {
     let heap = typelisp_rt::active_heap();
     match interp.dyn_slot_closure(heap, vtable, slot) {
         Ok(w) => w,
-        Err(e) => crate::eval::crossing::unwind_interpreted_failure(e),
+        Err(e) => crate::eval::crossing::unwind_interpreted_failure(e).into_word(),
     }
 }

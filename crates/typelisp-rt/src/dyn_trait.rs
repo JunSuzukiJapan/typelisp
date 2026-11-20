@@ -133,9 +133,12 @@ pub(crate) fn vtable_slot_addr(id: usize, slot: usize) -> (usize, u8) {
 /// interpreter exists to ask, so a missing hook is an invariant break rather
 /// than a limitation — the same reading [`apply_on_this_frame`] makes of a
 /// missing apply hook.
-pub(crate) unsafe fn reify_dyn_slot(vtable: u32, slot: u32, what: &str) -> i64 {
+pub(crate) unsafe fn reify_dyn_slot(vtable: u32, slot: u32, what: &str) -> Result<i64, typelisp_abi::Raised> {
     match DYN_SLOT_CLOSURE.with(|cell| cell.get()) {
-        Some(hook) => hook(vtable, slot),
+        Some(hook) => {
+            let closure = hook(vtable, slot);
+            typelisp_abi::raised().map(|()| closure)
+        }
         None => fatal(&format!(
             "{}: vtable slot {}/{} is empty and no interpreter is registered on this thread",
             what, vtable, slot

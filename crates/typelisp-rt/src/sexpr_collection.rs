@@ -1,6 +1,6 @@
 //! Building `Sexpr` vectors, tuples and arrays from lists.
 
-use typelisp_abi::{active_heap, decode, encode, fatal, raise};
+use typelisp_abi::{active_heap, decode, encode, fatal, raise, Raised};
 use typelisp_mem::{Heap, TypeId, Value};
 
 /// The elements of a proper `Sexpr` list, in order. `who` names the caller
@@ -54,12 +54,12 @@ pub unsafe extern "C" fn rt_list_to_sexpr_vector(args: *const i64, argc: u32) ->
 
 /// A tuple box of `Option<Sexpr>` elements holding `elems`, or the catchable
 /// error the interpreter raises when there are too few or too many of them.
-fn sexpr_tuple_of(heap: &mut Heap, elems: Vec<Value>) -> Value {
+fn sexpr_tuple_of(heap: &mut Heap, elems: Vec<Value>) -> Result<Value, Raised> {
     if !(1..=typelisp_mem::TUPLE_MAX_ARITY).contains(&elems.len()) {
-        raise(format!("a tuple has 1 to {} elements, not {}", typelisp_mem::TUPLE_MAX_ARITY, elems.len()));
+        return Err(raise(format!("a tuple has 1 to {} elements, not {}", typelisp_mem::TUPLE_MAX_ARITY, elems.len())));
     }
     let key = typelisp_mem::sexpr_tuple_type(elems.len());
-    heap.alloc_struct(key, elems)
+    Ok(heap.alloc_struct(key, elems))
 }
 
 /// A quoted `#{..}` in compiled code: `args[0]` is a `Sexpr` list of the
@@ -81,7 +81,10 @@ pub unsafe extern "C-unwind" fn rt_list_to_sexpr_tuple(args: *const i64, argc: u
     heap.push_root(list);
     let t = sexpr_tuple_of(heap, elems);
     heap.pop_root();
-    encode(t)
+    match t {
+        Ok(t) => encode(t),
+        Err(raised) => raised.into_word(),
+    }
 }
 
 /// `(construct sexpr tuple V)` in compiled code: the tuple of the elements of
@@ -103,7 +106,10 @@ pub unsafe extern "C-unwind" fn rt_vector_to_sexpr_tuple(args: *const i64, argc:
     heap.push_root(v);
     let t = sexpr_tuple_of(heap, elems);
     heap.pop_root();
-    encode(t)
+    match t {
+        Ok(t) => encode(t),
+        Err(raised) => raised.into_word(),
+    }
 }
 
 /// The payload a `(Tuple v)` pattern binds: a fresh `Vector<Option<Sexpr>>`

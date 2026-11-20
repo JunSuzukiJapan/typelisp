@@ -98,7 +98,7 @@ pub unsafe extern "C-unwind" fn rt_str_ref(args: *const i64, argc: u32) -> i64 {
         // `ref` still costs one `chars().nth`.
         None => {
             let len = active_heap().string(id).chars().count();
-            raise(format!("ref: index {} out of range (length {})", idx, len))
+            raise(format!("ref: index {} out of range (length {})", idx, len)).into_word()
         }
     }
 }
@@ -300,7 +300,7 @@ pub unsafe extern "C-unwind" fn rt_int_to_char(args: *const i64, argc: u32) -> i
     let n = *args;
     let valid = n >= 0 && n <= i64::from(u32::MAX) && char::from_u32(n as u32).is_some();
     if !valid {
-        raise(format!("int->char: {} is not a valid Unicode scalar value", n));
+        return raise(format!("int->char: {} is not a valid Unicode scalar value", n)).into_word();
     }
     n
 }
@@ -405,7 +405,7 @@ pub unsafe extern "C-unwind" fn rt_str_substring(args: *const i64, argc: u32) ->
     let chars: Vec<char> = heap.string(id).chars().collect();
     let len = chars.len() as i64;
     if start < 0 || end > len || start > end {
-        raise(format!("substring: invalid range {}..{} (length {})", start, end, len));
+        return raise(format!("substring: invalid range {}..{} (length {})", start, end, len)).into_word();
     }
     let s: String = chars[start as usize..end as usize].iter().collect();
     encode(heap.alloc_string(s))

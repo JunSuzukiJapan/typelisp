@@ -154,7 +154,7 @@ pub unsafe extern "C-unwind" fn rt_eval(args: *const i64, argc: u32) -> i64 {
         // frame this call sits in.
         match with_active_interp(|i| i.eval_form(heap, &form)) {
             Some(r) => r,
-            None => typelisp_abi::raise(NO_INTERPRETER_HERE.replace("{}", "eval")),
+            None => return typelisp_abi::raise(NO_INTERPRETER_HERE.replace("{}", "eval")).into_word(),
         }
     } else {
         (*env).eval_form(heap, &form)
@@ -211,7 +211,7 @@ unsafe fn expand_shim(
     let result = if env.is_null() {
         match with_active_interp(|i| f(i, heap, form, environment)) {
             Some(r) => r,
-            None => typelisp_abi::raise(NO_INTERPRETER_HERE.replace("{}", who)),
+            None => return typelisp_abi::raise(NO_INTERPRETER_HERE.replace("{}", who)).into_word(),
         }
     } else {
         f(&*env, heap, form, environment)
@@ -283,11 +283,11 @@ unsafe fn run_program_interp(args: *const i64, argc: u32, main_returns_int: bool
     let inits: Vec<usize> = program.inits.iter().map(|f| *f as usize).collect();
     let entry = program.entry as usize;
     let ret = if main_returns_int { crate::check::repr::Repr::Int } else { crate::check::repr::Repr::Unit };
-    let call = std::panic::AssertUnwindSafe(|| match run_program_result(interp, heap, &inits, entry, ret, main_returns_int) {
+    let code = match run_program_result(interp, heap, &inits, entry, ret, main_returns_int) {
         Ok(v) => v,
         Err(code) => code,
-    });
-    typelisp_rt::run_entry_payload(std::panic::catch_unwind(call))
+    };
+    typelisp_rt::exit_code(code)
 }
 
 /// [`run_program_interp`]'s inner call: `Interp::run_compiled_program`'s

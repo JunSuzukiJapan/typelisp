@@ -69,6 +69,7 @@ pub mod externs;
 pub mod ffi;
 pub mod llvm_builtins;
 pub mod optimize;
+pub(crate) mod raise_check;
 pub mod orc;
 pub mod type_table;
 
@@ -257,9 +258,8 @@ static RETIRED_CODE: Mutex<Vec<Arc<orc::JitCode>>> = Mutex::new(Vec::new());
 ///
 /// Dropping the last share frees the code and unregisters its unwind
 /// information, and that must not happen while anything is still in it: a
-/// task parked mid-call in a function since redefined, one a worker thread is
-/// stepping, or a panic unwinding through it (unregistering mid-unwind hangs
-/// the *next* unwind — see `tests/compiled_unwind_test.rs`). A `CompiledFn`
+/// task parked mid-call in a function since redefined, or one a worker thread
+/// is stepping. A `CompiledFn`
 /// dies wherever the `FnDef` holding it does, which knows none of that.
 ///
 /// The cost is that retired code lives until someone compiles again with no
@@ -445,9 +445,9 @@ impl CompiledFn {
         CompiledFn { code: self.code.clone(), addr: self.addr, body_abi: self.body_abi }
     }
 
-    /// Runs this function. A compiled `(panic ...)` unwinds out of here
-    /// rather than returning, so callers that need to recover must wrap the
-    /// call in [`catch_compiled_panic`].
+    /// Runs this function. A compiled `(panic ...)` returns with the raise
+    /// waiting on the thread, so callers must wrap the call in
+    /// [`catch_compiled_panic`], which takes it.
     ///
     pub fn call(&self, args: &[i64]) -> i64 {
         <Self as crate::eval::interp::CompiledBody>::call(self, args)

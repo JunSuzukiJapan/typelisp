@@ -25,30 +25,39 @@
 //! (`typeck::format`/`check_print_like`/`check_pprint`, and
 //! `registry`'s `pprint-*` entries).
 //!
-//! # Unwinding
+//! # Raising
 //!
-//! `extern "C-unwind"`, not `extern "C"`: a bad `~` directive and a
-//! `print-object` method that panics are both language-level failures, and
-//! [`typelisp_abi::raise`] unwinds out through here to the `catch`/
-//! `unwind-protect` region that should see them. A plain `extern "C"`
-//! boundary would turn that into an abort.
+//! A bad `~` directive and a `print-object` method that panics are both
+//! language-level failures: the shim raises ([`typelisp_abi::raise`]) and
+//! returns, and the compiled code that called it leaves for the `catch`/
+//! `unwind-protect` region that should see them.
 
-use typelisp_abi::{active_heap, encode, fatal, raise, tagged_arg};
+use typelisp_abi::{active_heap, encode, fatal, raise, tagged_arg, Raised};
 use typelisp_mem::symbols::well_known_symbol;
 use typelisp_mem::{wk, Value};
 
 use crate::runtime::{print_builtin, PrintError};
 
 /// Runs `name` with `args` already decoded, and converts the outcome to the
-/// compiled ABI: [`PrintError::Raise`] unwinds, [`PrintError::Shape`] aborts.
+/// compiled ABI: [`PrintError::Raise`] is raised, [`PrintError::Shape`]
+/// aborts. A shim that gets `Err` returns at once; the compiled code that
+/// called it sees the raise.
+///
+/// When a `print-object` method or `~/name/` definition the run called
+/// raised, that raise is the one kept: the printing error that stopped the
+/// run only says it happened, and replacing the method's own `panic` or
+/// `throw` with it would lose what the program raised.
 ///
 /// # Safety
 ///
 /// A `Heap` must be registered on this thread.
-unsafe fn run(name: u32, args: Vec<Value>) -> Value {
+unsafe fn run(name: u32, args: Vec<Value>) -> Result<Value, Raised> {
     match print_builtin(active_heap(), well_known_symbol(name), &args) {
-        Some(Ok(v)) => v,
-        Some(Err(PrintError::Raise(msg))) => raise(msg),
+        Some(Ok(v)) => Ok(v),
+        Some(Err(PrintError::Raise(msg))) => match typelisp_abi::raised() {
+            Err(raised) => Err(raised),
+            Ok(()) => Err(raise(msg)),
+        },
         Some(Err(PrintError::Shape(msg))) => fatal(&msg),
         None => fatal(&format!("print shim: \"{}\" is not a printing builtin", well_known_symbol(name))),
     }
@@ -80,7 +89,10 @@ pub unsafe extern "C-unwind" fn rt_format(args: *const i64, argc: u32) -> i64 {
     check_argc(argc, 2, "rt_format");
     let mut words = vec![Value::Bool(*args != 0)];
     words.extend((1..argc as usize).map(|i| tagged_arg(args, i)));
-    encode(run(wk::F_FORMAT_RT, words))
+    match run(wk::F_FORMAT_RT, words) {
+        Ok(v) => encode(v),
+        Err(_) => 0,
+    }
 }
 
 /// Generates `rt_print`/`rt_println`, which differ only in the trailing
@@ -97,7 +109,9 @@ macro_rules! print_shim {
         #[no_mangle]
         pub unsafe extern "C-unwind" fn $shim(args: *const i64, argc: u32) -> i64 {
             check_argc(argc, 1, stringify!($shim));
-            run($name, (0..argc as usize).map(|i| tagged_arg(args, i)).collect());
+            if run($name, (0..argc as usize).map(|i| tagged_arg(args, i)).collect()).is_err() {
+                return 0;
+            }
             0
         }
     };
@@ -120,7 +134,9 @@ pub unsafe extern "C-unwind" fn rt_pprint(args: *const i64, argc: u32) -> i64 {
     let which = tagged_arg(args, 0);
     let value = tagged_arg(args, 1);
     let colinc = Value::Int(*args.add(2));
-    run(wk::F_PPRINT_RT, vec![which, value, colinc]);
+    if run(wk::F_PPRINT_RT, vec![which, value, colinc]).is_err() {
+        return 0;
+    }
     0
 }
 
@@ -139,7 +155,9 @@ pub unsafe extern "C-unwind" fn rt_pprint_block_start(args: *const i64, argc: u3
     let prefix = tagged_arg(args, 1);
     let per_line = Value::Bool(*args.add(2) != 0);
     let suffix = tagged_arg(args, 3);
-    run(wk::F_PPRINT_BLOCK_START_RT, vec![obj, prefix, per_line, suffix]);
+    if run(wk::F_PPRINT_BLOCK_START_RT, vec![obj, prefix, per_line, suffix]).is_err() {
+        return 0;
+    }
     0
 }
 
@@ -150,7 +168,9 @@ pub unsafe extern "C-unwind" fn rt_pprint_block_start(args: *const i64, argc: u3
 /// A `Heap` must be registered on this thread.
 #[no_mangle]
 pub unsafe extern "C-unwind" fn rt_pprint_block_end(_args: *const i64, _argc: u32) -> i64 {
-    run(wk::F_PPRINT_BLOCK_END_RT, Vec::new());
+    if run(wk::F_PPRINT_BLOCK_END_RT, Vec::new()).is_err() {
+        return 0;
+    }
     0
 }
 
@@ -163,7 +183,9 @@ pub unsafe extern "C-unwind" fn rt_pprint_block_end(_args: *const i64, _argc: u3
 #[no_mangle]
 pub unsafe extern "C-unwind" fn rt_pprint_newline(args: *const i64, argc: u32) -> i64 {
     check_argc(argc, 1, "rt_pprint_newline");
-    run(wk::F_PPRINT_NEWLINE, vec![tagged_arg(args, 0)]);
+    if run(wk::F_PPRINT_NEWLINE, vec![tagged_arg(args, 0)]).is_err() {
+        return 0;
+    }
     0
 }
 
@@ -178,7 +200,9 @@ pub unsafe extern "C-unwind" fn rt_pprint_indent(args: *const i64, argc: u32) ->
     check_argc(argc, 2, "rt_pprint_indent");
     let kind = tagged_arg(args, 0);
     let n = Value::Int(*args.add(1));
-    run(wk::F_PPRINT_INDENT, vec![kind, n]);
+    if run(wk::F_PPRINT_INDENT, vec![kind, n]).is_err() {
+        return 0;
+    }
     0
 }
 
@@ -194,7 +218,9 @@ pub unsafe extern "C-unwind" fn rt_pprint_tab(args: *const i64, argc: u32) -> i6
     let kind = tagged_arg(args, 0);
     let colnum = Value::Int(*args.add(1));
     let colinc = Value::Int(*args.add(2));
-    run(wk::F_PPRINT_TAB, vec![kind, colnum, colinc]);
+    if run(wk::F_PPRINT_TAB, vec![kind, colnum, colinc]).is_err() {
+        return 0;
+    }
     0
 }
 
@@ -206,7 +232,10 @@ pub unsafe extern "C-unwind" fn rt_pprint_tab(args: *const i64, argc: u32) -> i6
 /// A `Heap` must be registered on this thread.
 #[no_mangle]
 pub unsafe extern "C-unwind" fn rt_pprint_pop(_args: *const i64, _argc: u32) -> i64 {
-    encode(run(wk::F_PPRINT_POP, Vec::new()))
+    match run(wk::F_PPRINT_POP, Vec::new()) {
+        Ok(v) => encode(v),
+        Err(_) => 0,
+    }
 }
 
 /// `(pprint-list-exhausted)` — a bare `0`/`1`.
@@ -217,7 +246,8 @@ pub unsafe extern "C-unwind" fn rt_pprint_pop(_args: *const i64, _argc: u32) -> 
 #[no_mangle]
 pub unsafe extern "C-unwind" fn rt_pprint_list_exhausted(_args: *const i64, _argc: u32) -> i64 {
     match run(wk::F_PPRINT_LIST_EXHAUSTED, Vec::new()) {
-        Value::Bool(b) => i64::from(b),
+        Ok(Value::Bool(b)) => i64::from(b),
+        Err(_) => 0,
         other => fatal(&format!("rt_pprint_list_exhausted: expected a bool, got {:?}", other)),
     }
 }

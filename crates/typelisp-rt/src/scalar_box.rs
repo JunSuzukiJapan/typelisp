@@ -120,7 +120,7 @@ pub unsafe extern "C-unwind" fn rt_sexpr_f64(args: *const i64, argc: u32) -> i64
     }
     match decode(*args) {
         Value::Boxed(id) if active_heap().is_f64(id) => active_heap().f64_value(id).to_bits() as i64,
-        _ => raise("sexpr-f64: expected an f64 Sexpr node".to_string()),
+        _ => raise("sexpr-f64: expected an f64 Sexpr node".to_string()).into_word(),
     }
 }
 
@@ -136,7 +136,7 @@ pub unsafe extern "C-unwind" fn rt_sexpr_f32(args: *const i64, argc: u32) -> i64
     }
     match decode(*args) {
         Value::Boxed(id) if active_heap().is_f32(id) => f64::from(active_heap().f32_value(id)).to_bits() as i64,
-        _ => raise("sexpr-f32: expected an f32 Sexpr node".to_string()),
+        _ => raise("sexpr-f32: expected an f32 Sexpr node".to_string()).into_word(),
     }
 }
 
@@ -225,7 +225,7 @@ pub(crate) unsafe fn sexpr_narrow_value(v: i64, width: u8, signed: bool) -> i64 
         }
     }
     let ty = format!("{}{width}", if signed { "i" } else { "u" });
-    raise(format!("sexpr-{ty}: expected a {ty} Sexpr node"))
+    raise(format!("sexpr-{ty}: expected a {ty} Sexpr node")).into_word()
 }
 
 /// `(sexpr-i8 x)` and its four siblings: the typed payload extractors for
