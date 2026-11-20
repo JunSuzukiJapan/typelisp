@@ -244,7 +244,10 @@ pub fn current_print_vars(heap: &Heap) -> Result<PrintVars, String> {
 /// pretty-printer ops must be merged into an open session *un*-laid-out:
 /// laying it out early would freeze line breaks chosen against the wrong
 /// starting column and without the enclosing block's indentation.
-pub fn build_format(heap: &mut Heap, control: &str, args: Value) -> Result<Out, String> {
+///
+/// `args` are the directive arguments, each already a `Sexpr`. The caller
+/// keeps them reachable: the run allocates (a `print-object` method can).
+pub fn build_format(heap: &mut Heap, control: &str, args: &[Value]) -> Result<Out, String> {
     let env = RtPrintEnv { hooks: print_hooks() };
     let opts = current_opts(heap)?;
     let ctx = RenderCtx { env: &env, print_vars: current_print_vars(heap)? };
@@ -498,6 +501,22 @@ fn arg_keyword(args: &[Value], i: usize, who: &str) -> Result<SymRef, PrintError
 /// `print-rt`, …), not the surface syntax: `format`/`print`/`println`/
 /// `pprint` and `pprint-logical-block` are special forms, and what survives
 /// checking is a call to one of the names below.
+/// Runs `f` with `items` rooted, so that what it allocates cannot collect
+/// them: they arrive as a slice, which the collector does not see.
+fn rooted<T>(heap: &mut Heap, items: &[Value], f: impl FnOnce(&mut Heap, &[Value]) -> T) -> T {
+    for v in items {
+        heap.push_root(*v);
+    }
+    let out = f(heap, items);
+    for _ in items {
+        heap.pop_root();
+    }
+    out
+}
+
+/// `args` of `format-rt` are the destination, the control string and the
+/// directive arguments; of `print-rt`/`println-rt`, the control string and
+/// the directive arguments — each argument a word of its own, not a list.
 pub fn print_builtin(heap: &mut Heap, name: SymRef, args: &[Value]) -> Option<Result<Value, PrintError>> {
     let r = match name.well_known() {
         // `format`'s `bool` destination: builds the text, and additionally
@@ -508,8 +527,7 @@ pub fn print_builtin(heap: &mut Heap, name: SymRef, args: &[Value]) -> Option<Re
         wk::F_FORMAT_RT => (|| {
             let dest = arg_bool(args, 0, "format")?;
             let control = arg_str(heap, args, 1, "format")?;
-            let list = *args.get(2).ok_or_else(|| PrintError::Shape("format: expected 3 arguments".into()))?;
-            let out = build_format(heap, &control, list).map_err(PrintError::Raise)?;
+            let out = rooted(heap, &args[2..], |heap, items| build_format(heap, &control, items)).map_err(PrintError::Raise)?;
             let opts = current_opts(heap).map_err(PrintError::Raise)?;
             let text = format::finish(out.clone(), &opts);
             if dest {
@@ -519,8 +537,7 @@ pub fn print_builtin(heap: &mut Heap, name: SymRef, args: &[Value]) -> Option<Re
         })(),
         wk::F_PRINT_RT | wk::F_PRINTLN_RT => (|| {
             let control = arg_str(heap, args, 0, name.name())?;
-            let list = *args.get(1).ok_or_else(|| PrintError::Shape(format!("{}: expected 2 arguments", name)))?;
-            let out = build_format(heap, &control, list).map_err(PrintError::Raise)?;
+            let out = rooted(heap, &args[1..], |heap, items| build_format(heap, &control, items)).map_err(PrintError::Raise)?;
             let opts = current_opts(heap).map_err(PrintError::Raise)?;
             emit(heap, out, name.is(wk::F_PRINTLN_RT), &opts).map_err(PrintError::Raise)?;
             Ok(Value::Empty)
@@ -627,8 +644,7 @@ mod tests {
         let mut heap = Heap::with_capacity(1 << 12);
         set_print_hooks(None);
 
-        let args = heap.cons(Value::Int(7), Value::Empty).expect("heap has room");
-        let err = build_format(&mut heap, "~a", args).expect_err("no program, no printer variables");
+        let err = build_format(&mut heap, "~a", &[Value::Int(7)]).expect_err("no program, no printer variables");
         assert!(err.contains("printer control variables"), "{}", err);
     }
 
@@ -650,8 +666,7 @@ mod tests {
         }));
 
         let boxed = heap.alloc_enum(typelisp_mem::TypeId::OPTION, 0, vec![Value::Int(7)]);
-        let args = heap.cons(boxed, Value::Empty).expect("heap has room");
-        let out = build_format(&mut heap, "~a", args).expect("format should succeed");
+        let out = build_format(&mut heap, "~a", &[boxed]).expect("format should succeed");
         assert_eq!(format::finish(out, &Opts::default()), "(Some 7)");
 
         set_print_hooks(None);
@@ -666,8 +681,7 @@ mod tests {
         set_print_hooks(Some(TEST_HOOKS));
 
         let boxed = heap.alloc_enum(typelisp_mem::TypeId::OPTION, 0, vec![Value::Int(7)]);
-        let args = heap.cons(boxed, Value::Empty).expect("heap has room");
-        let err = build_format(&mut heap, "~a", args).expect_err("an unregistered enum");
+        let err = build_format(&mut heap, "~a", &[boxed]).expect_err("an unregistered enum");
         assert!(err.contains("Option"), "{}", err);
 
         set_print_hooks(None);
@@ -686,10 +700,8 @@ mod tests {
 
         let pt = typelisp_mem::intern_type(typelisp_mem::TypeShape::named(typelisp_mem::NsId::ROOT, "pt", &[]));
         let boxed = heap.alloc_struct(pt, vec![Value::Int(1)]);
-        // `(v v)` — the two arguments `~a ~s` consumes.
-        let tail = heap.cons(boxed, Value::Empty).expect("heap has room");
-        let args = heap.cons(boxed, tail).expect("heap has room");
-        let out = build_format(&mut heap, "~a ~s", args).expect("format should succeed");
+        // The two arguments `~a ~s` consumes.
+        let out = build_format(&mut heap, "~a ~s", &[boxed, boxed]).expect("format should succeed");
         assert_eq!(format::finish(out, &Opts::default()), "#<A> #<S>");
 
         set_print_hooks(None);

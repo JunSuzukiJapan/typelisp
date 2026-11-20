@@ -56,12 +56,11 @@ pub fn build(
     heap: &mut Heap,
     ctx: RenderCtx<'_>,
     control: &str,
-    args: Value,
+    args: &[Value],
     opts: &Opts,
 ) -> Result<Out, String> {
     let nodes = parse(control)?;
-    let items = list_to_vec(heap, args, "the argument list")?;
-    let mut st = State { heap, ctx, args: items, pos: 0, opts: *opts };
+    let mut st = State { heap, ctx, args: args.to_vec(), pos: 0, opts: *opts };
     let mut out = Out::new();
     st.interp_seq(&nodes, &mut out)?;
     Ok(out)

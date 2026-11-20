@@ -312,6 +312,29 @@ pub(crate) fn needs_interpreter(name: &str) -> bool {
     )
 }
 
+/// The shims that take cells from the cons arena, each with the operation a
+/// program reaches it through: what `typl -c --no-cons` refuses a program
+/// for (`compile::aot::no_cons`).
+///
+/// The arena has one allocator, `typelisp_mem::Heap::cons`, and these are
+/// the shims whose bodies reach it: building a `Sexpr` cons, turning a path
+/// into a list, the reader (`read`, and a datum the program quotes), and the
+/// interpreter an `eval`-carrying executable
+/// holds. A shim that calls compiled code back (a closure, a
+/// `print-object` method) is not here: what it calls is in the program's
+/// module, where the check follows it itself.
+pub(crate) const CONS_MAKING_SHIMS: [(&str, &str); 9] = [
+    ("rt_cons", "building a `Sexpr` cons"),
+    ("rt_path_to_list", "turning a path into a list"),
+    ("rt_read", "`read`"),
+    ("rt_read_datum_at", "a quoted datum"),
+    ("rt_eval", "`eval`"),
+    ("rt_eval_init", "`eval`"),
+    ("rt_eval_state", "`eval`"),
+    ("rt_macroexpand", "`macroexpand`"),
+    ("rt_macroexpand_1", "`macroexpand-1`"),
+];
+
 /// The suspension [`needs_interpreter`]'s calls are preceded by —
 /// `call_state::SUSPEND_MAIN`.
 pub(crate) const RT_SUSPEND_MAIN: &str = "rt_suspend_main";
@@ -1298,3 +1321,18 @@ mod native_method_list_tests {
     }
 }
 
+
+#[cfg(test)]
+mod cons_making_shim_tests {
+    use super::{rt_extern_functions, CONS_MAKING_SHIMS};
+
+    /// A name here that no shim answers to would never match, and the check
+    /// would let its operation through.
+    #[test]
+    fn every_cons_making_shim_is_a_shim() {
+        let shims = rt_extern_functions();
+        for (name, _) in CONS_MAKING_SHIMS {
+            assert!(shims.iter().any(|(n, _)| *n == name), "{} is not in rt_extern_functions", name);
+        }
+    }
+}

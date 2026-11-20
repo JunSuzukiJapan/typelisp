@@ -966,13 +966,10 @@ impl Interp {
             return Ok(format!("(Some {})", self.render_readably(heap, v, None)?));
         }
         self.install_print_hooks();
-        // `core::list` roots `v` across the one `cons` it takes to wrap it, and
-        // rooting the finished list keeps `v` reachable through the format run,
-        // which allocates.
-        let list = core::list(heap, &[v]).map_err(|e| e.to_string())?;
-        heap.push_root(list);
+        // Rooted: the format run allocates.
+        heap.push_root(v);
         let text = typelisp_print::runtime::current_opts(heap).and_then(|opts| {
-            typelisp_print::runtime::build_format(heap, "~s", list).map(|out| typelisp_print::format::finish(out, &opts))
+            typelisp_print::runtime::build_format(heap, "~s", &[v]).map(|out| typelisp_print::format::finish(out, &opts))
         });
         heap.pop_root();
         text

@@ -139,6 +139,12 @@ impl ConcreteNames {
     pub fn method_symbol(type_path: impl Display, method: &str) -> String {
         Self::symbol(&Self::method_link(type_path, method))
     }
+
+    /// The link name a [`Self::symbol`] was made from, or `None` for a symbol
+    /// this did not make (a runtime shim, the generated `main`).
+    pub fn link_name_of(symbol: &str) -> Option<&str> {
+        symbol.strip_prefix(SYMBOL_PREFIX)
+    }
 }
 
 #[cfg(test)]

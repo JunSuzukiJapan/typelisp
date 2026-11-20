@@ -1298,17 +1298,18 @@ struct IoWait {
     deadline: Option<std::time::Instant>,
 }
 
-/// `(ARM . VALUE)` — what a `select` answers with. The arm index is the
-/// whole of the dispatch, and the value is the receive's `Option<T>` (or
-/// unit for a send or an `else`).
+/// `#{ARM VALUE}` — what a `select` answers with: field 0 is the arm index,
+/// the whole of the dispatch, and field 1 the receive's `Option<T>` (or unit
+/// for a send or an `else`). A box rather than a cons, so that `select` takes
+/// no cell from the cons arena.
 ///
-/// The `cons` can collect, and until it returns the payload — a `Some` box
-/// built moments ago — is reachable from nothing the collector walks, so it
-/// is rooted around the allocation.
+/// Until the box holds it, the payload — a `Some` box built moments ago — is
+/// reachable from nothing the collector walks, so it is rooted around the
+/// allocation.
 fn select_answer(heap: &mut Heap, arm: usize, payload: Value) -> Result<Value, SchedError> {
     let mut s = RootScope::new(heap);
     s.push_root(payload);
-    s.cons(Value::Int(arm as i64), payload).map_err(|e| SchedError::Internal(e.to_string()))
+    Ok(s.alloc_struct(typelisp_mem::sexpr_tuple_type(2), vec![Value::Int(arm as i64), payload]))
 }
 
 /// Hands `answer` to a parked task on **its own** root stack — see

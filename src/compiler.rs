@@ -5855,8 +5855,8 @@ const SOURCE_TEMPLATE: &str = r#"
 ;; raw integer in one would be read as a pointer. `extra` is the receive arm's
 ;; `Option<T>` type or the send arm's value.
 ;;
-;; The answer is a tagged `(ARM . VALUE)` cons: which arm won, and what it
-;; answered with. The index is the whole of the dispatch, which is why `else`
+;; The answer is a tagged `#{ARM VALUE}` box: which arm won (field 0), and
+;; what it answered with (field 1). The index is the whole of the dispatch, which is why `else`
 ;; being last matters — its index is the one past the channel arms.
 (defun select-arm-count ((arms Option<Sexpr>)) int
     (if (sexpr-consp arms)
@@ -5955,12 +5955,14 @@ const SOURCE_TEMPLATE: &str = r#"
       (fill-select-ops m fn-name builder env fn-env captured cur-fn loop-exit loop-slot block-names block-exits block-slots protect exit-cleanup args-ptr 2 arms)
       (let* ((ignored (build-call builder (get-function m "rt_suspend_chan_select") args-ptr argc))
              (raw (coroutine-suspend builder m))
-             (car-ptr (alloca-args builder 1)))
-        (store-arg builder car-ptr 0 raw)
-        (let* ((idx-v (untag-fixnum builder (build-call builder (get-function m "rt_car") car-ptr 1)))
-               (cdr-ptr (alloca-args builder 1)))
-          (store-arg builder cdr-ptr 0 raw)
-          (let* ((val-v (build-call builder (get-function m "rt_cdr") cdr-ptr 1))
+             (arm-ptr (alloca-args builder 2)))
+        (store-arg builder arm-ptr 0 raw)
+        (store-arg builder arm-ptr 1 (const-word builder 0))
+        (let* ((idx-v (untag-fixnum builder (build-call builder (get-function m "rt_struct_field_get") arm-ptr 2)))
+               (val-ptr (alloca-args builder 2)))
+          (store-arg builder val-ptr 0 raw)
+          (store-arg builder val-ptr 1 (const-word builder 1))
+          (let* ((val-v (build-call builder (get-function m "rt_struct_field_get") val-ptr 2))
                  (merge-block (append-block cur-fn "select-merge"))
                  (slot (alloca-args builder 1)))
             (compile-select-arms m fn-name builder env fn-env captured cur-fn loop-exit loop-slot block-names block-exits block-slots protect exit-cleanup idx-v val-v slot merge-block 0 arms)

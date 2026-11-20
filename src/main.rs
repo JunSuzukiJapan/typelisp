@@ -37,7 +37,7 @@ Usage:
   typl [OPTIONS]                                 start the REPL
   typl [OPTIONS] FILE [ARGS...]                  run FILE; ARGS are its (command-line-args)
   typl [--lib-dir DIR] [-O<N>] -c SOURCE [-o OUTPUT] [--heap-cells N]
-       [--max-memory SIZE]
+       [--max-memory SIZE] [--no-cons]
                                                  compile SOURCE to an executable
   typl [OPTIONS] test [FILE.typl] [FILTER]       run the #[test] functions of the
                                                  project here (or of FILE) whose
@@ -60,6 +60,8 @@ Options:
                          the capacity of the executable's arena (default 65536)
   --max-memory SIZE      after -c: the most the executable may allocate, in
                          bytes (K, M or G may follow); more is a runtime error
+  --no-cons              after -c: the executable has no cons cells; a program
+                         that needs them is a compile error
   --feature NAME         add a feature for #+/#- (repeatable)
   --on-redefine=POLICY   on redefinition: warn (default), error or silent
   --remove-lib           remove the library this typl wrote for compiled
@@ -227,7 +229,9 @@ fn compile_command(flag: &str, args: &[String], heap_cells: Option<usize>) -> i3
     let mut options = typelisp::compile::aot::BuildOptions { heap_cells, ..Default::default() };
     let mut it = args.iter();
     while let Some(a) = it.next() {
-        if let Some(v) = flag_value(a, "--max-memory", &mut it) {
+        if a == "--no-cons" {
+            options.no_cons = true;
+        } else if let Some(v) = flag_value(a, "--max-memory", &mut it) {
             let Some(v) = v else {
                 eprintln!("--max-memory: needs a size in bytes (K, M or G may follow)");
                 return 1;
@@ -260,12 +264,12 @@ fn compile_command(flag: &str, args: &[String], heap_cells: Option<usize>) -> i3
         } else if source.is_none() && !a.starts_with('-') {
             source = Some(PathBuf::from(a));
         } else {
-            eprintln!("{}: unexpected argument `{}` (usage: typl {} SOURCE [-o OUTPUT] [--release] [-O<N>] [--max-memory SIZE])", flag, a, flag);
+            eprintln!("{}: unexpected argument `{}` (usage: typl {} SOURCE [-o OUTPUT] [--release] [-O<N>] [--max-memory SIZE] [--no-cons])", flag, a, flag);
             return 1;
         }
     }
     let Some(source) = source else {
-        eprintln!("{}: needs a source file (usage: typl {} SOURCE [-o OUTPUT] [--release] [-O<N>] [--max-memory SIZE])", flag, flag);
+        eprintln!("{}: needs a source file (usage: typl {} SOURCE [-o OUTPUT] [--release] [-O<N>] [--max-memory SIZE] [--no-cons])", flag, flag);
         return 1;
     };
     let output = match output {

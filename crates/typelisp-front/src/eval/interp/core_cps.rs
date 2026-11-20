@@ -2738,13 +2738,16 @@ impl Interp {
             // compiled chain rather than up the continuation stack, and
             // `CompiledResume` is where the encoding happens — this frame is
             // only what catches the scheduler's `Apply`.
-            // `v` is `(ARM . VALUE)`: which arm won, and what it answered
+            // `v` is `#{ARM VALUE}`: which arm won, and what it answered
             // with. The index is the whole of the dispatch — the checker put
             // the `else` arm last precisely so its index is the one past the
             // channel arms.
             Frame::SelectArm { form, env } => {
-                let arm_index = match heap.car(v) {
-                    Ok(Value::Int(n)) if n >= 0 => n as usize,
+                let Value::Boxed(answer) = v else {
+                    return Err(EvalError::Internal(format!("eval: (select ..) was answered with {:?}", v)));
+                };
+                let arm_index = match heap.struct_field(answer, 0) {
+                    Value::Int(n) if n >= 0 => n as usize,
                     other => {
                         return Err(EvalError::Internal(format!(
                             "eval: (select ..) was answered with {:?}",
@@ -2752,7 +2755,7 @@ impl Interp {
                         )))
                     }
                 };
-                let payload = heap.cdr(v).map_err(heap_err)?;
+                let payload = heap.struct_field(answer, 1);
                 let arm = core::field(heap, form, arm_index).ok_or_else(|| {
                     EvalError::Internal(format!("eval: (select ..) has no arm {}", arm_index))
                 })?;

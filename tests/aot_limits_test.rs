@@ -1,7 +1,8 @@
 //! The resources an executable built by `typl -c` may use:
 //! `--heap-cells N` fixes its cons arena at `N` cells, and
-//! `--max-memory SIZE` bounds what the whole process allocates
-//! (`compile::aot::BuildOptions`). Driven through the `typl` binary, since
+//! `--max-memory SIZE` bounds what the whole process allocates, and
+//! `--no-cons` refuses at compile time a program that would take a cons
+//! cell (`compile::aot::BuildOptions`). Driven through the `typl` binary, since
 //! the flags are the CLI's, and checked by running what it builds.
 //!
 //! Scratch files go under `target/aot-test-tmp/`, one name per test, for the
@@ -27,8 +28,9 @@ const BIG_VECTOR: &str = r#"
   (if (= (len (Vector::filled 2000000 0)) 2000000) 0 2))
 "#;
 
-/// Compiles `source` with `flags` after `-c` and runs the executable.
-fn build_and_run(name: &str, source: &str, flags: &[&str]) -> Output {
+/// Compiles `source` with `flags` after `-c`: `typl`'s own output, and the
+/// executable's path.
+fn build(name: &str, source: &str, flags: &[&str]) -> (Output, PathBuf) {
     let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("target").join("aot-test-tmp").join(name);
     std::fs::create_dir_all(&dir).expect("failed to create the test scratch dir");
     let src = dir.join("prog.typl");
@@ -39,8 +41,21 @@ fn build_and_run(name: &str, source: &str, flags: &[&str]) -> Output {
         .args(flags)
         .output()
         .expect("failed to start the typl binary");
+    (out, exe)
+}
+
+/// Compiles `source` with `flags` after `-c` and runs the executable.
+fn build_and_run(name: &str, source: &str, flags: &[&str]) -> Output {
+    let (out, exe) = build(name, source, flags);
     assert!(out.status.success(), "typl -c failed: {}", String::from_utf8_lossy(&out.stderr));
     Command::new(&exe).output().expect("failed to run the compiled executable")
+}
+
+/// What `typl -c` said when it refused to build `source`.
+fn refused(name: &str, source: &str, flags: &[&str]) -> String {
+    let (out, _) = build(name, source, flags);
+    assert_eq!(out.status.code(), Some(1), "typl -c built it: {}", String::from_utf8_lossy(&out.stdout));
+    String::from_utf8_lossy(&out.stderr).into_owned()
 }
 
 #[test]
@@ -77,4 +92,48 @@ fn a_memory_limit_below_the_arena_stops_at_startup() {
     let run = build_and_run("limits-memory-arena", BIG_VECTOR, &["--max-memory", "100K"]);
     assert_eq!(run.status.code(), Some(1));
     assert!(String::from_utf8_lossy(&run.stderr).contains("memory limit exceeded"), "{}", String::from_utf8_lossy(&run.stderr));
+}
+
+/// Printing with arguments, arithmetic, strings, vectors, a hash table and
+/// a `select` over channels, all without a cons cell: the executable runs
+/// with an empty arena.
+#[test]
+fn a_program_without_cons_cells_builds_and_runs_without_an_arena() {
+    let run = build_and_run(
+        "limits-no-cons-runs",
+        r#"
+(defun fib ((n int)) int (if (< n 2) n (+ (fib (- n 1)) (fib (- n 2)))))
+(defun main () ()
+  (let ((v (Vector::filled 3 1))
+        (h (the HashTable<int, int> (HashTable::new)))
+        (c (the Chan<int> (Chan::new 1))))
+    (set h 1 2)
+    (send c 5)
+    (select ((x (recv c)) (println "got ~a" x)))
+    (println "fib ~a, ~a ~a, ~a" (fib 15) (len v) (get h 1) (upcase "ok"))))
+"#,
+        &["--no-cons"],
+    );
+    assert_eq!(run.status.code(), Some(0), "{}", String::from_utf8_lossy(&run.stderr));
+    assert_eq!(String::from_utf8_lossy(&run.stdout), "got (Some 5)\nfib 610, 3 (Some 2), OK\n");
+}
+
+/// The error names the operation and the functions it is reached by.
+#[test]
+fn a_program_that_conses_is_refused_with_the_chain_that_reaches_the_cons() {
+    let err = refused("limits-no-cons-refused", LIVE_LIST, &["--no-cons"]);
+    assert!(err.contains("--no-cons"), "{}", err);
+    assert!(err.contains("building a `Sexpr` cons (reached by main -> prog::main -> prog::build)"), "{}", err);
+}
+
+#[test]
+fn a_quoted_list_is_a_use_of_cons_cells() {
+    let err = refused("limits-no-cons-quote", "(defun main () () (println \"~a\" '(1 2 3)))\n", &["--no-cons"]);
+    assert!(err.contains("--no-cons: the program uses cons cells"), "{}", err);
+}
+
+#[test]
+fn no_cons_with_heap_cells_is_refused() {
+    let err = refused("limits-no-cons-cells", BIG_VECTOR, &["--no-cons", "--heap-cells", "100"]);
+    assert!(err.contains("cannot be combined"), "{}", err);
 }

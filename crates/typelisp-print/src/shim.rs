@@ -68,37 +68,36 @@ fn check_argc(argc: u32, n: usize, who: &str) {
 /// `(format <bool> control args…)` — CLHS 22.3.
 ///
 /// `args[0]` is the destination as a bare `0`/`1`, `args[1]` the control
-/// string and `args[2]` the `Sexpr` list of already-wrapped directive
-/// arguments. Returns the built text as a tagged string.
+/// string and the rest the directive arguments, each already a `Sexpr`.
+/// Returns the built text as a tagged string.
 ///
 /// # Safety
 ///
-/// `args` must point to at least 3 valid `i64`s in those representations; a
-/// `Heap` must be registered on this thread.
+/// `args` must point to `argc` (at least 2) valid `i64`s in those
+/// representations; a `Heap` must be registered on this thread.
 #[no_mangle]
 pub unsafe extern "C-unwind" fn rt_format(args: *const i64, argc: u32) -> i64 {
-    check_argc(argc, 3, "rt_format");
-    let dest = Value::Bool(*args != 0);
-    let control = tagged_arg(args, 1);
-    let list = tagged_arg(args, 2);
-    encode(run(wk::F_FORMAT_RT, vec![dest, control, list]))
+    check_argc(argc, 2, "rt_format");
+    let mut words = vec![Value::Bool(*args != 0)];
+    words.extend((1..argc as usize).map(|i| tagged_arg(args, i)));
+    encode(run(wk::F_FORMAT_RT, words))
 }
 
 /// Generates `rt_print`/`rt_println`, which differ only in the trailing
-/// newline. `args[0]` is the control string, `args[1]` the argument list;
-/// both return `()`, which is a bare `0`.
+/// newline. `args[0]` is the control string and the rest the directive
+/// arguments; both return `()`, which is a bare `0`.
 macro_rules! print_shim {
     ($shim:ident, $name:expr) => {
         /// `print`/`println` for compiled code — see [`crate::runtime::print_builtin`].
         ///
         /// # Safety
         ///
-        /// `args` must point to at least 2 valid tagged `i64`s; a `Heap` must
-        /// be registered on this thread.
+        /// `args` must point to `argc` (at least 1) valid tagged `i64`s; a
+        /// `Heap` must be registered on this thread.
         #[no_mangle]
         pub unsafe extern "C-unwind" fn $shim(args: *const i64, argc: u32) -> i64 {
-            check_argc(argc, 2, stringify!($shim));
-            run($name, vec![tagged_arg(args, 0), tagged_arg(args, 1)]);
+            check_argc(argc, 1, stringify!($shim));
+            run($name, (0..argc as usize).map(|i| tagged_arg(args, i)).collect());
             0
         }
     };

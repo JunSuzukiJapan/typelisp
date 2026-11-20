@@ -20,7 +20,7 @@ typl -c SOURCE [-o OUTPUT] [--target TRIPLE] [--heap-cells N] [--no-cons] [--max
 ```
 
 - `--heap-cells N`: 実行ファイルの cons アリーナの容量（セル数）。既定は今と同じ `1 << 16`（`eval` を含むプログラムは `1 << 18`）。アリーナは大きくならない。
-- `--no-cons`: cons セルを使わない。容量は 0 になり、cons が要る操作はコンパイル時にエラーになる。`--heap-cells` とは併用できない。
+- `--no-cons`: cons セルを使わない。容量は 0 になり、cons が要る操作はコンパイル時にエラーになる。`--heap-cells` とは併用できない。（段階 2 で実装）
 - `--max-memory SIZE`: 確保量の上限。`SIZE` はバイト数で、`K`/`M`/`G`（1024 の累乗）を付けてよい。
 - `--target TRIPLE`: 既定はホスト。`wasm32-wasip1` と `wasm32-unknown-unknown` を受け付ける。
 
@@ -36,10 +36,13 @@ typl -c SOURCE [-o OUTPUT] [--target TRIPLE] [--heap-cells N] [--no-cons] [--max
 
 ### 段階 2: cons を使わない設定（コンパイル時の検出）
 
-- 「cons セルを作るか」は関数ごとの事実。島の emit 時点で、cons を作るノード（`cons`、リストの組み立て、準クォート、`Sexpr` の `Cons` 構築、cons を作る `rt_*` の呼び出し）を記録する。
-- 呼び出しグラフ（prelude の関数を含む）をたどり、`main` と大域の初期化から到達できる関数のどれかが cons を作るなら、その呼び出しの連鎖をソース位置つきでエラーにする。
-- どの `rt_*` が内部で cons を作るかは表 1 つで答える（externs の表の列として持つ）。表に載っていない shim は作らないとみなすのではなく、全 shim に値を書かせる（未記入はコンパイルが通らない形にする）。
-- `eval` を含むプログラムは評価器が cons を作るので、`--no-cons` と併用するとエラー。
+- 「cons セル」は cons アリーナのセル（`--heap-cells` が数えるもの）。`cons` 関数が作る型付きペア `cons-cell<A,B>` は箱で、アリーナを使わない。
+- 判定は実行ファイルのモジュール全体（プログラム、リンクした prelude、生成した `main`）で行う（`compile::aot::no_cons`）。`main` から参照をたどる。直接の呼び出しに限らず、オペランドに現れる関数（ドライバ往復の呼び先、クロージャ、vtable や `print-object` の登録）も、定数式と大域の初期化子の中まで含める。
+- 届いた先が宣言だけの shim で、`externs::CONS_MAKING_SHIMS` に載っていればエラー。表に載るのは、`Heap::cons` に届く shim（`rt_cons`、`rt_path_to_list`、リーダ、`eval`/`macroexpand`）。
+- cons を使わずに済むように変えたもの:
+  - `format`/`print`/`println` の書式の引数: `Sexpr` のリストをやめ、1 個ずつ組み込み関数の引数として渡す。
+  - `select` の答え: `(腕 . 値)` の cons をやめ、`#{腕 値}` の箱にする。
+- `--no-cons` の実行ファイルはアリーナが 0 セルで、`--heap-cells` とは併用できない。
 
 ### 段階 3: 巻き戻しを状態語に
 

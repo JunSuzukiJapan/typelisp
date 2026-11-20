@@ -43,9 +43,11 @@ pub(crate) fn check_format(cx: &Cx, heap: &mut Heap, locals: &Locals, args: &[(V
     if cx.resolve(&dest.ty) != Type::Bool {
         return to_stream(cx, heap, locals, dest, &args[1..], loc);
     }
-    let (control, list) = check_control(cx, heap, locals, "format", (*control, control_loc.clone()), items, loc.clone())?;
+    let (control, items) = check_control(cx, heap, locals, "format", (*control, control_loc.clone()), items, loc.clone())?;
     let path = Path::internal_builtin(wk::F_FORMAT_RT);
-    Ok(Typed { node: Node::Call { path, targs: Vec::new(), args: vec![dest, control, list] }, ty: Type::Str, loc })
+    let mut call_args = vec![dest, control];
+    call_args.extend(items);
+    Ok(Typed { node: Node::Call { path, targs: Vec::new(), args: call_args }, ty: Type::Str, loc })
 }
 
 /// `(format stream control arg...)`, `dest` the stream checked: the string
@@ -91,9 +93,11 @@ pub(crate) fn check_print(cx: &Cx, heap: &mut Heap, locals: &Locals, head: u32, 
     let [(control, control_loc), items @ ..] = args else {
         return Err(Error::TypeError(format!("{}: expected at least a control string", what)));
     };
-    let (control, list) = check_control(cx, heap, locals, what, (*control, control_loc.clone()), items, loc.clone())?;
+    let (control, items) = check_control(cx, heap, locals, what, (*control, control_loc.clone()), items, loc.clone())?;
     let path = Path::internal_builtin(builtin);
-    Ok(Typed { node: Node::Call { path, targs: Vec::new(), args: vec![control, list] }, ty: Type::Unit, loc })
+    let mut call_args = vec![control];
+    call_args.extend(items);
+    Ok(Typed { node: Node::Call { path, targs: Vec::new(), args: call_args }, ty: Type::Unit, loc })
 }
 
 /// `(eprint control arg...)` or `(eprintln control arg...)`, `head` saying
@@ -151,7 +155,7 @@ fn check_control(
     (control, control_loc): (Value, Option<Loc>),
     items: &[(Value, Option<Loc>)],
     loc: Option<Loc>,
-) -> Result<(Typed, Typed), Error> {
+) -> Result<(Typed, Vec<Typed>), Error> {
     let text = control_text(heap, what, control)?;
     let mut checked = Vec::with_capacity(items.len());
     for (i, (item, item_loc)) in items.iter().enumerate() {
@@ -166,7 +170,16 @@ fn check_control(
         resolve_calls(cx, heap, locals, what, &text, &checked, control_loc)?
     };
     cx.check_directives_later(Directives { control: text, args: checked.iter().map(|t| t.ty.clone()).collect(), loc });
-    Ok((control, sexpr_list(checked)))
+    // Each argument a `Sexpr` of its own, not a list of them: building a
+    // list would take a cons cell per argument, and printing needs none.
+    let items = checked
+        .into_iter()
+        .map(|item| {
+            let loc = item.loc.clone();
+            Typed { node: Node::AsSexpr { value: Box::new(item) }, ty: sexpr_ty(), loc }
+        })
+        .collect();
+    Ok((control, items))
 }
 
 /// The control string `text`, which has `~/name/` directives, with each name

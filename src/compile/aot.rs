@@ -71,6 +71,7 @@ use crate::{Checker, Heap, Interp, Path, Reader, TopLevelForm, Value};
 use typelisp_mem::{wk, ConcreteNames};
 mod archive;
 mod native;
+mod no_cons;
 
 pub use archive::*;
 pub(crate) use native::*;
@@ -289,10 +290,17 @@ pub struct BuildOptions {
     /// The bound on the bytes the running executable allocates
     /// (`--max-memory`, `typelisp_rt::mem_limit`). `None` is no bound.
     pub max_memory: Option<usize>,
+    /// No cons arena at all (`--no-cons`): a program that would take a cell
+    /// from it is refused at compile time (`no_cons`), and the executable's
+    /// arena has no cells. Not with [`Self::heap_cells`].
+    pub no_cons: bool,
 }
 
 /// [`compile_file`] with the run-time resources `options` gives.
 pub fn compile_file_with(source_path: &str, output_path: &str, options: &BuildOptions) -> Result<(), String> {
+    if options.no_cons && options.heap_cells.is_some() {
+        return Err("--no-cons and --heap-cells cannot be combined: without cons cells there is no arena to size".to_string());
+    }
     crate::compile::driver::emitted_layout_is_runnable()?;
     let source =
         fs::read_to_string(source_path).map_err(|e| format!("failed to read \"{}\": {}", source_path, e))?;
@@ -677,16 +685,25 @@ pub fn compile_file_with(source_path: &str, output_path: &str, options: &BuildOp
             eval_env.as_deref().map(|bytes| (bytes, eval_ns, crate::release::is_release())),
             main_returns_int,
             HeapInit {
-                cells: options.heap_cells.unwrap_or(if eval_env.is_some() {
-                    EVAL_HEAP_CAPACITY
-                } else {
-                    typelisp_rt::DEFAULT_AOT_HEAP_CAPACITY
-                }),
-                fixed: options.heap_cells.is_some(),
+                cells: match options.heap_cells {
+                    Some(cells) => cells,
+                    None if options.no_cons => 0,
+                    None if eval_env.is_some() => EVAL_HEAP_CAPACITY,
+                    None => typelisp_rt::DEFAULT_AOT_HEAP_CAPACITY,
+                },
+                fixed: options.heap_cells.is_some() || options.no_cons,
                 max_memory: options.max_memory,
             },
         )
             .and_then(|()| m.verify().map_err(|e| format!("module failed verification: {}", e)))
+            .and_then(|()| {
+                if !options.no_cons {
+                    return Ok(());
+                }
+                let entry = m.get_function(ENTRY_POINT_NAME).expect("build_main_wrapper defined `main`");
+                let uses = no_cons::cons_uses(&m, entry);
+                if uses.is_empty() { Ok(()) } else { Err(no_cons::report(&uses)) }
+            })
             .and_then(|()| write_executable(&m, output_path, &link_libraries, &items))
     };
     // Destroyed here with the guard still held rather than left to fall out
