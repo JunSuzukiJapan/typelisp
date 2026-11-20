@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/traits.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
+<!-- translated-from: docs/ja/reference/functions/traits.md @ 6271c6d8b68694e1d27dd2e349b08117d2ef2bfb -->
 # Traity standardowe
 
 Traity do iteracji, porównywania, arytmetyki oraz dodawania i wyjmowania elementów. Pozostałe traity standardowe znajdują się we własnych
@@ -34,13 +34,13 @@ porównywać.
 (deftrait Equal ()
   (defmethod equal (self (other Self)) bool))                ; do zaimplementowania
 (deftrait Ord (Equal)                                     ; dziedziczy po Equal
-  (defmethod less (self (other Self)) bool)                  ; do zaimplementowania
-  (defmethod less-equal (self (other Self)) bool (not (less other self)))
-  (defmethod greater (self (other Self)) bool (less other self))
-  (defmethod greater-equal (self (other Self)) bool (not (less self other))))
+  (defmethod < (self (other Self)) bool)                     ; do zaimplementowania
+  (defmethod <= (self (other Self)) bool (not (< other self)))
+  (defmethod > (self (other Self)) bool (< other self))
+  (defmethod >= (self (other Self)) bool (not (< self other))))
 ```
 
-Aby zaimplementować `Equal`, pisze się `equal`, a dla `Ord` tylko `less`. Resztę `Ord` uzupełniają
+Aby zaimplementować `Equal`, pisze się `equal`, a dla `Ord` tylko `<`. Resztę `Ord` uzupełniają
 implementacje domyślne. `Ord` dziedziczy po `Equal`, więc przed `impl Ord X` potrzebne jest `impl Equal X`.
 
 `(equal a b)` wywołuje implementację `Equal` typu `a`. Napisanie go dla typu, który nie implementuje
@@ -53,10 +53,10 @@ Każdą metodę traitu można wywołać bezpośrednio jako funkcję (wewnątrz o
 | Nazwa | Forma | Typ | Opis |
 |---|---|---|---|
 | `equal` | `(equal a b)` | `(A,A)→bool` where `Equal A` | Czy są równe (`==` z Rusta) |
-| `less` | `(less a b)` | `(A,A)→bool` where `Ord A` | `a < b` |
-| `less-equal` | `(less-equal a b)` | `(A,A)→bool` where `Ord A` | `a <= b` |
-| `greater` | `(greater a b)` | `(A,A)→bool` where `Ord A` | `a > b` |
-| `greater-equal` | `(greater-equal a b)` | `(A,A)→bool` where `Ord A` | `a >= b` |
+| `<` | `(< a b)` | `(A,A)→bool` where `Ord A` | mniejsze |
+| `<=` | `(<= a b)` | `(A,A)→bool` where `Ord A` | mniejsze lub równe |
+| `>` | `(> a b)` | `(A,A)→bool` where `Ord A` | większe |
+| `>=` | `(>= a b)` | `(A,A)→bool` where `Ord A` | większe lub równe |
 
 `Equal` jest zaimplementowane dla: wszystkich typów liczbowych (od `i8` do `u32` / `f32` / `f64` / `int` /
 `ratio`), `bool` `char` `string` `symbol` `complex`, `Sexpr`, `cons-cell<A,B>` i krotek (element po
@@ -71,11 +71,8 @@ zawartości, a każdy inny atom przez `eql`. To porównanie przechodzi po warto�
 wywołuje żadnej metody. Struktura wewnątrz listy jest więc, jak w CL, porównywana według tożsamości,
 niezależnie od `impl Equal` jej typu.
 
-Nazwy metod `Ord` nie pokrywają się z wbudowanymi operatorami (`< <= > >=`) ani z `lt`, bo wbudowanych
-rzeczy nie da się przedefiniować, a każda implementacja deleguje do nich. Same skalarne operatory
-porównania są wbudowanymi metodami zależnymi od typu odbiorcy ([Liczby](numbers.md),
-[Łańcuchy i znaki](collections.md)). Wewnątrz ograniczenia napisany operator czyta się jako metodę traitu
-(rozdział 3). `=` staje się `equal`, a `/=` staje się `(not (equal a b))`.
+Skalarne operatory porównania są wbudowanymi metodami zależnymi od typu odbiorcy ([Liczby](numbers.md), [Łańcuchy i znaki](collections.md))
+i to one są implementacją `Ord`. Wewnątrz ograniczenia `=` staje się `equal`, a `/=` staje się `(not (equal a b))`.
 
 ## 3. Traity arytmetyczne (`Add` / `Sub` / `Mul` / `Div` / `Rem` / `Bits` / `Number`)
 
@@ -83,32 +80,30 @@ Warstwa pozwalająca kodowi generycznemu wymagać „typu, który można dodawa�
 wbudowanych operatorów** ([Liczby](numbers.md)) i nie przechodzi przez tę warstwę.
 
 ```lisp
-(deftrait Add () (defmethod add (self (other Self)) Self))
-(deftrait Sub () (defmethod sub (self (other Self)) Self))
-(deftrait Mul () (defmethod mul (self (other Self)) Self))
-(deftrait Div () (:type Output) (defmethod div (self (other Self)) Output))
-(deftrait Rem () (defmethod remainder (self (other Self)) Self))
+(deftrait Add () (defmethod + (self (other Self)) Self))
+(deftrait Sub () (defmethod - (self (other Self)) Self))
+(deftrait Mul () (defmethod * (self (other Self)) Self))
+(deftrait Div () (:type Output) (defmethod / (self (other Self)) Output))
+(deftrait Rem () (defmethod rem (self (other Self)) Self))
 (deftrait Bits ()
-  (defmethod bit-and (self (other Self)) Self)
-  (defmethod bit-or  (self (other Self)) Self)
-  (defmethod bit-xor (self (other Self)) Self)
-  (defmethod bit-not (self) Self)
-  (defmethod shift (self (count int)) Self))                 ; odległość jest zawsze int (jak w ash)
+  (defmethod logand (self (other Self)) Self)
+  (defmethod logior (self (other Self)) Self)
+  (defmethod logxor (self (other Self)) Self)
+  (defmethod lognot (self) Self)
+  (defmethod ash (self (count int)) Self))                   ; odległość jest zawsze int
 (deftrait Number (Add Sub Mul Rem Ord))                   ; bez metod; połączenie pięciu
 ```
 
-**Wewnątrz ograniczenia można pisać operatory.** Gdy odbiorcą jest zmienna typowa związana przez `:where`,
-operatory są odczytywane jako metody traitu (`+`→`add`, `-`→`sub`, `*`→`mul`, `/`→`div`, `rem`→`remainder`,
-`logand`→`bit-and`, `=`→`equal`, `<`→`less` …):
+**Wewnątrz ograniczenia można pisać operatory.** Metody każdego traitu nazywają się tak samo jak operatory
+i funkcje wbudowane typów konkretnych, więc pisze się je tak samo, gdy odbiorcą jest zmienna typowa związana
+przez `:where`:
 
 ```lisp
 (defun sum3<T> ((a T) (b T) (c T)) T (:where (Number T))
-  (+ a b c))                                              ; = (add (add a b) c)
+  (+ a b c))                                              ; = (+ (+ a b) c)
 ```
 
-Metoda traitu nie nazywa się `+`, ponieważ `+` to nazwa metody wbudowanej, a `impl` odmawia jej
-redefinicji (`cannot redefine built-in method`). Nie ma `Neg`: `(- x)` rozwija się do
-`(- (- x x) x)`, więc wystarczy `Sub`.
+Nie ma `Neg`: `(- x)` rozwija się do `(- (- x x) x)`, więc wystarczy `Sub`.
 
 Zaimplementowane dla: `Add`/`Sub`/`Mul`/`Div`/`Rem`/`Number` na wszystkich typach liczbowych (poza `complex`) oraz
 `Bits` na wszystkich typach całkowitych i `int`.

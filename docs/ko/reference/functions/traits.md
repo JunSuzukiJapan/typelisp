@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/traits.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
+<!-- translated-from: docs/ja/reference/functions/traits.md @ 6271c6d8b68694e1d27dd2e349b08117d2ef2bfb -->
 # 표준 트레이트
 
 반복, 비교, 산술, 요소의 추가와 꺼내기를 위한 트레이트. 그 밖의 표준 트레이트는 각자의 장에 있다: `Hash`([HashTable](collections.md#4-hashtablekv)),
@@ -29,13 +29,13 @@
 (deftrait Equal ()
   (defmethod equal (self (other Self)) bool))                ; 구현 필수
 (deftrait Ord (Equal)                                     ; Equal을 상속
-  (defmethod less (self (other Self)) bool)                  ; 구현 필수
-  (defmethod less-equal (self (other Self)) bool (not (less other self)))
-  (defmethod greater (self (other Self)) bool (less other self))
-  (defmethod greater-equal (self (other Self)) bool (not (less self other))))
+  (defmethod < (self (other Self)) bool)                     ; 구현 필수
+  (defmethod <= (self (other Self)) bool (not (< other self)))
+  (defmethod > (self (other Self)) bool (< other self))
+  (defmethod >= (self (other Self)) bool (not (< self other))))
 ```
 
-`Equal`을 구현하려면 `equal`을, `Ord`를 구현하려면 `less`만 쓰면 된다. `Ord`의 나머지는 기본 구현이
+`Equal`을 구현하려면 `equal`을, `Ord`를 구현하려면 `<`만 쓰면 된다. `Ord`의 나머지는 기본 구현이
 채운다. `Ord`는 `Equal`을 상속하므로 `impl Ord X` 앞에 `impl Equal X`가 필요하다.
 
 `(equal a b)`는 `a`의 타입의 `Equal` 구현을 호출한다. `Equal`을 구현하지 않은 타입에 쓰면 타입 오류가
@@ -48,10 +48,10 @@
 | 이름 | 형식 | 타입 | 설명 |
 |---|---|---|---|
 | `equal` | `(equal a b)` | `(A,A)→bool` where `Equal A` | 같은지(Rust의 `==`) |
-| `less` | `(less a b)` | `(A,A)→bool` where `Ord A` | `a < b` |
-| `less-equal` | `(less-equal a b)` | `(A,A)→bool` where `Ord A` | `a <= b` |
-| `greater` | `(greater a b)` | `(A,A)→bool` where `Ord A` | `a > b` |
-| `greater-equal` | `(greater-equal a b)` | `(A,A)→bool` where `Ord A` | `a >= b` |
+| `<` | `(< a b)` | `(A,A)→bool` where `Ord A` | 보다 작은가 |
+| `<=` | `(<= a b)` | `(A,A)→bool` where `Ord A` | 이하인가 |
+| `>` | `(> a b)` | `(A,A)→bool` where `Ord A` | 보다 큰가 |
+| `>=` | `(>= a b)` | `(A,A)→bool` where `Ord A` | 이상인가 |
 
 `Equal` 구현 완료: 모든 수치 타입(`i8`~`u32` / `f32` / `f64` / `int` / `ratio`)과 `bool` `char` `string`
 `symbol` `complex`, `Sexpr`, `cons-cell<A,B>`와 튜플(요소가 `Equal`이면 요소별로), `Option<T>`와
@@ -63,10 +63,8 @@
 비교한다. 이 비교는 실행 시에 값을 따라가는 것으로 메서드를 호출하지 않는다. 그래서 리스트 안의 구조체는
 그 타입의 `impl Equal`과 관계없이 CL과 마찬가지로 동일성으로 비교한다.
 
-`Ord`의 메서드 이름이 내장 연산자(`< <= > >=`)나 `lt`와 겹치지 않는 것은, 내장은 재정의할 수 없고 각
-구현이 그것들에 위임하기 때문이다. 스칼라 비교 연산자 자체는 수신자 타입별 내장 메서드다
-([수치](numbers.md)·[문자열과 문자](collections.md)). 경계 안에서 연산자로 쓰면 트레이트의 메서드로
-읽힌다(3장). `=`는 `equal`이 되고, `/=`는 `(not (equal a b))`가 된다.
+스칼라 비교 연산자는 수신자 타입별 내장 메서드이며([수치](numbers.md)·[문자열과 문자](collections.md)), 그대로 `Ord`의 구현이 된다.
+경계 안에서 `=`는 `equal`이 되고, `/=`는 `(not (equal a b))`가 된다.
 
 ## 3. 산술 트레이트(`Add` / `Sub` / `Mul` / `Div` / `Rem` / `Bits` / `Number`)
 
@@ -74,30 +72,29 @@
 거치지 않는다.
 
 ```lisp
-(deftrait Add () (defmethod add (self (other Self)) Self))
-(deftrait Sub () (defmethod sub (self (other Self)) Self))
-(deftrait Mul () (defmethod mul (self (other Self)) Self))
-(deftrait Div () (:type Output) (defmethod div (self (other Self)) Output))
-(deftrait Rem () (defmethod remainder (self (other Self)) Self))
+(deftrait Add () (defmethod + (self (other Self)) Self))
+(deftrait Sub () (defmethod - (self (other Self)) Self))
+(deftrait Mul () (defmethod * (self (other Self)) Self))
+(deftrait Div () (:type Output) (defmethod / (self (other Self)) Output))
+(deftrait Rem () (defmethod rem (self (other Self)) Self))
 (deftrait Bits ()
-  (defmethod bit-and (self (other Self)) Self)
-  (defmethod bit-or  (self (other Self)) Self)
-  (defmethod bit-xor (self (other Self)) Self)
-  (defmethod bit-not (self) Self)
-  (defmethod shift (self (count int)) Self))                 ; 거리는 항상 int(ash와 같다)
+  (defmethod logand (self (other Self)) Self)
+  (defmethod logior (self (other Self)) Self)
+  (defmethod logxor (self (other Self)) Self)
+  (defmethod lognot (self) Self)
+  (defmethod ash (self (count int)) Self))                   ; 거리는 항상 int
 (deftrait Number (Add Sub Mul Rem Ord))                   ; 메서드 없음·5개의 합성
 ```
 
-**경계 안에서는 연산자를 쓸 수 있다.** 받는 쪽이 `:where`로 묶인 타입 변수이면 연산자는 트레이트 메서드로 읽힌다
-(`+`→`add`, `-`→`sub`, `*`→`mul`, `/`→`div`, `rem`→`remainder`, `logand`→`bit-and`, `=`→`equal`, `<`→`less` …).
+**경계 안에서는 연산자를 쓸 수 있다.** 모든 트레이트의 메서드는 구체 타입에서 쓰는 연산자·내장 함수와 이름이
+같으므로, 받는 쪽이 `:where`로 묶인 타입 변수여도 똑같이 쓴다.
 
 ```lisp
 (defun sum3<T> ((a T) (b T) (c T)) T (:where (Number T))
-  (+ a b c))                                              ; = (add (add a b) c)
+  (+ a b c))                                              ; = (+ (+ a b) c)
 ```
 
-트레이트 메서드의 이름이 `+`가 아닌 것은 `+`가 내장 메서드의 이름이고 `impl`이 그것의 재정의를 거부하기 때문이다
-(`cannot redefine built-in method`). `Neg`는 없다. `(- x)`는 `(- (- x x) x)`로 전개되므로 `Sub`로 충분하다.
+`Neg`는 없다. `(- x)`는 `(- (- x x) x)`로 전개되므로 `Sub`로 충분하다.
 
 구현하는 타입: `Add`/`Sub`/`Mul`/`Div`/`Rem`/`Number`는 모든 수 타입(`complex` 제외), `Bits`는 모든 정수 타입과 `int`.
 

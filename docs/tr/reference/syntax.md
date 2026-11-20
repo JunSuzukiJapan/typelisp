@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 398532233e28225bb121ed5b18609d41ea1bf813 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ ac5a6b3adada21a0a55e0e1c4b0e1fabf4854908 -->
 # typelisp Sözdizimi Başvurusu
 
 typelisp, S-ifadelerle yazılan, statik tür denetimli bir Lisp'tir. Yerleşik fonksiyonların ve metotların
@@ -1011,7 +1011,7 @@ bir anda gerçekleştirir.
 ```lisp
 (deftrait Clamp (Ord)
   (defmethod clamp (self (lo Self) (hi Self)) Self
-    (if (less self lo) lo (if (less hi self) hi self))))
+    (if (< self lo) lo (if (< hi self) hi self))))
 (impl<T> Clamp T (:where (Ord T)))          ; no body at all; everything is the default
 ```
 
@@ -1020,7 +1020,7 @@ tekilleştirmeyle aynı mekanizmayla). Bir trait'in en fazla bir blanket gerçek
 türün açık bir `impl`'i varsa o öncelik alır. Gövdenin tür denetimi üretimden ayrıdır: bildirim noktasında
 bir kez, **hedef bir tür değişkeni olarak bırakılarak** (Rust'taki gibi) yapılır; bu yüzden hiç
 kullanılmayan bir gerçekleştirmenin bile, bildirilen sınırlar altında her hedef için başarısız olacak
-hataları orada yakalanır. Sınırların haklı kıldığı çağrılar (`(:where (Ord T))` altında `(less self other)`
+hataları orada yakalanır. Sınırların haklı kıldığı çağrılar (`(:where (Ord T))` altında `(< self other)`
 vb.), jenerik bir `defun`'un gövdesinde olduğu gibi geçer.
 
 **Docstring'ler**: bir `deftrait`, üst trait listesinin hemen ardından, öğelerden önce bir string sabiti
@@ -1030,8 +1030,8 @@ olurdu; bu yüzden ikisi ayırt edilemezdi.
 
 Standart kütüphanenin sağladığı trait'ler: **`Iter`** (`next` / ilişkili tür `Item`; `doiter` ve dizi
 fonksiyonlarının temeli), **`Equal`** (`equal`'ın kullandığı trait), **`Ord`**
-(`Equal`'ten miras alır; yalnızca `less` gerçekleştirilmelidir ve `less-equal` / `greater` /
-`greater-equal` varsayılan gerçekleştirmelerdir), **`Error`** (`message` / `source`; hata türlerini
+(`Equal`'ten miras alır; yalnızca `<` gerçekleştirilmelidir ve `<=` / `>` /
+`>=` varsayılan gerçekleştirmelerdir), **`Error`** (`message` / `source`; hata türlerini
 tekdüze ele almak için `:dyn Error`), **`print-object`** (türe göre yazdırılan gösterim), **`Pathish`**
 (yol adı belirleyicileri: bir string ya da bir `pathname`) ve akış hiyerarşisi **`Stream`** →
 **`InputStream`** / **`OutputStream`** → **`CharInput`** / **`CharOutput`** → **`PeekInput`**. Hangi

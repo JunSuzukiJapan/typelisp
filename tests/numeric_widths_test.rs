@@ -221,9 +221,8 @@ fn the_bitwise_trait_is_reachable_through_a_bound_too() {
     assert_eq!(show(src), "42");
 }
 
-/// A bound that does not provide the operator is still an error — the
-/// spelling table is a fallback for a name no bound declares, not a licence to
-/// add anything to anything.
+/// A bound that does not provide the operator is still an error: a bound
+/// supplies only the methods its trait declares.
 #[test]
 fn an_operator_without_the_bound_is_still_an_error() {
     let msg = check_error(
@@ -232,7 +231,19 @@ fn an_operator_without_the_bound_is_still_an_error() {
           (+ a b))
         "#,
     );
-    assert!(msg.contains("+") || msg.contains("add"), "unexpected message: {}", msg);
+    assert!(msg.contains("+"), "unexpected message: {}", msg);
+}
+
+/// The arithmetic traits' methods are the operators and builtins themselves,
+/// so a number has no second name for any of them.
+#[test]
+fn the_arithmetic_traits_add_no_second_name_to_a_number() {
+    for name in ["add", "sub", "mul", "div", "remainder", "bit-and", "bit-or", "bit-xor", "shift"] {
+        let msg = check_error(&format!("({name} 6 3)"));
+        assert!(msg.contains(name), "`{name}`: {msg}");
+    }
+    let msg = check_error("(bit-not 6)");
+    assert!(msg.contains("bit-not"), "{msg}");
 }
 
 // ---- complex numbers (Phase 1d) ------------------------------------------

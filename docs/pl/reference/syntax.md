@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 398532233e28225bb121ed5b18609d41ea1bf813 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ ac5a6b3adada21a0a55e0e1c4b0e1fabf4854908 -->
 # Referencja składni typelisp
 
 typelisp to statycznie typowany Lisp zapisywany w S-wyrażeniach. Listę funkcji wbudowanych i
@@ -1011,7 +1011,7 @@ typu spełniającego ograniczenia.
 ```lisp
 (deftrait Clamp (Ord)
   (defmethod clamp (self (lo Self) (hi Self)) Self
-    (if (less self lo) lo (if (less hi self) hi self))))
+    (if (< self lo) lo (if (< hi self) hi self))))
 (impl<T> Clamp T (:where (Ord T)))          ; w ogóle bez ciała; wszystko jest domyślne
 ```
 
@@ -1020,7 +1020,7 @@ zwykła jednomorfizacja). Trait może mieć co najwyżej jedną implementację b
 jawne `impl`, ma ono pierwszeństwo. Sprawdzanie typów ciała jest oddzielone od generowania: wykonywane jest
 raz w miejscu deklaracji, **z celem pozostawionym jako zmienna typowa** (jak w Rust), więc nawet
 implementacja, która nigdy nie jest używana, ma tam wychwytywane błędy, jeśli zawiodłyby dla każdego celu
-przy zadeklarowanych ograniczeniach. Wywołania uzasadnione ograniczeniami (`(less self other)` przy `(:where (Ord T))`
+przy zadeklarowanych ograniczeniach. Wywołania uzasadnione ograniczeniami (`(< self other)` przy `(:where (Ord T))`
 i tak dalej) przechodzą, jak w ciele funkcji generycznej `defun`.
 
 **Docstringi**: `deftrait` może mieć jeden docstring dla całego traitu, jako literał łańcuchowy zaraz po
@@ -1030,8 +1030,8 @@ nie dałoby się ich rozróżnić.
 
 Traity dostarczane przez bibliotekę standardową: **`Iter`** (`next` / typ powiązany `Item`; podstawa
 `doiter` i funkcji na sekwencjach), **`Equal`** (trait, którego używa `equal`),
-**`Ord`** (dziedziczy `Equal`; trzeba zaimplementować tylko `less`, a `less-equal` / `greater` /
-`greater-equal` to implementacje domyślne), **`Error`** (`message` / `source`; `:dyn Error` do
+**`Ord`** (dziedziczy `Equal`; trzeba zaimplementować tylko `<`, a `<=` / `>` /
+`>=` to implementacje domyślne), **`Error`** (`message` / `source`; `:dyn Error` do
 jednolitej obsługi typów błędów), **`print-object`** (reprezentacja wypisywana według typu), **`Pathish`**
 (desygnatory nazw ścieżek: łańcuch znaków lub `pathname`) oraz hierarchia strumieni **`Stream`** →
 **`InputStream`** / **`OutputStream`** → **`CharInput`** / **`CharOutput`** → **`PeekInput`**.

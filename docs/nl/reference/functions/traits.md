@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/traits.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
+<!-- translated-from: docs/ja/reference/functions/traits.md @ 6271c6d8b68694e1d27dd2e349b08117d2ef2bfb -->
 # Standaardtraits
 
 De traits voor iteratie, vergelijking, rekenkunde en het toevoegen en uitnemen van elementen. De overige standaardtraits staan in hun eigen
@@ -35,13 +35,13 @@ elementtype vergeleken kan worden.
 (deftrait Equal ()
   (defmethod equal (self (other Self)) bool))                ; moet geïmplementeerd worden
 (deftrait Ord (Equal)                                     ; erft van Equal
-  (defmethod less (self (other Self)) bool)                  ; moet geïmplementeerd worden
-  (defmethod less-equal (self (other Self)) bool (not (less other self)))
-  (defmethod greater (self (other Self)) bool (less other self))
-  (defmethod greater-equal (self (other Self)) bool (not (less self other))))
+  (defmethod < (self (other Self)) bool)                     ; moet geïmplementeerd worden
+  (defmethod <= (self (other Self)) bool (not (< other self)))
+  (defmethod > (self (other Self)) bool (< other self))
+  (defmethod >= (self (other Self)) bool (not (< self other))))
 ```
 
-Om `Equal` te implementeren schrijf je `equal`, en voor `Ord` alleen `less`. De standaardimplementaties
+Om `Equal` te implementeren schrijf je `equal`, en voor `Ord` alleen `<`. De standaardimplementaties
 vullen de rest van `Ord` in. `Ord` erft van `Equal`, dus `impl Equal X` is nodig vóór `impl Ord X`.
 
 `(equal a b)` roept de `Equal`-implementatie van het type van `a` aan. Het schrijven voor een type dat
@@ -54,10 +54,10 @@ Elke traitmethode kan rechtstreeks als functie worden aangeroepen (binnen een gr
 | Naam | Vorm | Type | Beschrijving |
 |---|---|---|---|
 | `equal` | `(equal a b)` | `(A,A)→bool` where `Equal A` | Of ze gelijk zijn (Rusts `==`) |
-| `less` | `(less a b)` | `(A,A)→bool` where `Ord A` | `a < b` |
-| `less-equal` | `(less-equal a b)` | `(A,A)→bool` where `Ord A` | `a <= b` |
-| `greater` | `(greater a b)` | `(A,A)→bool` where `Ord A` | `a > b` |
-| `greater-equal` | `(greater-equal a b)` | `(A,A)→bool` where `Ord A` | `a >= b` |
+| `<` | `(< a b)` | `(A,A)→bool` where `Ord A` | kleiner dan |
+| `<=` | `(<= a b)` | `(A,A)→bool` where `Ord A` | kleiner dan of gelijk |
+| `>` | `(> a b)` | `(A,A)→bool` where `Ord A` | groter dan |
+| `>=` | `(>= a b)` | `(A,A)→bool` where `Ord A` | groter dan of gelijk |
 
 `Equal` is geïmplementeerd voor: alle numerieke typen (`i8` t/m `u32` / `f32` / `f64` / `int` / `ratio`),
 `bool` `char` `string` `symbol` `complex`, `Sexpr`, `cons-cell<A,B>` en de tupels (element voor element,
@@ -72,11 +72,8 @@ elk ander atoom met `eql`. Deze vergelijking doorloopt de waarden tijdens het ui
 methode aan. Een struct in een lijst wordt dus, zoals in CL, op identiteit vergeleken, welke `impl Equal`
 zijn type ook heeft.
 
-De namen van de methoden van `Ord` overlappen niet met de ingebouwde operatoren (`< <= > >=`) of `lt`,
-omdat ingebouwde dingen niet opnieuw gedefinieerd kunnen worden en elke implementatie naar hen delegeert.
-De scalaire vergelijkingsoperatoren zelf zijn ingebouwde methoden per ontvangertype ([Getallen](numbers.md),
-[Strings en tekens](collections.md)). Binnen een grens wordt de geschreven operator gelezen als de methode
-van de trait (hoofdstuk 3). `=` wordt `equal`, en `/=` wordt `(not (equal a b))`.
+De scalaire vergelijkingsoperatoren zijn ingebouwde methoden per ontvangertype ([Getallen](numbers.md), [Strings en tekens](collections.md)),
+en ze zijn zoals ze zijn de implementatie van `Ord`. Binnen een grens wordt `=` `equal`, en `/=` wordt `(not (equal a b))`.
 
 ## 3. Rekenkundige traits (`Add` / `Sub` / `Mul` / `Div` / `Rem` / `Bits` / `Number`)
 
@@ -85,32 +82,30 @@ concrete types gebruikt de ingebouwde operatoren** ([Getallen](numbers.md)) en g
 laag.
 
 ```lisp
-(deftrait Add () (defmethod add (self (other Self)) Self))
-(deftrait Sub () (defmethod sub (self (other Self)) Self))
-(deftrait Mul () (defmethod mul (self (other Self)) Self))
-(deftrait Div () (:type Output) (defmethod div (self (other Self)) Output))
-(deftrait Rem () (defmethod remainder (self (other Self)) Self))
+(deftrait Add () (defmethod + (self (other Self)) Self))
+(deftrait Sub () (defmethod - (self (other Self)) Self))
+(deftrait Mul () (defmethod * (self (other Self)) Self))
+(deftrait Div () (:type Output) (defmethod / (self (other Self)) Output))
+(deftrait Rem () (defmethod rem (self (other Self)) Self))
 (deftrait Bits ()
-  (defmethod bit-and (self (other Self)) Self)
-  (defmethod bit-or  (self (other Self)) Self)
-  (defmethod bit-xor (self (other Self)) Self)
-  (defmethod bit-not (self) Self)
-  (defmethod shift (self (count int)) Self))                 ; the distance is always int (as with ash)
+  (defmethod logand (self (other Self)) Self)
+  (defmethod logior (self (other Self)) Self)
+  (defmethod logxor (self (other Self)) Self)
+  (defmethod lognot (self) Self)
+  (defmethod ash (self (count int)) Self))                   ; the distance is always int
 (deftrait Number (Add Sub Mul Rem Ord))                   ; geen methoden; een combinatie van vijf
 ```
 
-**Binnen een bound kun je operatoren schrijven.** Wanneer de ontvanger een typevariabele is die door
-`:where` is gebonden, worden operatoren als traitmethoden gelezen (`+`→`add`, `-`→`sub`, `*`→`mul`,
-`/`→`div`, `rem`→`remainder`, `logand`→`bit-and`, `=`→`equal`, `<`→`less` …):
+**Binnen een bound kun je operatoren schrijven.** De methoden van elke trait heten net als de operatoren en
+ingebouwde functies op concrete types, dus je schrijft ze op dezelfde manier wanneer de ontvanger een
+typevariabele is die door `:where` is gebonden:
 
 ```lisp
 (defun sum3<T> ((a T) (b T) (c T)) T (:where (Number T))
-  (+ a b c))                                              ; = (add (add a b) c)
+  (+ a b c))                                              ; = (+ (+ a b) c)
 ```
 
-De traitmethode heet niet `+` omdat `+` de naam van een ingebouwde methode is en `impl` weigert die
-opnieuw te definiëren (`cannot redefine built-in method`). Er is geen `Neg`: `(- x)` expandeert naar
-`(- (- x x) x)`, dus `Sub` volstaat.
+Er is geen `Neg`: `(- x)` expandeert naar `(- (- x x) x)`, dus `Sub` volstaat.
 
 Geïmplementeerd voor: `Add`/`Sub`/`Mul`/`Div`/`Rem`/`Number` op alle numerieke types (behalve
 `complex`), en `Bits` op alle gehele types en `int`.

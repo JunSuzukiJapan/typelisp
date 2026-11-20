@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 398532233e28225bb121ed5b18609d41ea1bf813 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ ac5a6b3adada21a0a55e0e1c4b0e1fabf4854908 -->
 # Riferimento della sintassi di typelisp
 
 typelisp è un Lisp a tipizzazione statica, scritto in S-expression. Per l'elenco delle funzioni e dei
@@ -1047,7 +1047,7 @@ per ogni tipo che soddisfa i vincoli.
 ```lisp
 (deftrait Clamp (Ord)
   (defmethod clamp (self (lo Self) (hi Self)) Self
-    (if (less self lo) lo (if (less hi self) hi self))))
+    (if (< self lo) lo (if (< hi self) hi self))))
 (impl<T> Clamp T (:where (Ord T)))          ; no body at all; everything is the default
 ```
 
@@ -1057,7 +1057,7 @@ blanket. Se un tipo ha un `impl` esplicito, quello ha la priorità. Il controllo
 separato dalla generazione: viene fatto una volta nel punto di dichiarazione, **con il bersaglio lasciato
 come variabile di tipo** (come in Rust), quindi anche un'implementazione mai usata ha i propri errori
 trovati lì se fallirebbero per ogni bersaglio sotto i vincoli dichiarati. Le chiamate giustificate dai
-vincoli (`(less self other)` sotto `(:where (Ord T))` e così via) passano, come nel corpo di una `defun`
+vincoli (`(< self other)` sotto `(:where (Ord T))` e così via) passano, come nel corpo di una `defun`
 generica.
 
 **Docstring**: un `deftrait` può avere una docstring per l'intero trait, come letterale stringa subito
@@ -1067,8 +1067,8 @@ ritorno di un'implementazione predefinita, quindi i due casi non si potrebbero d
 
 I trait forniti dalla libreria standard: **`Iter`** (`next` / tipo associato `Item`; la base di `doiter` e
 delle funzioni sulle sequenze), **`Equal`** (il trait che usa `equal`),
-**`Ord`** (eredita `Equal`; deve essere implementato solo `less`, e `less-equal` / `greater` /
-`greater-equal` sono implementazioni predefinite), **`Error`** (`message` / `source`; `:dyn Error` per
+**`Ord`** (eredita `Equal`; deve essere implementato solo `<`, e `<=` / `>` /
+`>=` sono implementazioni predefinite), **`Error`** (`message` / `source`; `:dyn Error` per
 trattare uniformemente i tipi di errore), **`print-object`** (una rappresentazione stampata per tipo),
 **`Pathish`** (designatori di pathname: una stringa o un `pathname`), e la gerarchia degli stream
 **`Stream`** → **`InputStream`** / **`OutputStream`** → **`CharInput`** / **`CharOutput`** →

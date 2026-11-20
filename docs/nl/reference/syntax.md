@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 398532233e28225bb121ed5b18609d41ea1bf813 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ ac5a6b3adada21a0a55e0e1c4b0e1fabf4854908 -->
 # typelisp-syntaxisreferentie
 
 typelisp is een statisch getypeerde Lisp, geschreven in S-expressies. Voor de lijst met ingebouwde
@@ -1050,7 +1050,7 @@ type dat aan de bounds voldoet.
 ```lisp
 (deftrait Clamp (Ord)
   (defmethod clamp (self (lo Self) (hi Self)) Self
-    (if (less self lo) lo (if (less hi self) hi self))))
+    (if (< self lo) lo (if (< hi self) hi self))))
 (impl<T> Clamp T (:where (Ord T)))          ; no body at all; everything is the default
 ```
 
@@ -1060,7 +1060,7 @@ hebben. Als een type een expliciete `impl` heeft, gaat die voor. Het typechecken
 het genereren: het gebeurt één keer op het punt van declaratie, **met de target als typevariabele** (zoals
 in Rust), dus zelfs een implementatie die nooit wordt gebruikt heeft haar fouten daar gevangen als ze voor
 elke target onder de gedeclareerde bounds zouden mislukken. Aanroepen die door de bounds worden
-gerechtvaardigd (`(less self other)` onder `(:where (Ord T))` enzovoort) slagen, zoals in de body van een
+gerechtvaardigd (`(< self other)` onder `(:where (Ord T))` enzovoort) slagen, zoals in de body van een
 generieke `defun`.
 
 **Docstrings**: een `deftrait` kan één docstring voor de hele trait hebben, als stringliteral direct na de
@@ -1070,8 +1070,8 @@ standaardimplementatie zijn, dus de twee zouden niet te onderscheiden zijn.
 
 De traits die de standaardbibliotheek biedt: **`Iter`** (`next` / geassocieerd type `Item`; de basis van
 `doiter` en de sequentiefuncties), **`Equal`** (de trait die `equal` gebruikt),
-**`Ord`** (erft `Equal`; alleen `less` moet worden geïmplementeerd, en `less-equal` / `greater` /
-`greater-equal` zijn standaardimplementaties), **`Error`** (`message` / `source`; `:dyn Error` om
+**`Ord`** (erft `Equal`; alleen `<` moet worden geïmplementeerd, en `<=` / `>` /
+`>=` zijn standaardimplementaties), **`Error`** (`message` / `source`; `:dyn Error` om
 foutentypes uniform te behandelen), **`print-object`** (een afgedrukte weergave per type), **`Pathish`**
 (pathname-designators: een string of een `pathname`), en de streamhiërarchie **`Stream`** →
 **`InputStream`** / **`OutputStream`** → **`CharInput`** / **`CharOutput`** → **`PeekInput`**.

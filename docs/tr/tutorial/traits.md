@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/traits.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
+<!-- translated-from: docs/ja/tutorial/traits.md @ 6271c6d8b68694e1d27dd2e349b08117d2ef2bfb -->
 # Trait'ler
 
 Bir trait, "bu tür şu işlemleri destekler" sözüdür. Trait'ler birkaç türün aynı adlı işlemleri
@@ -99,7 +99,7 @@ fonksiyonları türünüz için kullanılabilir kılar.
 | Trait | Gerçekleştirilecek metotlar | Neyi mümkün kılar |
 |---|---|---|
 | `Equal` | `equal` | `equal`, `=`, `assert-equal`, `match`'in `(:= ifade)` örüntüsü, `:test equal` verilen `member` vb. |
-| `Ord` | `less` | `less-equal`, `greater` vb. `Ord`, `Equal`'ten miras alır |
+| `Ord` | `<` | `<=`, `>`, `>=`. `Ord`, `Equal`'ten miras alır |
 | `print-object` | `print-object` | Değerlerin `println` ve benzerleriyle nasıl gösterileceği |
 | `Iter` | `next` | `doiter`, `map`, `filter`, `sort` vb. |
 | `Error` | `message`, `source` | Hata türü olarak kullanım ([Hata Yönetimi](errors.md)) |
@@ -114,9 +114,9 @@ aldığından önce `Equal`'in `impl`'i gelmelidir.
   (defmethod equal (self (other Self)) bool (= self::yen other::yen)))
 
 (impl Ord money
-  (defmethod less (self (other Self)) bool (< self::yen other::yen)))
+  (defmethod < (self (other Self)) bool (< self::yen other::yen)))
 
-(greater (make-instance 'money :yen 5) (make-instance 'money :yen 3))     ; => true (the default implementation in Ord)
+(> (make-instance 'money :yen 5) (make-instance 'money :yen 3))     ; => true (the default implementation in Ord)
 ```
 
 `print-object`'i gerçekleştirmek, `println`'in değeri nasıl göstereceğini belirler. `escape`
@@ -139,7 +139,7 @@ yazabilirsiniz.
   (foldl (iter v)
          (lambda ((best Option<T>) (x T)) Option<T>
            (match best
-             ((Some b) (if (less b x) (Option::Some x) best))
+             ((Some b) (if (< b x) (Option::Some x) best))
              ((None) (Option::Some x))))
          (Option::None)))
 ```

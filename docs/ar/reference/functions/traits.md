@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/traits.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
+<!-- translated-from: docs/ja/reference/functions/traits.md @ 6271c6d8b68694e1d27dd2e349b08117d2ef2bfb -->
 # السمات القياسية
 
 سمات التكرار والمقارنة والحساب وإضافة العناصر وإخراجها. أما السمات القياسية الأخرى ففي فصولها الخاصة: `Hash`
@@ -31,13 +31,13 @@ Rust. تُستعملان في قيود `:where` للدوال العامة لاش
 (deftrait Equal ()
   (defmethod equal (self (other Self)) bool))                ; يجب تنفيذه
 (deftrait Ord (Equal)                                     ; يرث Equal
-  (defmethod less (self (other Self)) bool)                  ; يجب تنفيذه
-  (defmethod less-equal (self (other Self)) bool (not (less other self)))
-  (defmethod greater (self (other Self)) bool (less other self))
-  (defmethod greater-equal (self (other Self)) bool (not (less self other))))
+  (defmethod < (self (other Self)) bool)                     ; يجب تنفيذه
+  (defmethod <= (self (other Self)) bool (not (< other self)))
+  (defmethod > (self (other Self)) bool (< other self))
+  (defmethod >= (self (other Self)) bool (not (< self other))))
 ```
 
-لتنفيذ `Equal` اكتب `equal`، ولتنفيذ `Ord` اكتب `less` وحده. وتملأ التنفيذات الافتراضية بقية `Ord`.
+لتنفيذ `Equal` اكتب `equal`، ولتنفيذ `Ord` اكتب `<` وحده. وتملأ التنفيذات الافتراضية بقية `Ord`.
 ترث `Ord` السمة `Equal`، فيلزم `impl Equal X` قبل `impl Ord X`.
 
 يستدعي `(equal a b)` تنفيذ `Equal` لنوع `a`. وكتابته لنوع لا ينفّذ `Equal` خطأ نوع. للمقارنة بالهوية
@@ -49,10 +49,10 @@ Rust. تُستعملان في قيود `:where` للدوال العامة لاش
 | الاسم | الصيغة | النوع | الوصف |
 |---|---|---|---|
 | `equal` | `(equal a b)` | `(A,A)→bool` حيث `Equal A` | هل هما متساويان (`==` في Rust) |
-| `less` | `(less a b)` | `(A,A)→bool` حيث `Ord A` | `a < b` |
-| `less-equal` | `(less-equal a b)` | `(A,A)→bool` حيث `Ord A` | `a <= b` |
-| `greater` | `(greater a b)` | `(A,A)→bool` حيث `Ord A` | `a > b` |
-| `greater-equal` | `(greater-equal a b)` | `(A,A)→bool` حيث `Ord A` | `a >= b` |
+| `<` | `(< a b)` | `(A,A)→bool` حيث `Ord A` | أصغر من |
+| `<=` | `(<= a b)` | `(A,A)→bool` حيث `Ord A` | أصغر من أو يساوي |
+| `>` | `(> a b)` | `(A,A)→bool` حيث `Ord A` | أكبر من |
+| `>=` | `(>= a b)` | `(A,A)→bool` حيث `Ord A` | أكبر من أو يساوي |
 
 تُنفَّذ `Equal` لـ: كل الأنواع العددية (`i8` إلى `u32` / `f32` / `f64` / `int` / `ratio`)، و`bool` و`char`
 و`string` و`symbol` و`complex`، و`Sexpr`، و`cons-cell<A,B>` والصفوف (عنصرًا عنصرًا، عندما تكون العناصر
@@ -65,10 +65,8 @@ Rust. تُستعملان في قيود `:where` للدوال العامة لاش
 بـ `eql`. وهذه المقارنة تمرّ على القيم وقت التشغيل ولا تستدعي أي دالة. لذا تُقارَن البنية داخل القائمة
 بالهوية كما في CL، أيًّا كان `impl Equal` لنوعها.
 
-لا تتداخل أسماء دوال `Ord` مع العوامل المدمجة (`< <= > >=`) أو `lt`، لأن المدمج لا يُعاد تعريفه وكل تنفيذ
-يفوّض إليها. وعوامل المقارنة العددية نفسها دوال مدمجة بحسب نوع المستقبِل ([الأعداد](numbers.md)،
-[السلاسل والمحارف](collections.md)). وداخل القيد يُقرأ العامل المكتوب على أنه دالة السمة (الفصل 3). يصير
-`=` هو `equal`، ويصير `/=` هو `(not (equal a b))`.
+وعوامل المقارنة العددية دوال مدمجة بحسب نوع المستقبِل ([الأعداد](numbers.md)، [السلاسل والمحارف](collections.md))، وهي نفسها تنفيذ `Ord`.
+وداخل القيد يصير `=` هو `equal`، ويصير `/=` هو `(not (equal a b))`.
 
 ## 3. سمات الحساب (`Add` / `Sub` / `Mul` / `Div` / `Rem` / `Bits` / `Number`)
 
@@ -76,31 +74,29 @@ Rust. تُستعملان في قيود `:where` للدوال العامة لاش
 المعامِلات المضمنة** ([الأعداد](numbers.md)) ولا يمرّ بهذه الطبقة.
 
 ```lisp
-(deftrait Add () (defmethod add (self (other Self)) Self))
-(deftrait Sub () (defmethod sub (self (other Self)) Self))
-(deftrait Mul () (defmethod mul (self (other Self)) Self))
-(deftrait Div () (:type Output) (defmethod div (self (other Self)) Output))
-(deftrait Rem () (defmethod remainder (self (other Self)) Self))
+(deftrait Add () (defmethod + (self (other Self)) Self))
+(deftrait Sub () (defmethod - (self (other Self)) Self))
+(deftrait Mul () (defmethod * (self (other Self)) Self))
+(deftrait Div () (:type Output) (defmethod / (self (other Self)) Output))
+(deftrait Rem () (defmethod rem (self (other Self)) Self))
 (deftrait Bits ()
-  (defmethod bit-and (self (other Self)) Self)
-  (defmethod bit-or  (self (other Self)) Self)
-  (defmethod bit-xor (self (other Self)) Self)
-  (defmethod bit-not (self) Self)
-  (defmethod shift (self (count int)) Self))                 ; المسافة دائمًا int (كما في ash)
+  (defmethod logand (self (other Self)) Self)
+  (defmethod logior (self (other Self)) Self)
+  (defmethod logxor (self (other Self)) Self)
+  (defmethod lognot (self) Self)
+  (defmethod ash (self (count int)) Self))                   ; المسافة دائمًا int
 (deftrait Number (Add Sub Mul Rem Ord))                   ; بلا طرق؛ تركيب من خمس
 ```
 
-**داخل القيد يمكنك كتابة المعامِلات.** عندما يكون المستقبِل متغير نوع مقيّدًا بـ `:where` تُقرأ المعامِلات
-على أنها توابع السمة (`+`→`add` و`-`→`sub` و`*`→`mul` و`/`→`div` و`rem`→`remainder` و
-`logand`→`bit-and` و`=`→`equal` و`<`→`less` ...):
+**داخل القيد يمكنك كتابة المعامِلات.** تحمل توابع كل سمة أسماء المعامِلات والدوال المدمجة المستعملة مع الأنواع
+المحددة نفسها، فتُكتب بالطريقة نفسها عندما يكون المستقبِل متغير نوع مقيّدًا بـ `:where`:
 
 ```lisp
 (defun sum3<T> ((a T) (b T) (c T)) T (:where (Number T))
-  (+ a b c))                                              ; = (add (add a b) c)
+  (+ a b c))                                              ; = (+ (+ a b) c)
 ```
 
-لا يُسمّى تابع السمة `+` لأن `+` اسم تابع مضمن و`impl` ترفض إعادة تعريفه
-(`cannot redefine built-in method`). ولا توجد `Neg`: فـ `(- x)` تتوسع إلى `(- (- x x) x)`، فتكفي `Sub`.
+ولا توجد `Neg`: فـ `(- x)` تتوسع إلى `(- (- x x) x)`، فتكفي `Sub`.
 
 تُنفَّذ: `Add`/`Sub`/`Mul`/`Div`/`Rem`/`Number` لكل الأنواع العددية (عدا `complex`)، و`Bits` لكل أنواع
 الأعداد الصحيحة و`int`.

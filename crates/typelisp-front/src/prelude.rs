@@ -100,12 +100,12 @@ fn tuple_source() -> String {
             eq_body
         )
         .unwrap();
-        // `less`: the first element that differs decides.
-        let mut less = format!("(less self::{f} other::{f})", f = fields[n - 1]);
+        // `<`: the first element that differs decides.
+        let mut less = format!("(< self::{f} other::{f})", f = fields[n - 1]);
         for f in fields[..n - 1].iter().rev() {
-            less = format!("(if (less self::{f} other::{f}) true (if (less other::{f} self::{f}) false {less}))");
+            less = format!("(if (< self::{f} other::{f}) true (if (< other::{f} self::{f}) false {less}))");
         }
-        writeln!(out, "(impl<{}> Ord {} (:where {}) (defmethod less (self (other Self)) bool {}))", params.join(","), generic, bound("Ord"), less)
+        writeln!(out, "(impl<{}> Ord {} (:where {}) (defmethod < (self (other Self)) bool {}))", params.join(","), generic, bound("Ord"), less)
             .unwrap();
         // `sxhash`: the elements' hashes folded as `h * 31 + x`, kept in range
         // at every step.
@@ -2035,25 +2035,24 @@ user-visible capacity."
 ;; bound, so any strict-weak-order function works, not just a type's natural
 ;; `Ord` impl.
 ;;
-;; `Ord` is Rust's `PartialOrd` (`less`=`<`, `less-equal`=`<=`, `greater`=`>`,
-;; `greater-equal`=`>=`), and inherits `Equal` as `PartialOrd: PartialEq`
-;; does. Only `less` is left to the implementor; the other three have default
-;; bodies. Method names avoid the builtin operator/`lt` names on purpose:
-;; builtins cannot be redefined.
+;; `Ord` is Rust's `PartialOrd`, its methods the operators `<` `<=` `>` `>=`,
+;; and inherits `Equal` as `PartialOrd: PartialEq` does. Only `<` is left to
+;; the implementor; the other three have default bodies. A type whose
+;; built-in operators have the trait's signatures needs no body at all.
 (module cmp
 (pub deftrait Equal ()
   (defmethod equal (self (other Self)) bool))
 (pub deftrait Ord (Equal)
-  (defmethod less (self (other Self)) bool)
-  (defmethod less-equal (self (other Self)) bool
+  (defmethod < (self (other Self)) bool)
+  (defmethod <= (self (other Self)) bool
     "`a<=b` iff not `b<a`."
-    (not (less other self)))
-  (defmethod greater (self (other Self)) bool
+    (not (< other self)))
+  (defmethod > (self (other Self)) bool
     "`a>b` iff `b<a`."
-    (less other self))
-  (defmethod greater-equal (self (other Self)) bool
+    (< other self))
+  (defmethod >= (self (other Self)) bool
     "`a>=b` iff not `a<b`."
-    (not (less self other)))))
+    (not (< self other)))))
 
 ;; Scalar `Equal` impls. A type whose builtin `equal` method has the trait's
 ;; signature needs no body: that method is the trait's. The numbers' `equal`
@@ -2091,19 +2090,18 @@ user-visible capacity."
       ((Ok x) (match other ((Ok y) (equal x y)) ((Err _) false)))
       ((Err e) (match other ((Ok _) false) ((Err f) (equal e f)))))))
 
-;; Scalar `Ord` impls — only the core `less`; the other three come from `Ord`'s
-;; default bodies. Every scalar here has the overloaded `<` builtin (numbers
-;; always had it; `char`/`string` gained one alongside these expanded traits —
-;; code-point / lexicographic order). `bool`/`symbol` carry no meaningful
+;; Scalar `Ord` impls. Every scalar here has the four built-in comparison
+;; operators (code-point order for `char`, lexicographic for `string`), and
+;; they are the trait's methods. `bool`/`symbol` carry no meaningful
 ;; order, so no `Ord` for them. Each also needs its `Equal` impl above, since
 ;; `Ord` inherits `Equal`.
-(impl Ord i32    (defmethod less (self (other Self)) bool (< self other)))
-(impl Ord f64    (defmethod less (self (other Self)) bool (< self other)))
-(impl Ord int (defmethod less (self (other Self)) bool (< self other)))
-(impl Ord ratio  (defmethod less (self (other Self)) bool (< self other)))
-(impl Ord rational (defmethod less (self (other Self)) bool (< self other)))
-(impl Ord char   (defmethod less (self (other Self)) bool (< self other)))
-(impl Ord string (defmethod less (self (other Self)) bool (< self other)))
+(impl Ord i32)
+(impl Ord f64)
+(impl Ord int)
+(impl Ord ratio)
+(impl Ord rational)
+(impl Ord char)
+(impl Ord string)
 
 ;; The other integer widths and `f32`.
 (impl Equal i8)
@@ -2113,12 +2111,12 @@ user-visible capacity."
 (impl Equal u32)
 (impl Equal f32)
 
-(impl Ord i8    (defmethod less (self (other Self)) bool (< self other)))
-(impl Ord i16   (defmethod less (self (other Self)) bool (< self other)))
-(impl Ord u8    (defmethod less (self (other Self)) bool (< self other)))
-(impl Ord u16   (defmethod less (self (other Self)) bool (< self other)))
-(impl Ord u32   (defmethod less (self (other Self)) bool (< self other)))
-(impl Ord f32   (defmethod less (self (other Self)) bool (< self other)))
+(impl Ord i8)
+(impl Ord i16)
+(impl Ord u8)
+(impl Ord u16)
+(impl Ord u32)
+(impl Ord f32)
 
 ;; ---------------------------------------------------------------------
 ;; `Hash` — CL's `sxhash`, as a trait.
@@ -2252,52 +2250,40 @@ user-visible capacity."
 ;; that the variable be a type you can add, so no generic function could
 ;; add two of its own arguments.
 ;;
-;; The method names are `add`/`sub`/... rather than `+`/`-`/...: an `impl`
-;; naming a method `+` is refused ("cannot redefine built-in method"), and
-;; the refusal is right — the operator names belong to the primitive
-;; types' own tables. The checker closes the gap from the other side: on a
+;; The methods are the operators themselves: `Add` declares `+`, and a
+;; primitive type's impl has no body, since its built-in `+` already has
+;; the trait's signature and is the trait's method (as with `Equal`). On a
 ;; receiver whose type is a `where`-bounded type variable, `(+ a b)`
-;; resolves to the `Add` bound's `add` (`typeck::bounds`),
-;; so generic code is still written with operators and only these
-;; declarations spell the names out.
+;; resolves to the bound's `+` (`typeck::bounds`).
 ;;
 ;; There is no `Neg`: `(- x)` desugars to `(- (- x x) x)`
 ;; (`check_unary_negate_or_invert`), so negation on a type variable needs
 ;; `Sub` and nothing more.
 (module ops
 (pub deftrait Add ()
-  (defmethod add (self (other Self)) Self))
+  (defmethod + (self (other Self)) Self))
 (pub deftrait Sub ()
-  (defmethod sub (self (other Self)) Self))
+  (defmethod - (self (other Self)) Self))
 (pub deftrait Mul ()
-  (defmethod mul (self (other Self)) Self))
+  (defmethod * (self (other Self)) Self))
 ;; `Div` names its result type: CL's `/` on two integers is a `rational`, so
 ;; `int`'s `Output` is `rational` while every other number divides into
 ;; itself. The others name it `Self`'s own type.
 (pub deftrait Div ()
   (:type Output)
-  (defmethod div (self (other Self)) Output))
-;; `remainder`, not `rem`: `rem` is already a method on every numeric type
-;; (above), and a trait may not declare a name its implementors already
-;; define. The impls delegate to it, and `(rem a b)` on a bounded type
-;; variable resolves here through the same operator spelling as `+`, so
-;; the short name is still what generic code writes.
+  (defmethod / (self (other Self)) Output))
 (pub deftrait Rem ()
-  (defmethod remainder (self (other Self)) Self))
-;; The bitwise catalog, spelled apart from the `logand`/`logior`/`logxor`/
-;; `lognot` builtins for the same reason `add` is spelled apart from `+`.
+  (defmethod rem (self (other Self)) Self))
+;; The bitwise catalog.
 (pub deftrait Bits ()
-  (defmethod bit-and (self (other Self)) Self)
-  (defmethod bit-or (self (other Self)) Self)
-  (defmethod bit-xor (self (other Self)) Self)
-  (defmethod bit-not (self) Self)
-  ;; `shift` is the only member whose second parameter is not `Self`: a
-  ;; shift distance measures bits, so the receiver's width and signedness
-  ;; have nothing to say about it (the same reasoning that made `ash`'s own
-  ;; second parameter an `i32`). It could not have been written before that
-  ;; change — an impl for `u8` would have had no way to say "shift right".
-  ;; Positive is left, negative is right, exactly like `ash`.
-  (defmethod shift (self (count int)) Self))
+  (defmethod logand (self (other Self)) Self)
+  (defmethod logior (self (other Self)) Self)
+  (defmethod logxor (self (other Self)) Self)
+  (defmethod lognot (self) Self)
+  ;; `ash` is the only member whose second parameter is not `Self`: a shift
+  ;; distance measures bits, so the receiver's width and signedness have
+  ;; nothing to say about it. Positive is left, negative is right.
+  (defmethod ash (self (count int)) Self))
 ;; What "a number" means as a bound: arithmetic and an ordering, with no
 ;; methods of its own — a name for the conjunction, so `(:where (Number T))`
 ;; says in one bound what five would. `Div` is not among them: its `Output`
@@ -2324,109 +2310,74 @@ user-visible capacity."
 (impl u32
   (pub defmethod rem (self (b u32  )) u32   (- self (* b (/ self b)))))
 
-;; The impls. Each is the built-in operator under the trait's name.
-(impl Add i32    (defmethod add (self (other Self)) Self (+ self other)))
-(impl Add i8     (defmethod add (self (other Self)) Self (+ self other)))
-(impl Add i16    (defmethod add (self (other Self)) Self (+ self other)))
-(impl Add u8     (defmethod add (self (other Self)) Self (+ self other)))
-(impl Add u16    (defmethod add (self (other Self)) Self (+ self other)))
-(impl Add u32    (defmethod add (self (other Self)) Self (+ self other)))
-(impl Add f64    (defmethod add (self (other Self)) Self (+ self other)))
-(impl Add f32    (defmethod add (self (other Self)) Self (+ self other)))
-(impl Add int (defmethod add (self (other Self)) Self (+ self other)))
-(impl Add ratio  (defmethod add (self (other Self)) Self (+ self other)))
-(impl Add rational (defmethod add (self (other Self)) Self (+ self other)))
+;; The impls. A primitive type's built-in operator is the trait's method.
+(impl Add i32)
+(impl Add i8)
+(impl Add i16)
+(impl Add u8)
+(impl Add u16)
+(impl Add u32)
+(impl Add f64)
+(impl Add f32)
+(impl Add int)
+(impl Add ratio)
+(impl Add rational)
 
-(impl Sub i32    (defmethod sub (self (other Self)) Self (- self other)))
-(impl Sub i8     (defmethod sub (self (other Self)) Self (- self other)))
-(impl Sub i16    (defmethod sub (self (other Self)) Self (- self other)))
-(impl Sub u8     (defmethod sub (self (other Self)) Self (- self other)))
-(impl Sub u16    (defmethod sub (self (other Self)) Self (- self other)))
-(impl Sub u32    (defmethod sub (self (other Self)) Self (- self other)))
-(impl Sub f64    (defmethod sub (self (other Self)) Self (- self other)))
-(impl Sub f32    (defmethod sub (self (other Self)) Self (- self other)))
-(impl Sub int (defmethod sub (self (other Self)) Self (- self other)))
-(impl Sub ratio  (defmethod sub (self (other Self)) Self (- self other)))
-(impl Sub rational (defmethod sub (self (other Self)) Self (- self other)))
+(impl Sub i32)
+(impl Sub i8)
+(impl Sub i16)
+(impl Sub u8)
+(impl Sub u16)
+(impl Sub u32)
+(impl Sub f64)
+(impl Sub f32)
+(impl Sub int)
+(impl Sub ratio)
+(impl Sub rational)
 
-(impl Mul i32    (defmethod mul (self (other Self)) Self (* self other)))
-(impl Mul i8     (defmethod mul (self (other Self)) Self (* self other)))
-(impl Mul i16    (defmethod mul (self (other Self)) Self (* self other)))
-(impl Mul u8     (defmethod mul (self (other Self)) Self (* self other)))
-(impl Mul u16    (defmethod mul (self (other Self)) Self (* self other)))
-(impl Mul u32    (defmethod mul (self (other Self)) Self (* self other)))
-(impl Mul f64    (defmethod mul (self (other Self)) Self (* self other)))
-(impl Mul f32    (defmethod mul (self (other Self)) Self (* self other)))
-(impl Mul int (defmethod mul (self (other Self)) Self (* self other)))
-(impl Mul ratio  (defmethod mul (self (other Self)) Self (* self other)))
-(impl Mul rational (defmethod mul (self (other Self)) Self (* self other)))
+(impl Mul i32)
+(impl Mul i8)
+(impl Mul i16)
+(impl Mul u8)
+(impl Mul u16)
+(impl Mul u32)
+(impl Mul f64)
+(impl Mul f32)
+(impl Mul int)
+(impl Mul ratio)
+(impl Mul rational)
 
-(impl Div i32    (:type Output i32) (defmethod div (self (other Self)) i32 (/ self other)))
-(impl Div i8     (:type Output i8) (defmethod div (self (other Self)) i8 (/ self other)))
-(impl Div i16    (:type Output i16) (defmethod div (self (other Self)) i16 (/ self other)))
-(impl Div u8     (:type Output u8) (defmethod div (self (other Self)) u8 (/ self other)))
-(impl Div u16    (:type Output u16) (defmethod div (self (other Self)) u16 (/ self other)))
-(impl Div u32    (:type Output u32) (defmethod div (self (other Self)) u32 (/ self other)))
-(impl Div f64    (:type Output f64) (defmethod div (self (other Self)) f64 (/ self other)))
-(impl Div f32    (:type Output f32) (defmethod div (self (other Self)) f32 (/ self other)))
-(impl Div int    (:type Output rational) (defmethod div (self (other Self)) rational (/ self other)))
-(impl Div ratio  (:type Output ratio) (defmethod div (self (other Self)) ratio (/ self other)))
-(impl Div rational (:type Output rational) (defmethod div (self (other Self)) rational (/ self other)))
+(impl Div i32 (:type Output i32))
+(impl Div i8 (:type Output i8))
+(impl Div i16 (:type Output i16))
+(impl Div u8 (:type Output u8))
+(impl Div u16 (:type Output u16))
+(impl Div u32 (:type Output u32))
+(impl Div f64 (:type Output f64))
+(impl Div f32 (:type Output f32))
+(impl Div int (:type Output rational))
+(impl Div ratio (:type Output ratio))
+(impl Div rational (:type Output rational))
 
-(impl Rem i32    (defmethod remainder (self (other Self)) Self (rem self other)))
-(impl Rem i8     (defmethod remainder (self (other Self)) Self (rem self other)))
-(impl Rem i16    (defmethod remainder (self (other Self)) Self (rem self other)))
-(impl Rem u8     (defmethod remainder (self (other Self)) Self (rem self other)))
-(impl Rem u16    (defmethod remainder (self (other Self)) Self (rem self other)))
-(impl Rem u32    (defmethod remainder (self (other Self)) Self (rem self other)))
-(impl Rem f64    (defmethod remainder (self (other Self)) Self (rem self other)))
-(impl Rem f32    (defmethod remainder (self (other Self)) Self (rem self other)))
-(impl Rem int (defmethod remainder (self (other Self)) Self (rem self other)))
-(impl Rem ratio  (defmethod remainder (self (other Self)) Self (rem self other)))
-(impl Rem rational (defmethod remainder (self (other Self)) Self (rem self other)))
+(impl Rem i32)
+(impl Rem i8)
+(impl Rem i16)
+(impl Rem u8)
+(impl Rem u16)
+(impl Rem u32)
+(impl Rem f64)
+(impl Rem f32)
+(impl Rem int)
+(impl Rem ratio)
+(impl Rem rational)
 
-(impl Bits i32
-  (defmethod bit-and (self (other Self)) Self (logand self other))
-  (defmethod bit-or (self (other Self)) Self (logior self other))
-  (defmethod bit-xor (self (other Self)) Self (logxor self other))
-  (defmethod bit-not (self) Self (lognot self))
-  (defmethod shift (self (count int)) Self (ash self count)))
-(impl Bits i8
-  (defmethod bit-and (self (other Self)) Self (logand self other))
-  (defmethod bit-or (self (other Self)) Self (logior self other))
-  (defmethod bit-xor (self (other Self)) Self (logxor self other))
-  (defmethod bit-not (self) Self (lognot self))
-  (defmethod shift (self (count int)) Self (ash self count)))
-(impl Bits i16
-  (defmethod bit-and (self (other Self)) Self (logand self other))
-  (defmethod bit-or (self (other Self)) Self (logior self other))
-  (defmethod bit-xor (self (other Self)) Self (logxor self other))
-  (defmethod bit-not (self) Self (lognot self))
-  (defmethod shift (self (count int)) Self (ash self count)))
-(impl Bits u8
-  (defmethod bit-and (self (other Self)) Self (logand self other))
-  (defmethod bit-or (self (other Self)) Self (logior self other))
-  (defmethod bit-xor (self (other Self)) Self (logxor self other))
-  (defmethod bit-not (self) Self (lognot self))
-  (defmethod shift (self (count int)) Self (ash self count)))
-(impl Bits u16
-  (defmethod bit-and (self (other Self)) Self (logand self other))
-  (defmethod bit-or (self (other Self)) Self (logior self other))
-  (defmethod bit-xor (self (other Self)) Self (logxor self other))
-  (defmethod bit-not (self) Self (lognot self))
-  (defmethod shift (self (count int)) Self (ash self count)))
-(impl Bits u32
-  (defmethod bit-and (self (other Self)) Self (logand self other))
-  (defmethod bit-or (self (other Self)) Self (logior self other))
-  (defmethod bit-xor (self (other Self)) Self (logxor self other))
-  (defmethod bit-not (self) Self (lognot self))
-  (defmethod shift (self (count int)) Self (ash self count)))
-(impl Bits int
-  (defmethod bit-and (self (other Self)) Self (logand self other))
-  (defmethod bit-or (self (other Self)) Self (logior self other))
-  (defmethod bit-xor (self (other Self)) Self (logxor self other))
-  (defmethod bit-not (self) Self (lognot self))
-  (defmethod shift (self (count int)) Self (ash self count)))
+(impl Bits i32)
+(impl Bits i8)
+(impl Bits i16)
+(impl Bits u8)
+(impl Bits u16)
+(impl Bits u32)
+(impl Bits int)
 
 ;; `Number` has no methods, so its impls are the bare conjunction: this
 ;; type has all five.
@@ -2473,44 +2424,44 @@ user-visible capacity."
 ;;
 ;; Written from `sample` rather than from a literal because a literal has to
 ;; have a type, and there is no way to spell "1 of type T" for an open `T`.
-;; `(bit-xor sample sample)` is `T`'s zero whatever `T` is, its complement is
+;; `(logxor sample sample)` is `T`'s zero whatever `T` is, its complement is
 ;; all ones, and shifting those left by `size` and complementing again leaves
 ;; exactly the low `size` bits. At a width where `size` reaches the width
 ;; itself the shift is `0` (`ash` past the width) and the complement is the
 ;; whole word, which is the right answer there too.
 (module %internal (pub defun bits-mask<T> ((sample T) (size int)) T
   (:where (Bits T))
-  (bit-not (shift (bit-not (bit-xor sample sample)) size))))
+  (lognot (ash (lognot (logxor sample sample)) size))))
 
 ;; `(ldb integer bytespec)`: extract the `size`-bit field starting at
 ;; `position`, right-justified.
 (module num
 (pub defun ldb<T> ((n T) (spec cons-cell<int,int>)) T
   (:where (Bits T))
-  (bit-and (shift n (* -1 (byte-position spec))) (std::%internal::bits-mask n (byte-size spec))))
+  (logand (ash n (* -1 (byte-position spec))) (std::%internal::bits-mask n (byte-size spec))))
 ;; `(ldb-test integer bytespec)`: does that field have any 1 bits?
 (pub defun ldb-test<T> ((n T) (spec cons-cell<int,int>)) bool
   (:where (Bits T) (Equal T))
-  (not (equal (ldb n spec) (bit-xor n n))))
+  (not (equal (ldb n spec) (logxor n n))))
 ;; `(mask-field integer bytespec)`: like `ldb`, but left in place rather than
 ;; right-justified.
 (pub defun mask-field<T> ((n T) (spec cons-cell<int,int>)) T
   (:where (Bits T))
-  (bit-and n (shift (std::%internal::bits-mask n (byte-size spec)) (byte-position spec))))
+  (logand n (ash (std::%internal::bits-mask n (byte-size spec)) (byte-position spec))))
 ;; `(dpb integer newbyte bytespec)`: deposit `newbyte`'s low `size` bits into
 ;; that field of `integer`, leaving every other bit of `integer` untouched.
 (pub defun dpb<T> ((n T) (newbyte T) (spec cons-cell<int,int>)) T
   (:where (Bits T))
-  (let ((mask (shift (std::%internal::bits-mask n (byte-size spec)) (byte-position spec))))
-    (bit-or (bit-and n (bit-not mask))
-            (bit-and (shift newbyte (byte-position spec)) mask))))
+  (let ((mask (ash (std::%internal::bits-mask n (byte-size spec)) (byte-position spec))))
+    (logior (logand n (lognot mask))
+            (logand (ash newbyte (byte-position spec)) mask))))
 ;; `(deposit-field integer newbyte bytespec)`: like `dpb`, but `newbyte` is
 ;; already positioned (only its bits inside the field matter) rather than
 ;; right-justified.
 (pub defun deposit-field<T> ((n T) (newbyte T) (spec cons-cell<int,int>)) T
   (:where (Bits T))
-  (let ((mask (shift (std::%internal::bits-mask n (byte-size spec)) (byte-position spec))))
-    (bit-or (bit-and n (bit-not mask)) (bit-and newbyte mask))))
+  (let ((mask (ash (std::%internal::bits-mask n (byte-size spec)) (byte-position spec))))
+    (logior (logand n (lognot mask)) (logand newbyte mask))))
 
 ;; `(boole op a b)`: CL's 16-way generic bitwise-op selector. `op` is one of
 ;; the 16 `boole-*` constants below (an `i32` code, not a keyword — this
@@ -2542,28 +2493,28 @@ user-visible capacity."
 ;; operand the same way `bits-mask` gets them.
 (pub defun boole<T> ((op int) (a T) (b T)) T
   (:where (Bits T))
-  (if (= op boole-clr) (bit-xor a a)
-  (if (= op boole-set) (bit-not (bit-xor a a))
+  (if (= op boole-clr) (logxor a a)
+  (if (= op boole-set) (lognot (logxor a a))
   (if (= op boole-1) a
   (if (= op boole-2) b
-  (if (= op boole-c1) (bit-not a)
-  (if (= op boole-c2) (bit-not b)
-  (if (= op boole-and) (bit-and a b)
-  (if (= op boole-ior) (bit-or a b)
-  (if (= op boole-xor) (bit-xor a b)
-  (if (= op boole-eqv) (bit-not (bit-xor a b))
-  (if (= op boole-nand) (bit-not (bit-and a b))
-  (if (= op boole-nor) (bit-not (bit-or a b))
-  (if (= op boole-andc1) (bit-and (bit-not a) b)
-  (if (= op boole-andc2) (bit-and a (bit-not b))
-  (if (= op boole-orc1) (bit-or (bit-not a) b)
-  (if (= op boole-orc2) (bit-or a (bit-not b))
+  (if (= op boole-c1) (lognot a)
+  (if (= op boole-c2) (lognot b)
+  (if (= op boole-and) (logand a b)
+  (if (= op boole-ior) (logior a b)
+  (if (= op boole-xor) (logxor a b)
+  (if (= op boole-eqv) (lognot (logxor a b))
+  (if (= op boole-nand) (lognot (logand a b))
+  (if (= op boole-nor) (lognot (logior a b))
+  (if (= op boole-andc1) (logand (lognot a) b)
+  (if (= op boole-andc2) (logand a (lognot b))
+  (if (= op boole-orc1) (logior (lognot a) b)
+  (if (= op boole-orc2) (logior a (lognot b))
       (panic "boole: unknown op code")))))))))))))))))))
 
 ;; `cons-cell<A,B>`'s Equal/Ord: recursive (structural) comparison. The field
 ;; comparisons go through the methods' own `where` bounds — checked as
 ;; diagnostics-only `TraitCall`s while `A`/`B` are open, then resolved to the
-;; field types' real `equal`/`less` when the owner monomorphizes (nesting,
+;; field types' real `equal`/`<` when the owner monomorphizes (nesting,
 ;; e.g. `cons-cell<cons-cell<i32,i32>,i32>`, just recurses one level per
 ;; instantiation). Note the bound names must be the *owner's* declared type
 ;; parameters (`A`/`B`, exactly as written on the `defstruct`) — a method's
@@ -2574,20 +2525,20 @@ user-visible capacity."
         (equal self::cdr other::cdr)
         false)))
 
-;; Ord: lexicographic, `car` first, then `cdr`. The double-`less` form (car
+;; Ord: lexicographic, `car` first, then `cdr`. The double-`<` form (car
 ;; strictly less → true; car strictly greater → false; otherwise cars are
-;; equivalent, compare cdrs) keeps `less`'s own body free of any appeal to
+;; equivalent, compare cdrs) keeps `<`'s own body free of any appeal to
 ;; equality, so the recursion needs `(Ord A)`/`(Ord B)` and nothing more.
 ;; `Ord` inheriting `Equal` does oblige the *impl as a whole* to have an
 ;; `impl Equal cons-cell<A,B>` — which is right above.
-;; `less-equal`/`greater`/`greater-equal` come from `Ord`'s default bodies.
+;; `<=`/`>`/`>=` come from `Ord`'s default bodies.
 (impl<A,B> Ord cons-cell<A,B> (:where (Ord A) (Ord B))
-  (defmethod less (self (other Self)) bool
-    (if (less self::car other::car)
+  (defmethod < (self (other Self)) bool
+    (if (< self::car other::car)
         true
-        (if (less other::car self::car)
+        (if (< other::car self::car)
             false
-            (less self::cdr other::cdr)))))
+            (< self::cdr other::cdr)))))
 
 ;; The `Error` trait — what every error type implements, modeled on Rust's
 ;; `std::error::Error`. `Error` is a *trait*, never a type: there is no
@@ -4075,7 +4026,7 @@ user-visible capacity."
 ;; ---------------------------------------------------------------------------
 ;; `HashSet<T>`, `SortedTable<K,V>`, `Deque<T>`: Rust's `HashSet`, `BTreeMap`
 ;; and `VecDeque`, each created with `new`. The method names follow `HashTable` (`get` `set` `remove`
-;; `count` `clear`); a set's add is `insert`, since `add` is the `Add` trait's.
+;; `count` `clear`); a set's add is `insert`, as in Rust.
 ;; `iter` walks a snapshot, as `HashTable`'s does, so changing the collection
 ;; inside a `doiter` over it is not seen by that loop.
 
@@ -4115,13 +4066,13 @@ user-visible capacity."
 (pub defun hashset-equalp<T> () std::collections::HashSet<T> (std::collections::HashSet::with-table (std::%internal::hashtable-equalp))))
 
 ;; Sorted parallel vectors of keys and values, found by binary search on
-;; `less`. Lookup is a binary search; `set` of a new key and `remove` shift the
+;; `<`. Lookup is a binary search; `set` of a new key and `remove` shift the
 ;; elements after it. Iterating gives `#{key value}` tuples in key order.
 (module %internal (pub defun sorted-position<K> ((ks Vector<K>) (k K)) int (:where (Ord K))
   (let ((lo 0) (hi (len ks)))
     (while (< lo hi)
       (let ((mid (truncate (+ lo hi) 2)))
-        (if (less (get ks mid) k) (setf lo (+ mid 1)) (setf hi mid))))
+        (if (< (get ks mid) k) (setf lo (+ mid 1)) (setf hi mid))))
     lo)))
 (module %internal (pub defun vector-insert-at<T> ((v Vector<T>) (i int) (x T)) ()
   (push v x)

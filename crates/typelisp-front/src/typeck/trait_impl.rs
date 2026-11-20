@@ -146,20 +146,21 @@ pub(crate) fn check_trait_impl(
     let mut left = Vec::new();
     for (m, _) in &tdef.methods {
         if !methods.iter().any(|(w, _)| w == m) {
-            if tdef.defaults.contains(m) {
-                left.push(*m);
-                continue;
-            }
             // A method the type already has is the trait's, when it has the
-            // signature the trait gives it.
+            // signature the trait gives it — ahead of a default body, which
+            // would be a second method of the same name (`int`'s built-in
+            // `<=` is `Ord`'s).
             let existing = match &inst {
                 Some(args) => reg.method_at(&owner, *m, args),
                 None => reg.method(&owner, *m),
             };
-            let Some(existing) = existing else {
-                return Err(Error::TypeError(format!("{}: missing method `{}` (`{}` declares no default body for it)", shown, m, trait_path)));
-            };
-            adopt(&tdef, existing, &target_ty, &assoc, head.params(), &shown, &trait_path, *m)?;
+            match existing {
+                Some(existing) => adopt(&tdef, existing, &target_ty, &assoc, head.params(), &shown, &trait_path, *m)?,
+                None if tdef.defaults.contains(m) => left.push(*m),
+                None => {
+                    return Err(Error::TypeError(format!("{}: missing method `{}` (`{}` declares no default body for it)", shown, m, trait_path)))
+                }
+            }
         }
     }
     for sup in &tdef.supertraits {

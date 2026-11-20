@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/traits.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
+<!-- translated-from: docs/ja/tutorial/traits.md @ 6271c6d8b68694e1d27dd2e349b08117d2ef2bfb -->
 # trait
 
 trait 是「這個型別支援這些操作」的約定。它讓多個型別擁有同名的操作，使用這些操作的函式就不必為每個型別分別撰寫。其機制與 Rust 的
@@ -93,7 +93,7 @@ error: ...: type error: report: type `int` does not implement trait `shape` requ
 | trait | 要實作的方法 | 可以使用的功能 |
 |---|---|---|
 | `Equal` | `equal` | `equal`、`=`、`assert-equal`、`match` 的 `(:= 運算式)` 模式、傳入 `:test equal` 的 `member` 等 |
-| `Ord` | `less` | `less-equal`、`greater` 等。`Ord` 繼承 `Equal` |
+| `Ord` | `<` | `<=`、`>`、`>=`。`Ord` 繼承 `Equal` |
 | `print-object` | `print-object` | `println` 等顯示時的形式 |
 | `Iter` | `next` | `doiter`、`map`、`filter`、`sort` 等 |
 | `Error` | `message`、`source` | 作為錯誤型別使用（[錯誤處理](errors.md)） |
@@ -107,9 +107,9 @@ error: ...: type error: report: type `int` does not implement trait `shape` requ
   (defmethod equal (self (other Self)) bool (= self::yen other::yen)))
 
 (impl Ord money
-  (defmethod less (self (other Self)) bool (< self::yen other::yen)))
+  (defmethod < (self (other Self)) bool (< self::yen other::yen)))
 
-(greater (make-instance 'money :yen 5) (make-instance 'money :yen 3))     ; => true（Ord 的預設實作）
+(> (make-instance 'money :yen 5) (make-instance 'money :yen 3))     ; => true（Ord 的預設實作）
 ```
 
 實作 `print-object` 就能決定 `println` 的顯示方式。被要求可讀回的形式時（如 `~s`），引數 `escape` 為 `true`。
@@ -130,7 +130,7 @@ error: ...: type error: report: type `int` does not implement trait `shape` requ
   (foldl (iter v)
          (lambda ((best Option<T>) (x T)) Option<T>
            (match best
-             ((Some b) (if (less b x) (Option::Some x) best))
+             ((Some b) (if (< b x) (Option::Some x) best))
              ((None) (Option::Some x))))
          (Option::None)))
 ```

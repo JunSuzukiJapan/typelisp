@@ -197,7 +197,7 @@ fn an_argument_waiting_with_a_pinned_one_also_reads_a_generic_callers_parameter(
                  (foldl (iter v)
                         (lambda ((best Option<T>) (x T)) Option<T>
                           (match best
-                            ((Some b) (if (less b x) (Option::Some x) best))
+                            ((Some b) (if (< b x) (Option::Some x) best))
                             ((None) (Option::Some x))))
                         (Option::None)))
                (defun make-v () Vector<int> (Vector::new))

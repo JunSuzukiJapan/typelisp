@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 398532233e28225bb121ed5b18609d41ea1bf813 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ ac5a6b3adada21a0a55e0e1c4b0e1fabf4854908 -->
 # Syntaxreferens för typelisp
 
 typelisp är ett statiskt typat Lisp, skrivet med S-uttryck. För listan över inbyggda funktioner och
@@ -1010,7 +1010,7 @@ implementerar traitet på en gång för varje typ som uppfyller gränserna.
 ```lisp
 (deftrait Clamp (Ord)
   (defmethod clamp (self (lo Self) (hi Self)) Self
-    (if (less self lo) lo (if (less hi self) hi self))))
+    (if (< self lo) lo (if (< hi self) hi self))))
 (impl<T> Clamp T (:where (Ord T)))          ; ingen kropp alls; allt är standardimplementationen
 ```
 
@@ -1019,7 +1019,7 @@ som vanlig monomorfisering). Ett trait kan ha högst en generell implementation.
 explicit `impl` har den företräde. Typkontrollen av kroppen är skild från genereringen: den görs en gång på
 deklarationsstället, **med målet kvar som en typvariabel** (som i Rust), så även en implementation som
 aldrig används får sina fel fångade där om de skulle misslyckas för varje mål under de deklarerade
-gränserna. Anrop som motiveras av gränserna (`(less self other)` under `(:where (Ord T))` och så vidare)
+gränserna. Anrop som motiveras av gränserna (`(< self other)` under `(:where (Ord T))` och så vidare)
 passerar, som i kroppen av en generisk `defun`.
 
 **Dokumentationssträngar**: ett `deftrait` kan ha en dokumentationssträng för hela traitet, som en
@@ -1030,8 +1030,8 @@ de två kunde inte skiljas åt.
 
 De traits standardbiblioteket tillhandahåller: **`Iter`** (`next` / associerad typ `Item`; grunden för
 `doiter` och sekvensfunktionerna), **`Equal`** (den trait som `equal` använder),
-**`Ord`** (ärver `Equal`; bara `less` måste implementeras, och `less-equal` / `greater` /
-`greater-equal` är standardimplementationer), **`Error`** (`message` / `source`; `:dyn Error` för att
+**`Ord`** (ärver `Equal`; bara `<` måste implementeras, och `<=` / `>` /
+`>=` är standardimplementationer), **`Error`** (`message` / `source`; `:dyn Error` för att
 hantera feltyper enhetligt), **`print-object`** (en utskriftsform per typ), **`Pathish`**
 (pathname-designatorer: en sträng eller ett `pathname`), och strömhierarkin **`Stream`** →
 **`InputStream`** / **`OutputStream`** → **`CharInput`** / **`CharOutput`** → **`PeekInput`**.

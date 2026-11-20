@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 398532233e28225bb121ed5b18609d41ea1bf813 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ ac5a6b3adada21a0a55e0e1c4b0e1fabf4854908 -->
 # Référence de la syntaxe de typelisp
 
 typelisp est un Lisp à typage statique, écrit en S-expressions. Pour la liste des fonctions et méthodes intégrées,
@@ -1024,7 +1024,7 @@ chaque type qui satisfait les bornes.
 ```lisp
 (deftrait Clamp (Ord)
   (defmethod clamp (self (lo Self) (hi Self)) Self
-    (if (less self lo) lo (if (less hi self) hi self))))
+    (if (< self lo) lo (if (< hi self) hi self))))
 (impl<T> Clamp T (:where (Ord T)))          ; aucun corps ; tout est par défaut
 ```
 
@@ -1033,7 +1033,7 @@ mécanisme que la monomorphisation ordinaire). Un trait peut avoir au plus une i
 type a un `impl` explicite, celui-ci est prioritaire. La vérification du corps est distincte de la génération : elle
 se fait une fois à l'endroit de la déclaration, **avec la cible laissée comme variable de type** (comme en Rust) ;
 même une implémentation jamais utilisée voit donc ses erreurs détectées là si elles échoueraient pour toute cible
-sous les bornes déclarées. Les appels justifiés par les bornes (`(less self other)` sous `(:where (Ord T))`, etc.)
+sous les bornes déclarées. Les appels justifiés par les bornes (`(< self other)` sous `(:where (Ord T))`, etc.)
 passent, comme dans le corps d'un `defun` générique.
 
 **Docstrings** : un `deftrait` peut avoir une docstring pour l'ensemble du trait, sous forme de littéral chaîne juste
@@ -1043,7 +1043,7 @@ implémentation par défaut ; les deux ne pourraient donc pas être distingués.
 
 Les traits que fournit la bibliothèque standard : **`Iter`** (`next` / type associé `Item` ; la base de `doiter` et
 des fonctions de séquence), **`Equal`** (le trait qu'utilise `equal`), **`Ord`** (hérite de
-`Equal` ; seule `less` doit être implémentée, et `less-equal` / `greater` / `greater-equal` sont des implémentations par
+`Equal` ; seule `<` doit être implémentée, et `<=` / `>` / `>=` sont des implémentations par
 défaut), **`Error`** (`message` / `source` ; `:dyn Error` pour traiter uniformément les types d'erreur),
 **`print-object`** (une représentation imprimée par type), **`Pathish`** (désignateurs de noms de chemin : une chaîne
 ou un `pathname`), et la hiérarchie des flux **`Stream`** → **`InputStream`** / **`OutputStream`** →

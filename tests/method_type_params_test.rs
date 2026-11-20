@@ -163,7 +163,7 @@ const TRAIT_DEFS: &str = r##"
   (defmethod map-it<U> (self (f (fn (int) U))) U))
 (defstruct Big (n int))
 (impl Pick Big
-  (defmethod pick<W> (self (a W) (b W)) W (if (less a b) b a))
+  (defmethod pick<W> (self (a W) (b W)) W (if (< a b) b a))
   (defmethod map-it<W> (self (f (fn (int) W))) W (f self::n)))
 (defun via<T> ((x T)) string (:where (Pick T)) (format false "~a ~a" (pick x 3 9) (map-it x (lambda ((n int)) bool (> n 0)))))
 "##;

@@ -1300,7 +1300,7 @@ const SOURCE_TEMPLATE: &str = r#"
 ;; the receiver-type methods that lower to LLVM instructions (i64/i32) or
 ;; `rt_str_*` primitive calls (string) rather than a real function call?
 ;; Anything *not* on these lists — a user-defined method on a primitive
-;; receiver, e.g. the prelude's `impl Ord i32` → `less` — falls through to
+;; receiver, e.g. the prelude's `mod` on `f32` — falls through to
 ;; `compile-assoc-user`'s ordinary call by symbol. (Chained `if`s: the
 ;; prelude's `or` macro isn't loaded under `run_with_compiler`.)
 ;; Which receiver type names go to `int-native-method?`/`float-native-method?`

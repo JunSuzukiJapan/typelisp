@@ -366,9 +366,9 @@ fn nested_pairs_recurse_through_the_impl() {
 fn pairs_order_lexicographically_with_less() {
     // car decides first (1 < 2 even though 9 > 0); equal cars fall through
     // to cdr.
-    let src = "(+ (if (less (cons 1 9) (cons 2 0)) 1 0)
-                  (+ (if (less (cons 1 2) (cons 1 3)) 10 0)
-                     (if (less (cons 1 3) (cons 1 3)) 100 0)))";
+    let src = "(+ (if (< (cons 1 9) (cons 2 0)) 1 0)
+                  (+ (if (< (cons 1 2) (cons 1 3)) 10 0)
+                     (if (< (cons 1 3) (cons 1 3)) 100 0)))";
     assert_eq!(eval_ok(src), Value::Int(11));
 }
 
@@ -379,7 +379,7 @@ fn member_and_sort_work_over_a_vector_of_pairs() {
                  (push v (cons 2 0))
                  (push v (cons 1 5))
                  (push v (cons 1 3))
-                 (let ((sorted (sort (iter v) (lambda ((a cons-cell<int,int>) (b cons-cell<int,int>)) bool (less a b)))))
+                 (let ((sorted (sort (iter v) (lambda ((a cons-cell<int,int>) (b cons-cell<int,int>)) bool (< a b)))))
                    (let ((first (get sorted 0)))
                      (+ (if (member (cons 1 5) (iter v) :test equal) 1000 0)
                         (+ (if (member (cons 9 9) (iter v) :test equal) 100 0)

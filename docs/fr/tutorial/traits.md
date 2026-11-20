@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/traits.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
+<!-- translated-from: docs/ja/tutorial/traits.md @ 6271c6d8b68694e1d27dd2e349b08117d2ef2bfb -->
 # Traits
 
 Un trait est une promesse : « ce type prend en charge ces opérations ». Les traits permettent à plusieurs types
@@ -100,7 +100,7 @@ standard qui l'utilisent.
 | Trait | Méthodes à implémenter | Ce que cela permet |
 |---|---|---|
 | `Equal` | `equal` | `equal`, `=`, `assert-equal`, le motif `(:= expr)` de `match`, `member` avec `:test equal`, etc. |
-| `Ord` | `less` | `less-equal`, `greater`, etc. `Ord` hérite de `Equal` |
+| `Ord` | `<` | `<=`, `>`, `>=`. `Ord` hérite de `Equal` |
 | `print-object` | `print-object` | La façon dont `println` et consorts affichent les valeurs |
 | `Iter` | `next` | `doiter`, `map`, `filter`, `sort`, etc. |
 | `Error` | `message`, `source` | L'utilisation comme type d'erreur ([Gestion des erreurs](errors.md)) |
@@ -115,9 +115,9 @@ Implémentons `Equal` et `Ord` pour un type représentant une somme d'argent. Co
   (defmethod equal (self (other Self)) bool (= self::yen other::yen)))
 
 (impl Ord money
-  (defmethod less (self (other Self)) bool (< self::yen other::yen)))
+  (defmethod < (self (other Self)) bool (< self::yen other::yen)))
 
-(greater (make-instance 'money :yen 5) (make-instance 'money :yen 3))     ; => true (l'implémentation par défaut de Ord)
+(> (make-instance 'money :yen 5) (make-instance 'money :yen 3))     ; => true (l'implémentation par défaut de Ord)
 ```
 
 Implémenter `print-object` décide de la façon dont `println` affiche la valeur. L'argument `escape` vaut `true`
@@ -139,7 +139,7 @@ Combiné à une borne de trait, on peut écrire une fonction qui marche pour tou
   (foldl (iter v)
          (lambda ((best Option<T>) (x T)) Option<T>
            (match best
-             ((Some b) (if (less b x) (Option::Some x) best))
+             ((Some b) (if (< b x) (Option::Some x) best))
              ((None) (Option::Some x))))
          (Option::None)))
 ```

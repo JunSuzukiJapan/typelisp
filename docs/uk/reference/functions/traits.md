@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/traits.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
+<!-- translated-from: docs/ja/reference/functions/traits.md @ 6271c6d8b68694e1d27dd2e349b08117d2ef2bfb -->
 # Стандартні трейти
 
 Трейти для ітерації, порівняння, арифметики, додавання та вилучення елементів. Інші стандартні трейти описано у власних розділах: `Hash`
@@ -34,13 +34,13 @@
 (deftrait Equal ()
   (defmethod equal (self (other Self)) bool))                ; обов'язковий
 (deftrait Ord (Equal)                                     ; успадковує Equal
-  (defmethod less (self (other Self)) bool)                  ; обов'язковий
-  (defmethod less-equal (self (other Self)) bool (not (less other self)))
-  (defmethod greater (self (other Self)) bool (less other self))
-  (defmethod greater-equal (self (other Self)) bool (not (less self other))))
+  (defmethod < (self (other Self)) bool)                     ; обов'язковий
+  (defmethod <= (self (other Self)) bool (not (< other self)))
+  (defmethod > (self (other Self)) bool (< other self))
+  (defmethod >= (self (other Self)) bool (not (< self other))))
 ```
 
-Щоб реалізувати `Equal`, пишуть `equal`, а для `Ord` лише `less`. Решту `Ord` доповнюють реалізації за
+Щоб реалізувати `Equal`, пишуть `equal`, а для `Ord` лише `<`. Решту `Ord` доповнюють реалізації за
 замовчуванням. `Ord` успадковує `Equal`, тож перед `impl Ord X` потрібен `impl Equal X`.
 
 `(equal a b)` викликає реалізацію `Equal` для типу `a`. Написати його для типу, який не реалізує `Equal`, —
@@ -53,10 +53,10 @@
 | Назва | Форма | Тип | Опис |
 |---|---|---|---|
 | `equal` | `(equal a b)` | `(A,A)→bool` where `Equal A` | Чи рівні вони (`==` у Rust) |
-| `less` | `(less a b)` | `(A,A)→bool` where `Ord A` | `a < b` |
-| `less-equal` | `(less-equal a b)` | `(A,A)→bool` where `Ord A` | `a <= b` |
-| `greater` | `(greater a b)` | `(A,A)→bool` where `Ord A` | `a > b` |
-| `greater-equal` | `(greater-equal a b)` | `(A,A)→bool` where `Ord A` | `a >= b` |
+| `<` | `(< a b)` | `(A,A)→bool` where `Ord A` | менше |
+| `<=` | `(<= a b)` | `(A,A)→bool` where `Ord A` | менше або дорівнює |
+| `>` | `(> a b)` | `(A,A)→bool` where `Ord A` | більше |
+| `>=` | `(>= a b)` | `(A,A)→bool` where `Ord A` | більше або дорівнює |
 
 `Equal` реалізовано для: усіх числових типів (від `i8` до `u32` / `f32` / `f64` / `int` / `ratio`), `bool`
 `char` `string` `symbol` `complex`, `Sexpr`, `cons-cell<A,B>` і кортежів (поелементно, якщо елементи
@@ -70,10 +70,8 @@
 методів. Тому структура всередині списку, як і в CL, порівнюється за ідентичністю, хоч би який `impl Equal`
 мав її тип.
 
-Імена методів `Ord` не перетинаються з вбудованими операторами (`< <= > >=`) і `lt`, бо вбудоване не можна
-перевизначити, а кожна реалізація делегує їм. Самі скалярні оператори порівняння — вбудовані методи для
-кожного типу отримувача ([Числа](numbers.md), [Рядки й символи](collections.md)). Усередині обмеження
-написаний оператор читається як метод трейта (розділ 3). `=` стає `equal`, а `/=` — `(not (equal a b))`.
+Скалярні оператори порівняння — вбудовані методи для кожного типу отримувача ([Числа](numbers.md), [Рядки й символи](collections.md)),
+і вони ж є реалізацією `Ord`. Усередині обмеження `=` стає `equal`, а `/=` — `(not (equal a b))`.
 
 ## 3. Арифметичні трейти (`Add` / `Sub` / `Mul` / `Div` / `Rem` / `Bits` / `Number`)
 
@@ -81,32 +79,30 @@
 типами використовує вбудовані оператори** ([Числа](numbers.md)) і через цей шар не проходить.
 
 ```lisp
-(deftrait Add () (defmethod add (self (other Self)) Self))
-(deftrait Sub () (defmethod sub (self (other Self)) Self))
-(deftrait Mul () (defmethod mul (self (other Self)) Self))
-(deftrait Div () (:type Output) (defmethod div (self (other Self)) Output))
-(deftrait Rem () (defmethod remainder (self (other Self)) Self))
+(deftrait Add () (defmethod + (self (other Self)) Self))
+(deftrait Sub () (defmethod - (self (other Self)) Self))
+(deftrait Mul () (defmethod * (self (other Self)) Self))
+(deftrait Div () (:type Output) (defmethod / (self (other Self)) Output))
+(deftrait Rem () (defmethod rem (self (other Self)) Self))
 (deftrait Bits ()
-  (defmethod bit-and (self (other Self)) Self)
-  (defmethod bit-or  (self (other Self)) Self)
-  (defmethod bit-xor (self (other Self)) Self)
-  (defmethod bit-not (self) Self)
-  (defmethod shift (self (count int)) Self))                 ; the distance is always int (as with ash)
+  (defmethod logand (self (other Self)) Self)
+  (defmethod logior (self (other Self)) Self)
+  (defmethod logxor (self (other Self)) Self)
+  (defmethod lognot (self) Self)
+  (defmethod ash (self (count int)) Self))                   ; the distance is always int
 (deftrait Number (Add Sub Mul Rem Ord))                   ; методів немає; поєднання п'яти
 ```
 
-**Всередині обмеження можна писати оператори.** Коли одержувач — змінна типу, обмежена через `:where`,
-оператори читаються як методи трейта (`+`→`add`, `-`→`sub`, `*`→`mul`, `/`→`div`, `rem`→`remainder`,
-`logand`→`bit-and`, `=`→`equal`, `<`→`less` …):
+**Всередині обмеження можна писати оператори.** Методи кожного трейта називаються так само, як оператори й
+вбудовані функції конкретних типів, тож пишуться так само, коли одержувач — змінна типу, обмежена через
+`:where`:
 
 ```lisp
 (defun sum3<T> ((a T) (b T) (c T)) T (:where (Number T))
-  (+ a b c))                                              ; = (add (add a b) c)
+  (+ a b c))                                              ; = (+ (+ a b) c)
 ```
 
-Метод трейта не названо `+`, бо `+` — це назва вбудованого методу, а `impl` відмовляється його
-перевизначати (`cannot redefine built-in method`). `Neg` немає: `(- x)` розгортається в
-`(- (- x x) x)`, тож `Sub` достатньо.
+`Neg` немає: `(- x)` розгортається в `(- (- x x) x)`, тож `Sub` достатньо.
 
 Реалізовано для: `Add`/`Sub`/`Mul`/`Div`/`Rem`/`Number` для всіх числових типів (крім `complex`) і
 `Bits` для всіх цілих типів та `int`.

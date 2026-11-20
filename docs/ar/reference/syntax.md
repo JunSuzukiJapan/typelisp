@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 398532233e28225bb121ed5b18609d41ea1bf813 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ ac5a6b3adada21a0a55e0e1c4b0e1fabf4854908 -->
 # مرجع صياغة typelisp
 
 typelisp لغة Lisp ذات أنواع ساكنة، تُكتب بتعبيرات رمزية (S-expressions). ولقائمة الدوال والتوابع المضمنة
@@ -942,7 +942,7 @@ NULL، استخدم `ptr` غير المنمّط (الذي لا يمكن قراء
 ```lisp
 (deftrait Clamp (Ord)
   (defmethod clamp (self (lo Self) (hi Self)) Self
-    (if (less self lo) lo (if (less hi self) hi self))))
+    (if (< self lo) lo (if (< hi self) hi self))))
 (impl<T> Clamp T (:where (Ord T)))          ; بلا أي جسم؛ كل شيء افتراضي
 ```
 
@@ -950,7 +950,7 @@ NULL، استخدم `ptr` غير المنمّط (الذي لا يمكن قراء
 العادية نفسها). وللسمة تنفيذ شامل واحد على الأكثر. وإذا كان لنوع `impl` صريح فهو الأولى. وفحص أنواع الجسم
 منفصل عن التوليد: يُجرى مرة واحدة عند موضع الإعلان، **مع ترك الهدف متغير نوع** (كما في Rust)، فحتى تنفيذ لا
 يُستخدم أبدًا تُلتقط أخطاؤه هناك إذا كانت ستفشل لكل هدف ضمن القيود المعلَنة. والاستدعاءات التي تبررها القيود
-(`(less self other)` تحت `(:where (Ord T))` وهكذا) تمر، كما في جسم `defun` عامة.
+(`(< self other)` تحت `(:where (Ord T))` وهكذا) تمر، كما في جسم `defun` عامة.
 
 **السلاسل التوثيقية**: يمكن أن تكون لـ `deftrait` سلسلة توثيقية واحدة للسمة كلها، سلسلة نصية حرفية مباشرة
 بعد قائمة السمات الأعلى، قبل البنود (`(deftrait Name () "doc" (:type ...) (method ...)...)`). والتوقيع بلا
@@ -958,8 +958,8 @@ NULL، استخدم `ptr` غير المنمّط (الذي لا يمكن قراء
 فلا يمكن التمييز بينهما.
 
 السمات التي توفرها المكتبة القياسية: **`Iter`** (`next` / النوع المرتبط `Item`؛ أساس `doiter` ودوال
-التسلسلات) و**`Equal`** (السمة التي يستعملها `equal`) و**`Ord`** (ترث `Equal`؛ ولا يجب تنفيذ إلا `less`،
-و`less-equal` / `greater` / `greater-equal` تنفيذات افتراضية) و**`Error`** (`message` / `source`؛ و`:dyn Error`
+التسلسلات) و**`Equal`** (السمة التي يستعملها `equal`) و**`Ord`** (ترث `Equal`؛ ولا يجب تنفيذ إلا `<`،
+و`<=` / `>` / `>=` تنفيذات افتراضية) و**`Error`** (`message` / `source`؛ و`:dyn Error`
 للتعامل الموحد مع أنواع الأخطاء) و**`print-object`** (تمثيل مطبوع لكل نوع) و**`Pathish`** (محدِّدات
 المسارات: سلسلة نصية أو `pathname`)، والتسلسل الهرمي للتدفقات **`Stream`** ← **`InputStream`** /
 **`OutputStream`** ← **`CharInput`** / **`CharOutput`** ← **`PeekInput`**.

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 398532233e28225bb121ed5b18609d41ea1bf813 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ ac5a6b3adada21a0a55e0e1c4b0e1fabf4854908 -->
 # Syntaxreferenz von typelisp
 
 typelisp ist ein statisch typisiertes Lisp, geschrieben in S-Ausdrücken. Die Liste der eingebauten Funktionen
@@ -1042,7 +1042,7 @@ Typ implementiert, der die Schranken erfüllt.
 ```lisp
 (deftrait Clamp (Ord)
   (defmethod clamp (self (lo Self) (hi Self)) Self
-    (if (less self lo) lo (if (less hi self) hi self))))
+    (if (< self lo) lo (if (< hi self) hi self))))
 (impl<T> Clamp T (:where (Ord T)))          ; überhaupt kein Rumpf; alles ist die Standardimplementierung
 ```
 
@@ -1052,7 +1052,7 @@ Hat ein Typ ein ausdrückliches `impl`, hat dieses Vorrang. Die Typprüfung des 
 getrennt: Sie geschieht wie in Rust einmal an der Deklarationsstelle, **mit dem Ziel als Typvariable**, daher
 werden selbst bei einer Implementierung, die nie verwendet wird, Fehler dort gefunden, wenn sie unter den
 deklarierten Schranken für jedes Ziel scheitern würden. Durch die Schranken gerechtfertigte Aufrufe
-(`(less self other)` unter `(:where (Ord T))` usw.) gehen durch, wie im Rumpf eines generischen `defun`.
+(`(< self other)` unter `(:where (Ord T))` usw.) gehen durch, wie im Rumpf eines generischen `defun`.
 
 **Docstrings**: Ein `deftrait` kann einen Docstring für den ganzen Trait haben, als Zeichenkettenliteral direkt
 nach der Liste der Obertraits, vor den Einträgen (`(deftrait Name () "doc" (:type ...) (method ...)...)`). Eine
@@ -1061,7 +1061,7 @@ einer Standardimplementierung, daher ließen sich beide nicht unterscheiden.
 
 Die Traits, die die Standardbibliothek bereitstellt: **`Iter`** (`next` / assoziierter Typ `Item`; die Grundlage
 von `doiter` und den Sequenzfunktionen), **`Equal`** (der Trait, den `equal` verwendet),
-**`Ord`** (erbt `Equal`; nur `less` muss implementiert werden, und `less-equal` / `greater` / `greater-equal` sind
+**`Ord`** (erbt `Equal`; nur `<` muss implementiert werden, und `<=` / `>` / `>=` sind
 Standardimplementierungen), **`Error`** (`message` / `source`; `:dyn Error`, um Fehlertypen einheitlich zu
 behandeln), **`print-object`** (eine typabhängige Druckdarstellung), **`Pathish`** (Pfadnamensbezeichner: eine
 Zeichenkette oder ein `pathname`) sowie die Stream-Hierarchie **`Stream`** → **`InputStream`** /

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 398532233e28225bb121ed5b18609d41ea1bf813 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ ac5a6b3adada21a0a55e0e1c4b0e1fabf4854908 -->
 # Довідник із синтаксису typelisp
 
 typelisp — це Лісп зі статичною типізацією, що записується S-виразами. Перелік вбудованих функцій і
@@ -1005,7 +1005,7 @@ Rust (`impl Point { ... }`).
 ```lisp
 (deftrait Clamp (Ord)
   (defmethod clamp (self (lo Self) (hi Self)) Self
-    (if (less self lo) lo (if (less hi self) hi self))))
+    (if (< self lo) lo (if (< hi self) hi self))))
 (impl<T> Clamp T (:where (Ord T)))          ; no body at all; everything is the default
 ```
 
@@ -1014,7 +1014,7 @@ Rust (`impl Point { ... }`).
 має явний `impl`, він має пріоритет. Перевірка типів тіла відокремлена від генерації: вона виконується
 один раз у точці оголошення, **із ціллю, що лишається змінною типу** (як у Rust), тож навіть реалізація,
 що ніколи не використовується, має свої помилки спіймані там, якщо вони зазнали б невдачі для кожної цілі
-за оголошених обмежень. Виклики, виправдані обмеженнями (`(less self other)` за `(:where (Ord T))` тощо),
+за оголошених обмежень. Виклики, виправдані обмеженнями (`(< self other)` за `(:where (Ord T))` тощо),
 проходять, як у тілі узагальненого `defun`.
 
 **Рядки документації**: `deftrait` може мати один рядок документації на весь трейт, як рядковий літерал
@@ -1024,7 +1024,7 @@ Rust (`impl Point { ... }`).
 
 Трейти, які надає стандартна бібліотека: **`Iter`** (`next` / асоційований тип `Item`; основа `doiter` і
 функцій над послідовностями), **`Equal`** (трейт, яким користується `equal`), **`Ord`** (успадковує
-`Equal`; реалізувати треба лише `less`, а `less-equal` / `greater` / `greater-equal` — типові реалізації),
+`Equal`; реалізувати треба лише `<`, а `<=` / `>` / `>=` — типові реалізації),
 **`Error`** (`message` / `source`; `:dyn Error` для однорідної обробки типів помилок),
 **`print-object`** (представлення для друку для кожного типу), **`Pathish`** (designator-и шляхів: рядок
 або `pathname`) і ієрархія потоків **`Stream`** → **`InputStream`** / **`OutputStream`** →

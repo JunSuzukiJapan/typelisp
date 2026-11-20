@@ -29,13 +29,13 @@
 (deftrait Equal ()
   (defmethod equal (self (other Self)) bool))                ; 実装必須
 (deftrait Ord (Equal)                                     ; Equal を継承
-  (defmethod less (self (other Self)) bool)                  ; 実装必須
-  (defmethod less-equal (self (other Self)) bool (not (less other self)))
-  (defmethod greater (self (other Self)) bool (less other self))
-  (defmethod greater-equal (self (other Self)) bool (not (less self other))))
+  (defmethod < (self (other Self)) bool)                     ; 実装必須
+  (defmethod <= (self (other Self)) bool (not (< other self)))
+  (defmethod > (self (other Self)) bool (< other self))
+  (defmethod >= (self (other Self)) bool (not (< self other))))
 ```
 
-`Equal` を実装するには `equal` を、`Ord` を実装するには `less` だけを書けばよい。`Ord` の残りは
+`Equal` を実装するには `equal` を、`Ord` を実装するには `<` だけを書けばよい。`Ord` の残りは
 デフォルト実装が埋める。`Ord` は `Equal` を継承するので、`impl Ord X` の前に `impl Equal X` が要る。
 
 `(equal a b)` は、`a` の型の `Equal` の実装を呼ぶ。`Equal` を実装しない型に書くと型エラーになる。
@@ -47,10 +47,10 @@
 | 名前 | 形式 | 型 | 説明 |
 |---|---|---|---|
 | `equal` | `(equal a b)` | `(A,A)→bool` where `Equal A` | 等しいか（Rust の `==`） |
-| `less` | `(less a b)` | `(A,A)→bool` where `Ord A` | `a < b` |
-| `less-equal` | `(less-equal a b)` | `(A,A)→bool` where `Ord A` | `a <= b` |
-| `greater` | `(greater a b)` | `(A,A)→bool` where `Ord A` | `a > b` |
-| `greater-equal` | `(greater-equal a b)` | `(A,A)→bool` where `Ord A` | `a >= b` |
+| `<` | `(< a b)` | `(A,A)→bool` where `Ord A` | より小さいか |
+| `<=` | `(<= a b)` | `(A,A)→bool` where `Ord A` | 以下か |
+| `>` | `(> a b)` | `(A,A)→bool` where `Ord A` | より大きいか |
+| `>=` | `(>= a b)` | `(A,A)→bool` where `Ord A` | 以上か |
 
 `Equal` 実装済み: 全数値型（`i8`〜`u32` / `f32` / `f64` / `int` / `ratio`）と `bool` `char`
 `string` `symbol` `complex`、`Sexpr`、`cons-cell<A,B>` とタプル（要素が `Equal` なら要素ごとに）、
@@ -63,10 +63,8 @@
 アトムは `eql` で比べる。この比較は実行時に値をたどるもので、メソッドを呼ばない。そのため、リストの
 中の構造体は、その型の `impl Equal` にかかわらず、CL と同じく同一性で比べる。
 
-`Ord` のメソッド名が組み込みの演算子（`< <= > >=`）や `lt` と重ならないのは、組み込みは再定義
-できず、各実装がそれらへ委譲するため。スカラの比較演算子そのものは受け手の型ごとの組み込み
-メソッド（[数値](numbers.md)・[文字列と文字](collections.md)）。境界内では演算子で書けば、
-トレイトのメソッドに読み替えられる（3 章）。`=` は `equal` に、`/=` は `(not (equal a b))` になる。
+スカラの比較演算子は受け手の型ごとの組み込みメソッド（[数値](numbers.md)・[文字列と文字](collections.md)）で、
+それがそのまま `Ord` の実装になる。境界内では `=` は `equal` に、`/=` は `(not (equal a b))` になる。
 
 ## 3. 算術トレイト（`Add` / `Sub` / `Mul` / `Div` / `Rem` / `Bits` / `Number`）
 
@@ -74,32 +72,29 @@
 （[数値](numbers.md)）で、この層は通らない。
 
 ```lisp
-(deftrait Add () (defmethod add (self (other Self)) Self))
-(deftrait Sub () (defmethod sub (self (other Self)) Self))
-(deftrait Mul () (defmethod mul (self (other Self)) Self))
-(deftrait Div () (:type Output) (defmethod div (self (other Self)) Output))
-(deftrait Rem () (defmethod remainder (self (other Self)) Self))
+(deftrait Add () (defmethod + (self (other Self)) Self))
+(deftrait Sub () (defmethod - (self (other Self)) Self))
+(deftrait Mul () (defmethod * (self (other Self)) Self))
+(deftrait Div () (:type Output) (defmethod / (self (other Self)) Output))
+(deftrait Rem () (defmethod rem (self (other Self)) Self))
 (deftrait Bits ()
-  (defmethod bit-and (self (other Self)) Self)
-  (defmethod bit-or  (self (other Self)) Self)
-  (defmethod bit-xor (self (other Self)) Self)
-  (defmethod bit-not (self) Self)
-  (defmethod shift (self (count int)) Self))                 ; 距離は常に int（ash と同じ）
+  (defmethod logand (self (other Self)) Self)
+  (defmethod logior (self (other Self)) Self)
+  (defmethod logxor (self (other Self)) Self)
+  (defmethod lognot (self) Self)
+  (defmethod ash (self (count int)) Self))                   ; 距離は常に int
 (deftrait Number (Add Sub Mul Rem Ord))                   ; メソッド無し・5つの合成
 ```
 
-**境界内では演算子で書ける。** `:where` で束縛された型変数が受け手のとき、演算子は
-トレイトメソッドへ読み替えられる（`+`→`add`、`-`→`sub`、`*`→`mul`、`/`→`div`、
-`rem`→`remainder`、`logand`→`bit-and`、`=`→`equal`、`<`→`less` …）:
+**境界内では演算子で書ける。** どのトレイトのメソッドも、具体型で使う演算子・組み込み関数と
+同じ名前なので、`:where` で束縛された型変数が受け手でも同じように書ける:
 
 ```lisp
 (defun sum3<T> ((a T) (b T) (c T)) T (:where (Number T))
-  (+ a b c))                                              ; = (add (add a b) c)
+  (+ a b c))                                              ; = (+ (+ a b) c)
 ```
 
-トレイト側のメソッド名が `+` でないのは、`+` が組み込みメソッド名で `impl` が再定義を
-拒むため（`cannot redefine built-in method`）。`Neg` は無い——`(- x)` は
-`(- (- x x) x)` へ展開されるので `Sub` だけで足りる。
+`Neg` は無い——`(- x)` は `(- (- x x) x)` へ展開されるので `Sub` だけで足りる。
 
 実装済み: `Add`/`Sub`/`Mul`/`Div`/`Rem`/`Number` は全数値型（`complex` を除く）、`Bits` は全整数型と `int`。
 

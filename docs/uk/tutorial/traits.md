@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/traits.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
+<!-- translated-from: docs/ja/tutorial/traits.md @ 6271c6d8b68694e1d27dd2e349b08117d2ef2bfb -->
 # Трейти
 
 Трейт — це обіцянка, що «цей тип підтримує ці операції». Трейти дозволяють кільком типам ділити операції
@@ -100,7 +100,7 @@ error: ...: type error: report: type `int` does not implement trait `shape` requ
 | Трейт | Методи для реалізації | Що вмикає |
 |---|---|---|
 | `Equal` | `equal` | `equal`, `=`, `assert-equal`, зразок `(:= вираз)` у `match`, `member` з `:test equal` тощо |
-| `Ord` | `less` | `less-equal`, `greater` тощо. `Ord` успадковує `Equal` |
+| `Ord` | `<` | `<=`, `>`, `>=`. `Ord` успадковує `Equal` |
 | `print-object` | `print-object` | Як значення показують `println` та подібні |
 | `Iter` | `next` | `doiter`, `map`, `filter`, `sort` тощо |
 | `Error` | `message`, `source` | Використання як типу помилки ([Обробка помилок](errors.md)) |
@@ -115,9 +115,9 @@ error: ...: type error: report: type `int` does not implement trait `shape` requ
   (defmethod equal (self (other Self)) bool (= self::yen other::yen)))
 
 (impl Ord money
-  (defmethod less (self (other Self)) bool (< self::yen other::yen)))
+  (defmethod < (self (other Self)) bool (< self::yen other::yen)))
 
-(greater (make-instance 'money :yen 5) (make-instance 'money :yen 3))     ; => true (the default implementation in Ord)
+(> (make-instance 'money :yen 5) (make-instance 'money :yen 3))     ; => true (the default implementation in Ord)
 ```
 
 Реалізація `print-object` визначає, як `println` показує значення. Аргумент `escape` дорівнює `true`,
@@ -140,7 +140,7 @@ error: ...: type error: report: type `int` does not implement trait `shape` requ
   (foldl (iter v)
          (lambda ((best Option<T>) (x T)) Option<T>
            (match best
-             ((Some b) (if (less b x) (Option::Some x) best))
+             ((Some b) (if (< b x) (Option::Some x) best))
              ((None) (Option::Some x))))
          (Option::None)))
 ```

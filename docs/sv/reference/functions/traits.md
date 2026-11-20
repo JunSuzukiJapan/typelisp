@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/traits.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
+<!-- translated-from: docs/ja/reference/functions/traits.md @ 6271c6d8b68694e1d27dd2e349b08117d2ef2bfb -->
 # Standardtraits
 
 Traits för iteration, jämförelse, aritmetik och att lägga till och ta ut element. De andra standardtraits finns i sina egna kapitel: `Hash`
@@ -34,13 +34,13 @@ jämföra.
 (deftrait Equal ()
   (defmethod equal (self (other Self)) bool))                ; måste implementeras
 (deftrait Ord (Equal)                                     ; ärver från Equal
-  (defmethod less (self (other Self)) bool)                  ; måste implementeras
-  (defmethod less-equal (self (other Self)) bool (not (less other self)))
-  (defmethod greater (self (other Self)) bool (less other self))
-  (defmethod greater-equal (self (other Self)) bool (not (less self other))))
+  (defmethod < (self (other Self)) bool)                     ; måste implementeras
+  (defmethod <= (self (other Self)) bool (not (< other self)))
+  (defmethod > (self (other Self)) bool (< other self))
+  (defmethod >= (self (other Self)) bool (not (< self other))))
 ```
 
-För att implementera `Equal` skriver man `equal`, och för `Ord` bara `less`. Standardimplementationerna
+För att implementera `Equal` skriver man `equal`, och för `Ord` bara `<`. Standardimplementationerna
 fyller i resten av `Ord`. `Ord` ärver från `Equal`, så `impl Equal X` behövs före `impl Ord X`.
 
 `(equal a b)` anropar `Equal`-implementationen för typen hos `a`. Att skriva det för en typ som inte
@@ -53,10 +53,10 @@ en konkret typ som implementerar den):
 | Namn | Form | Typ | Beskrivning |
 |---|---|---|---|
 | `equal` | `(equal a b)` | `(A,A)→bool` where `Equal A` | Om de är lika (Rusts `==`) |
-| `less` | `(less a b)` | `(A,A)→bool` where `Ord A` | `a < b` |
-| `less-equal` | `(less-equal a b)` | `(A,A)→bool` where `Ord A` | `a <= b` |
-| `greater` | `(greater a b)` | `(A,A)→bool` where `Ord A` | `a > b` |
-| `greater-equal` | `(greater-equal a b)` | `(A,A)→bool` where `Ord A` | `a >= b` |
+| `<` | `(< a b)` | `(A,A)→bool` where `Ord A` | mindre än |
+| `<=` | `(<= a b)` | `(A,A)→bool` where `Ord A` | mindre än eller lika med |
+| `>` | `(> a b)` | `(A,A)→bool` where `Ord A` | större än |
+| `>=` | `(>= a b)` | `(A,A)→bool` where `Ord A` | större än eller lika med |
 
 `Equal` är implementerat för: alla numeriska typer (`i8` till `u32` / `f32` / `f64` / `int` / `ratio`),
 `bool` `char` `string` `symbol` `complex`, `Sexpr`, `cons-cell<A,B>` och tuplerna (element för element,
@@ -69,11 +69,8 @@ för: alla numeriska typer, `char` `string` och `cons-cell<A,B>` (lexikografiskt
 varje annan atom med `eql`. Jämförelsen går igenom värdena vid körning och anropar ingen metod. En struct i
 en lista jämförs därför efter identitet, som i CL, oavsett vilket `impl Equal` dess typ har.
 
-Namnen på `Ord`:s metoder krockar inte med de inbyggda operatorerna (`< <= > >=`) eller `lt`, eftersom det
-inbyggda inte kan omdefinieras och varje implementation delegerar till dem. De skalära
-jämförelseoperatorerna är själva inbyggda metoder per mottagartyp ([Tal](numbers.md),
-[Strängar och tecken](collections.md)). Inom en gräns läses den skrivna operatorn som traitens metod
-(kapitel 3). `=` blir `equal`, och `/=` blir `(not (equal a b))`.
+De skalära jämförelseoperatorerna är inbyggda metoder per mottagartyp ([Tal](numbers.md), [Strängar och tecken](collections.md)), och de är
+oförändrat `Ord`:s implementation. Inom en gräns blir `=` `equal`, och `/=` blir `(not (equal a b))`.
 
 ## 3. Aritmetiska traits (`Add` / `Sub` / `Mul` / `Div` / `Rem` / `Bits` / `Number`)
 
@@ -81,32 +78,29 @@ Ett lager för generisk kod att kräva "en typ som kan adderas". **Aritmetik på
 inbyggda operatorerna** ([Tal](numbers.md)) och går inte genom det här lagret.
 
 ```lisp
-(deftrait Add () (defmethod add (self (other Self)) Self))
-(deftrait Sub () (defmethod sub (self (other Self)) Self))
-(deftrait Mul () (defmethod mul (self (other Self)) Self))
-(deftrait Div () (:type Output) (defmethod div (self (other Self)) Output))
-(deftrait Rem () (defmethod remainder (self (other Self)) Self))
+(deftrait Add () (defmethod + (self (other Self)) Self))
+(deftrait Sub () (defmethod - (self (other Self)) Self))
+(deftrait Mul () (defmethod * (self (other Self)) Self))
+(deftrait Div () (:type Output) (defmethod / (self (other Self)) Output))
+(deftrait Rem () (defmethod rem (self (other Self)) Self))
 (deftrait Bits ()
-  (defmethod bit-and (self (other Self)) Self)
-  (defmethod bit-or  (self (other Self)) Self)
-  (defmethod bit-xor (self (other Self)) Self)
-  (defmethod bit-not (self) Self)
-  (defmethod shift (self (count int)) Self))                 ; avståndet är alltid int (som med ash)
+  (defmethod logand (self (other Self)) Self)
+  (defmethod logior (self (other Self)) Self)
+  (defmethod logxor (self (other Self)) Self)
+  (defmethod lognot (self) Self)
+  (defmethod ash (self (count int)) Self))                   ; avståndet är alltid int
 (deftrait Number (Add Sub Mul Rem Ord))                   ; inga metoder; en kombination av fem
 ```
 
-**Inuti en gräns kan man skriva operatorer.** När mottagaren är en typvariabel bunden av `:where` läses
-operatorer som trait-metoder (`+`→`add`, `-`→`sub`, `*`→`mul`, `/`→`div`, `rem`→`remainder`,
-`logand`→`bit-and`, `=`→`equal`, `<`→`less` …):
+**Inuti en gräns kan man skriva operatorer.** Varje traits metoder heter som operatorerna och de inbyggda
+funktionerna på konkreta typer, så de skrivs likadant när mottagaren är en typvariabel bunden av `:where`:
 
 ```lisp
 (defun sum3<T> ((a T) (b T) (c T)) T (:where (Number T))
-  (+ a b c))                                              ; = (add (add a b) c)
+  (+ a b c))                                              ; = (+ (+ a b) c)
 ```
 
-Trait-metoden heter inte `+` eftersom `+` är namnet på en inbyggd metod och `impl` vägrar omdefiniera
-den (`cannot redefine built-in method`). Det finns ingen `Neg`: `(- x)` expanderar till
-`(- (- x x) x)`, så `Sub` räcker.
+Det finns ingen `Neg`: `(- x)` expanderar till `(- (- x x) x)`, så `Sub` räcker.
 
 Implementerat för: `Add`/`Sub`/`Mul`/`Div`/`Rem`/`Number` på alla numeriska typer (utom `complex`), och
 `Bits` på alla heltalstyper och `int`.

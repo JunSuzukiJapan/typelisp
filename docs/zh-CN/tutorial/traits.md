@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/traits.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
+<!-- translated-from: docs/ja/tutorial/traits.md @ 6271c6d8b68694e1d27dd2e349b08117d2ef2bfb -->
 # trait
 
 trait 是"这个类型支持这些操作"的约定。它让多个类型拥有同名的操作，从而使用这些操作的函数不必为每个类型分别编写。
@@ -93,7 +93,7 @@ error: ...: type error: report: type `int` does not implement trait `shape` requ
 | trait | 要实现的方法 | 可以使用的功能 |
 |---|---|---|
 | `Equal` | `equal` | `equal`、`=`、`assert-equal`、`match` 的 `(:= 表达式)` 模式、传入 `:test equal` 的 `member` 等 |
-| `Ord` | `less` | `less-equal`、`greater` 等。`Ord` 继承 `Equal` |
+| `Ord` | `<` | `<=`、`>`、`>=`。`Ord` 继承 `Equal` |
 | `print-object` | `print-object` | `println` 等显示时的形式 |
 | `Iter` | `next` | `doiter`、`map`、`filter`、`sort` 等 |
 | `Error` | `message`、`source` | 作为错误类型使用（[错误处理](errors.md)） |
@@ -107,9 +107,9 @@ error: ...: type error: report: type `int` does not implement trait `shape` requ
   (defmethod equal (self (other Self)) bool (= self::yen other::yen)))
 
 (impl Ord money
-  (defmethod less (self (other Self)) bool (< self::yen other::yen)))
+  (defmethod < (self (other Self)) bool (< self::yen other::yen)))
 
-(greater (make-instance 'money :yen 5) (make-instance 'money :yen 3))     ; => true（Ord 的默认实现）
+(> (make-instance 'money :yen 5) (make-instance 'money :yen 3))     ; => true（Ord 的默认实现）
 ```
 
 实现 `print-object` 可以决定 `println` 的显示方式。当要求可读回的形式时（如 `~s`），参数 `escape` 为 `true`。
@@ -130,7 +130,7 @@ error: ...: type error: report: type `int` does not implement trait `shape` requ
   (foldl (iter v)
          (lambda ((best Option<T>) (x T)) Option<T>
            (match best
-             ((Some b) (if (less b x) (Option::Some x) best))
+             ((Some b) (if (< b x) (Option::Some x) best))
              ((None) (Option::Some x))))
          (Option::None)))
 ```

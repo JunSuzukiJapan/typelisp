@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 398532233e28225bb121ed5b18609d41ea1bf813 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ ac5a6b3adada21a0a55e0e1c4b0e1fabf4854908 -->
 # typelisp 문법 레퍼런스
 
 typelisp는 S 식으로 쓰는 정적 타입 Lisp이다. 내장 함수와 메서드의 목록은 [내장 함수](functions/README.md), 타입 목록은
@@ -882,21 +882,21 @@ CL의 `deftype`을 정적 타입 언어에서 의미가 있는 범위로 좁힌 
 ```lisp
 (deftrait Clamp (Ord)
   (defmethod clamp (self (lo Self) (hi Self)) Self
-    (if (less self lo) lo (if (less hi self) hi self))))
+    (if (< self lo) lo (if (< hi self) hi self))))
 (impl<T> Clamp T (:where (Ord T)))          ; 본체 없음. 모두 기본 구현
 ```
 
 **구체 타입이 실제로 쓰기 전까지는 코드를 만들지 않는다**(타입마다 한 번, 보통의 단형화와 같은 구조). 하나의 트레이트에
 블랭킷 구현은 최대 하나이다. 같은 타입에 명시적인 `impl`이 있으면 그것이 우선한다. 본체의 타입 검사는 생성과 별개로, 선언한
 시점에 **대상을 타입 변수로 둔 채** 한 번 이루어진다(Rust와 같다). 한 번도 쓰이지 않는 구현이라도, 선언한 경계 아래에서
-어떤 대상에 대해서도 통과하지 못할 실수는 거기서 걸러진다. 경계가 허락하는 호출(`(:where (Ord T))` 아래의 `(less self other)`
+어떤 대상에 대해서도 통과하지 못할 실수는 거기서 걸러진다. 경계가 허락하는 호출(`(:where (Ord T))` 아래의 `(< self other)`
 등)은 제네릭 `defun`의 본체처럼 통과한다.
 
 **문서 문자열**: `deftrait`는 상위 트레이트 목록 바로 뒤, 항목 앞에 문자열 리터럴을 두면 트레이트 전체에 문서 문자열을 하나
 가질 수 있다(`(deftrait Name () "doc" (:type ...) (method ...)...)`). 본체가 없는 시그니처는 문서 문자열을 가질 수 없다. 끝의
 문자열 자체가 기본 구현의 반환값이 되어 둘을 구별할 수 없기 때문이다.
 
-표준 라이브러리가 제공하는 트레이트: **`Iter`**(`next` / 연관 타입 `Item`. `doiter`와 시퀀스 함수의 바탕), **`Equal`** (`equal`이 쓰는 트레이트), **`Ord`**(`Equal`를 상속. `less`만 구현 필수이고 `less-equal` / `greater` / `greater-equal`은 기본
+표준 라이브러리가 제공하는 트레이트: **`Iter`**(`next` / 연관 타입 `Item`. `doiter`와 시퀀스 함수의 바탕), **`Equal`** (`equal`이 쓰는 트레이트), **`Ord`**(`Equal`를 상속. `<`만 구현 필수이고 `<=` / `>` / `>=`은 기본
 구현), **`Error`**(`message` / `source`. 오류 타입을 한결같이 다루는 `:dyn Error`), **`print-object`**(타입별 출력 표현),
 **`Pathish`**(경로명 지정자 = 문자열 또는 `pathname`), 그리고 스트림 계층 **`Stream`** → **`InputStream`** /
 **`OutputStream`** → **`CharInput`** / **`CharOutput`** → **`PeekInput`**. 어느 타입이 어느 트레이트를 구현하는지는

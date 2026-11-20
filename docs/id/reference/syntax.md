@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 398532233e28225bb121ed5b18609d41ea1bf813 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ ac5a6b3adada21a0a55e0e1c4b0e1fabf4854908 -->
 # Referensi Sintaks typelisp
 
 typelisp adalah Lisp dengan tipe statis, ditulis dalam S-expression. Untuk daftar fungsi bawaan dan
@@ -1048,7 +1048,7 @@ sekaligus untuk setiap tipe yang memenuhi batas.
 ```lisp
 (deftrait Clamp (Ord)
   (defmethod clamp (self (lo Self) (hi Self)) Self
-    (if (less self lo) lo (if (less hi self) hi self))))
+    (if (< self lo) lo (if (< hi self) hi self))))
 (impl<T> Clamp T (:where (Ord T)))          ; no body at all; everything is the default
 ```
 
@@ -1058,7 +1058,7 @@ implementasi blanket. Jika sebuah tipe memiliki `impl` eksplisit, yang itu diuta
 tipe badan terpisah dari pembangkitan: ia dilakukan sekali pada titik deklarasi, **dengan sasaran
 dibiarkan sebagai variabel tipe** (seperti di Rust), sehingga bahkan implementasi yang tidak pernah
 dipakai pun kesalahannya tertangkap di sana jika akan gagal untuk setiap sasaran di bawah batas yang
-dideklarasikan. Pemanggilan yang dibenarkan oleh batas (`(less self other)` di bawah
+dideklarasikan. Pemanggilan yang dibenarkan oleh batas (`(< self other)` di bawah
 `(:where (Ord T))` dan sebagainya) lolos, seperti pada badan `defun` generik.
 
 **Docstring**: `deftrait` dapat memiliki satu docstring untuk seluruh trait, sebagai literal string
@@ -1069,7 +1069,7 @@ keduanya tidak dapat dibedakan.
 
 Trait yang disediakan pustaka standar: **`Iter`** (`next` / tipe terkait `Item`; dasar `doiter` dan
 fungsi sekuens), **`Equal`** (trait yang dipakai `equal`), **`Ord`** (mewarisi
-`Equal`; hanya `less` yang wajib diimplementasikan, dan `less-equal` / `greater` / `greater-equal`
+`Equal`; hanya `<` yang wajib diimplementasikan, dan `<=` / `>` / `>=`
 adalah implementasi bawaan), **`Error`** (`message` / `source`; `:dyn Error` untuk menangani tipe
 kesalahan secara seragam), **`print-object`** (representasi cetak per tipe), **`Pathish`**
 (pathname designator: string atau `pathname`), dan hierarki stream **`Stream`** → **`InputStream`** /

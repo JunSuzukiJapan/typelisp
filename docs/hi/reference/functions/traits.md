@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/traits.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
+<!-- translated-from: docs/ja/reference/functions/traits.md @ 6271c6d8b68694e1d27dd2e349b08117d2ef2bfb -->
 # स्टैंडर्ड trait
 
 इटरेशन, तुलना, अंकगणित और तत्व जोड़ने व निकालने के trait। अन्य स्टैंडर्ड trait अपने-अपने अध्यायों में हैं: `Hash` ([HashTable](collections.md#4-hashtablekv)), `Error` ([त्रुटि टाइप](option-result.md#3-त्रुटि-टाइप-और-error-trait)), `print-object` ([प्रिंटिंग](printing.md#5-print-object-प्रति-टाइप-प्रिंट-किया-गया-प्रतिनिधित्व)), और स्ट्रीम trait तथा `Pathish` ([स्ट्रीम और फ़ाइलें](streams-files.md))। कौन-सा टाइप कौन-सा लागू करता है यह [टाइप](../types.md) में है। trait कैसे परिभाषित करें यह [सिंटैक्स संदर्भ](../syntax.md#39-deftrait--impl--trait) में है।
@@ -23,13 +23,13 @@
 (deftrait Equal ()
   (defmethod equal (self (other Self)) bool))                ; लागू करना अनिवार्य
 (deftrait Ord (Equal)                                     ; Equal से विरासत
-  (defmethod less (self (other Self)) bool)                  ; लागू करना अनिवार्य
-  (defmethod less-equal (self (other Self)) bool (not (less other self)))
-  (defmethod greater (self (other Self)) bool (less other self))
-  (defmethod greater-equal (self (other Self)) bool (not (less self other))))
+  (defmethod < (self (other Self)) bool)                     ; लागू करना अनिवार्य
+  (defmethod <= (self (other Self)) bool (not (< other self)))
+  (defmethod > (self (other Self)) bool (< other self))
+  (defmethod >= (self (other Self)) bool (not (< self other))))
 ```
 
-`Equal` लागू करने के लिए `equal` लिखें, और `Ord` के लिए केवल `less`। `Ord` का बाकी हिस्सा डिफ़ॉल्ट
+`Equal` लागू करने के लिए `equal` लिखें, और `Ord` के लिए केवल `<`। `Ord` का बाकी हिस्सा डिफ़ॉल्ट
 कार्यान्वयन भरते हैं। `Ord` को `Equal` से विरासत मिलती है, इसलिए `impl Ord X` से पहले `impl Equal X` चाहिए।
 
 `(equal a b)` `a` के टाइप का `Equal` कार्यान्वयन बुलाता है। जो टाइप `Equal` लागू नहीं करता उसके लिए इसे
@@ -42,10 +42,10 @@
 | नाम | फ़ॉर्म | टाइप | विवरण |
 |---|---|---|---|
 | `equal` | `(equal a b)` | `(A,A)→bool` where `Equal A` | क्या वे बराबर हैं (Rust का `==`) |
-| `less` | `(less a b)` | `(A,A)→bool` where `Ord A` | `a < b` |
-| `less-equal` | `(less-equal a b)` | `(A,A)→bool` where `Ord A` | `a <= b` |
-| `greater` | `(greater a b)` | `(A,A)→bool` where `Ord A` | `a > b` |
-| `greater-equal` | `(greater-equal a b)` | `(A,A)→bool` where `Ord A` | `a >= b` |
+| `<` | `(< a b)` | `(A,A)→bool` where `Ord A` | से छोटा |
+| `<=` | `(<= a b)` | `(A,A)→bool` where `Ord A` | से छोटा या बराबर |
+| `>` | `(> a b)` | `(A,A)→bool` where `Ord A` | से बड़ा |
+| `>=` | `(>= a b)` | `(A,A)→bool` where `Ord A` | से बड़ा या बराबर |
 
 `Equal` इनके लिए लागू है: सभी संख्यात्मक टाइप (`i8` से `u32` / `f32` / `f64` / `int` / `ratio`), `bool`
 `char` `string` `symbol` `complex`, `Sexpr`, `cons-cell<A,B>` और tuple (तत्व-दर-तत्व, जब तत्व `Equal` हों),
@@ -58,39 +58,36 @@
 तुलना होते हैं। यह तुलना रनटाइम पर मानों पर चलती है और कोई मेथड नहीं बुलाती। इसलिए सूची के भीतर का struct,
 उसके टाइप का `impl Equal` कुछ भी हो, CL की तरह पहचान से तुलना होता है।
 
-`Ord` के मेथडों के नाम बिल्ट-इन ऑपरेटरों (`< <= > >=`) या `lt` से नहीं टकराते, क्योंकि बिल्ट-इन को फिर से
-परिभाषित नहीं किया जा सकता और हर कार्यान्वयन उन्हीं को सौंपता है। स्केलर तुलना ऑपरेटर स्वयं receiver टाइप
-के अनुसार बिल्ट-इन मेथड हैं ([संख्याएँ](numbers.md), [स्ट्रिंग और अक्षर](collections.md))। सीमा के भीतर
-लिखा गया ऑपरेटर trait के मेथड के रूप में पढ़ा जाता है (अध्याय 3)। `=` `equal` बनता है, और `/=`
-`(not (equal a b))` बनता है।
+स्केलर तुलना ऑपरेटर receiver टाइप के अनुसार बिल्ट-इन मेथड हैं ([संख्याएँ](numbers.md), [स्ट्रिंग और अक्षर](collections.md)), और वही सीधे `Ord` का
+कार्यान्वयन हैं। सीमा के भीतर `=` `equal` बनता है, और `/=` `(not (equal a b))` बनता है।
 
 ## 3. अंकगणितीय trait (`Add` / `Sub` / `Mul` / `Div` / `Rem` / `Bits` / `Number`)
 
 जेनेरिक कोड के लिए "जोड़ा जा सकने वाला टाइप" माँगने की एक परत। **ठोस टाइप पर अंकगणित बिल्ट-इन ऑपरेटर का उपयोग करता है** ([संख्याएँ](numbers.md)) और इस परत से होकर नहीं जाता।
 
 ```lisp
-(deftrait Add () (defmethod add (self (other Self)) Self))
-(deftrait Sub () (defmethod sub (self (other Self)) Self))
-(deftrait Mul () (defmethod mul (self (other Self)) Self))
-(deftrait Div () (:type Output) (defmethod div (self (other Self)) Output))
-(deftrait Rem () (defmethod remainder (self (other Self)) Self))
+(deftrait Add () (defmethod + (self (other Self)) Self))
+(deftrait Sub () (defmethod - (self (other Self)) Self))
+(deftrait Mul () (defmethod * (self (other Self)) Self))
+(deftrait Div () (:type Output) (defmethod / (self (other Self)) Output))
+(deftrait Rem () (defmethod rem (self (other Self)) Self))
 (deftrait Bits ()
-  (defmethod bit-and (self (other Self)) Self)
-  (defmethod bit-or  (self (other Self)) Self)
-  (defmethod bit-xor (self (other Self)) Self)
-  (defmethod bit-not (self) Self)
-  (defmethod shift (self (count int)) Self))                 ; दूरी हमेशा int है (ash की तरह)
+  (defmethod logand (self (other Self)) Self)
+  (defmethod logior (self (other Self)) Self)
+  (defmethod logxor (self (other Self)) Self)
+  (defmethod lognot (self) Self)
+  (defmethod ash (self (count int)) Self))                   ; दूरी हमेशा int है
 (deftrait Number (Add Sub Mul Rem Ord))                   ; कोई मेथड नहीं; पाँच का संयोजन
 ```
 
-**बाउंड के भीतर, आप ऑपरेटर लिख सकते हैं।** जब रिसीवर `:where` से बँधा टाइप वेरिएबल हो, तो ऑपरेटर trait मेथड के रूप में पढ़े जाते हैं (`+`→`add`, `-`→`sub`, `*`→`mul`, `/`→`div`, `rem`→`remainder`, `logand`→`bit-and`, `=`→`equal`, `<`→`less` …):
+**बाउंड के भीतर, आप ऑपरेटर लिख सकते हैं।** हर trait के मेथडों के नाम वही हैं जो ठोस टाइपों पर इस्तेमाल होने वाले ऑपरेटरों और बिल्ट-इन फ़ंक्शनों के हैं, इसलिए जब रिसीवर `:where` से बँधा टाइप वेरिएबल हो तब भी उन्हें वैसे ही लिखा जाता है:
 
 ```lisp
 (defun sum3<T> ((a T) (b T) (c T)) T (:where (Number T))
-  (+ a b c))                                              ; = (add (add a b) c)
+  (+ a b c))                                              ; = (+ (+ a b) c)
 ```
 
-trait मेथड का नाम `+` नहीं है क्योंकि `+` बिल्ट-इन मेथड का नाम है और `impl` उसे दोबारा परिभाषित करने से इनकार करता है (`cannot redefine built-in method`)। `Neg` नहीं है: `(- x)` `(- (- x x) x)` में विस्तारित होता है, इसलिए `Sub` पर्याप्त है।
+`Neg` नहीं है: `(- x)` `(- (- x x) x)` में विस्तारित होता है, इसलिए `Sub` पर्याप्त है।
 
 इनके लिए लागू: सभी संख्यात्मक टाइप (`complex` को छोड़कर) पर `Add`/`Sub`/`Mul`/`Div`/`Rem`/`Number`, और सभी पूर्णांक टाइप तथा `int` पर `Bits`।
 

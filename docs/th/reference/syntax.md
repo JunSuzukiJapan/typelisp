@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 398532233e28225bb121ed5b18609d41ea1bf813 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ ac5a6b3adada21a0a55e0e1c4b0e1fabf4854908 -->
 # เอกสารอ้างอิงไวยากรณ์ typelisp
 
 typelisp เป็น Lisp ที่มีระบบชนิดแบบสถิต เขียนด้วย S-expression สำหรับรายการฟังก์ชันและเมทอดที่มีให้ในตัว
@@ -959,7 +959,7 @@ implement trait เดียวกันให้ทั้ง `Box<T>` และ
 ```lisp
 (deftrait Clamp (Ord)
   (defmethod clamp (self (lo Self) (hi Self)) Self
-    (if (less self lo) lo (if (less hi self) hi self))))
+    (if (< self lo) lo (if (< hi self) hi self))))
 (impl<T> Clamp T (:where (Ord T)))          ; no body at all; everything is the default
 ```
 
@@ -968,7 +968,7 @@ monomorphization ธรรมดา) trait มี blanket implementation ได�
 `impl` ที่ชัดเจน ตัวนั้นมีลำดับความสำคัญ การตรวจสอบชนิดของตัวเนื้อหาแยกจากการสร้าง: ทำ
 หนึ่งครั้งที่จุดประกาศ **โดยปล่อยเป้าหมายเป็นตัวแปรชนิด** (เหมือนใน Rust) ดังนั้นแม้
 implementation ที่ไม่เคยถูกใช้ก็ถูกจับความผิดพลาดที่นั่น หากมันจะล้มเหลวกับทุกเป้าหมาย
-ภายใต้ bound ที่ประกาศ การเรียกที่ bound รองรับ (`(less self other)` ภายใต้ `(:where (Ord T))`
+ภายใต้ bound ที่ประกาศ การเรียกที่ bound รองรับ (`(< self other)` ภายใต้ `(:where (Ord T))`
 และอื่น ๆ) ผ่าน เหมือนในตัวเนื้อหาของ `defun` แบบ generic
 
 **Docstring**: `deftrait` มี docstring ได้หนึ่งอันสำหรับทั้ง trait เป็นสตริง literal ทันทีหลัง
@@ -978,8 +978,8 @@ implementation ที่ไม่เคยถูกใช้ก็ถูกจ�
 
 trait ที่ไลบรารีมาตรฐานจัดให้: **`Iter`** (`next` / associated type `Item` พื้นฐานของ
 `doiter` และฟังก์ชันของลำดับ), **`Equal`** (trait ที่ `equal` ใช้),
-**`Ord`** (สืบทอด `Equal` ต้อง implement เฉพาะ `less` และ `less-equal` / `greater` /
-`greater-equal` เป็น implementation เริ่มต้น), **`Error`** (`message` / `source`; `:dyn Error` สำหรับ
+**`Ord`** (สืบทอด `Equal` ต้อง implement เฉพาะ `<` และ `<=` / `>` /
+`>=` เป็น implementation เริ่มต้น), **`Error`** (`message` / `source`; `:dyn Error` สำหรับ
 จัดการชนิดข้อผิดพลาดอย่างสม่ำเสมอ), **`print-object`** (การแสดงผลของแต่ละชนิด), **`Pathish`**
 (ตัวกำหนด pathname: สตริงหรือ `pathname`) และลำดับชั้นของสตรีม **`Stream`** →
 **`InputStream`** / **`OutputStream`** → **`CharInput`** / **`CharOutput`** → **`PeekInput`**

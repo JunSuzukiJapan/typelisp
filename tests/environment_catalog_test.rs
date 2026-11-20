@@ -312,7 +312,7 @@ fn directory_lists_truenames() {
 
     // Spelled with a `..` detour so the argument is not already a truename.
     let spelled = format!("{}/../listed", elsewhere.to_string_lossy());
-    let got = show(&format!("(sort (iter (unwrap (directory \"{}\"))) (lambda ((a string) (b string)) bool (less a b)))", spelled));
+    let got = show(&format!("(sort (iter (unwrap (directory \"{}\"))) (lambda ((a string) (b string)) bool (< a b)))", spelled));
     let canon = |p: std::path::PathBuf| std::fs::canonicalize(p).expect("canonicalize").to_string_lossy().into_owned();
     let mut want = [canon(listed.join("plain.txt")), canon(elsewhere.join("target.txt"))];
     want.sort();

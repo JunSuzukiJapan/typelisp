@@ -95,7 +95,7 @@ error: ...: type error: report: type `int` does not implement trait `shape` requ
 | トレイト | 実装するメソッド | 使えるようになるもの |
 |---|---|---|
 | `Equal` | `equal` | `equal`、`=`、`assert-equal`、`match` の `(:= 式)` パターン、`:test equal` を渡した `member` など |
-| `Ord` | `less` | `less-equal`、`greater` など。`Ord` は `Equal` を継承する |
+| `Ord` | `<` | `<=`、`>`、`>=`。`Ord` は `Equal` を継承する |
 | `print-object` | `print-object` | `println` などでの表示のしかた |
 | `Iter` | `next` | `doiter`、`map`、`filter`、`sort` など |
 | `Error` | `message`、`source` | エラー型として扱う（[エラー処理](errors.md)） |
@@ -110,9 +110,9 @@ error: ...: type error: report: type `int` does not implement trait `shape` requ
   (defmethod equal (self (other Self)) bool (= self::yen other::yen)))
 
 (impl Ord money
-  (defmethod less (self (other Self)) bool (< self::yen other::yen)))
+  (defmethod < (self (other Self)) bool (< self::yen other::yen)))
 
-(greater (make-instance 'money :yen 5) (make-instance 'money :yen 3))     ; => true（Ord のデフォルト実装）
+(> (make-instance 'money :yen 5) (make-instance 'money :yen 3))     ; => true（Ord のデフォルト実装）
 ```
 
 `print-object` を実装すると、`println` での表示を決められます。引数 `escape` は、`~s` のように
@@ -134,7 +134,7 @@ error: ...: type error: report: type `int` does not implement trait `shape` requ
   (foldl (iter v)
          (lambda ((best Option<T>) (x T)) Option<T>
            (match best
-             ((Some b) (if (less b x) (Option::Some x) best))
+             ((Some b) (if (< b x) (Option::Some x) best))
              ((None) (Option::Some x))))
          (Option::None)))
 ```

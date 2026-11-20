@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/traits.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
+<!-- translated-from: docs/ja/reference/functions/traits.md @ 6271c6d8b68694e1d27dd2e349b08117d2ef2bfb -->
 # Các trait chuẩn
 
 Các trait cho việc lặp, so sánh, số học và thêm, lấy ra phần tử. Các trait chuẩn khác nằm ở các chương riêng của chúng: `Hash`
@@ -33,13 +33,13 @@ Rust. Chúng được dùng trong ràng buộc `:where` của hàm generic để
 (deftrait Equal ()
   (defmethod equal (self (other Self)) bool))                ; bắt buộc cài đặt
 (deftrait Ord (Equal)                                     ; kế thừa Equal
-  (defmethod less (self (other Self)) bool)                  ; bắt buộc cài đặt
-  (defmethod less-equal (self (other Self)) bool (not (less other self)))
-  (defmethod greater (self (other Self)) bool (less other self))
-  (defmethod greater-equal (self (other Self)) bool (not (less self other))))
+  (defmethod < (self (other Self)) bool)                     ; bắt buộc cài đặt
+  (defmethod <= (self (other Self)) bool (not (< other self)))
+  (defmethod > (self (other Self)) bool (< other self))
+  (defmethod >= (self (other Self)) bool (not (< self other))))
 ```
 
-Để cài đặt `Equal` thì viết `equal`, còn `Ord` chỉ cần `less`. Các cài đặt mặc định điền phần còn lại của
+Để cài đặt `Equal` thì viết `equal`, còn `Ord` chỉ cần `<`. Các cài đặt mặc định điền phần còn lại của
 `Ord`. `Ord` kế thừa `Equal`, nên cần `impl Equal X` trước `impl Ord X`.
 
 `(equal a b)` gọi cài đặt `Equal` của kiểu của `a`. Viết nó cho một kiểu không cài đặt `Equal` là lỗi kiểu.
@@ -52,10 +52,10 @@ hoặc trên một kiểu cụ thể đã cài đặt nó):
 | Tên | Dạng | Kiểu | Mô tả |
 |---|---|---|---|
 | `equal` | `(equal a b)` | `(A,A)→bool` với `Equal A` | Có bằng nhau không (`==` của Rust) |
-| `less` | `(less a b)` | `(A,A)→bool` với `Ord A` | `a < b` |
-| `less-equal` | `(less-equal a b)` | `(A,A)→bool` với `Ord A` | `a <= b` |
-| `greater` | `(greater a b)` | `(A,A)→bool` với `Ord A` | `a > b` |
-| `greater-equal` | `(greater-equal a b)` | `(A,A)→bool` với `Ord A` | `a >= b` |
+| `<` | `(< a b)` | `(A,A)→bool` với `Ord A` | nhỏ hơn |
+| `<=` | `(<= a b)` | `(A,A)→bool` với `Ord A` | nhỏ hơn hoặc bằng |
+| `>` | `(> a b)` | `(A,A)→bool` với `Ord A` | lớn hơn |
+| `>=` | `(>= a b)` | `(A,A)→bool` với `Ord A` | lớn hơn hoặc bằng |
 
 `Equal` được cài đặt cho: mọi kiểu số (`i8` đến `u32` / `f32` / `f64` / `int` / `ratio`), `bool` `char`
 `string` `symbol` `complex`, `Sexpr`, `cons-cell<A,B>` và các tuple (từng phần tử, khi các phần tử là
@@ -69,11 +69,8 @@ mọi atom khác bằng `eql`. Phép so sánh này duyệt các giá trị lúc 
 một struct nằm trong danh sách được so sánh theo định danh như trong CL, bất kể kiểu của nó có
 `impl Equal` nào.
 
-Tên các phương thức của `Ord` không trùng với các toán tử dựng sẵn (`< <= > >=`) hay `lt` vì không thể định
-nghĩa lại cái dựng sẵn và mỗi cài đặt ủy quyền cho chúng. Bản thân các toán tử so sánh vô hướng là phương
-thức dựng sẵn theo kiểu đối tượng nhận ([Số](numbers.md), [Chuỗi và ký tự](collections.md)). Bên trong ràng
-buộc, toán tử được viết sẽ được đọc là phương thức của trait (chương 3). `=` trở thành `equal`, còn `/=` trở
-thành `(not (equal a b))`.
+Các toán tử so sánh vô hướng là phương thức dựng sẵn theo kiểu đối tượng nhận ([Số](numbers.md), [Chuỗi và ký tự](collections.md)), và
+chúng chính là cài đặt của `Ord`. Bên trong ràng buộc, `=` trở thành `equal`, còn `/=` trở thành `(not (equal a b))`.
 
 ## 3. Các trait số học (`Add` / `Sub` / `Mul` / `Div` / `Rem` / `Bits` / `Number`)
 
@@ -81,32 +78,30 @@ Một tầng để mã generic yêu cầu "một kiểu có thể cộng đượ
 tử dựng sẵn** ([Số](numbers.md)) và không đi qua tầng này.
 
 ```lisp
-(deftrait Add () (defmethod add (self (other Self)) Self))
-(deftrait Sub () (defmethod sub (self (other Self)) Self))
-(deftrait Mul () (defmethod mul (self (other Self)) Self))
-(deftrait Div () (:type Output) (defmethod div (self (other Self)) Output))
-(deftrait Rem () (defmethod remainder (self (other Self)) Self))
+(deftrait Add () (defmethod + (self (other Self)) Self))
+(deftrait Sub () (defmethod - (self (other Self)) Self))
+(deftrait Mul () (defmethod * (self (other Self)) Self))
+(deftrait Div () (:type Output) (defmethod / (self (other Self)) Output))
+(deftrait Rem () (defmethod rem (self (other Self)) Self))
 (deftrait Bits ()
-  (defmethod bit-and (self (other Self)) Self)
-  (defmethod bit-or  (self (other Self)) Self)
-  (defmethod bit-xor (self (other Self)) Self)
-  (defmethod bit-not (self) Self)
-  (defmethod shift (self (count int)) Self))                 ; khoảng dịch luôn là int (như với ash)
+  (defmethod logand (self (other Self)) Self)
+  (defmethod logior (self (other Self)) Self)
+  (defmethod logxor (self (other Self)) Self)
+  (defmethod lognot (self) Self)
+  (defmethod ash (self (count int)) Self))                   ; khoảng dịch luôn là int
 (deftrait Number (Add Sub Mul Rem Ord))                   ; không có phương thức; tổ hợp của năm trait
 ```
 
-**Bên trong một ràng buộc, bạn có thể viết toán tử.** Khi bên nhận là một biến kiểu bị ràng buộc bởi
-`:where`, các toán tử được hiểu là phương thức của trait (`+`→`add`, `-`→`sub`, `*`→`mul`, `/`→`div`,
-`rem`→`remainder`, `logand`→`bit-and`, `=`→`equal`, `<`→`less` …):
+**Bên trong một ràng buộc, bạn có thể viết toán tử.** Phương thức của mọi trait có cùng tên với các toán tử và
+hàm dựng sẵn dùng trên kiểu cụ thể, nên được viết y như vậy khi bên nhận là một biến kiểu bị ràng buộc bởi
+`:where`:
 
 ```lisp
 (defun sum3<T> ((a T) (b T) (c T)) T (:where (Number T))
-  (+ a b c))                                              ; = (add (add a b) c)
+  (+ a b c))                                              ; = (+ (+ a b) c)
 ```
 
-Phương thức của trait không được đặt tên là `+` vì `+` là tên của một phương thức dựng sẵn và `impl` từ
-chối định nghĩa lại nó (`cannot redefine built-in method`). Không có `Neg`: `(- x)` khai triển thành
-`(- (- x x) x)`, nên `Sub` là đủ.
+Không có `Neg`: `(- x)` khai triển thành `(- (- x x) x)`, nên `Sub` là đủ.
 
 Được triển khai cho: `Add`/`Sub`/`Mul`/`Div`/`Rem`/`Number` trên mọi kiểu số (trừ `complex`), và `Bits`
 trên mọi kiểu số nguyên và `int`.

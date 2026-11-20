@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 398532233e28225bb121ed5b18609d41ea1bf813 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ ac5a6b3adada21a0a55e0e1c4b0e1fabf4854908 -->
 # Referencia de sintaxis de typelisp
 
 typelisp es un Lisp con tipado estático que se escribe en expresiones S. Para la lista de funciones y métodos
@@ -1027,7 +1027,7 @@ una vez para todo tipo que cumpla las restricciones.
 ```lisp
 (deftrait Clamp (Ord)
   (defmethod clamp (self (lo Self) (hi Self)) Self
-    (if (less self lo) lo (if (less hi self) hi self))))
+    (if (< self lo) lo (if (< hi self) hi self))))
 (impl<T> Clamp T (:where (Ord T)))          ; sin cuerpo; todo es la implementación por defecto
 ```
 
@@ -1037,7 +1037,7 @@ un `impl` explícito, ese tiene prioridad. La comprobación de tipos del cuerpo 
 generación: se hace una vez en el punto de declaración, **con el destino como variable de tipo** (como en
 Rust), así que incluso una implementación que nunca se usa tiene sus errores detectados ahí si fallarían para
 todo destino bajo las restricciones declaradas. Las llamadas justificadas por las restricciones
-(`(less self other)` bajo `(:where (Ord T))`, etc.) pasan, como en el cuerpo de un `defun` genérico.
+(`(< self other)` bajo `(:where (Ord T))`, etc.) pasan, como en el cuerpo de un `defun` genérico.
 
 **Docstrings**: un `deftrait` puede tener una docstring para todo el trait, como literal de cadena justo
 después de la lista de supertraits, antes de los elementos (`(deftrait Name () "doc" (:type ...) (method ...)...)`).
@@ -1046,7 +1046,7 @@ implementación por defecto, así que no se podrían distinguir.
 
 Los traits que ofrece la biblioteca estándar: **`Iter`** (`next` / tipo asociado `Item`; la base de `doiter` y
 de las funciones de secuencia), **`Equal`** (el trait que usa `equal`),
-**`Ord`** (hereda `Equal`; solo hay que implementar `less`, y `less-equal` / `greater` / `greater-equal` son
+**`Ord`** (hereda `Equal`; solo hay que implementar `<`, y `<=` / `>` / `>=` son
 implementaciones por defecto), **`Error`** (`message` / `source`; `:dyn Error` para manejar los tipos de error
 de forma uniforme), **`print-object`** (una representación impresa por tipo), **`Pathish`** (designadores de
 nombres de ruta: una cadena o un `pathname`) y la jerarquía de streams **`Stream`** → **`InputStream`** /

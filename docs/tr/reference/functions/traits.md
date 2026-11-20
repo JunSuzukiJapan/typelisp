@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/traits.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
+<!-- translated-from: docs/ja/reference/functions/traits.md @ 6271c6d8b68694e1d27dd2e349b08117d2ef2bfb -->
 # Standart Trait'ler
 
 Yineleme, karşılaştırma, aritmetik ve öğe ekleme ile çıkarma için trait'ler. Diğer standart trait'ler kendi bölümlerindedir:
@@ -34,13 +34,13 @@ karşılaştırılabilmesini istemek için kullanılırlar.
 (deftrait Equal ()
   (defmethod equal (self (other Self)) bool))                ; uygulanmalı
 (deftrait Ord (Equal)                                     ; Equal'dan kalıtır
-  (defmethod less (self (other Self)) bool)                  ; uygulanmalı
-  (defmethod less-equal (self (other Self)) bool (not (less other self)))
-  (defmethod greater (self (other Self)) bool (less other self))
-  (defmethod greater-equal (self (other Self)) bool (not (less self other))))
+  (defmethod < (self (other Self)) bool)                     ; uygulanmalı
+  (defmethod <= (self (other Self)) bool (not (< other self)))
+  (defmethod > (self (other Self)) bool (< other self))
+  (defmethod >= (self (other Self)) bool (not (< self other))))
 ```
 
-`Equal`'ı uygulamak için `equal`, `Ord` için yalnızca `less` yazılır. `Ord`'un geri kalanını varsayılan
+`Equal`'ı uygulamak için `equal`, `Ord` için yalnızca `<` yazılır. `Ord`'un geri kalanını varsayılan
 uygulamalar doldurur. `Ord`, `Equal`'dan kalıttığı için `impl Ord X`'ten önce `impl Equal X` gerekir.
 
 `(equal a b)`, `a`'nın türünün `Equal` uygulamasını çağırır. `Equal`'ı uygulamayan bir tür için yazmak
@@ -53,10 +53,10 @@ ya da onu uygulayan somut bir türde):
 | Ad | Biçim | Tür | Açıklama |
 |---|---|---|---|
 | `equal` | `(equal a b)` | `(A,A)→bool` where `Equal A` | Eşit olup olmadıkları (Rust'taki `==`) |
-| `less` | `(less a b)` | `(A,A)→bool` where `Ord A` | `a < b` |
-| `less-equal` | `(less-equal a b)` | `(A,A)→bool` where `Ord A` | `a <= b` |
-| `greater` | `(greater a b)` | `(A,A)→bool` where `Ord A` | `a > b` |
-| `greater-equal` | `(greater-equal a b)` | `(A,A)→bool` where `Ord A` | `a >= b` |
+| `<` | `(< a b)` | `(A,A)→bool` where `Ord A` | küçüktür |
+| `<=` | `(<= a b)` | `(A,A)→bool` where `Ord A` | küçük veya eşittir |
+| `>` | `(> a b)` | `(A,A)→bool` where `Ord A` | büyüktür |
+| `>=` | `(>= a b)` | `(A,A)→bool` where `Ord A` | büyük veya eşittir |
 
 `Equal` şunlar için uygulanmıştır: tüm sayısal türler (`i8`'den `u32`'ye / `f32` / `f64` / `int` /
 `ratio`), `bool` `char` `string` `symbol` `complex`, `Sexpr`, `cons-cell<A,B>` ve demetler (elemanlar
@@ -71,11 +71,8 @@ Bir listenin (`Sexpr`) `equal`'ı CL'in `equal`'ıdır: cons'lar yapıya, dizgel
 çağırmaz. Bu yüzden bir liste içindeki struct, türünün `impl Equal`'ı ne olursa olsun, CL'deki gibi
 kimliğe göre karşılaştırılır.
 
-`Ord`'un metot adları yerleşik operatörlerle (`< <= > >=`) ya da `lt` ile çakışmaz; çünkü yerleşikler
-yeniden tanımlanamaz ve her uygulama onlara devreder. Skaler karşılaştırma operatörlerinin kendisi,
-alıcı türüne göre yerleşik metotlardır ([Sayılar](numbers.md), [Dizgeler ve karakterler](collections.md)).
-Bir sınır içinde yazılan operatör trait'in metodu olarak okunur (3. bölüm). `=` `equal` olur, `/=` ise
-`(not (equal a b))` olur.
+Skaler karşılaştırma operatörleri, alıcı türüne göre yerleşik metotlardır ([Sayılar](numbers.md), [Dizgeler ve karakterler](collections.md)) ve olduğu
+gibi `Ord`'un uygulamasıdır. Bir sınır içinde `=` `equal` olur, `/=` ise `(not (equal a b))` olur.
 
 ## 3. Aritmetik trait'ler (`Add` / `Sub` / `Mul` / `Div` / `Rem` / `Bits` / `Number`)
 
@@ -83,32 +80,30 @@ Jenerik kodun "toplanabilen bir tür" istemesi için bir katman. **Somut türler
 yerleşik işleçleri kullanır** ([Sayılar](numbers.md)) ve bu katmandan geçmez.
 
 ```lisp
-(deftrait Add () (defmethod add (self (other Self)) Self))
-(deftrait Sub () (defmethod sub (self (other Self)) Self))
-(deftrait Mul () (defmethod mul (self (other Self)) Self))
-(deftrait Div () (:type Output) (defmethod div (self (other Self)) Output))
-(deftrait Rem () (defmethod remainder (self (other Self)) Self))
+(deftrait Add () (defmethod + (self (other Self)) Self))
+(deftrait Sub () (defmethod - (self (other Self)) Self))
+(deftrait Mul () (defmethod * (self (other Self)) Self))
+(deftrait Div () (:type Output) (defmethod / (self (other Self)) Output))
+(deftrait Rem () (defmethod rem (self (other Self)) Self))
 (deftrait Bits ()
-  (defmethod bit-and (self (other Self)) Self)
-  (defmethod bit-or  (self (other Self)) Self)
-  (defmethod bit-xor (self (other Self)) Self)
-  (defmethod bit-not (self) Self)
-  (defmethod shift (self (count int)) Self))                 ; the distance is always int (as with ash)
+  (defmethod logand (self (other Self)) Self)
+  (defmethod logior (self (other Self)) Self)
+  (defmethod logxor (self (other Self)) Self)
+  (defmethod lognot (self) Self)
+  (defmethod ash (self (count int)) Self))                   ; the distance is always int
 (deftrait Number (Add Sub Mul Rem Ord))                   ; metot yok; beşinin birleşimi
 ```
 
-**Bir sınırın içinde işleç yazabilirsiniz.** Alıcı, `:where` ile bağlanmış bir tür değişkeni olduğunda
-işleçler trait metotları olarak okunur (`+`→`add`, `-`→`sub`, `*`→`mul`, `/`→`div`, `rem`→`remainder`,
-`logand`→`bit-and`, `=`→`equal`, `<`→`less` …):
+**Bir sınırın içinde işleç yazabilirsiniz.** Her trait'in metotları, somut türlerde kullanılan işleçler ve
+yerleşik fonksiyonlarla aynı adı taşır; bu yüzden alıcı `:where` ile bağlanmış bir tür değişkeni olduğunda da
+aynı şekilde yazılır:
 
 ```lisp
 (defun sum3<T> ((a T) (b T) (c T)) T (:where (Number T))
-  (+ a b c))                                              ; = (add (add a b) c)
+  (+ a b c))                                              ; = (+ (+ a b) c)
 ```
 
-Trait metodu `+` olarak adlandırılmamıştır; çünkü `+`, yerleşik bir metodun adıdır ve `impl` onu yeniden
-tanımlamayı reddeder (`cannot redefine built-in method`). `Neg` yoktur: `(- x)`, `(- (- x x) x)`'e açılır;
-bu yüzden `Sub` yeterlidir.
+`Neg` yoktur: `(- x)`, `(- (- x x) x)`'e açılır; bu yüzden `Sub` yeterlidir.
 
 Şunlar için gerçekleştirilmiştir: tüm sayısal türlerde (`complex` hariç) `Add`/`Sub`/`Mul`/`Div`/`Rem`/
 `Number` ve tüm tamsayı türlerinde ve `int`'te `Bits`.

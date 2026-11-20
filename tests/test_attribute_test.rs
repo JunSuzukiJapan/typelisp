@@ -49,7 +49,6 @@ fn typl(dir: &Path, args: &[&str]) -> (i32, String, String) {
 }
 
 const MATH: &str = r#"(use std::error::assert-equal) 
-(shadow add)
 (pub defun add ((a int) (b int)) int (+ a b))
 
 #[test]

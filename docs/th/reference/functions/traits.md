@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/traits.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
+<!-- translated-from: docs/ja/reference/functions/traits.md @ 6271c6d8b68694e1d27dd2e349b08117d2ef2bfb -->
 # Trait มาตรฐาน
 
 trait สำหรับการวนซ้ำ การเปรียบเทียบ การคำนวณ และการเพิ่มและนำสมาชิกออก trait มาตรฐานอื่นอยู่ในบทของตัวเอง:
@@ -33,13 +33,13 @@ trait สำหรับการวนซ้ำ การเปรียบเ�
 (deftrait Equal ()
   (defmethod equal (self (other Self)) bool))                ; ต้อง implement
 (deftrait Ord (Equal)                                     ; สืบทอด Equal
-  (defmethod less (self (other Self)) bool)                  ; ต้อง implement
-  (defmethod less-equal (self (other Self)) bool (not (less other self)))
-  (defmethod greater (self (other Self)) bool (less other self))
-  (defmethod greater-equal (self (other Self)) bool (not (less self other))))
+  (defmethod < (self (other Self)) bool)                     ; ต้อง implement
+  (defmethod <= (self (other Self)) bool (not (< other self)))
+  (defmethod > (self (other Self)) bool (< other self))
+  (defmethod >= (self (other Self)) bool (not (< self other))))
 ```
 
-การ implement `Equal` ให้เขียน `equal` ส่วน `Ord` เขียนแค่ `less` ส่วนที่เหลือของ `Ord` มาจาก implementation
+การ implement `Equal` ให้เขียน `equal` ส่วน `Ord` เขียนแค่ `<` ส่วนที่เหลือของ `Ord` มาจาก implementation
 ปริยาย `Ord` สืบทอด `Equal` จึงต้องมี `impl Equal X` ก่อน `impl Ord X`
 
 `(equal a b)` เรียก implementation ของ `Equal` ของชนิดของ `a` ถ้าเขียนกับชนิดที่ไม่ได้ implement `Equal`
@@ -52,10 +52,10 @@ implement ไว้แล้ว):
 | ชื่อ | รูปแบบ | ชนิด | คำอธิบาย |
 |---|---|---|---|
 | `equal` | `(equal a b)` | `(A,A)→bool` where `Equal A` | เท่ากันหรือไม่ (`==` ของ Rust) |
-| `less` | `(less a b)` | `(A,A)→bool` where `Ord A` | `a < b` |
-| `less-equal` | `(less-equal a b)` | `(A,A)→bool` where `Ord A` | `a <= b` |
-| `greater` | `(greater a b)` | `(A,A)→bool` where `Ord A` | `a > b` |
-| `greater-equal` | `(greater-equal a b)` | `(A,A)→bool` where `Ord A` | `a >= b` |
+| `<` | `(< a b)` | `(A,A)→bool` where `Ord A` | น้อยกว่า |
+| `<=` | `(<= a b)` | `(A,A)→bool` where `Ord A` | น้อยกว่าหรือเท่ากับ |
+| `>` | `(> a b)` | `(A,A)→bool` where `Ord A` | มากกว่า |
+| `>=` | `(>= a b)` | `(A,A)→bool` where `Ord A` | มากกว่าหรือเท่ากับ |
 
 `Equal` ถูก implement สำหรับ: ชนิดตัวเลขทั้งหมด (`i8` ถึง `u32` / `f32` / `f64` / `int` / `ratio`), `bool`
 `char` `string` `symbol` `complex`, `Sexpr`, `cons-cell<A,B>` และ tuple (ทีละสมาชิก เมื่อสมาชิกเป็น `Equal`)
@@ -68,10 +68,8 @@ implement ไว้แล้ว):
 ด้วย `eql` การเปรียบเทียบนี้ไล่ค่าตอนรันและไม่เรียกเมธอดใด ดังนั้น struct ที่อยู่ในลิสต์จึงเปรียบเทียบตาม
 เอกลักษณ์เหมือนใน CL ไม่ว่าชนิดของมันจะมี `impl Equal` แบบใด
 
-ชื่อเมธอดของ `Ord` ไม่ซ้ำกับตัวดำเนินการในตัว (`< <= > >=`) หรือ `lt` เพราะของในตัวนิยามใหม่ไม่ได้และแต่ละ
-implementation ส่งต่อไปยังพวกมัน ตัวดำเนินการเปรียบเทียบสเกลาร์เองเป็นเมธอดในตัวตามชนิดของผู้รับ
-([ตัวเลข](numbers.md), [สตริงและอักขระ](collections.md)) ภายในขอบเขต ตัวดำเนินการที่เขียนจะถูกอ่านเป็นเมธอด
-ของ trait (บทที่ 3) `=` กลายเป็น `equal` และ `/=` กลายเป็น `(not (equal a b))`
+ตัวดำเนินการเปรียบเทียบสเกลาร์เป็นเมธอดในตัวตามชนิดของผู้รับ ([ตัวเลข](numbers.md), [สตริงและอักขระ](collections.md)) และเป็น implementation
+ของ `Ord` ตามนั้นเลย ภายในขอบเขต `=` กลายเป็น `equal` และ `/=` กลายเป็น `(not (equal a b))`
 
 ## 3. trait การคำนวณ (`Add` / `Sub` / `Mul` / `Div` / `Rem` / `Bits` / `Number`)
 
@@ -79,32 +77,29 @@ implementation ส่งต่อไปยังพวกมัน ตัวด�
 ตัวดำเนินการที่มีให้ในตัว** ([ตัวเลข](numbers.md)) และไม่ผ่านชั้นนี้
 
 ```lisp
-(deftrait Add () (defmethod add (self (other Self)) Self))
-(deftrait Sub () (defmethod sub (self (other Self)) Self))
-(deftrait Mul () (defmethod mul (self (other Self)) Self))
-(deftrait Div () (:type Output) (defmethod div (self (other Self)) Output))
-(deftrait Rem () (defmethod remainder (self (other Self)) Self))
+(deftrait Add () (defmethod + (self (other Self)) Self))
+(deftrait Sub () (defmethod - (self (other Self)) Self))
+(deftrait Mul () (defmethod * (self (other Self)) Self))
+(deftrait Div () (:type Output) (defmethod / (self (other Self)) Output))
+(deftrait Rem () (defmethod rem (self (other Self)) Self))
 (deftrait Bits ()
-  (defmethod bit-and (self (other Self)) Self)
-  (defmethod bit-or  (self (other Self)) Self)
-  (defmethod bit-xor (self (other Self)) Self)
-  (defmethod bit-not (self) Self)
-  (defmethod shift (self (count int)) Self))                 ; the distance is always int (as with ash)
+  (defmethod logand (self (other Self)) Self)
+  (defmethod logior (self (other Self)) Self)
+  (defmethod logxor (self (other Self)) Self)
+  (defmethod lognot (self) Self)
+  (defmethod ash (self (count int)) Self))                   ; the distance is always int
 (deftrait Number (Add Sub Mul Rem Ord))                   ; ไม่มีเมธอด เป็นการรวมห้าตัว
 ```
 
-**ภายใน bound คุณเขียนตัวดำเนินการได้** เมื่อตัวรับเป็นตัวแปรชนิดที่ถูกผูกด้วย `:where`
-ตัวดำเนินการจะถูกอ่านเป็นเมทอดของ trait (`+`→`add`, `-`→`sub`, `*`→`mul`, `/`→`div`, `rem`→`remainder`,
-`logand`→`bit-and`, `=`→`equal`, `<`→`less` …):
+**ภายใน bound คุณเขียนตัวดำเนินการได้** เมทอดของทุก trait มีชื่อเดียวกับตัวดำเนินการและฟังก์ชันในตัวที่ใช้กับชนิด
+ที่เป็นรูปธรรม จึงเขียนแบบเดียวกันเมื่อตัวรับเป็นตัวแปรชนิดที่ถูกผูกด้วย `:where`:
 
 ```lisp
 (defun sum3<T> ((a T) (b T) (c T)) T (:where (Number T))
-  (+ a b c))                                              ; = (add (add a b) c)
+  (+ a b c))                                              ; = (+ (+ a b) c)
 ```
 
-เมทอดของ trait ไม่ได้ชื่อ `+` เพราะ `+` เป็นชื่อของเมทอดที่มีให้ในตัว และ `impl` ปฏิเสธที่จะ
-นิยามใหม่ (`cannot redefine built-in method`) ไม่มี `Neg`: `(- x)` ขยายเป็น
-`(- (- x x) x)` ดังนั้น `Sub` ก็เพียงพอ
+ไม่มี `Neg`: `(- x)` ขยายเป็น `(- (- x x) x)` ดังนั้น `Sub` ก็เพียงพอ
 
 ถูก implement สำหรับ: `Add`/`Sub`/`Mul`/`Div`/`Rem`/`Number` บนชนิดตัวเลขทั้งหมด (ยกเว้น `complex`) และ
 `Bits` บนชนิดจำนวนเต็มทั้งหมดและ `int`
