@@ -16,7 +16,6 @@ use typelisp::Value;
 #[test]
 fn defun_docstring_is_returned_by_documentation() {
     let src = r#"
-        (shadow add)
         (defun add ((x int) (y int)) int
           "Adds two integers."
           (+ x y))
@@ -28,7 +27,6 @@ fn defun_docstring_is_returned_by_documentation() {
 #[test]
 fn defun_without_docstring_has_no_documentation() {
     let src = r#"
-        (shadow add)
         (defun add ((x int) (y int)) int (+ x y))
         (is-none (documentation add))
     "#;

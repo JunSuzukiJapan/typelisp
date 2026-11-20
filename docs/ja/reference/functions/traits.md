@@ -74,10 +74,10 @@
 （[数値](numbers.md)）で、この層は通らない。
 
 ```lisp
-(deftrait Add () (defmethod add (self (other Self)) Self))
-(deftrait Sub () (defmethod sub (self (other Self)) Self))
-(deftrait Mul () (defmethod mul (self (other Self)) Self))
-(deftrait Div () (:type Output) (defmethod div (self (other Self)) Output))
+(deftrait Add () (defmethod + (self (other Self)) Self))
+(deftrait Sub () (defmethod - (self (other Self)) Self))
+(deftrait Mul () (defmethod * (self (other Self)) Self))
+(deftrait Div () (:type Output) (defmethod / (self (other Self)) Output))
 (deftrait Rem () (defmethod remainder (self (other Self)) Self))
 (deftrait Bits ()
   (defmethod bit-and (self (other Self)) Self)
@@ -88,18 +88,16 @@
 (deftrait Number (Add Sub Mul Rem Ord))                   ; メソッド無し・5つの合成
 ```
 
-**境界内では演算子で書ける。** `:where` で束縛された型変数が受け手のとき、演算子は
-トレイトメソッドへ読み替えられる（`+`→`add`、`-`→`sub`、`*`→`mul`、`/`→`div`、
-`rem`→`remainder`、`logand`→`bit-and`、`=`→`equal`、`<`→`less` …）:
+**境界内では演算子で書ける。** `Add`/`Sub`/`Mul`/`Div` のメソッドは演算子そのもの。
+ほかのトレイトでは、`:where` で束縛された型変数が受け手のとき、演算子がトレイトメソッドへ
+読み替えられる（`rem`→`remainder`、`logand`→`bit-and`、`=`→`equal`、`<`→`less` …）:
 
 ```lisp
 (defun sum3<T> ((a T) (b T) (c T)) T (:where (Number T))
-  (+ a b c))                                              ; = (add (add a b) c)
+  (+ a b c))                                              ; = (+ (+ a b) c)
 ```
 
-トレイト側のメソッド名が `+` でないのは、`+` が組み込みメソッド名で `impl` が再定義を
-拒むため（`cannot redefine built-in method`）。`Neg` は無い——`(- x)` は
-`(- (- x x) x)` へ展開されるので `Sub` だけで足りる。
+`Neg` は無い——`(- x)` は `(- (- x x) x)` へ展開されるので `Sub` だけで足りる。
 
 実装済み: `Add`/`Sub`/`Mul`/`Div`/`Rem`/`Number` は全数値型（`complex` を除く）、`Bits` は全整数型と `int`。
 

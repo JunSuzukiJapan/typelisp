@@ -2252,31 +2252,28 @@ user-visible capacity."
 ;; that the variable be a type you can add, so no generic function could
 ;; add two of its own arguments.
 ;;
-;; The method names are `add`/`sub`/... rather than `+`/`-`/...: an `impl`
-;; naming a method `+` is refused ("cannot redefine built-in method"), and
-;; the refusal is right — the operator names belong to the primitive
-;; types' own tables. The checker closes the gap from the other side: on a
+;; The methods are the operators themselves: `Add` declares `+`, and a
+;; primitive type's impl has no body, since its built-in `+` already has
+;; the trait's signature and is the trait's method (as with `Equal`). On a
 ;; receiver whose type is a `where`-bounded type variable, `(+ a b)`
-;; resolves to the `Add` bound's `add` (`typeck::bounds`),
-;; so generic code is still written with operators and only these
-;; declarations spell the names out.
+;; resolves to the bound's `+` (`typeck::bounds`).
 ;;
 ;; There is no `Neg`: `(- x)` desugars to `(- (- x x) x)`
 ;; (`check_unary_negate_or_invert`), so negation on a type variable needs
 ;; `Sub` and nothing more.
 (module ops
 (pub deftrait Add ()
-  (defmethod add (self (other Self)) Self))
+  (defmethod + (self (other Self)) Self))
 (pub deftrait Sub ()
-  (defmethod sub (self (other Self)) Self))
+  (defmethod - (self (other Self)) Self))
 (pub deftrait Mul ()
-  (defmethod mul (self (other Self)) Self))
+  (defmethod * (self (other Self)) Self))
 ;; `Div` names its result type: CL's `/` on two integers is a `rational`, so
 ;; `int`'s `Output` is `rational` while every other number divides into
 ;; itself. The others name it `Self`'s own type.
 (pub deftrait Div ()
   (:type Output)
-  (defmethod div (self (other Self)) Output))
+  (defmethod / (self (other Self)) Output))
 ;; `remainder`, not `rem`: `rem` is already a method on every numeric type
 ;; (above), and a trait may not declare a name its implementors already
 ;; define. The impls delegate to it, and `(rem a b)` on a bounded type
@@ -2285,7 +2282,7 @@ user-visible capacity."
 (pub deftrait Rem ()
   (defmethod remainder (self (other Self)) Self))
 ;; The bitwise catalog, spelled apart from the `logand`/`logior`/`logxor`/
-;; `lognot` builtins for the same reason `add` is spelled apart from `+`.
+;; `lognot` builtins.
 (pub deftrait Bits ()
   (defmethod bit-and (self (other Self)) Self)
   (defmethod bit-or (self (other Self)) Self)
@@ -2324,54 +2321,55 @@ user-visible capacity."
 (impl u32
   (pub defmethod rem (self (b u32  )) u32   (- self (* b (/ self b)))))
 
-;; The impls. Each is the built-in operator under the trait's name.
-(impl Add i32    (defmethod add (self (other Self)) Self (+ self other)))
-(impl Add i8     (defmethod add (self (other Self)) Self (+ self other)))
-(impl Add i16    (defmethod add (self (other Self)) Self (+ self other)))
-(impl Add u8     (defmethod add (self (other Self)) Self (+ self other)))
-(impl Add u16    (defmethod add (self (other Self)) Self (+ self other)))
-(impl Add u32    (defmethod add (self (other Self)) Self (+ self other)))
-(impl Add f64    (defmethod add (self (other Self)) Self (+ self other)))
-(impl Add f32    (defmethod add (self (other Self)) Self (+ self other)))
-(impl Add int (defmethod add (self (other Self)) Self (+ self other)))
-(impl Add ratio  (defmethod add (self (other Self)) Self (+ self other)))
-(impl Add rational (defmethod add (self (other Self)) Self (+ self other)))
+;; The impls. A primitive type's built-in operator is the trait's method, and
+;; `Rem`'s `remainder` and `Bits`'s methods delegate to their builtins.
+(impl Add i32)
+(impl Add i8)
+(impl Add i16)
+(impl Add u8)
+(impl Add u16)
+(impl Add u32)
+(impl Add f64)
+(impl Add f32)
+(impl Add int)
+(impl Add ratio)
+(impl Add rational)
 
-(impl Sub i32    (defmethod sub (self (other Self)) Self (- self other)))
-(impl Sub i8     (defmethod sub (self (other Self)) Self (- self other)))
-(impl Sub i16    (defmethod sub (self (other Self)) Self (- self other)))
-(impl Sub u8     (defmethod sub (self (other Self)) Self (- self other)))
-(impl Sub u16    (defmethod sub (self (other Self)) Self (- self other)))
-(impl Sub u32    (defmethod sub (self (other Self)) Self (- self other)))
-(impl Sub f64    (defmethod sub (self (other Self)) Self (- self other)))
-(impl Sub f32    (defmethod sub (self (other Self)) Self (- self other)))
-(impl Sub int (defmethod sub (self (other Self)) Self (- self other)))
-(impl Sub ratio  (defmethod sub (self (other Self)) Self (- self other)))
-(impl Sub rational (defmethod sub (self (other Self)) Self (- self other)))
+(impl Sub i32)
+(impl Sub i8)
+(impl Sub i16)
+(impl Sub u8)
+(impl Sub u16)
+(impl Sub u32)
+(impl Sub f64)
+(impl Sub f32)
+(impl Sub int)
+(impl Sub ratio)
+(impl Sub rational)
 
-(impl Mul i32    (defmethod mul (self (other Self)) Self (* self other)))
-(impl Mul i8     (defmethod mul (self (other Self)) Self (* self other)))
-(impl Mul i16    (defmethod mul (self (other Self)) Self (* self other)))
-(impl Mul u8     (defmethod mul (self (other Self)) Self (* self other)))
-(impl Mul u16    (defmethod mul (self (other Self)) Self (* self other)))
-(impl Mul u32    (defmethod mul (self (other Self)) Self (* self other)))
-(impl Mul f64    (defmethod mul (self (other Self)) Self (* self other)))
-(impl Mul f32    (defmethod mul (self (other Self)) Self (* self other)))
-(impl Mul int (defmethod mul (self (other Self)) Self (* self other)))
-(impl Mul ratio  (defmethod mul (self (other Self)) Self (* self other)))
-(impl Mul rational (defmethod mul (self (other Self)) Self (* self other)))
+(impl Mul i32)
+(impl Mul i8)
+(impl Mul i16)
+(impl Mul u8)
+(impl Mul u16)
+(impl Mul u32)
+(impl Mul f64)
+(impl Mul f32)
+(impl Mul int)
+(impl Mul ratio)
+(impl Mul rational)
 
-(impl Div i32    (:type Output i32) (defmethod div (self (other Self)) i32 (/ self other)))
-(impl Div i8     (:type Output i8) (defmethod div (self (other Self)) i8 (/ self other)))
-(impl Div i16    (:type Output i16) (defmethod div (self (other Self)) i16 (/ self other)))
-(impl Div u8     (:type Output u8) (defmethod div (self (other Self)) u8 (/ self other)))
-(impl Div u16    (:type Output u16) (defmethod div (self (other Self)) u16 (/ self other)))
-(impl Div u32    (:type Output u32) (defmethod div (self (other Self)) u32 (/ self other)))
-(impl Div f64    (:type Output f64) (defmethod div (self (other Self)) f64 (/ self other)))
-(impl Div f32    (:type Output f32) (defmethod div (self (other Self)) f32 (/ self other)))
-(impl Div int    (:type Output rational) (defmethod div (self (other Self)) rational (/ self other)))
-(impl Div ratio  (:type Output ratio) (defmethod div (self (other Self)) ratio (/ self other)))
-(impl Div rational (:type Output rational) (defmethod div (self (other Self)) rational (/ self other)))
+(impl Div i32 (:type Output i32))
+(impl Div i8 (:type Output i8))
+(impl Div i16 (:type Output i16))
+(impl Div u8 (:type Output u8))
+(impl Div u16 (:type Output u16))
+(impl Div u32 (:type Output u32))
+(impl Div f64 (:type Output f64))
+(impl Div f32 (:type Output f32))
+(impl Div int (:type Output rational))
+(impl Div ratio (:type Output ratio))
+(impl Div rational (:type Output rational))
 
 (impl Rem i32    (defmethod remainder (self (other Self)) Self (rem self other)))
 (impl Rem i8     (defmethod remainder (self (other Self)) Self (rem self other)))
@@ -4075,7 +4073,7 @@ user-visible capacity."
 ;; ---------------------------------------------------------------------------
 ;; `HashSet<T>`, `SortedTable<K,V>`, `Deque<T>`: Rust's `HashSet`, `BTreeMap`
 ;; and `VecDeque`, each created with `new`. The method names follow `HashTable` (`get` `set` `remove`
-;; `count` `clear`); a set's add is `insert`, since `add` is the `Add` trait's.
+;; `count` `clear`); a set's add is `insert`, as in Rust.
 ;; `iter` walks a snapshot, as `HashTable`'s does, so changing the collection
 ;; inside a `doiter` over it is not seen by that loop.
 

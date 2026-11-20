@@ -232,7 +232,7 @@ fn an_operator_without_the_bound_is_still_an_error() {
           (+ a b))
         "#,
     );
-    assert!(msg.contains("+") || msg.contains("add"), "unexpected message: {}", msg);
+    assert!(msg.contains("+"), "unexpected message: {}", msg);
 }
 
 // ---- complex numbers (Phase 1d) ------------------------------------------

@@ -88,7 +88,7 @@ impl TraitBound {
 pub(crate) struct BoundMethod<'r> {
     pub(crate) trait_path: Path,
     /// The trait's name of the method: an operator's is the trait method it
-    /// spells (`/` is `Div`'s `div`).
+    /// spells (`<` is `Ord`'s `less`).
     pub(crate) method: typelisp_mem::SymRef,
     pub(crate) sig: &'r FnDef,
     /// The trait's `Self` and associated types at the bound; `None` for an
@@ -434,19 +434,13 @@ fn trait_at(reg: &Registry, from: Path, at: Vec<Option<Type>>, want: &Path, dept
 }
 
 /// The trait method an operator spells when its receiver is a `where`-bounded
-/// type variable — `+` is `Add`'s `add`, `<` is `Ord`'s `less`.
+/// type variable — `rem` is `Rem`'s `remainder`, `<` is `Ord`'s `less`.
 ///
-/// One table, not a rule: the prelude's numeric traits pick these names
-/// (`prelude.rs`'s "arithmetic traits" section says why they cannot be the
-/// operators), and this is the other half of that choice. A name absent from
-/// the table is passed through unchanged, and so is one a bound declares
-/// itself.
+/// One table, not a rule: the prelude's traits pick these names, and this is
+/// the other half of that choice. A name absent from the table is passed
+/// through unchanged, and so is one a bound declares itself (`Add`'s `+`).
 pub(crate) fn trait_operator_method(op: SymRef) -> Option<SymRef> {
-    const TABLE: [(&str, &str); 14] = [
-        ("+", "add"),
-        ("-", "sub"),
-        ("*", "mul"),
-        ("/", "div"),
+    const TABLE: [(&str, &str); 10] = [
         ("rem", "remainder"),
         ("logand", "bit-and"),
         ("logior", "bit-or"),
