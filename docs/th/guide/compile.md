@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ 0269bbc25c244db48a107288b49aa6d3cb9da715 -->
+<!-- translated-from: docs/ja/guide/compile.md @ 2951f1d504da73ac227a8215a24999037882fcbc -->
 # การคอมไพล์
 
 หากไม่ทำอะไรเพิ่ม โปรแกรม typelisp จะรันในอินเทอร์พรีเตอร์ นอกจากนี้ยังมีวิธีคอมไพล์เป็นโค้ดเนทีฟ
@@ -186,7 +186,7 @@ fib(25) = 75025
 ```
 
 - ต้องเตรียมการก่อน และใช้ได้เฉพาะกับ `typl` แบบ debug build ที่บิลด์ในรีโพสิทอรีเท่านั้น
-  รัน `rustup target add wasm32-wasip1` ด้วย rustup แล้วรัน `scripts/build-wasm-runtime.sh` ในรีโพสิทอรี
+  รัน `rustup target add wasm32-wasip1 wasm32-unknown-unknown` ด้วย rustup แล้วรัน `scripts/build-wasm-runtime.sh` ในรีโพสิทอรี ขั้นตอนนี้ยังเป็นการเตรียมสำหรับหัวข้อ 3.7 ด้วย
 - โมดูลทำงานเหมือนไฟล์ปฏิบัติการ: เอาต์พุตมาตรฐาน ข้อผิดพลาดมาตรฐาน และรหัสออก, `(command-line-args)`,
   การอ่านเขียนไฟล์, `throw`/`catch`/`panic`, งาน แชนเนล และ `sleep` รวมถึง `eval` ใช้ได้
   งานจะรันทีละงานบนเธรดเดียว อ่านเขียนไฟล์ได้เฉพาะในไดเรกทอรีที่สภาพแวดล้อมเปิดให้โมดูลเห็น
@@ -196,6 +196,29 @@ fib(25) = 75025
   TLS, การแปลงชื่อ), เธรดของระบบปฏิบัติการ (`Thread`), ฟังก์ชัน C (`defffi`), `get-internal-run-time`, `machine-instance`, `software-version`, `file-author`,
   เขตเวลาท้องถิ่น และ `ed`
 - `--heap-cells`, `--max-memory`, `--no-cons`, `-O<N>` และ `--release` ใช้ได้เหมือนกับไฟล์ปฏิบัติการ
+
+### 3.7 รันในเบราว์เซอร์หรือ Node.js
+
+เมื่อใส่ `--target wasm32-unknown-unknown` คำสั่ง `typl -c` จะสร้างโมดูล WebAssembly สำหรับโหลดและรันจาก JavaScript ข้างโมดูล (`hello.wasm`) ในโฟลเดอร์เดียวกันจะมี JavaScript ที่โหลดและรันโมดูลนั้น (`hello.mjs`) การเตรียมการเหมือนหัวข้อ 3.6
+
+```sh
+$ typl -c hello.typl --target wasm32-unknown-unknown   # ได้ hello.wasm และ hello.mjs
+$ node hello.mjs                                       # รันด้วย Node.js
+args: #()
+fib(25) = 75025
+```
+
+จาก JavaScript อื่น ให้เรียก `run` ของ `hello.mjs` ฟังก์ชัน `write` จะได้รับเอาต์พุตเป็นข้อความ (`fd` เป็น 1 สำหรับเอาต์พุตมาตรฐาน และ 2 สำหรับข้อผิดพลาดมาตรฐาน) ค่าของ `run` คือรหัสออก
+
+```js
+import { run } from './hello.mjs';
+const code = await run({ write: (fd, text) => { /* เช่น แสดงบนหน้าเว็บ */ } });
+```
+
+- ถ้าไม่ส่ง `write` Node.js จะเขียนไปที่เอาต์พุตมาตรฐานและข้อผิดพลาดมาตรฐาน ส่วนเบราว์เซอร์จะเขียนลงคอนโซลทีละบรรทัด
+- ในเบราว์เซอร์ ให้เสิร์ฟ `hello.wasm` ผ่าน HTTP จากที่เดียวกับ `hello.mjs` (โหลดจาก `file://` ไม่ได้)
+- `sleep` รอด้วย `Atomics.wait` ซึ่งเบราว์เซอร์อนุญาตเฉพาะภายใน Worker ของหน้าที่แยก cross-origin เท่านั้น จึงควรรันโปรแกรมที่ใช้ `sleep` ใน Worker
+- นอกจากสิ่งที่ใช้ไม่ได้ในหัวข้อ 3.6 แล้ว การทำงานกับไฟล์และไดเรกทอรีจะเป็น**ข้อผิดพลาดตอนคอมไพล์** อินพุตมาตรฐานจะอ่านได้ว่าว่าง และ `(command-line-args)` เป็นเวกเตอร์ว่าง
 
 ## 4. Dump
 

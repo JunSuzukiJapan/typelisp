@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ 0269bbc25c244db48a107288b49aa6d3cb9da715 -->
+<!-- translated-from: docs/ja/guide/compile.md @ 2951f1d504da73ac227a8215a24999037882fcbc -->
 # Kompilering
 
 Om du inte gör något annat körs typelisp-program i tolken. Dessutom finns två sätt att kompilera till
@@ -188,7 +188,7 @@ fib(25) = 75025
 ```
 
 - Det kräver förberedelse och fungerar bara med en debug-version av `typl` byggd i repot.
-  Kör `rustup target add wasm32-wasip1` med rustup och sedan `scripts/build-wasm-runtime.sh` i repot.
+  Kör `rustup target add wasm32-wasip1 wasm32-unknown-unknown` med rustup och sedan `scripts/build-wasm-runtime.sh` i repot. Det förbereder också avsnitt 3.7.
 - Modulen beter sig som den körbara filen: standard ut, standard fel och slutkod, `(command-line-args)`,
   läsa och skriva filer, `throw`/`catch`/`panic`, uppgifter, kanaler och `sleep`, och `eval` fungerar.
   Uppgifterna körs efter varandra i en enda tråd. Filer kan bara läsas och skrivas i de kataloger
@@ -198,6 +198,29 @@ fib(25) = 75025
   TLS, namnuppslagning), OS-trådar (`Thread`), C-funktioner (`defffi`), `get-internal-run-time`, `machine-instance`, `software-version`, `file-author`,
   den lokala tidszonen och `ed`.
 - `--heap-cells`, `--max-memory`, `--no-cons`, `-O<N>` och `--release` fungerar som för en körbar fil.
+
+### 3.7 Köra i en webbläsare eller i Node.js
+
+Med `--target wasm32-unknown-unknown` gör `typl -c` en WebAssembly-modul som laddas och körs från JavaScript. Bredvid modulen (`hello.wasm`), i samma mapp, skrivs det JavaScript som laddar och kör den (`hello.mjs`). Förberedelsen är densamma som i avsnitt 3.6.
+
+```sh
+$ typl -c hello.typl --target wasm32-unknown-unknown   # gör hello.wasm och hello.mjs
+$ node hello.mjs                                       # kör den med Node.js
+args: #()
+fib(25) = 75025
+```
+
+Från annat JavaScript anropar du `run` i `hello.mjs`. `write` får utdata som text (`fd` är 1 för standard ut och 2 för standard fel). Värdet av `run` är slutkoden.
+
+```js
+import { run } from './hello.mjs';
+const code = await run({ write: (fd, text) => { /* visa den på sidan, till exempel */ } });
+```
+
+- Utan `write` skriver Node.js till standard ut och standard fel, och en webbläsare till konsolen, en rad i taget.
+- I en webbläsare ska `hello.wasm` serveras över HTTP från samma ställe som `hello.mjs` (den kan inte laddas från `file://`).
+- `sleep` väntar med `Atomics.wait`. En webbläsare tillåter det bara i en Worker på en cross-origin-isolerad sida, så kör ett program som använder `sleep` i en Worker.
+- Utöver det som inte kan användas i avsnitt 3.6 är fil- och katalogoperationer ett **kompileringsfel**. Standard in läses som tom, och `(command-line-args)` är en tom vektor.
 
 ## 4. Dumpar
 

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ 0269bbc25c244db48a107288b49aa6d3cb9da715 -->
+<!-- translated-from: docs/ja/guide/compile.md @ 2951f1d504da73ac227a8215a24999037882fcbc -->
 # कंपाइल करना
 
 यदि आप और कुछ न करें, तो typelisp प्रोग्राम इंटरप्रेटर में चलते हैं। इसके अलावा नेटिव कोड में कंपाइल करने के दो तरीके हैं, और एक पर्यावरण को सहेजने का तरीका है। विनिर्देश का विवरण [सिंटैक्स संदर्भ अध्याय 10](../reference/syntax.md#10-कंपाइलेशन) में है।
@@ -160,7 +160,7 @@ fib(25) = 75025
 ```
 
 - इसके लिए तैयारी चाहिए, और यह केवल रिपॉज़िटरी में बने `typl` के डीबग बिल्ड के साथ काम करता है।
-  rustup से `rustup target add wasm32-wasip1` चलाएँ, फिर रिपॉज़िटरी में `scripts/build-wasm-runtime.sh` चलाएँ।
+  rustup से `rustup target add wasm32-wasip1 wasm32-unknown-unknown` चलाएँ, फिर रिपॉज़िटरी में `scripts/build-wasm-runtime.sh` चलाएँ। इससे खंड 3.7 की तैयारी भी हो जाती है।
 - मॉड्यूल एक्ज़ीक्यूटेबल जैसा ही व्यवहार करता है: मानक आउटपुट, मानक त्रुटि और निकास कोड, `(command-line-args)`,
   फ़ाइलें पढ़ना-लिखना, `throw`/`catch`/`panic`, टास्क, चैनल और `sleep`, तथा `eval` काम करते हैं।
   टास्क एक ही थ्रेड पर बारी-बारी से चलते हैं। फ़ाइलें केवल उन डायरेक्टरी में पढ़ी-लिखी जा सकती हैं
@@ -170,6 +170,29 @@ fib(25) = 75025
   TLS, नाम समाधान), OS थ्रेड (`Thread`), C फ़ंक्शन (`defffi`), `get-internal-run-time`, `machine-instance`, `software-version`, `file-author`,
   स्थानीय समय क्षेत्र, और `ed`।
 - `--heap-cells`, `--max-memory`, `--no-cons`, `-O<N>` और `--release` एक्ज़ीक्यूटेबल की तरह ही काम करते हैं।
+
+### 3.7 ब्राउज़र या Node.js में चलाना
+
+`--target wasm32-unknown-unknown` देने पर `typl -c` ऐसा WebAssembly मॉड्यूल बनाता है जिसे JavaScript से लोड करके चलाया जाता है। मॉड्यूल (`hello.wasm`) के साथ, उसी फ़ोल्डर में, उसे लोड करके चलाने वाला JavaScript (`hello.mjs`) भी बनता है। तैयारी खंड 3.6 जैसी ही है।
+
+```sh
+$ typl -c hello.typl --target wasm32-unknown-unknown   # hello.wasm और hello.mjs बनते हैं
+$ node hello.mjs                                       # Node.js से चलाएँ
+args: #()
+fib(25) = 75025
+```
+
+दूसरे JavaScript से `hello.mjs` का `run` बुलाएँ। `write` को आउटपुट टेक्स्ट के रूप में मिलता है (`fd` मानक आउटपुट के लिए 1 और मानक त्रुटि के लिए 2 है)। `run` का मान निकास कोड है।
+
+```js
+import { run } from './hello.mjs';
+const code = await run({ write: (fd, text) => { /* उदाहरण के लिए पेज पर दिखाएँ */ } });
+```
+
+- `write` न देने पर Node.js मानक आउटपुट और मानक त्रुटि में, और ब्राउज़र कंसोल में एक-एक पंक्ति लिखता है।
+- ब्राउज़र में `hello.wasm` को `hello.mjs` वाली जगह से ही HTTP पर दें (`file://` से लोड नहीं हो सकता)।
+- `sleep` `Atomics.wait` से प्रतीक्षा करता है। ब्राउज़र इसकी अनुमति केवल cross-origin अलग किए गए पेज के Worker में देता है, इसलिए `sleep` इस्तेमाल करने वाला प्रोग्राम Worker में चलाएँ।
+- खंड 3.6 में जो इस्तेमाल नहीं हो सकता उसके अलावा, फ़ाइल और डायरेक्टरी के काम **कंपाइल त्रुटि** हैं। मानक इनपुट खाली पढ़ा जाता है, और `(command-line-args)` एक खाली वेक्टर है।
 
 ## 4. डंप
 

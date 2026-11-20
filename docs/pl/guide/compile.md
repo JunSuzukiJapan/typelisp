@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ 0269bbc25c244db48a107288b49aa6d3cb9da715 -->
+<!-- translated-from: docs/ja/guide/compile.md @ 2951f1d504da73ac227a8215a24999037882fcbc -->
 # Kompilacja
 
 O ile nie zrobisz nic więcej, programy typelisp działają w interpreterze. Ponadto istnieją dwa
@@ -185,7 +185,7 @@ fib(25) = 75025
 ```
 
 - Wymaga to przygotowania i działa tylko z wersją debug `typl` zbudowaną w repozytorium.
-  Uruchom `rustup target add wasm32-wasip1` przez rustup, a potem `scripts/build-wasm-runtime.sh` w repozytorium.
+  Uruchom `rustup target add wasm32-wasip1 wasm32-unknown-unknown` przez rustup, a potem `scripts/build-wasm-runtime.sh` w repozytorium. To przygotowuje też do podrozdziału 3.7.
 - Moduł zachowuje się jak plik wykonywalny: standardowe wyjście, standardowe wyjście błędów i kod wyjścia, `(command-line-args)`,
   odczyt i zapis plików, `throw`/`catch`/`panic`, zadania, kanały i `sleep` oraz `eval` działają.
   Zadania wykonują się po kolei w jednym wątku. Pliki można czytać i zapisywać tylko w katalogach,
@@ -195,6 +195,29 @@ fib(25) = 75025
   TLS, rozwiązywanie nazw), wątków systemowych (`Thread`), funkcji C (`defffi`), `get-internal-run-time`, `machine-instance`, `software-version`, `file-author`,
   lokalnej strefy czasowej ani `ed`.
 - `--heap-cells`, `--max-memory`, `--no-cons`, `-O<N>` i `--release` działają tak samo jak dla pliku wykonywalnego.
+
+### 3.7 Uruchamianie w przeglądarce lub w Node.js
+
+Z `--target wasm32-unknown-unknown` polecenie `typl -c` tworzy moduł WebAssembly ładowany i uruchamiany z JavaScriptu. Obok modułu (`hello.wasm`), w tym samym folderze, powstaje JavaScript, który go ładuje i uruchamia (`hello.mjs`). Przygotowanie jest takie samo jak w podrozdziale 3.6.
+
+```sh
+$ typl -c hello.typl --target wasm32-unknown-unknown   # tworzy hello.wasm i hello.mjs
+$ node hello.mjs                                       # uruchomienie w Node.js
+args: #()
+fib(25) = 75025
+```
+
+Z innego kodu JavaScript wywołaj `run` z `hello.mjs`. `write` otrzymuje wyjście jako tekst (`fd` to 1 dla standardowego wyjścia i 2 dla standardowego wyjścia błędów). Wartością `run` jest kod wyjścia.
+
+```js
+import { run } from './hello.mjs';
+const code = await run({ write: (fd, text) => { /* na przykład pokaż na stronie */ } });
+```
+
+- Bez `write` Node.js pisze na standardowe wyjście i standardowe wyjście błędów, a przeglądarka do konsoli, wiersz po wierszu.
+- W przeglądarce udostępnij `hello.wasm` przez HTTP z tego samego miejsca co `hello.mjs` (nie da się go załadować z `file://`).
+- `sleep` czeka przez `Atomics.wait`. Przeglądarka pozwala na to tylko w Workerze strony z izolacją cross-origin, więc program używający `sleep` uruchamiaj w Workerze.
+- Oprócz tego, czego nie można używać w podrozdziale 3.6, operacje na plikach i katalogach są **błędem kompilacji**. Standardowe wejście czyta się jako puste, a `(command-line-args)` jest pustym wektorem.
 
 ## 4. Zrzuty (dumps)
 

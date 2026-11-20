@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ 0269bbc25c244db48a107288b49aa6d3cb9da715 -->
+<!-- translated-from: docs/ja/guide/compile.md @ 2951f1d504da73ac227a8215a24999037882fcbc -->
 # 컴파일
 
 아무것도 하지 않으면 typelisp 프로그램은 인터프리터에서 실행된다. 그 밖에 네이티브 코드로 컴파일하는 방법이 두 가지,
@@ -179,7 +179,7 @@ fib(25) = 75025
 ```
 
 - 준비가 필요합니다. 이 기능은 저장소에서 빌드한 디버그 빌드 `typl`에서만 쓸 수 있습니다.
-  rustup으로 `rustup target add wasm32-wasip1`을 실행한 뒤, 저장소에서 `scripts/build-wasm-runtime.sh`를 실행하세요.
+  rustup으로 `rustup target add wasm32-wasip1 wasm32-unknown-unknown`을 실행한 뒤, 저장소에서 `scripts/build-wasm-runtime.sh`를 실행하세요. 3.7절의 준비도 겸합니다.
 - 실행 파일과 똑같이 동작합니다. 표준 출력, 표준 오류, 종료 코드, `(command-line-args)`,
   파일 읽기와 쓰기, `throw`/`catch`/`panic`, 태스크, 채널, `sleep`, `eval`을 쓸 수 있습니다.
   태스크는 하나의 스레드에서 차례로 실행됩니다. 파일은 실행 환경이 모듈에 보여 주는
@@ -189,6 +189,29 @@ fib(25) = 75025
   TLS, 이름 해석), OS 스레드(`Thread`), C 함수(`defffi`), `get-internal-run-time`, `machine-instance`, `software-version`, `file-author`,
   로컬 시간대, `ed`입니다.
 - `--heap-cells`, `--max-memory`, `--no-cons`, `-O<N>`, `--release`는 그대로 쓸 수 있습니다.
+
+### 3.7 브라우저나 Node.js에서 실행하기
+
+`--target wasm32-unknown-unknown`을 붙이면 `typl -c`는 JavaScript에서 불러와 실행하는 WebAssembly 모듈을 만듭니다. 모듈(`hello.wasm`) 옆, 같은 폴더에 그것을 불러와 실행하는 JavaScript(`hello.mjs`)가 만들어집니다. 준비는 3.6절과 같습니다.
+
+```sh
+$ typl -c hello.typl --target wasm32-unknown-unknown   # hello.wasm과 hello.mjs가 만들어진다
+$ node hello.mjs                                       # Node.js로 실행한다
+args: #()
+fib(25) = 75025
+```
+
+다른 JavaScript에서는 `hello.mjs`의 `run`을 호출합니다. `write`에는 출력이 문자열로 전달됩니다(`fd`는 표준 출력이 1, 표준 오류가 2). `run`의 값은 종료 코드입니다.
+
+```js
+import { run } from './hello.mjs';
+const code = await run({ write: (fd, text) => { /* 예를 들어 화면에 표시 */ } });
+```
+
+- `write`를 넘기지 않으면 Node.js에서는 표준 출력과 표준 오류로, 브라우저에서는 콘솔로 한 줄씩 출력합니다.
+- 브라우저에서는 `hello.wasm`을 `hello.mjs`와 같은 위치에서 HTTP로 제공하세요(`file://`에서는 불러올 수 없습니다).
+- `sleep`은 `Atomics.wait`로 기다립니다. 브라우저에서는 이것을 교차 출처 격리된 페이지의 Worker 안에서만 쓸 수 있으므로, `sleep`을 쓰는 프로그램은 Worker에서 실행하세요.
+- 3.6절에서 쓸 수 없는 것에 더해, 파일과 디렉터리 조작이 **컴파일 오류**가 됩니다. 표준 입력은 빈 것으로 읽히고, `(command-line-args)`는 빈 벡터입니다.
 
 ## 4. 덤프
 

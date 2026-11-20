@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ 0269bbc25c244db48a107288b49aa6d3cb9da715 -->
+<!-- translated-from: docs/ja/guide/compile.md @ 2951f1d504da73ac227a8215a24999037882fcbc -->
 # Biên dịch
 
 Nếu bạn không làm gì thêm, chương trình typelisp chạy trong trình thông dịch. Ngoài ra còn có hai
@@ -184,7 +184,7 @@ fib(25) = 75025
 ```
 
 - Cần chuẩn bị, và chỉ dùng được với bản build debug của `typl` được build trong kho mã.
-  Chạy `rustup target add wasm32-wasip1` bằng rustup, rồi chạy `scripts/build-wasm-runtime.sh` trong kho mã.
+  Chạy `rustup target add wasm32-wasip1 wasm32-unknown-unknown` bằng rustup, rồi chạy `scripts/build-wasm-runtime.sh` trong kho mã. Việc này cũng là chuẩn bị cho mục 3.7.
 - Mô-đun hoạt động như tệp thực thi: đầu ra chuẩn, lỗi chuẩn và mã thoát, `(command-line-args)`,
   đọc ghi tệp, `throw`/`catch`/`panic`, tác vụ, kênh và `sleep`, cùng `eval` đều dùng được.
   Các tác vụ chạy lần lượt trên một luồng. Chỉ đọc ghi được tệp trong các thư mục
@@ -194,6 +194,29 @@ fib(25) = 75025
   TLS, phân giải tên), luồng của hệ điều hành (`Thread`), hàm C (`defffi`), `get-internal-run-time`, `machine-instance`, `software-version`, `file-author`,
   múi giờ cục bộ và `ed`.
 - `--heap-cells`, `--max-memory`, `--no-cons`, `-O<N>` và `--release` dùng được như với tệp thực thi.
+
+### 3.7 Chạy trong trình duyệt hoặc Node.js
+
+Với `--target wasm32-unknown-unknown`, `typl -c` tạo một mô-đun WebAssembly để nạp và chạy từ JavaScript. Bên cạnh mô-đun (`hello.wasm`), trong cùng thư mục, có tệp JavaScript nạp và chạy nó (`hello.mjs`). Việc chuẩn bị giống mục 3.6.
+
+```sh
+$ typl -c hello.typl --target wasm32-unknown-unknown   # tạo hello.wasm và hello.mjs
+$ node hello.mjs                                       # chạy bằng Node.js
+args: #()
+fib(25) = 75025
+```
+
+Từ JavaScript khác, hãy gọi `run` trong `hello.mjs`. `write` nhận đầu ra dưới dạng văn bản (`fd` là 1 cho đầu ra chuẩn, 2 cho lỗi chuẩn). Giá trị của `run` là mã thoát.
+
+```js
+import { run } from './hello.mjs';
+const code = await run({ write: (fd, text) => { /* ví dụ hiển thị lên trang */ } });
+```
+
+- Không có `write` thì Node.js ghi ra đầu ra chuẩn và lỗi chuẩn, còn trình duyệt ghi ra console, từng dòng một.
+- Trong trình duyệt, hãy phục vụ `hello.wasm` qua HTTP từ cùng chỗ với `hello.mjs` (không nạp được từ `file://`).
+- `sleep` chờ bằng `Atomics.wait`. Trình duyệt chỉ cho phép việc này trong Worker của trang được cô lập cross-origin, nên hãy chạy chương trình dùng `sleep` trong Worker.
+- Ngoài những thứ không dùng được ở mục 3.6, các thao tác với tệp và thư mục là **lỗi biên dịch**. Đầu vào chuẩn được đọc là rỗng, và `(command-line-args)` là một vector rỗng.
 
 ## 4. Dump
 

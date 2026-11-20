@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ 0269bbc25c244db48a107288b49aa6d3cb9da715 -->
+<!-- translated-from: docs/ja/guide/compile.md @ 2951f1d504da73ac227a8215a24999037882fcbc -->
 # Derleme
 
 Başka bir şey yapmazsanız typelisp programları yorumlayıcıda çalışır. Buna ek olarak yerel koda
@@ -187,7 +187,7 @@ fib(25) = 75025
 ```
 
 - Hazırlık gerekir ve yalnızca depoda derlenmiş bir hata ayıklama (debug) `typl` ile çalışır.
-  rustup ile `rustup target add wasm32-wasip1` çalıştırın, ardından depoda `scripts/build-wasm-runtime.sh` çalıştırın.
+  rustup ile `rustup target add wasm32-wasip1 wasm32-unknown-unknown` çalıştırın, ardından depoda `scripts/build-wasm-runtime.sh` çalıştırın. Bu, 3.7 bölümünün hazırlığını da yapar.
 - Modül çalıştırılabilir dosya gibi davranır: standart çıktı, standart hata ve çıkış kodu, `(command-line-args)`,
   dosya okuma ve yazma, `throw`/`catch`/`panic`, görevler, kanallar ve `sleep`, ve `eval` çalışır.
   Görevler tek bir iş parçacığında sırayla çalışır. Dosyalar yalnızca ortamın modüle gösterdiği dizinlerde
@@ -197,6 +197,29 @@ fib(25) = 75025
   TLS, ad çözümleme), işletim sistemi iş parçacıkları (`Thread`), C fonksiyonları (`defffi`), `get-internal-run-time`, `machine-instance`, `software-version`, `file-author`,
   yerel saat dilimi ve `ed`.
 - `--heap-cells`, `--max-memory`, `--no-cons`, `-O<N>` ve `--release` çalıştırılabilir dosyada olduğu gibi çalışır.
+
+### 3.7 Tarayıcıda veya Node.js'te çalıştırmak
+
+`--target wasm32-unknown-unknown` ile `typl -c`, JavaScript'ten yüklenip çalıştırılan bir WebAssembly modülü üretir. Modülün (`hello.wasm`) yanına, aynı klasöre, onu yükleyip çalıştıran JavaScript'i (`hello.mjs`) yazar. Hazırlık 3.6 bölümündekiyle aynıdır.
+
+```sh
+$ typl -c hello.typl --target wasm32-unknown-unknown   # hello.wasm ve hello.mjs üretir
+$ node hello.mjs                                       # Node.js ile çalıştırmak
+args: #()
+fib(25) = 75025
+```
+
+Başka bir JavaScript'ten `hello.mjs` içindeki `run` fonksiyonunu çağırın. `write` çıktıyı metin olarak alır (`fd` standart çıktı için 1, standart hata için 2'dir). `run`'ın değeri çıkış kodudur.
+
+```js
+import { run } from './hello.mjs';
+const code = await run({ write: (fd, text) => { /* örneğin sayfada göstermek */ } });
+```
+
+- `write` verilmezse Node.js standart çıktıya ve standart hataya, tarayıcı ise konsola satır satır yazar.
+- Tarayıcıda `hello.wasm`'ı `hello.mjs` ile aynı yerden HTTP üzerinden sunun (`file://` üzerinden yüklenemez).
+- `sleep`, `Atomics.wait` ile bekler. Tarayıcı buna yalnızca cross-origin yalıtımlı bir sayfanın Worker'ı içinde izin verir; bu yüzden `sleep` kullanan programı bir Worker'da çalıştırın.
+- 3.6 bölümünde kullanılamayanlara ek olarak dosya ve dizin işlemleri bir **derleme hatasıdır**. Standart girdi boş okunur ve `(command-line-args)` boş bir vektördür.
 
 ## 4. Dump'lar
 

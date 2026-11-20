@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ 0269bbc25c244db48a107288b49aa6d3cb9da715 -->
+<!-- translated-from: docs/ja/guide/compile.md @ 2951f1d504da73ac227a8215a24999037882fcbc -->
 # Kompilasi
 
 Jika Anda tidak melakukan apa-apa lagi, program typelisp berjalan di interpreter. Selain itu ada dua
@@ -190,7 +190,7 @@ fib(25) = 75025
 ```
 
 - Ini memerlukan persiapan dan hanya bekerja dengan build debug `typl` yang dibangun di repositori.
-  Jalankan `rustup target add wasm32-wasip1` dengan rustup, lalu jalankan `scripts/build-wasm-runtime.sh` di repositori.
+  Jalankan `rustup target add wasm32-wasip1 wasm32-unknown-unknown` dengan rustup, lalu jalankan `scripts/build-wasm-runtime.sh` di repositori. Ini juga menyiapkan bagian 3.7.
 - Modul berperilaku seperti berkas eksekusi: keluaran standar, galat standar, dan kode keluar, `(command-line-args)`,
   membaca dan menulis berkas, `throw`/`catch`/`panic`, tugas, kanal, dan `sleep`, serta `eval` berfungsi.
   Tugas berjalan bergantian dalam satu thread. Berkas hanya bisa dibaca dan ditulis di dalam direktori
@@ -200,6 +200,29 @@ fib(25) = 75025
   TLS, resolusi nama), thread OS (`Thread`), fungsi C (`defffi`), `get-internal-run-time`, `machine-instance`, `software-version`, `file-author`,
   zona waktu lokal, dan `ed`.
 - `--heap-cells`, `--max-memory`, `--no-cons`, `-O<N>`, dan `--release` berlaku seperti untuk berkas eksekusi.
+
+### 3.7 Menjalankan di peramban atau Node.js
+
+Dengan `--target wasm32-unknown-unknown`, `typl -c` membuat modul WebAssembly yang dimuat dan dijalankan dari JavaScript. Di samping modul (`hello.wasm`), di folder yang sama, dibuat JavaScript yang memuat dan menjalankannya (`hello.mjs`). Persiapannya sama dengan bagian 3.6.
+
+```sh
+$ typl -c hello.typl --target wasm32-unknown-unknown   # membuat hello.wasm dan hello.mjs
+$ node hello.mjs                                       # jalankan dengan Node.js
+args: #()
+fib(25) = 75025
+```
+
+Dari JavaScript lain, panggil `run` dari `hello.mjs`. `write` menerima keluaran sebagai teks (`fd` bernilai 1 untuk keluaran standar dan 2 untuk galat standar). Nilai `run` adalah kode keluar.
+
+```js
+import { run } from './hello.mjs';
+const code = await run({ write: (fd, text) => { /* misalnya tampilkan di halaman */ } });
+```
+
+- Tanpa `write`, Node.js menulis ke keluaran standar dan galat standar, sedangkan peramban ke konsol, baris demi baris.
+- Di peramban, sajikan `hello.wasm` lewat HTTP dari tempat yang sama dengan `hello.mjs` (tidak bisa dimuat dari `file://`).
+- `sleep` menunggu dengan `Atomics.wait`. Peramban hanya mengizinkannya di dalam Worker pada halaman yang terisolasi lintas asal, jadi jalankan program yang memakai `sleep` di dalam Worker.
+- Selain yang tidak bisa dipakai di bagian 3.6, operasi berkas dan direktori adalah **galat kompilasi**. Masukan standar terbaca kosong, dan `(command-line-args)` adalah vektor kosong.
 
 ## 4. Dump
 

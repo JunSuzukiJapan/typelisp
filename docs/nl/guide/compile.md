@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ 0269bbc25c244db48a107288b49aa6d3cb9da715 -->
+<!-- translated-from: docs/ja/guide/compile.md @ 2951f1d504da73ac227a8215a24999037882fcbc -->
 # Compileren
 
 Tenzij je iets anders doet, draaien typelisp-programma's in de interpreter. Daarnaast zijn er twee
@@ -195,7 +195,7 @@ fib(25) = 75025
 ```
 
 - Dit vraagt voorbereiding en werkt alleen met een debug-build van `typl` die in de repository is gebouwd.
-  Voer met rustup `rustup target add wasm32-wasip1` uit en daarna in de repository `scripts/build-wasm-runtime.sh`.
+  Voer met rustup `rustup target add wasm32-wasip1 wasm32-unknown-unknown` uit en daarna in de repository `scripts/build-wasm-runtime.sh`. Dit bereidt ook paragraaf 3.7 voor.
 - De module gedraagt zich als het uitvoerbare bestand: standaarduitvoer, standaardfout en exitcode, `(command-line-args)`,
   bestanden lezen en schrijven, `throw`/`catch`/`panic`, taken, kanalen en `sleep`, en `eval` werken.
   Taken draaien na elkaar op één thread. Bestanden kunnen alleen gelezen en geschreven worden in de mappen
@@ -205,6 +205,29 @@ fib(25) = 75025
   TLS, naamresolutie), OS-threads (`Thread`), C-functies (`defffi`), `get-internal-run-time`, `machine-instance`, `software-version`, `file-author`,
   de lokale tijdzone en `ed`.
 - `--heap-cells`, `--max-memory`, `--no-cons`, `-O<N>` en `--release` werken zoals bij een uitvoerbaar bestand.
+
+### 3.7 Uitvoeren in een browser of in Node.js
+
+Met `--target wasm32-unknown-unknown` maakt `typl -c` een WebAssembly-module die vanuit JavaScript wordt geladen en uitgevoerd. Naast de module (`hello.wasm`) komt in dezelfde map het JavaScript dat haar laadt en uitvoert (`hello.mjs`). De voorbereiding is dezelfde als in paragraaf 3.6.
+
+```sh
+$ typl -c hello.typl --target wasm32-unknown-unknown   # maakt hello.wasm en hello.mjs
+$ node hello.mjs                                       # uitvoeren met Node.js
+args: #()
+fib(25) = 75025
+```
+
+Vanuit ander JavaScript roept u `run` uit `hello.mjs` aan. `write` krijgt de uitvoer als tekst (`fd` is 1 voor standaarduitvoer, 2 voor standaardfout). De waarde van `run` is de exitcode.
+
+```js
+import { run } from './hello.mjs';
+const code = await run({ write: (fd, text) => { /* bijvoorbeeld op de pagina tonen */ } });
+```
+
+- Zonder `write` schrijft Node.js naar standaarduitvoer en standaardfout, en een browser regel voor regel naar de console.
+- Serveer in een browser `hello.wasm` via HTTP vanaf dezelfde plek als `hello.mjs` (vanaf `file://` kan het niet geladen worden).
+- `sleep` wacht met `Atomics.wait`. Een browser staat dat alleen toe in een Worker van een cross-origin-geïsoleerde pagina; voer een programma dat `sleep` gebruikt dus uit in een Worker.
+- Naast wat in paragraaf 3.6 niet kan, zijn bestands- en mapbewerkingen een **compileerfout**. Standaardinvoer leest als leeg en `(command-line-args)` is een lege vector.
 
 ## 4. Dumps
 

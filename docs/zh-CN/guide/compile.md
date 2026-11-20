@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ 0269bbc25c244db48a107288b49aa6d3cb9da715 -->
+<!-- translated-from: docs/ja/guide/compile.md @ 2951f1d504da73ac227a8215a24999037882fcbc -->
 # 编译
 
 如果不做任何处理，typelisp 程序由解释器执行。除此之外，还有两种编译为本机代码的方法，以及一种保存环境的方法。
@@ -174,7 +174,7 @@ fib(25) = 75025
 ```
 
 - 需要准备，且只能用在仓库中构建的调试版 `typl`。
-  先用 rustup 执行 `rustup target add wasm32-wasip1`，再在仓库中执行 `scripts/build-wasm-runtime.sh`。
+  先用 rustup 执行 `rustup target add wasm32-wasip1 wasm32-unknown-unknown`，再在仓库中执行 `scripts/build-wasm-runtime.sh`。这也同时完成了 3.7 节的准备。
 - 模块的行为与可执行文件相同：标准输出、标准错误和退出码、`(command-line-args)`、
   文件读写、`throw`/`catch`/`panic`、任务、通道和 `sleep`，以及 `eval` 都可以使用。
   任务在一个线程上依次执行。文件只能在运行环境向模块公开的目录中读写
@@ -184,6 +184,29 @@ fib(25) = 75025
   TLS、名称解析）、操作系统线程（`Thread`）、C 函数（`defffi`）、`get-internal-run-time`, `machine-instance`, `software-version`, `file-author`、
   本地时区，以及 `ed`。
 - `--heap-cells`、`--max-memory`、`--no-cons`、`-O<N>`、`--release` 照常可用。
+
+### 3.7 在浏览器或 Node.js 中运行
+
+加上 `--target wasm32-unknown-unknown` 后，`typl -c` 生成由 JavaScript 加载并运行的 WebAssembly 模块。在模块（`hello.wasm`）旁边的同一文件夹中，还会生成加载并运行它的 JavaScript（`hello.mjs`）。准备工作与 3.6 节相同。
+
+```sh
+$ typl -c hello.typl --target wasm32-unknown-unknown   # 生成 hello.wasm 和 hello.mjs
+$ node hello.mjs                                       # 用 Node.js 运行
+args: #()
+fib(25) = 75025
+```
+
+在其他 JavaScript 中，调用 `hello.mjs` 的 `run`。`write` 以字符串形式接收输出（`fd` 标准输出为 1，标准错误为 2）。`run` 的值是退出码。
+
+```js
+import { run } from './hello.mjs';
+const code = await run({ write: (fd, text) => { /* 例如显示在页面上 */ } });
+```
+
+- 不传 `write` 时，Node.js 输出到标准输出和标准错误，浏览器则逐行输出到控制台。
+- 在浏览器中，请通过 HTTP 从与 `hello.mjs` 相同的位置提供 `hello.wasm`（无法从 `file://` 加载）。
+- `sleep` 用 `Atomics.wait` 等待。浏览器只允许在跨源隔离页面的 Worker 中使用它，因此使用 `sleep` 的程序请在 Worker 中运行。
+- 除 3.6 节中不能使用的之外，文件和目录操作也是**编译错误**。标准输入读作空，`(command-line-args)` 是空向量。
 
 ## 4. 转储
 

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ 0269bbc25c244db48a107288b49aa6d3cb9da715 -->
+<!-- translated-from: docs/ja/guide/compile.md @ 2951f1d504da73ac227a8215a24999037882fcbc -->
 # Compilación
 
 Si no se hace nada más, los programas de typelisp se ejecutan en el intérprete. Además hay dos formas de
@@ -186,7 +186,7 @@ fib(25) = 75025
 ```
 
 - Requiere preparación y solo funciona con una compilación de depuración de `typl` hecha en el repositorio.
-  Ejecute `rustup target add wasm32-wasip1` con rustup y luego `scripts/build-wasm-runtime.sh` en el repositorio.
+  Ejecute `rustup target add wasm32-wasip1 wasm32-unknown-unknown` con rustup y luego `scripts/build-wasm-runtime.sh` en el repositorio. Esto también prepara la sección 3.7.
 - El módulo se comporta como el ejecutable: salida estándar, error estándar y código de salida, `(command-line-args)`,
   lectura y escritura de archivos, `throw`/`catch`/`panic`, tareas, canales y `sleep`, y `eval` funcionan.
   Las tareas se ejecutan una tras otra en un solo hilo. Solo se pueden leer y escribir archivos dentro de los
@@ -196,6 +196,29 @@ fib(25) = 75025
   TLS, resolución de nombres), hilos del sistema (`Thread`), funciones de C (`defffi`), `get-internal-run-time`, `machine-instance`, `software-version`, `file-author`,
   la zona horaria local ni `ed`.
 - `--heap-cells`, `--max-memory`, `--no-cons`, `-O<N>` y `--release` funcionan igual que para un ejecutable.
+
+### 3.7 Ejecutar en un navegador o en Node.js
+
+Con `--target wasm32-unknown-unknown`, `typl -c` crea un módulo WebAssembly que se carga y ejecuta desde JavaScript. Junto al módulo (`hello.wasm`), en la misma carpeta, se crea el JavaScript que lo carga y ejecuta (`hello.mjs`). La preparación es la misma que en la sección 3.6.
+
+```sh
+$ typl -c hello.typl --target wasm32-unknown-unknown   # crea hello.wasm y hello.mjs
+$ node hello.mjs                                       # ejecutarlo con Node.js
+args: #()
+fib(25) = 75025
+```
+
+Desde otro JavaScript, llame a `run` de `hello.mjs`. `write` recibe la salida como texto (`fd` es 1 para la salida estándar y 2 para el error estándar). El valor de `run` es el código de salida.
+
+```js
+import { run } from './hello.mjs';
+const code = await run({ write: (fd, text) => { /* mostrarlo en la página, por ejemplo */ } });
+```
+
+- Sin `write`, Node.js escribe en la salida estándar y el error estándar, y un navegador en la consola, línea a línea.
+- En un navegador, sirva `hello.wasm` por HTTP desde el mismo lugar que `hello.mjs` (no se puede cargar desde `file://`).
+- `sleep` espera con `Atomics.wait`. Un navegador solo lo permite dentro de un Worker de una página con aislamiento de origen cruzado, así que ejecute en un Worker los programas que usan `sleep`.
+- Además de lo que no se puede usar en la sección 3.6, las operaciones con archivos y directorios son un **error de compilación**. La entrada estándar se lee como vacía y `(command-line-args)` es un vector vacío.
 
 ## 4. Volcados
 

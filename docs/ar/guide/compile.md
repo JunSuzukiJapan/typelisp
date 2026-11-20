@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ 0269bbc25c244db48a107288b49aa6d3cb9da715 -->
+<!-- translated-from: docs/ja/guide/compile.md @ 2951f1d504da73ac227a8215a24999037882fcbc -->
 # الترجمة
 
 إذا لم تفعل شيئًا آخر فإن برامج typelisp تعمل في المفسِّر (interpreter). وإضافة إلى ذلك توجد طريقتان
@@ -184,7 +184,7 @@ fib(25) = 75025
 ```
 
 - يحتاج هذا إلى تحضير، ولا يعمل إلا مع نسخة تصحيح (debug) من `typl` مبنية في المستودع.
-  نفّذ `rustup target add wasm32-wasip1` عبر rustup، ثم نفّذ `scripts/build-wasm-runtime.sh` في المستودع.
+  نفّذ `rustup target add wasm32-wasip1 wasm32-unknown-unknown` عبر rustup، ثم نفّذ `scripts/build-wasm-runtime.sh` في المستودع. وهذا يُعِدّ أيضًا للقسم 3.7.
 - تتصرف الوحدة كما يتصرف الملف التنفيذي: المخرج القياسي والخطأ القياسي ورمز الخروج، و`(command-line-args)`،
   وقراءة الملفات وكتابتها، و`throw`/`catch`/`panic`، والمهام والقنوات و`sleep`، و`eval` كلها تعمل.
   تعمل المهام واحدة بعد الأخرى في خيط واحد. ولا يمكن قراءة الملفات وكتابتها إلا داخل المجلدات
@@ -194,6 +194,29 @@ fib(25) = 75025
   وTLS وتحليل الأسماء)، وخيوط نظام التشغيل (`Thread`)، ودوال C (`defffi`)، و`get-internal-run-time`, `machine-instance`, `software-version`, `file-author`،
   والمنطقة الزمنية المحلية، و`ed`.
 - تعمل `--heap-cells` و`--max-memory` و`--no-cons` و`-O<N>` و`--release` كما تعمل مع الملف التنفيذي.
+
+### 3.7 التشغيل في متصفح أو في Node.js
+
+مع `--target wasm32-unknown-unknown` يُنشئ `typl -c` وحدة WebAssembly تُحمَّل وتُشغَّل من JavaScript. وبجانب الوحدة (`hello.wasm`) في المجلد نفسه، يُنشئ ملف JavaScript الذي يحمّلها ويشغّلها (`hello.mjs`). والتحضير هو نفسه كما في القسم 3.6.
+
+```sh
+$ typl -c hello.typl --target wasm32-unknown-unknown   # يُنشئ hello.wasm وhello.mjs
+$ node hello.mjs                                       # التشغيل بـ Node.js
+args: #()
+fib(25) = 75025
+```
+
+من شيفرة JavaScript أخرى، استدعِ `run` من `hello.mjs`. تتلقى `write` المخرجات نصًّا (`fd` هو 1 للمخرج القياسي و2 للخطأ القياسي). وقيمة `run` هي رمز الخروج.
+
+```js
+import { run } from './hello.mjs';
+const code = await run({ write: (fd, text) => { /* اعرضه في الصفحة مثلًا */ } });
+```
+
+- بدون `write` يكتب Node.js إلى المخرج القياسي والخطأ القياسي، ويكتب المتصفح إلى وحدة التحكم سطرًا سطرًا.
+- في المتصفح، قدّم `hello.wasm` عبر HTTP من المكان نفسه الذي فيه `hello.mjs` (لا يمكن تحميله من `file://`).
+- ينتظر `sleep` بواسطة `Atomics.wait`. ولا يسمح المتصفح بذلك إلا داخل Worker في صفحة معزولة عبر الأصول، لذا شغّل البرنامج الذي يستخدم `sleep` في Worker.
+- إضافة إلى ما لا يمكن استخدامه في القسم 3.6، تكون عمليات الملفات والمجلدات **خطأ ترجمة**. ويُقرأ الإدخال القياسي فارغًا، و`(command-line-args)` متجه فارغ.
 
 ## 4. ملفات الـ dump
 
