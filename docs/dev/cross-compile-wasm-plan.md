@@ -92,6 +92,16 @@ typl -c SOURCE [-o OUTPUT] [--target TRIPLE] [--heap-cells N] [--no-cons] [--max
 - `.wasm` と一緒に、読み込んで実行する最小限の JS を出す。
 - テスト: `node` で実行して出力を比べる。
 
+設計（実装前）:
+
+- このターゲットの std は、標準出力・標準エラーへの書き込みを捨て、`Instant::now`/`SystemTime::now`/`thread::sleep` は panic、`process::exit` は trap、`env::args` は空、ファイルは常に `Err`。libc も無い（`mem_limit` の `write`/`_exit`、`isatty` が通らない）。
+- 窓口を 1 つ作る: `typelisp_mem::host`。標準出力・標準エラーへの書き込み、終了、時刻（単調時刻と UNIX 時刻）、眠る。wasm32-unknown-unknown 以外は std に渡すだけ、このターゲットでは import モジュール `typelisp` の関数を呼ぶ。新しいクレートにしないのは、公開するクレートの並びを変えないため。最下層の `typelisp-mem` なら全クレートから使える。
+- 置き換えるもの: ランタイムの `eprintln!`（fatal、panic/throw の報告）、`Backend::Stdout`/`Stderr` の書き込み、`Instant` はスケジューラ全体で `host::Instant` に、`SystemTime` は `host::unix_time`、`sleep` は `host::sleep`、`exit` は `host::exit`。Rust 自身の panic は panic hook で `host` に書く。
+- import: `write(fd, ptr, len)`、`exit(code)`（JS は例外を投げて wasm から抜ける）、`now() -> f64`（ミリ秒、単調）、`unix_time() -> f64`、`sleep(ms)`（node と Worker では `Atomics.wait` で本当に待つ）。
+- 入口: crt が無いので、`main` を `typelisp_main` として export し、`--no-entry` でリンクする。JS が呼んで戻り値を終了コードにする。
+- 標準入力は読めば入力の終わり、`(command-line-args)` は空。コンパイル時に断るのは、wasip1 の表に加えて、ファイルとディレクトリの操作。
+- リンク: crt1/libc 無しで `wasm-ld --no-entry --export=typelisp_main`。ランタイムは `scripts/build-wasm-runtime.sh` が両方のターゲットを作る。
+
 ## 必要なツール
 
 - `rustup target add wasm32-wasip1 wasm32-unknown-unknown`

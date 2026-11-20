@@ -8,18 +8,25 @@ fn main() {
 
 // `<target dir>/<profile>`, where this build's artifacts go — the debug `typl`
 // links `typelisp-front`'s staticlib from there (`compile::aot::link_archive`).
-// Read from `OUT_DIR` (`<target dir>/<profile>/build/<pkg>-<hash>/out`) rather
-// than put together from `CARGO_MANIFEST_DIR`, so a `CARGO_TARGET_DIR` or a
-// `--target` is followed. Cargo does not document that shape, so anything
+// Read from `OUT_DIR` rather than put together from `CARGO_MANIFEST_DIR`, so a
+// `CARGO_TARGET_DIR` or a `--target` is followed. Cargo does not document its
+// shape, and it has had two: `<target dir>/<profile>/build/<pkg>-<hash>/out`,
+// and `<target dir>/<profile>/build/<pkg>/<hash>/out` from Rust 1.100. Anything
 // else stops the build instead of naming a folder the archive is not in.
 fn profile_dir() {
     let out_dir = std::path::PathBuf::from(std::env::var("OUT_DIR").expect("cargo sets OUT_DIR"));
-    let build = out_dir.parent().and_then(|p| p.parent());
+    fn is_build(p: Option<&std::path::Path>) -> Option<&std::path::Path> {
+        p.filter(|p| p.file_name() == Some("build".as_ref()))
+    }
+    let unit = out_dir.parent().filter(|_| out_dir.file_name() == Some("out".as_ref()));
+    let build = unit
+        .and_then(|u| is_build(u.parent()).or_else(|| is_build(u.parent().and_then(|p| p.parent()))));
     let dir = match build {
-        Some(build) if out_dir.file_name() == Some("out".as_ref()) && build.file_name() == Some("build".as_ref()) => {
-            build.parent().expect("`build` has a parent")
-        }
-        _ => panic!("OUT_DIR `{}` is not `<target dir>/<profile>/build/<pkg>/out`", out_dir.display()),
+        Some(build) => build.parent().expect("`build` has a parent"),
+        None => panic!(
+            "OUT_DIR `{}` is neither `<target dir>/<profile>/build/<pkg>-<hash>/out` nor `<target dir>/<profile>/build/<pkg>/<hash>/out`",
+            out_dir.display()
+        ),
     };
     println!("cargo:rustc-env=TYPELISP_PROFILE_DIR={}", dir.display());
 }
