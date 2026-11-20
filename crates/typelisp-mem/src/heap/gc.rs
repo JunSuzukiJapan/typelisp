@@ -417,11 +417,11 @@ impl Heap {
                     .filter(|v| v.thread != me && v.state.load(Ordering::SeqCst) == RUNNING)
                     .map(|v| v.name.as_str())
                     .collect();
-                eprintln!(
+                crate::host::eprintln(format_args!(
                     "gc: still waiting after {:?} for {} to stop — a thread blocked without `Heap::native`?",
                     WATCHDOG,
                     names.join(", ")
-                );
+                ));
             }
         }
         let session_roots: Vec<Value> =

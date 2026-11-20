@@ -307,6 +307,9 @@ pub enum Target {
     Host,
     /// `wasm32-wasip1`: a WebAssembly module for a WASI (preview 1) host.
     Wasip1,
+    /// `wasm32-unknown-unknown`: a WebAssembly module that imports what it
+    /// needs of its host from JavaScript, with the JavaScript that loads it.
+    Wasm32Unknown,
 }
 
 impl Target {
@@ -314,7 +317,20 @@ impl Target {
     pub fn parse(name: &str) -> Result<Target, String> {
         match name {
             "wasm32-wasip1" => Ok(Target::Wasip1),
-            _ => Err(format!("--target: unknown target `{}` (the one there is: wasm32-wasip1)", name)),
+            "wasm32-unknown-unknown" => Ok(Target::Wasm32Unknown),
+            _ => Err(format!(
+                "--target: unknown target `{}` (the ones there are: wasm32-wasip1, wasm32-unknown-unknown)",
+                name
+            )),
+        }
+    }
+
+    /// The target triple, as `--target` spells it.
+    pub fn name(self) -> &'static str {
+        match self {
+            Target::Host => "host",
+            Target::Wasip1 => "wasm32-wasip1",
+            Target::Wasm32Unknown => "wasm32-unknown-unknown",
         }
     }
 }
@@ -731,18 +747,23 @@ pub fn compile_file_with(source_path: &str, output_path: &str, options: &BuildOp
             })
             .and_then(|()| match options.target {
                 Target::Host => write_executable(&m, output_path, &link_libraries, &items),
-                Target::Wasip1 => {
+                Target::Wasip1 | Target::Wasm32Unknown => {
+                    let unavailable = match options.target {
+                        Target::Wasip1 => crate::compile::externs::wasm_unavailable,
+                        _ => crate::compile::externs::wasm_unknown_unavailable,
+                    };
                     let entry = m.get_function(ENTRY_POINT_NAME).expect("build_main_wrapper defined `main`");
                     let uses = reach::uses(&m, entry, |name| {
-                        if let Some(what) = crate::compile::externs::wasm_unavailable(name) {
+                        if let Some(what) = unavailable(name) {
                             return Some(what.to_string());
                         }
                         ffi_decls.iter().any(|d| d.c_symbol == name).then(|| format!("the C function `{}`", name))
                     });
                     if !uses.is_empty() {
-                        return Err(reach::report("--target wasm32-wasip1: the program uses what WebAssembly does not have:", &uses));
+                        let header = format!("--target {}: the program uses what the target does not have:", options.target.name());
+                        return Err(reach::report(&header, &uses));
                     }
-                    wasm::write_module(&m, output_path, &items)
+                    wasm::write_module(&m, output_path, &items, options.target)
                 }
             })
     };

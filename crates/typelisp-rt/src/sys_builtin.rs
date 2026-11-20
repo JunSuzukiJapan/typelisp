@@ -122,12 +122,9 @@ pub fn get_universal_time() -> i64 {
     const UNIX_TO_CL_EPOCH_SECS: i64 = 2_208_988_800;
     // A clock set before 1970 reads as negative Unix seconds, rounded down
     // like every other instant.
-    let unix_secs = match std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH) {
+    let unix_secs = match typelisp_mem::host::unix_time() {
         Ok(d) => d.as_secs() as i64,
-        Err(before) => {
-            let d = before.duration();
-            -(d.as_secs() as i64) - i64::from(d.subsec_nanos() > 0)
-        }
+        Err(d) => -(d.as_secs() as i64) - i64::from(d.subsec_nanos() > 0),
     };
     unix_secs + UNIX_TO_CL_EPOCH_SECS
 }
@@ -141,8 +138,8 @@ pub fn get_universal_time() -> i64 {
 /// and a compiled call comparable: `(time ...)` around a compiled body still
 /// subtracts two readings off one clock.
 pub fn get_internal_real_time() -> i64 {
-    static START: std::sync::OnceLock<std::time::Instant> = std::sync::OnceLock::new();
-    let start = START.get_or_init(std::time::Instant::now);
+    static START: std::sync::OnceLock<typelisp_mem::host::Instant> = std::sync::OnceLock::new();
+    let start = START.get_or_init(typelisp_mem::host::Instant::now);
     start.elapsed().as_micros() as i64
 }
 
@@ -492,10 +489,17 @@ pub fn ed_open(heap: &mut Heap, path: &str, line: i64) -> Value {
 /// `isatty` and not a guess from an environment variable: this is the actual
 /// question, and `libc` is already a dependency of this crate.
 pub fn stdin_is_tty() -> bool {
+    // No standard input to be a terminal: `wasm32-unknown-unknown`'s reads as
+    // empty (`typelisp_mem::host`).
+    #[cfg(all(target_family = "wasm", target_os = "unknown"))]
+    return false;
     // SAFETY: `isatty` reads a file descriptor's type and touches no memory.
     // 0 is standard input, which every process has (or does not, in which case
     // `isatty` answers 0 — the same answer, for the same reason).
-    unsafe { libc::isatty(0) == 1 }
+    #[cfg(not(all(target_family = "wasm", target_os = "unknown")))]
+    unsafe {
+        libc::isatty(0) == 1
+    }
 }
 
 // ---- The compiled-code edge -------------------------------------------
@@ -611,7 +615,7 @@ pub fn sleep(heap: &mut Heap, secs: f64) -> Result<(), String> {
     if !(secs >= 0.0) {
         return Err(format!("sleep: {} is not a non-negative number of seconds", secs));
     }
-    heap.native(|| std::thread::sleep(std::time::Duration::from_secs_f64(secs)));
+    heap.native(|| typelisp_mem::host::sleep(std::time::Duration::from_secs_f64(secs)));
     Ok(())
 }
 
@@ -840,5 +844,5 @@ pub unsafe extern "C" fn rt_exit(args: *const i64, argc: u32) -> i64 {
     if argc < 1 {
         fatal("rt_exit: expected 1 argument");
     }
-    std::process::exit(*args as i32)
+    typelisp_mem::host::exit(*args as i32)
 }

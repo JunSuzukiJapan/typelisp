@@ -186,7 +186,7 @@ pub fn load_with(
     while let Some((v, _)) = forms.next_form(heap).expect("core macros: read failed") {
         let tl = chk.check_form(heap, &*interp, v).expect("core macros: check failed");
         for w in chk.take_warnings() {
-            eprintln!("{}", w);
+            typelisp_mem::host::eprintln(format_args!("{}", w));
         }
         on_checked(heap, tl);
         interp.exec(heap, tl).expect("core macros: eval failed");

@@ -322,7 +322,7 @@ impl<'a, B: TaskBody> Locked<'a, B> {
         {
             let _ = (changed, guard);
             match until {
-                Some(d) => heap.native(|| std::thread::sleep(d)),
+                Some(d) => heap.native(|| typelisp_mem::host::sleep(d)),
                 None => typelisp_abi::fatal("every task is waiting, and on WebAssembly there is no other thread to wake one"),
             }
         }
@@ -457,7 +457,7 @@ fn next<B: TaskBody>(shared: &SchedShared<B>, heap: &mut Heap, who: Who) -> Next
                 SchedError::Internal("scheduler: every task is blocked and none can proceed".to_string()).into()
             ));
         }
-        let until = deadline.map(|d| d.saturating_duration_since(std::time::Instant::now()));
+        let until = deadline.map(|d| d.saturating_duration_since(typelisp_mem::host::Instant::now()));
         s = if io_waiting && !s.guard.polling { s.poll(heap, until) } else { s.wait(heap, until) };
     }
 }

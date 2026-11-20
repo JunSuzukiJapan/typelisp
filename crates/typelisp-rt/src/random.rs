@@ -31,10 +31,9 @@ pub fn xorshift64_step(x: u64) -> u64 {
 /// Public for the same reason [`xorshift64_step`] is: the interpreter's
 /// `eval_make_random_state_fresh` calls it rather than keeping a second copy.
 pub fn fresh_random_seed() -> u64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
+    typelisp_mem::host::unix_time()
         // A clock set before 1970 is as good a source of entropy as any.
-        .map_or_else(|before| before.duration().as_nanos() as u64, |d| d.as_nanos() as u64)
+        .map_or_else(|before| before.as_nanos() as u64, |d| d.as_nanos() as u64)
         | 1
 }
 

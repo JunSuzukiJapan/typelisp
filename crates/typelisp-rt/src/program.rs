@@ -37,6 +37,7 @@ pub const DEFAULT_AOT_HEAP_CAPACITY: usize = 1 << 16;
 /// readable `i64`s.
 #[no_mangle]
 pub unsafe extern "C" fn rt_heap_init(args: *const i64, argc: u32) -> i64 {
+    typelisp_mem::host::install_panic_report();
     let capacity = if argc >= 1 { *args as usize } else { DEFAULT_AOT_HEAP_CAPACITY };
     if argc >= 2 && *args.add(1) != 0 {
         crate::mem_limit::set_memory_limit(*args.add(1) as usize);
@@ -219,7 +220,7 @@ unsafe fn run_program(program: &Program) -> Result<Value, i64> {
     let threads = match crate::sched::thread_count() {
         Ok(n) => n,
         Err(m) => {
-            eprintln!("error: {}", m);
+            typelisp_mem::host::eprintln(format_args!("error: {}", m));
             return Err(EXIT_CODE_PANIC);
         }
     };
@@ -257,7 +258,7 @@ unsafe fn run_program(program: &Program) -> Result<Value, i64> {
             // reached the entry as a Rust unwind — a task's failure is the
             // program's.
             Err(failure) => {
-                eprintln!("{}", failure);
+                typelisp_mem::host::eprintln(format_args!("{}", failure));
                 Err(EXIT_CODE_PANIC)
             }
         }
@@ -315,7 +316,7 @@ pub unsafe extern "C-unwind" fn rt_drive_body(args: *const i64, argc: u32) -> i6
 pub unsafe fn exit_code(code: i64) -> i64 {
     let Some(payload) = typelisp_abi::take_raised() else { return code };
     if let Some(p) = payload.downcast_ref::<CompiledPanic>() {
-        eprintln!("panic: {}", p.message);
+        typelisp_mem::host::eprintln(format_args!("panic: {}", p.message));
         return EXIT_CODE_PANIC;
     }
     // A `throw` that found no enclosing `catch` anywhere. Reported with the
@@ -323,7 +324,7 @@ pub unsafe fn exit_code(code: i64) -> i64 {
     // say the same thing about the same program.
     if payload.is::<CompiledThrow>() {
         let (tag, _) = take_throw().unwrap_or_else(|| fatal("a compiled throw was raised with no throw in flight"));
-        eprintln!("throw: no enclosing (catch '{}) for this throw", tag.spelling());
+        typelisp_mem::host::eprintln(format_args!("throw: no enclosing (catch '{}) for this throw", tag.spelling()));
         return EXIT_CODE_PANIC;
     }
     fatal("the program entry was left by an unwind that is neither a panic nor a throw")

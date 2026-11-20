@@ -209,8 +209,8 @@ fib(25) = 75025
 ```
 
 - 準備がいります。この機能は、リポジトリでビルドしたデバッグビルドの `typl` でだけ使えます。
-  rustup で `rustup target add wasm32-wasip1` を実行してから、リポジトリで
-  `scripts/build-wasm-runtime.sh` を実行してください。
+  rustup で `rustup target add wasm32-wasip1 wasm32-unknown-unknown` を実行してから、リポジトリで
+  `scripts/build-wasm-runtime.sh` を実行してください（3.7 節の準備も兼ねます）。
 - 実行ファイルと同じに振る舞います。標準出力・標準エラー・終了コード、`(command-line-args)`、
   ファイルの読み書き、`throw`/`catch`/`panic`、タスク・チャネル・`sleep`、`eval` が使えます。
   タスクは 1 つのスレッドで順に実行されます。ファイルは、実行環境がモジュールに見せている
@@ -220,6 +220,35 @@ fib(25) = 75025
   TLS・名前解決）、OS スレッド（`Thread`）、C の関数（`defffi`）、`get-internal-run-time`、
   `machine-instance`、`software-version`、`file-author`、ローカルのタイムゾーン、`ed` です。
 - `--heap-cells`、`--max-memory`、`--no-cons`、`-O<N>`、`--release` はそのまま使えます。
+
+### 3.7 ブラウザや Node.js で動かす
+
+`--target wasm32-unknown-unknown` を付けると、JavaScript から読み込んで実行する WebAssembly の
+モジュールを作ります。モジュール（`hello.wasm`）と一緒に、それを読み込んで実行する JavaScript
+（`hello.mjs`）が同じフォルダにできます。準備は 3.6 節と同じです。
+
+```sh
+$ typl -c hello.typl --target wasm32-unknown-unknown   # hello.wasm と hello.mjs ができる
+$ node hello.mjs                                       # Node.js で実行する
+args: #()
+fib(25) = 75025
+```
+
+ほかの JavaScript からは、`hello.mjs` の `run` を呼びます。`write` には出力が文字列で渡されます
+（`fd` は標準出力が 1、標準エラーが 2）。`run` の値は終了コードです。
+
+```js
+import { run } from './hello.mjs';
+const code = await run({ write: (fd, text) => { /* 画面に出すなど */ } });
+```
+
+- `write` を渡さないと、Node.js では標準出力・標準エラーに、ブラウザではコンソールに 1 行ずつ出します。
+- ブラウザでは、`hello.wasm` を `hello.mjs` と同じ場所から HTTP で配信してください（`file://` からは
+  読み込めません）。
+- `sleep` は `Atomics.wait` で待ちます。ブラウザでは、これが使えるのはクロスオリジン分離された
+  ページの Worker の中だけなので、`sleep` を使うプログラムは Worker で実行してください。
+- 3.6 節で使えないものに加えて、ファイルとディレクトリの操作が**コンパイルエラー**になります。
+  標準入力は空として読まれ、`(command-line-args)` は空のベクタです。
 
 ## 4. ダンプ
 

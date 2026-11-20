@@ -130,7 +130,7 @@ pub fn fixnum_fits(n: i64) -> bool {
 /// rather than depended on, because `typelisp-abi` is the crate above this
 /// one.
 fn corrupt(msg: &str) -> ! {
-    eprintln!("typelisp runtime error: {}", msg);
+    crate::host::eprintln(format_args!("typelisp runtime error: {}", msg));
     std::process::abort();
 }
 

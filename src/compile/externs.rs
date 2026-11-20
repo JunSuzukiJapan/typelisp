@@ -408,6 +408,27 @@ pub(crate) fn wasm_unavailable(name: &str) -> Option<&'static str> {
     WASM_UNAVAILABLE_SHIMS.iter().find(|(shim, _)| *shim == name).map(|(_, what)| *what)
 }
 
+/// The shims that need a file system, which `wasm32-unknown-unknown` has not
+/// got (`typelisp_mem::host` gives it standard output and error only): opening
+/// a file, and every `rt_file_` shim ([`NO_FILE_SYSTEM_PREFIX`]).
+pub(crate) const NO_FILE_SYSTEM_SHIMS: [(&str, &str); 1] = [("rt_stream_open_file", "opening a file")];
+
+/// The prefix of the shims that ask the file system about a path.
+pub(crate) const NO_FILE_SYSTEM_PREFIX: (&str, &str) = ("rt_file_", "a file or directory operation");
+
+/// What `name` is, when it is a shim a `wasm32-unknown-unknown` module has
+/// not got: a WASI module's ([`wasm_unavailable`]), and the file system
+/// ([`NO_FILE_SYSTEM_SHIMS`]).
+pub(crate) fn wasm_unknown_unavailable(name: &str) -> Option<&'static str> {
+    if let Some(what) = wasm_unavailable(name) {
+        return Some(what);
+    }
+    if name.starts_with(NO_FILE_SYSTEM_PREFIX.0) {
+        return Some(NO_FILE_SYSTEM_PREFIX.1);
+    }
+    NO_FILE_SYSTEM_SHIMS.iter().find(|(shim, _)| *shim == name).map(|(_, what)| *what)
+}
+
 /// The suspension [`needs_interpreter`]'s calls are preceded by —
 /// `call_state::SUSPEND_MAIN`.
 pub(crate) const RT_SUSPEND_MAIN: &str = "rt_suspend_main";
@@ -1417,6 +1438,11 @@ mod cons_making_shim_tests {
             assert!(shims.iter().any(|(n, _)| *n == name), "{} is not in rt_extern_functions", name);
         }
         let prefix = super::WASM_UNAVAILABLE_PREFIX.0;
+        assert!(shims.iter().any(|(n, _)| n.starts_with(prefix)), "no shim starts with {}", prefix);
+        for (name, _) in super::NO_FILE_SYSTEM_SHIMS {
+            assert!(shims.iter().any(|(n, _)| *n == name), "{} is not in rt_extern_functions", name);
+        }
+        let prefix = super::NO_FILE_SYSTEM_PREFIX.0;
         assert!(shims.iter().any(|(n, _)| n.starts_with(prefix)), "no shim starts with {}", prefix);
     }
 

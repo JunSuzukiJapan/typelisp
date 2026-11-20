@@ -20,7 +20,6 @@
 //! program per thread, many per process under `cargo test`.
 
 use std::cell::RefCell;
-use std::io::Write;
 
 use typelisp_mem::{wk, BoxId, Heap, SymRef, TypeId, Value};
 use crate::format::{self, PrintVars, RenderCtx};
@@ -416,10 +415,7 @@ fn write_stdout(heap: &mut Heap, text: &str) -> Result<(), String> {
     // One of the three doors a session's output leaves by; see
     // `typelisp_abi::dribble`'s module docs for the other two.
     typelisp_abi::dribble::note(text);
-    heap.native(|| {
-        let mut out = std::io::stdout();
-        write!(out, "{}", text).and_then(|()| out.flush())
-    })
+    heap.native(|| typelisp_mem::host::write_stdout(text.as_bytes()).and_then(|()| typelisp_mem::host::flush_stdout()))
     .map_err(|e| format!("print: {}", e))
 }
 

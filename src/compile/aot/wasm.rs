@@ -1,11 +1,13 @@
-//! `wasm32-wasip1`: emitting the module as a WebAssembly object and linking
-//! it into a WASI command module with `wasm-ld`.
+//! The WebAssembly targets: emitting the module as a WebAssembly object and
+//! linking it with `wasm-ld` — into a WASI command module for
+//! `wasm32-wasip1`, and for `wasm32-unknown-unknown` into a module whose host
+//! is JavaScript, written out beside it (`wasm_loader.mjs`).
 //!
 //! The module is the one a native executable is made from. Nothing in it
 //! depends on the width of a pointer: a word is an `i64` everywhere, and a
 //! pointer becomes one only through `ptrtoint`/`inttoptr`, which on a 32-bit
-//! target widen and narrow. So the prelude's committed bitcode serves this
-//! target too — it carries no data layout of its own — and the module is
+//! target widen and narrow. So the prelude's committed bitcode serves these
+//! targets too — it carries no data layout of its own — and the module is
 //! given the target's layout here, before the passes run.
 
 use std::fs;
@@ -31,13 +33,22 @@ use crate::CompileTarget;
 /// The runtime reads its arguments from WASI itself, not from `main`.
 const WASI_MAIN: &str = "__main_void";
 
+/// What a `wasm32-unknown-unknown` module exports for its loader to call:
+/// there is no start file, and the answer is the exit code.
+const JS_MAIN: &str = "typelisp_main";
+
+/// The JavaScript written beside a `wasm32-unknown-unknown` module, with
+/// [`LOADER_MODULE_NAME`] standing for the module's file name.
+const LOADER: &str = include_str!("wasm_loader.mjs");
+const LOADER_MODULE_NAME: &str = "__TYPELISP_MODULE__";
+
 /// The stack a native executable's main thread gets, so that recursion runs
 /// as deep on WebAssembly as it does natively.
 const STACK_SIZE: u32 = 8 * 1024 * 1024;
 
-fn target_machine() -> Result<TargetMachine, String> {
+fn target_machine(llvm_triple: &str) -> Result<TargetMachine, String> {
     Target::initialize_webassembly(&InitializationConfig::default());
-    let triple = TargetTriple::create("wasm32-unknown-wasip1");
+    let triple = TargetTriple::create(llvm_triple);
     let target = Target::from_triple(&triple).map_err(|e| e.to_string())?;
     target
         .create_target_machine(
@@ -48,22 +59,37 @@ fn target_machine() -> Result<TargetMachine, String> {
             RelocMode::Static,
             CodeModel::Default,
         )
-        .ok_or_else(|| "failed to create a target machine for wasm32-wasip1".to_string())
+        .ok_or_else(|| format!("failed to create a target machine for {}", llvm_triple))
 }
 
-/// Emits `module` as a WebAssembly object and links it, with the
-/// `wasm32-wasip1` runtime, into a command module at `output_path`. Must be
-/// called with [`crate::compile::COMPILE_LOCK`] held.
-pub(super) fn write_module(module: &Module<'static>, output_path: &str, items: &[CompileTarget]) -> Result<(), String> {
-    let runtime = wasm_runtime_dir()?;
-    let tm = target_machine()?;
+/// Emits `module` as a WebAssembly object and links it, with `target`'s
+/// runtime, into a module at `output_path` — and for
+/// `wasm32-unknown-unknown`, the loader beside it (`output_path` with
+/// `.mjs`). Must be called with [`crate::compile::COMPILE_LOCK`] held.
+pub(super) fn write_module(
+    module: &Module<'static>,
+    output_path: &str,
+    items: &[CompileTarget],
+    target: super::Target,
+) -> Result<(), String> {
+    let (llvm_triple, entry_name) = match target {
+        super::Target::Wasip1 => ("wasm32-unknown-wasip1", WASI_MAIN),
+        super::Target::Wasm32Unknown => ("wasm32-unknown-unknown", JS_MAIN),
+        super::Target::Host => return Err("internal error: write_module called for the host".to_string()),
+    };
+    let loader = match target {
+        super::Target::Wasm32Unknown => Some(loader_path(output_path)?),
+        _ => None,
+    };
+    let runtime = wasm_runtime_dir(target.name())?;
+    let tm = target_machine(llvm_triple)?;
     module.set_triple(&tm.get_triple());
     module.set_data_layout(&tm.get_target_data().get_data_layout());
     module
         .get_function(ENTRY_POINT_NAME)
         .ok_or("internal error: the module has no `main`")?
         .as_global_value()
-        .set_name(WASI_MAIN);
+        .set_name(entry_name);
     split_address_words(module)?;
     crate::compile::codegen_prep::prepare(module)?;
     crate::compile::optimize::run_llvm_passes(module, &tm)?;
@@ -75,11 +101,22 @@ pub(super) fn write_module(module: &Module<'static>, output_path: &str, items: &
         eprintln!("{}", warning);
     }
 
-    let status = Command::new(runtime.join("wasm-ld"))
-        .arg(runtime.join("crt1-command.o"))
-        .arg(&object_path)
-        .arg(runtime.join(STATICLIB_NAME))
-        .arg(runtime.join("libc.a"))
+    let mut link = Command::new(runtime.join("wasm-ld"));
+    match target {
+        super::Target::Wasip1 => {
+            link.arg(runtime.join("crt1-command.o"))
+                .arg(&object_path)
+                .arg(runtime.join(STATICLIB_NAME))
+                .arg(runtime.join("libc.a"));
+        }
+        _ => {
+            link.arg("--no-entry")
+                .arg(format!("--export={}", JS_MAIN))
+                .arg(&object_path)
+                .arg(runtime.join(STATICLIB_NAME));
+        }
+    }
+    let status = link
         .arg("-z")
         .arg(format!("stack-size={}", STACK_SIZE))
         .arg("-o")
@@ -91,7 +128,27 @@ pub(super) fn write_module(module: &Module<'static>, output_path: &str, items: &
     if !status.success() {
         return Err(format!("wasm-ld failed with status {}", status));
     }
+    if let Some((loader, name)) = loader {
+        let text = LOADER.replace(LOADER_MODULE_NAME, &name.replace('\\', "\\\\").replace('\'', "\\'"));
+        fs::write(&loader, text).map_err(|e| format!("failed to write {}: {}", loader.display(), e))?;
+    }
     Ok(())
+}
+
+/// Where the loader for the module at `output_path` goes — `output_path` with
+/// `.mjs`, so the two are found side by side — and the module's file name, by
+/// which the loader finds it.
+fn loader_path(output_path: &str) -> Result<(std::path::PathBuf, String), String> {
+    let module = std::path::Path::new(output_path);
+    let name = module
+        .file_name()
+        .and_then(|n| n.to_str())
+        .ok_or_else(|| format!("{} has no file name to give the loader", output_path))?;
+    let loader = module.with_extension("mjs");
+    if loader == module {
+        return Err(format!("{} ends in .mjs, which is the loader's name; name the module .wasm", output_path));
+    }
+    Ok((loader, name.to_string()))
 }
 
 /// Rewrites every table of words whose initialiser holds an address

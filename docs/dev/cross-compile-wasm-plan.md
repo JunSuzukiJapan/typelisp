@@ -92,7 +92,7 @@ typl -c SOURCE [-o OUTPUT] [--target TRIPLE] [--heap-cells N] [--no-cons] [--max
 - `.wasm` と一緒に、読み込んで実行する最小限の JS を出す。
 - テスト: `node` で実行して出力を比べる。
 
-設計（実装前）:
+実装:
 
 - このターゲットの std は、標準出力・標準エラーへの書き込みを捨て、`Instant::now`/`SystemTime::now`/`thread::sleep` は panic、`process::exit` は trap、`env::args` は空、ファイルは常に `Err`。libc も無い（`mem_limit` の `write`/`_exit`、`isatty` が通らない）。
 - 窓口を 1 つ作る: `typelisp_mem::host`。標準出力・標準エラーへの書き込み、終了、時刻（単調時刻と UNIX 時刻）、眠る。wasm32-unknown-unknown 以外は std に渡すだけ、このターゲットでは import モジュール `typelisp` の関数を呼ぶ。新しいクレートにしないのは、公開するクレートの並びを変えないため。最下層の `typelisp-mem` なら全クレートから使える。
@@ -101,6 +101,9 @@ typl -c SOURCE [-o OUTPUT] [--target TRIPLE] [--heap-cells N] [--no-cons] [--max
 - 入口: crt が無いので、`main` を `typelisp_main` として export し、`--no-entry` でリンクする。JS が呼んで戻り値を終了コードにする。
 - 標準入力は読めば入力の終わり、`(command-line-args)` は空。コンパイル時に断るのは、wasip1 の表に加えて、ファイルとディレクトリの操作。
 - リンク: crt1/libc 無しで `wasm-ld --no-entry --export=typelisp_main`。ランタイムは `scripts/build-wasm-runtime.sh` が両方のターゲットを作る。
+- ローダー: `src/compile/aot/wasm_loader.mjs` を `include_str!` し、モジュールの名前を埋めて `<出力>.mjs` に書く。`node prog.mjs` で実行でき、`run({ write })` で他の JS からも呼べる。Node では `fs.writeSync` で書く（`process.stdout.write` は macOS のパイプで非同期になり、終了の前に失われうる）。ブラウザの既定はコンソールへ 1 行ずつ、最後に改行の無い行も出す。`SharedArrayBuffer` は `sleep` の時に初めて作る（クロスオリジン分離されていないページでは作れないので、sleep しないプログラムを巻き込まない）。
+- 断る表: `externs::wasm_unknown_unavailable` = wasip1 の表 + `NO_FILE_SYSTEM_SHIMS`（`rt_stream_open_file`）+ `rt_file_` の接頭辞。
+- テスト: `tests/aot_wasm_js_test.rs`。import が `typelisp` の 5 つだけであることも確かめる。ブラウザでの実行は未確認（Node のみ）。
 
 ## 必要なツール
 

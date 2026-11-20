@@ -194,7 +194,7 @@ impl Interp {
             // returning — `rt_i64` truncates to `i32` the same way every
             // other `i32`-typed builtin extracts its argument.
             wk::F_EXIT => match rt_i64(&args[0]) {
-                Ok(code) => std::process::exit(code as i32),
+                Ok(code) => typelisp_mem::host::exit(code as i32),
                 Err(e) => Some(Err(e)),
             },
             // `symbol->string`/`intern`: the `symbol`<->`string` bridges.

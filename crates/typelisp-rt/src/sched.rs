@@ -192,7 +192,7 @@ pub enum Waiting {
     /// everything else keeps running, and the program only reaches the OS's
     /// `sleep` when nothing at all is ready, for as long as the nearest
     /// deadline. `after` rides on the same mechanism.
-    Until(std::time::Instant),
+    Until(typelisp_mem::host::Instant),
     /// A `Chan<T>` operation.
     Chan(ChanOp),
     /// `(task ...)` — start a task that applies this closure, and answer with
@@ -233,13 +233,13 @@ pub enum Waiting {
     /// also a sleep, and answers with a `bool`: `true` when the socket
     /// became ready, `false` when the clock ran out first. Without one the
     /// answer is unit, as `sleep`'s is.
-    Io { fd: i32, interest: crate::os::Interest, deadline: Option<std::time::Instant> },
+    Io { fd: i32, interest: crate::os::Interest, deadline: Option<typelisp_mem::host::Instant> },
 }
 
 /// What an `Io` wait answers with once the socket is ready: unit for a
 /// plain `net-wait`, `true` for a `net-wait-for` (whose other answer,
 /// `false`, is the clock's).
-fn io_ready_answer(deadline: Option<std::time::Instant>) -> Value {
+fn io_ready_answer(deadline: Option<typelisp_mem::host::Instant>) -> Value {
     if deadline.is_some() {
         Value::Bool(true)
     } else {
@@ -793,7 +793,7 @@ impl<B: TaskBody> Scheduler<B> {
             // A deadline that has already passed is not a wait at all — which
             // is what makes `(sleep 0.0)` CL's yield-ish zero, with no special
             // case for it anywhere.
-            Waiting::Until(t) => (*t <= std::time::Instant::now()).then_some(Ok(Value::Empty)),
+            Waiting::Until(t) => (*t <= typelisp_mem::host::Instant::now()).then_some(Ok(Value::Empty)),
             Waiting::Task(on) => match self.slots.get(on.0) {
                 Some(Slot::Done(v)) => Some(Ok(*v)),
                 Some(Slot::Parked(_)) | Some(Slot::Running) | Some(Slot::Blocked(..)) => None,
@@ -827,7 +827,7 @@ impl<B: TaskBody> Scheduler<B> {
                 match crate::os::poll_ready(&[(*fd, *interest)], Some(std::time::Duration::ZERO)) {
                     Ok(ready) if ready.iter().any(|(_, r)| *r) => Some(Ok(io_ready_answer(*deadline))),
                     Ok(_) => match deadline {
-                        Some(t) if *t <= std::time::Instant::now() => Some(Ok(Value::Bool(false))),
+                        Some(t) if *t <= typelisp_mem::host::Instant::now() => Some(Ok(Value::Bool(false))),
                         _ => None,
                     },
                     Err(_) => Some(Ok(io_ready_answer(*deadline))),
@@ -1173,7 +1173,7 @@ impl<B: TaskBody> Scheduler<B> {
         if self.sleeping == 0 && self.io_waiting == 0 {
             return;
         }
-        let now = std::time::Instant::now();
+        let now = typelisp_mem::host::Instant::now();
         let mut due = Vec::new();
         for i in 0..self.slots.len() {
             // A socket wait with a deadline is also a sleep: when the clock
@@ -1273,7 +1273,7 @@ impl<B: TaskBody> Scheduler<B> {
     ///
     /// `None` means nobody is: with nothing ready either, every remaining task
     /// is waiting on something that will never happen.
-    fn earliest_deadline(&self) -> Option<std::time::Instant> {
+    fn earliest_deadline(&self) -> Option<typelisp_mem::host::Instant> {
         if self.sleeping == 0 && self.io_waiting == 0 {
             return None;
         }
@@ -1295,7 +1295,7 @@ struct IoWait {
     slot: usize,
     fd: i32,
     interest: crate::os::Interest,
-    deadline: Option<std::time::Instant>,
+    deadline: Option<typelisp_mem::host::Instant>,
 }
 
 /// `#{ARM VALUE}` — what a `select` answers with: field 0 is the arm index,

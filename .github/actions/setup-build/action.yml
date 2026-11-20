@@ -83,12 +83,13 @@ runs:
         fi
         retry rustup toolchain install "${{ inputs.rust-version }}" --profile minimal
         rustup default "${{ inputs.rust-version }}"
-        # The runtime `typl -c --target wasm32-wasip1` links
-        # (scripts/build-wasm-runtime.sh) is built for this target.
-        retry rustup target add wasm32-wasip1
+        # The runtimes `typl -c --target <triple>` links
+        # (scripts/build-wasm-runtime.sh) are built for these targets.
+        retry rustup target add wasm32-wasip1 wasm32-unknown-unknown
 
-    # What the wasm32-wasip1 tests run the modules they build under
-    # (scripts/run-wasi.mjs); the containers have none.
+    # What the WebAssembly tests run the modules they build under
+    # (scripts/run-wasi.mjs, and the loader typl writes beside a
+    # wasm32-unknown-unknown module); the containers have none.
     - uses: actions/setup-node@v4
       with:
         node-version: 24

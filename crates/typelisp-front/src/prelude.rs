@@ -7692,7 +7692,7 @@ pub fn load_interpreted_with(
         on_read(heap, v);
         let tl = chk.check_form(heap, &*interp, v).expect("prelude: check failed");
         for w in chk.take_warnings() {
-            eprintln!("{}", w);
+            typelisp_mem::host::eprintln(format_args!("{}", w));
         }
         on_checked(heap, tl);
         interp.exec(heap, tl).expect("prelude: eval failed");

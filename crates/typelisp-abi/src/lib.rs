@@ -148,7 +148,7 @@ pub unsafe fn active_heap() -> &'static mut Heap {
 /// 2026-08-17; what is left here is the ~190 sites that genuinely mean the
 /// runtime is broken.
 pub fn fatal(msg: &str) -> ! {
-    eprintln!("typelisp runtime error: {}", msg);
+    typelisp_mem::host::eprintln(format_args!("typelisp runtime error: {}", msg));
     std::process::abort();
 }
 

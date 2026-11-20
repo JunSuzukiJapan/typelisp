@@ -218,7 +218,7 @@ fn a_socket_is_refused_at_compile_time_with_the_chain_that_reaches_it() {
   (match (tcp-listen "127.0.0.1" 0) ((Ok _) (println "ok")) ((Err _) (println "err"))))
 "#,
     );
-    assert!(err.contains("--target wasm32-wasip1: the program uses what WebAssembly does not have:"), "{}", err);
+    assert!(err.contains("--target wasm32-wasip1: the program uses what the target does not have:"), "{}", err);
     assert!(err.contains("a socket (reached by main -> prog::main -> std::net::tcp-listen"), "{}", err);
 }
 

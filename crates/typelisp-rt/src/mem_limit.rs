@@ -112,19 +112,29 @@ fn exceeded(size: usize, in_use: usize, limit: usize) -> ! {
     ] {
         len += part.write(&mut buf[len..]);
     }
+    // The host's own write and exit, which allocate nothing on this side.
+    #[cfg(all(target_family = "wasm", target_os = "unknown"))]
+    {
+        let _ = typelisp_mem::host::write_stderr(&buf[..len]);
+        typelisp_mem::host::exit(crate::program::EXIT_CODE_PANIC as i32)
+    }
     // Straight to the descriptor: `std::io::stderr()`'s lock asks for the
     // current thread's identity, whose first use allocates — which comes
     // back here. Likewise `process::exit` runs the C library's exit handlers,
     // which may allocate; `_exit` ends the process at once.
+    #[cfg(not(all(target_family = "wasm", target_os = "unknown")))]
     let mut written = 0;
-    while written < len {
-        let n = unsafe { libc::write(2, buf[written..len].as_ptr().cast(), len - written) };
-        if n <= 0 {
-            break;
+    #[cfg(not(all(target_family = "wasm", target_os = "unknown")))]
+    {
+        while written < len {
+            let n = unsafe { libc::write(2, buf[written..len].as_ptr().cast(), len - written) };
+            if n <= 0 {
+                break;
+            }
+            written += n as usize;
         }
-        written += n as usize;
+        unsafe { libc::_exit(crate::program::EXIT_CODE_PANIC as libc::c_int) }
     }
-    unsafe { libc::_exit(crate::program::EXIT_CODE_PANIC as libc::c_int) }
 }
 
 enum Part {

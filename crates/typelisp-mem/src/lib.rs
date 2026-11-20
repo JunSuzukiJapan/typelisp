@@ -11,6 +11,7 @@
 
 pub mod errors;
 pub mod heap;
+pub mod host;
 pub mod int_arg;
 pub mod name_view;
 pub mod names;

@@ -62,9 +62,10 @@ Options:
                          bytes (K, M or G may follow); more is a runtime error
   --no-cons              after -c: the executable has no cons cells; a program
                          that needs them is a compile error
-  --target TARGET        after -c: build for TARGET instead of this machine;
-                         wasm32-wasip1 makes a WASI module (default OUTPUT:
-                         SOURCE with .wasm)
+  --target TARGET        after -c: build for TARGET instead of this machine:
+                         wasm32-wasip1 makes a WASI module, wasm32-unknown-unknown
+                         a module and the JavaScript that runs it (default
+                         OUTPUT: SOURCE with .wasm)
   --feature NAME         add a feature for #+/#- (repeatable)
   --on-redefine=POLICY   on redefinition: warn (default), error or silent
   --remove-lib           remove the library this typl wrote for compiled
@@ -236,7 +237,7 @@ fn compile_command(flag: &str, args: &[String], heap_cells: Option<usize>) -> i3
             options.no_cons = true;
         } else if let Some(v) = flag_value(a, "--target", &mut it) {
             let Some(v) = v else {
-                eprintln!("--target: needs a target (wasm32-wasip1)");
+                eprintln!("--target: needs a target (wasm32-wasip1 or wasm32-unknown-unknown)");
                 return 1;
             };
             match typelisp::compile::aot::Target::parse(v) {
@@ -291,7 +292,7 @@ fn compile_command(flag: &str, args: &[String], heap_cells: Option<usize>) -> i3
         Some(o) => o,
         None if source.extension().is_some_and(|e| e == "typl") => match options.target {
             typelisp::compile::aot::Target::Host => source.with_extension(""),
-            typelisp::compile::aot::Target::Wasip1 => source.with_extension("wasm"),
+            typelisp::compile::aot::Target::Wasip1 | typelisp::compile::aot::Target::Wasm32Unknown => source.with_extension("wasm"),
         },
         None => {
             eprintln!("{}: {} does not end in .typl, so give the executable's name with -o", flag, source.display());

@@ -13,7 +13,7 @@ use super::{chan_id_of, task_id_of, ChanOp, SchedError, SelectOp, Waiting, Wake}
 /// two refuse the same handles in the same words. A closed or non-socket
 /// handle is a program error — the stream was closed and then waited on —
 /// and panics rather than parking a task nothing will ever wake.
-pub fn io_wait(heap: &mut Heap, argv: &[Value], deadline: Option<std::time::Instant>) -> Result<Waiting, SchedError> {
+pub fn io_wait(heap: &mut Heap, argv: &[Value], deadline: Option<typelisp_mem::host::Instant>) -> Result<Waiting, SchedError> {
     let handle = match argv.first() {
         Some(Value::Int(h)) => *h,
         other => return Err(SchedError::Internal(format!("net-wait: {:?} is not a stream handle", other))),
@@ -30,13 +30,13 @@ pub fn io_wait(heap: &mut Heap, argv: &[Value], deadline: Option<std::time::Inst
 
 /// `secs` from now, with `sleep`'s refusals: negative or NaN is not a
 /// duration, and neither is one the clock cannot hold.
-pub fn io_deadline(secs: f64) -> Result<std::time::Instant, SchedError> {
+pub fn io_deadline(secs: f64) -> Result<typelisp_mem::host::Instant, SchedError> {
     if !(secs >= 0.0) {
         return Err(SchedError::Panic(format!("net-wait-for: {} is not a non-negative number of seconds", secs)));
     }
     let d = std::time::Duration::try_from_secs_f64(secs)
         .map_err(|_| SchedError::Panic(format!("net-wait-for: {} is longer than this can wait", secs)))?;
-    Ok(std::time::Instant::now() + d)
+    Ok(typelisp_mem::host::Instant::now() + d)
 }
 
 /// `(sleep secs)` as a wait, with the refusals CL makes: a negative or NaN
@@ -49,7 +49,7 @@ pub fn sleep_wait(secs: f64) -> Result<Waiting, SchedError> {
     }
     let d = std::time::Duration::try_from_secs_f64(secs)
         .map_err(|_| SchedError::Panic(format!("sleep: {} is longer than this can wait", secs)))?;
-    Ok(Waiting::Until(std::time::Instant::now() + d))
+    Ok(Waiting::Until(typelisp_mem::host::Instant::now() + d))
 }
 
 /// The type a compiled suspension site appended as its second word — the

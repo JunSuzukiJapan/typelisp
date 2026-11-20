@@ -317,7 +317,7 @@ unsafe fn run_program_result(
         // encoded as is not an exit code.
         Ok(_) => Ok(typelisp_rt::EXIT_CODE_SUCCESS),
         Err(e) => {
-            eprintln!("{}", e);
+            typelisp_mem::host::eprintln(format_args!("{}", e));
             Err(typelisp_rt::EXIT_CODE_PANIC)
         }
     }

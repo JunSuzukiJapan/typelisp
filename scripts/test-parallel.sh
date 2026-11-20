@@ -185,11 +185,11 @@ export TEST_TIMEOUT
 
 echo "=== cargo build -p typelisp-front (staticlib for the AOT tests) ==="
 cargo build -p typelisp-front || { echo "FAILED: building typelisp-front's staticlib"; exit 1; }
-# The same runtime built for wasm32-wasip1, which `aot_wasm_test` links its
-# modules with (`compile::aot::wasm_runtime_dir`); not made by any cargo
+# The same runtime built for the WebAssembly targets, which `aot_wasm_test`
+# and `aot_wasm_js_test` link their modules with (`compile::aot::wasm_runtime_dir`); not made by any cargo
 # invocation here, for the same reason as the staticlib above.
-echo "=== scripts/build-wasm-runtime.sh (the runtime for the wasm32-wasip1 tests) ==="
-"$repo_root/scripts/build-wasm-runtime.sh" || { echo "FAILED: building the wasm32-wasip1 runtime"; exit 1; }
+echo "=== scripts/build-wasm-runtime.sh (the runtimes for the WebAssembly tests) ==="
+"$repo_root/scripts/build-wasm-runtime.sh" || { echo "FAILED: building the WebAssembly runtimes"; exit 1; }
 
 mkdir -p "$logdir"
 # Fresh verdicts: without this, a target whose worker never ran would be

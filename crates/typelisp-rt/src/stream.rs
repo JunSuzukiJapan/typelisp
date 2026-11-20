@@ -624,8 +624,8 @@ impl StreamTable {
         s.last_written = Some(char::from(b));
         match &mut s.backend {
             Backend::FileOut(w) => w.write_all(&[b]).map_err(|e| format!("write-byte: {}", e)),
-            Backend::Stdout => std::io::stdout().write_all(&[b]).map_err(|e| format!("write-byte: {}", e)),
-            Backend::Stderr => std::io::stderr().write_all(&[b]).map_err(|e| format!("write-byte: {}", e)),
+            Backend::Stdout => typelisp_mem::host::write_stdout(&[b]).map_err(|e| format!("write-byte: {}", e)),
+            Backend::Stderr => typelisp_mem::host::write_stderr(&[b]).map_err(|e| format!("write-byte: {}", e)),
             #[cfg(not(target_family = "wasm"))]
             Backend::Tcp { .. } => Err("write-byte: a socket is written through net-push-byte".to_string()),
             _ => Err("write-byte: the stream is not a byte output stream".to_string()),
@@ -700,10 +700,10 @@ impl StreamTable {
                 // binary output, and a dribble file is text a person reads
                 // back.
                 typelisp_abi::dribble::note(text);
-                std::io::stdout().write_all(text.as_bytes()).map_err(|e| format!("write: {}", e))
+                typelisp_mem::host::write_stdout(text.as_bytes()).map_err(|e| format!("write: {}", e))
             }
             Backend::Stderr => {
-                std::io::stderr().write_all(text.as_bytes()).map_err(|e| format!("write: {}", e))
+                typelisp_mem::host::write_stderr(text.as_bytes()).map_err(|e| format!("write: {}", e))
             }
             #[cfg(not(target_family = "wasm"))]
             Backend::Tcp { .. } => Err("write: a socket is written through net-push-string".to_string()),
@@ -721,8 +721,8 @@ impl StreamTable {
         let s = self.writable(h)?;
         match &mut s.backend {
             Backend::FileOut(w) => w.flush().map_err(|e| format!("finish-output: {}", e)),
-            Backend::Stdout => std::io::stdout().flush().map_err(|e| format!("finish-output: {}", e)),
-            Backend::Stderr => std::io::stderr().flush().map_err(|e| format!("finish-output: {}", e)),
+            Backend::Stdout => typelisp_mem::host::flush_stdout().map_err(|e| format!("finish-output: {}", e)),
+            Backend::Stderr => typelisp_mem::host::flush_stderr().map_err(|e| format!("finish-output: {}", e)),
             #[cfg(not(target_family = "wasm"))]
             Backend::Tcp { .. } => Err("finish-output: a socket is flushed through net-flush".to_string()),
             _ => Ok(()),
