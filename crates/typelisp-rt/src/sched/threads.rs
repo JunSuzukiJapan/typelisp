@@ -308,12 +308,24 @@ impl<'a, B: TaskBody> Locked<'a, B> {
         self.flush();
         let changed = &self.shared.changed;
         let guard = &mut self.guard;
+        #[cfg(not(target_family = "wasm"))]
         heap.native(|| match until {
             Some(d) => {
                 changed.wait_for(guard, d);
             }
             None => changed.wait(guard),
         });
+        // The one thread there is: nothing else can change anything while it
+        // waits, so a wait with a deadline is a sleep, and one without is
+        // never woken.
+        #[cfg(target_family = "wasm")]
+        {
+            let _ = (changed, guard);
+            match until {
+                Some(d) => heap.native(|| std::thread::sleep(d)),
+                None => typelisp_abi::fatal("every task is waiting, and on WebAssembly there is no other thread to wake one"),
+            }
+        }
         self
     }
 
@@ -720,6 +732,10 @@ pub fn install_crew<B>(
 /// included: `TYPELISP_THREADS` when it is set, and the machine's
 /// parallelism when it is not.
 pub fn thread_count() -> Result<usize, String> {
+    // WebAssembly without the threads proposal: the one thread is all there is.
+    #[cfg(target_family = "wasm")]
+    return Ok(1);
+    #[cfg(not(target_family = "wasm"))]
     match std::env::var("TYPELISP_THREADS") {
         Ok(v) => match v.trim().parse::<usize>() {
             Ok(n) if n >= 1 => Ok(n),

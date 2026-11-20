@@ -48,6 +48,9 @@ libc = "0.2"
 # and the scheduler's `poll` is still the only place a task waits. `ring` is
 # the crypto provider that builds without cmake or nasm; `webpki-roots` is
 # Mozilla's root store, bundled, so no OS keychain library is linked.
+# Not on wasm: `ring` builds C, and a wasm program has no sockets to put TLS
+# on (`net` is not compiled there either).
+[target.'cfg(not(target_family = "wasm"))'.dependencies]
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
 webpki-roots = "1"
 

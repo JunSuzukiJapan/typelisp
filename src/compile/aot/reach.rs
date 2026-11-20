@@ -1,5 +1,7 @@
-//! `typl -c --no-cons`: refusing, at compile time, a program that would take
-//! a cell from the cons arena.
+//! What the executable can run that it may not: refusing, at compile time, a
+//! program that reaches a runtime shim it is not allowed to use —
+//! `typl -c --no-cons` the cons arena, `--target wasm32-wasip1` what
+//! WebAssembly has not got.
 //!
 //! The question is asked of the executable's whole module — the program, the
 //! prelude bodies linked into it, and the `main` that starts them — because
@@ -9,8 +11,8 @@
 //! round trip that hands the callee over as a word, a closure carries its
 //! code, a vtable or `print-object` registration names its method). The walk
 //! follows every such reference, through constant expressions and global
-//! initialisers too. What it reaches that is only declared is a runtime
-//! shim; a shim in [`CONS_MAKING_SHIMS`] is a use of the arena.
+//! initialisers too. What it reaches that is only declared is a runtime shim
+//! or a C function, and the caller says which of those are refused.
 
 use std::collections::{HashMap, VecDeque};
 
@@ -22,19 +24,18 @@ use inkwell::llvm_sys::prelude::LLVMValueRef;
 use inkwell::module::Module;
 use inkwell::values::{AsValueRef, FunctionValue};
 
-use crate::compile::externs::CONS_MAKING_SHIMS;
-
-/// One way the program reaches the cons arena: the functions from `main` to
-/// the shim, by their symbols, and the operation the shim is.
-pub(super) struct ConsUse {
+/// One refused function the program reaches: the functions from `main` to
+/// it, by their symbols, and what it is, as the error says it.
+pub(super) struct Use {
     pub chain: Vec<String>,
-    pub operation: &'static str,
+    pub what: String,
 }
 
-/// Every cons-making shim `entry` reaches in `module`, each with the first
-/// chain of references (shortest, breadth first) that reaches it. Empty when
-/// the program runs without the arena.
-pub(super) fn cons_uses(module: &Module<'static>, entry: FunctionValue<'static>) -> Vec<ConsUse> {
+/// Every function `entry` reaches in `module` that `refused` names (by
+/// answering what it is), each with the first chain of references
+/// (shortest, breadth first) that reaches it. Empty when the program reaches
+/// none.
+pub(super) fn uses(module: &Module<'static>, entry: FunctionValue<'static>, refused: impl Fn(&str) -> Option<String>) -> Vec<Use> {
     // Each function reached, and the one that reached it first.
     let mut parent: HashMap<LLVMValueRef, Option<LLVMValueRef>> = HashMap::new();
     let mut queue = VecDeque::new();
@@ -44,8 +45,8 @@ pub(super) fn cons_uses(module: &Module<'static>, entry: FunctionValue<'static>)
     let mut found = Vec::new();
     while let Some(func) = queue.pop_front() {
         let name = value_name(func);
-        if let Some((_, operation)) = CONS_MAKING_SHIMS.iter().find(|(shim, _)| *shim == name) {
-            found.push(ConsUse { chain: chain_to(&parent, func), operation });
+        if let Some(what) = refused(&name) {
+            found.push(Use { chain: chain_to(&parent, func), what });
             continue;
         }
         let Some(f) = module.get_function(&name) else { continue };
@@ -116,10 +117,10 @@ fn value_name(v: LLVMValueRef) -> String {
     String::from_utf8_lossy(bytes).into_owned()
 }
 
-/// The error `typl -c --no-cons` stops with: each use, its chain spelled
-/// with the program's own names.
-pub(super) fn report(uses: &[ConsUse]) -> String {
-    let mut msg = String::from("--no-cons: the program uses cons cells:");
+/// The error compiling stops with: `header`, then each use, its chain
+/// spelled with the program's own names.
+pub(super) fn report(header: &str, uses: &[Use]) -> String {
+    let mut msg = String::from(header);
     for u in uses {
         let chain: Vec<&str> = u
             .chain
@@ -127,7 +128,7 @@ pub(super) fn report(uses: &[ConsUse]) -> String {
             .take(u.chain.len() - 1)
             .map(|s| typelisp_mem::ConcreteNames::link_name_of(s).unwrap_or(s))
             .collect();
-        msg.push_str(&format!("\n  {} (reached by {})", u.operation, chain.join(" -> ")));
+        msg.push_str(&format!("\n  {} (reached by {})", u.what, chain.join(" -> ")));
     }
     msg
 }

@@ -64,10 +64,12 @@
 //! rather than being dropped with it — cannot make a stale handle name a
 //! different stream; it names a closed one forever.
 
+#[cfg(not(target_family = "wasm"))]
 use std::collections::VecDeque;
 use std::convert::TryFrom;
 use std::fs::{File, OpenOptions};
 use std::io::{BufRead, BufReader, BufWriter, Read, Write};
+#[cfg(not(target_family = "wasm"))]
 use std::net::UdpSocket;
 
 use typelisp_mem::Heap;
@@ -132,6 +134,7 @@ pub(crate) enum Backend {
     /// failure is not the program's, so it must not be a panic: a server
     /// would die with its first misbehaving client. `net-socket-error`
     /// reads it back.
+    #[cfg(not(target_family = "wasm"))]
     Tcp {
         sock: Sock,
         tls: Option<Box<rustls::Connection>>,
@@ -145,15 +148,18 @@ pub(crate) enum Backend {
     /// server-side TLS connection over it, sharing this configuration —
     /// the certificate and key loaded once when the listener was made,
     /// plus any added since for other names (`crate::net::TlsServer`).
+    #[cfg(not(target_family = "wasm"))]
     Listener { listen: Listen, tls: Option<crate::net::TlsServer> },
     /// A UDP socket, non-blocking. Datagrams, not a stream: it is neither an
     /// input nor an output stream, and `crate::net` speaks to it in whole
     /// messages. `last_from` is who sent the datagram most recently received.
+    #[cfg(not(target_family = "wasm"))]
     Udp { sock: UdpSocket, last_from: Option<std::net::SocketAddr> },
     /// A name resolution in flight on a helper thread. What the table holds
     /// is the read end of a pipe the thread writes one byte to when it is
     /// done — a descriptor `poll` can wait on like any socket's — and the
     /// slot the thread leaves its answer in.
+    #[cfg(not(target_family = "wasm"))]
     Resolver { pipe: std::io::PipeReader, answer: ResolverAnswer },
     /// Indexed by *character*, not byte, so reading is O(1) per character and
     /// can never split a multi-byte one.
@@ -172,11 +178,13 @@ pub(crate) enum Backend {
 /// wait loops in the prelude — which is why they share one `Backend` arm
 /// and one prelude type (`socket-stream`) rather than two of each. What
 /// differs is only how one is made and what its address looks like.
+#[cfg(not(target_family = "wasm"))]
 pub(crate) enum Sock {
     Tcp(std::net::TcpStream),
     Unix(std::os::unix::net::UnixStream),
 }
 
+#[cfg(not(target_family = "wasm"))]
 impl Read for Sock {
     fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
         match self {
@@ -186,6 +194,7 @@ impl Read for Sock {
     }
 }
 
+#[cfg(not(target_family = "wasm"))]
 impl Write for Sock {
     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
         match self {
@@ -201,6 +210,7 @@ impl Write for Sock {
     }
 }
 
+#[cfg(not(target_family = "wasm"))]
 impl Sock {
     pub(crate) fn set_nonblocking(&self, on: bool) -> std::io::Result<()> {
         match self {
@@ -246,6 +256,7 @@ impl Sock {
 
 /// A Unix socket address as text: its path, or `(unnamed)` for the client
 /// end of a connection, which has no path of its own.
+#[cfg(not(target_family = "wasm"))]
 pub(crate) fn unix_addr_string(a: &std::os::unix::net::SocketAddr) -> String {
     match a.as_pathname() {
         Some(p) => p.to_string_lossy().into_owned(),
@@ -257,11 +268,13 @@ pub(crate) fn unix_addr_string(a: &std::os::unix::net::SocketAddr) -> String {
 /// so that closing it can remove the socket file — the file is the address,
 /// and a stale one would refuse the next `bind` (Go's listener does the
 /// same on `Close`).
+#[cfg(not(target_family = "wasm"))]
 pub(crate) enum Listen {
     Tcp(std::net::TcpListener),
     Unix { listener: std::os::unix::net::UnixListener, path: std::path::PathBuf },
 }
 
+#[cfg(not(target_family = "wasm"))]
 impl Listen {
     #[cfg(unix)]
     pub(crate) fn raw_fd(&self) -> i32 {
@@ -281,6 +294,7 @@ impl Listen {
 
 /// Where a resolver thread leaves what it found: every address the name
 /// has, or why there is none. Shared with the thread, hence the lock.
+#[cfg(not(target_family = "wasm"))]
 pub(crate) type ResolverAnswer = std::sync::Arc<std::sync::Mutex<Option<Result<Vec<std::net::SocketAddr>, String>>>>;
 
 pub(crate) struct StreamObj {
@@ -311,6 +325,7 @@ impl StreamObj {
 /// socket object, and nothing for a string stream. A file's path is not
 /// here — only the opener has it, and records it on the stream.
 fn describe_backend(backend: &Backend) -> StreamResult<String> {
+    #[cfg(not(target_family = "wasm"))]
     let io = |e: std::io::Error| format!("describe: {}", e);
     Ok(match backend {
         Backend::Stdin => "for \"standard input\"".to_string(),
@@ -318,16 +333,21 @@ fn describe_backend(backend: &Backend) -> StreamResult<String> {
         Backend::Stderr => "for \"standard error\"".to_string(),
         // A connection whose peer has gone has no peer address any more; it
         // is described by what it still has.
+        #[cfg(not(target_family = "wasm"))]
         Backend::Tcp { sock, .. } => match sock.peer_address() {
             Ok(peer) => format!("for \"socket {}, peer: {}\"", sock.local_address().map_err(io)?, peer),
             Err(_) => format!("for \"socket {}\"", sock.local_address().map_err(io)?),
         },
+        #[cfg(not(target_family = "wasm"))]
         Backend::Listener { listen, .. } => format!("{}, fd: {}", listen.local_address().map_err(io)?, listen.raw_fd()),
+        #[cfg(not(target_family = "wasm"))]
         Backend::Udp { sock, .. } => {
             use std::os::unix::io::AsRawFd;
             format!("{}, fd: {}", sock.local_addr().map_err(io)?, sock.as_raw_fd())
         }
-        Backend::StringIn { .. } | Backend::StringOut(_) | Backend::Resolver { .. } | Backend::Closed => String::new(),
+        #[cfg(not(target_family = "wasm"))]
+        Backend::Resolver { .. } => String::new(),
+        Backend::StringIn { .. } | Backend::StringOut(_) | Backend::Closed => String::new(),
         Backend::FileIn(_) | Backend::FileOut(_) => {
             return Err("describe: a file stream was opened without recording its path".to_string())
         }
@@ -462,6 +482,7 @@ impl StreamTable {
         // Waiting for the rest is not this layer's to do: the prelude's
         // `close` calls `finish-output` first, which parks the task until
         // the buffer is empty, so this attempt is normally a no-op.
+        #[cfg(not(target_family = "wasm"))]
         if let Backend::Tcp { sock, tls: None, wbuf, .. } = &mut s.backend {
             let (front, _) = wbuf.as_slices();
             if !front.is_empty() {
@@ -471,11 +492,13 @@ impl StreamTable {
         // A TLS connection tells the peer it is closing (`close_notify`),
         // best effort and without waiting, so the peer can tell a clean end
         // from a cut connection.
+        #[cfg(not(target_family = "wasm"))]
         if let Backend::Tcp { sock, tls: Some(conn), .. } = &mut s.backend {
             conn.send_close_notify();
             let _ = conn.write_tls(sock);
         }
         // The socket file is the listener's address: gone with the listener.
+        #[cfg(not(target_family = "wasm"))]
         if let Backend::Listener { listen: Listen::Unix { path, .. }, .. } = &s.backend {
             let _ = std::fs::remove_file(path);
         }
@@ -500,9 +523,13 @@ impl StreamTable {
     pub fn raw_fd(&mut self, h: Handle) -> StreamResult<i32> {
         use std::os::unix::io::AsRawFd;
         match &self.get(h)?.backend {
+            #[cfg(not(target_family = "wasm"))]
             Backend::Tcp { sock, .. } => Ok(sock.raw_fd()),
+            #[cfg(not(target_family = "wasm"))]
             Backend::Listener { listen, .. } => Ok(listen.raw_fd()),
+            #[cfg(not(target_family = "wasm"))]
             Backend::Udp { sock, .. } => Ok(sock.as_raw_fd()),
+            #[cfg(not(target_family = "wasm"))]
             Backend::Resolver { pipe, .. } => Ok(pipe.as_raw_fd()),
             Backend::Closed => Err("the stream is closed".to_string()),
             _ => Err("net-wait: only a socket can be waited on".to_string()),
@@ -550,6 +577,7 @@ impl StreamTable {
             }
             // Not a fallback to a blocking read: a socket is read through
             // `net-pop-char`/`net-fill`, which never wait.
+            #[cfg(not(target_family = "wasm"))]
             Backend::Tcp { .. } => Err("read-char: a socket is read through net-pop-char".to_string()),
             _ => Err("the stream is not an input stream".to_string()),
         }
@@ -579,6 +607,7 @@ impl StreamTable {
                 let mut lock = stdin.lock();
                 lock.read(&mut buf).map_err(|e| format!("read-byte: {}", e))?
             }
+            #[cfg(not(target_family = "wasm"))]
             Backend::Tcp { .. } => return Err("read-byte: a socket is read through net-pop-byte".to_string()),
             _ => return Err("read-byte: the stream is not a byte input stream".to_string()),
         };
@@ -597,6 +626,7 @@ impl StreamTable {
             Backend::FileOut(w) => w.write_all(&[b]).map_err(|e| format!("write-byte: {}", e)),
             Backend::Stdout => std::io::stdout().write_all(&[b]).map_err(|e| format!("write-byte: {}", e)),
             Backend::Stderr => std::io::stderr().write_all(&[b]).map_err(|e| format!("write-byte: {}", e)),
+            #[cfg(not(target_family = "wasm"))]
             Backend::Tcp { .. } => Err("write-byte: a socket is written through net-push-byte".to_string()),
             _ => Err("write-byte: the stream is not a byte output stream".to_string()),
         }
@@ -646,6 +676,7 @@ impl StreamTable {
         Ok(match &s.backend {
             Backend::StringIn { chars, pos } => *pos < chars.len(),
             // Already received and sitting in the buffer: no OS read needed.
+            #[cfg(not(target_family = "wasm"))]
             Backend::Tcp { rbuf, .. } => !rbuf.is_empty(),
             _ => false,
         })
@@ -674,6 +705,7 @@ impl StreamTable {
             Backend::Stderr => {
                 std::io::stderr().write_all(text.as_bytes()).map_err(|e| format!("write: {}", e))
             }
+            #[cfg(not(target_family = "wasm"))]
             Backend::Tcp { .. } => Err("write: a socket is written through net-push-string".to_string()),
             _ => Err("the stream is not an output stream".to_string()),
         }
@@ -691,6 +723,7 @@ impl StreamTable {
             Backend::FileOut(w) => w.flush().map_err(|e| format!("finish-output: {}", e)),
             Backend::Stdout => std::io::stdout().flush().map_err(|e| format!("finish-output: {}", e)),
             Backend::Stderr => std::io::stderr().flush().map_err(|e| format!("finish-output: {}", e)),
+            #[cfg(not(target_family = "wasm"))]
             Backend::Tcp { .. } => Err("finish-output: a socket is flushed through net-flush".to_string()),
             _ => Ok(()),
         }

@@ -68,13 +68,23 @@ typl -c SOURCE [-o OUTPUT] [--target TRIPLE] [--heap-cells N] [--no-cons] [--max
 ### 段階 4: wasm32-wasip1
 
 - コード生成: `--target` の triple で `TargetMachine` を作る。
-- prelude: コミット済みの `prelude.typld` はホストの datalayout 向けなので、ターゲットごとのダンプを持つ。
 - ランタイム: `typelisp-front` を `wasm32-wasip1` の staticlib としてもビルドする。wasm に無い機能は cfg で外す。
   - OS スレッド（`Thread<T>`）、ネットワーク、TLS、C FFI、`libc` の `getrusage`/`uname`/`getpwuid_r`/`localtime_r`。
   - これらを使うプログラムは、wasm 向けのコンパイル時にエラーにする（実行時に失敗させない）。判定は段階 2 と同じ「到達できる shim の表」で行う。
   - タスク（`task`）、チャネル、`select` は単一スレッドのスケジューラで動く。
-- リンク: `wasm-ld`（LLVM 22 の lld）。
-- テスト: `wasmtime` で実行して出力を比べる。
+- リンク: `wasm-ld`。
+- テスト: WASI の実行環境で実行して出力を比べる。
+
+実装:
+
+- prelude はターゲットごとのダンプを持たない。コミット済みのビットコードは datalayout を持たず、最適化前で、ポインタは `ptrtoint`/`inttoptr` で i64 と行き来するだけなので、wasm32 でも幅を広げ・縮めるだけで成り立つ。結合したモジュールに wasm の triple と datalayout を設定してから passes を流す（`src/compile/aot/wasm.rs`）。
+- 例外が 1 つある。表（型・形・フレームの配置）の初期値にある `ptrtoint (ptr @g to i64)` は、32bit のアドレスを 64bit の枠に置く再配置が wasm の目的ファイルに無いので、バックエンドが断る。wasm では、そういう `[N x i64]` を packed な構造体に置き換え、アドレスの語を `<{ ptr @g, i32 0 }>` にする（`split_address_words`）。リトルエンディアンなので、バイト列は同じになる。
+- 入口: wasi-libc の `crt1-command.o` は `__main_void` を呼ぶので、`main` をその名前に変える。引数は Rust の std が WASI から読む。
+- リンク: rustup の toolchain の `rust-lld` を `wasm-ld` という名前で起動する。`crt1-command.o`、`libc.a` と並べて、`scripts/build-wasm-runtime.sh` が `<target>/wasm-runtime/<profile>/wasm32-wasip1/` に置く（Homebrew の LLVM 22 には lld が無く、Homebrew の rust には wasm のターゲットが無い）。スタックは 8MiB。
+- ランタイム: wasm では `net`、`net/tls`、`x509`、`net_builtin`、`rt_net_*` の shim、ストリームのソケットの変種を cfg で外す（rustls/ring は wasm 以外だけの依存）。スケジューラはスレッドが 1 本: `thread_count` は 1、時間つきの待ちは眠るだけ、時間なしの待ちは fatal、`SelfPipe` は作れるだけで触れたら unreachable。インタプリタ（`eval`）からのソケットは panic。
+- 使えないもののコンパイル時の検出は段階 2 の到達判定を一般化した `src/compile/aot/reach.rs` で行う。表は `externs::WASM_UNAVAILABLE_SHIMS` と `rt_net_` の接頭辞。C の関数は `defffi` の記号で判定する。
+- 未対応: リリースビルドの `typl` は wasm のランタイムを中に持たない（`wasm_runtime_dir` が断る）。持たせるには build.rs が wasm ターゲットを要求することになる。
+- テスト: `tests/aot_wasm_test.rs`。`scripts/run-wasi.mjs`（node の `node:wasi`、`/` だけを開く。`.` も開くと絶対パスの解決が `.` に引かれて失敗する）で実行し、ネイティブの実行ファイルと出力・終了コードを比べる。
 
 ### 段階 5: wasm32-unknown-unknown
 
@@ -85,5 +95,4 @@ typl -c SOURCE [-o OUTPUT] [--target TRIPLE] [--heap-cells N] [--no-cons] [--max
 ## 必要なツール
 
 - `rustup target add wasm32-wasip1 wasm32-unknown-unknown`
-- `brew install lld`（`wasm-ld`。LLVM 22 と同じ版）
-- `brew install wasmtime`
+- node（WASI の実行。テストが使う）

@@ -87,10 +87,15 @@ impl Interp {
             // The sockets. `net-wait` never arrives here: `finish_call`
             // intercepts it, as it does `sleep`, because it stops the task.
             wk::F_NET_ACCEPT | wk::F_NET_BUFFERED_P | wk::F_NET_CONNECT_BEGIN | wk::F_NET_CONNECT_FINISH | wk::F_NET_FILL | wk::F_NET_FLUSH | wk::F_NET_LISTEN | wk::F_NET_LOCAL_ADDRESS | wk::F_NET_PEER_ADDRESS | wk::F_NET_PEER_SUBJECT | wk::F_NET_POP_BYTE | wk::F_NET_POP_CHAR | wk::F_NET_PUSH_BYTE | wk::F_NET_PUSH_STRING | wk::F_NET_RESOLVE_BEGIN | wk::F_NET_RESOLVE_FINISH | wk::F_NET_SERVER_NAME | wk::F_NET_SET_KEEPALIVE | wk::F_NET_SET_KEEPALIVE_PERIOD | wk::F_NET_SET_NODELAY | wk::F_NET_SHUTDOWN_WRITE | wk::F_NET_SOCKET_ERROR | wk::F_NET_TLS_ADD_CERTIFICATE | wk::F_NET_TLS_HANDSHAKE | wk::F_NET_TLS_LISTEN | wk::F_NET_TLS_START | wk::F_NET_UDP_BIND | wk::F_NET_UDP_LAST_SENDER | wk::F_NET_UDP_RECV | wk::F_NET_UDP_SEND_TO | wk::F_NET_UNIX_CONNECT | wk::F_NET_UNIX_LISTEN | wk::F_NET_WAIT | wk::F_NET_WAIT_FOR => {
-                Some(match typelisp_rt::net_builtin::net_builtin(heap, name, args)? {
+                #[cfg(not(target_family = "wasm"))]
+                return Some(match typelisp_rt::net_builtin::net_builtin(heap, name, args)? {
                     Ok(v) => Ok(v),
                     Err(e) => Err(EvalError::Internal(e)),
-                })
+                });
+                // A compiled program that names a socket is refused when it
+                // is compiled for WebAssembly; only an `eval`'d form gets here.
+                #[cfg(target_family = "wasm")]
+                return Some(Err(EvalError::Panic(format!("{}: WebAssembly has no sockets", name.name()))));
             }
             // The readtable (CLHS 23.1). Routed by name rather than by
             // prefix: `set-`/`get-` are far too common to claim, and there

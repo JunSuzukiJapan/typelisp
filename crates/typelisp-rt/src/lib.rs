@@ -51,9 +51,12 @@ pub mod mem_limit;
 pub mod c_mem;
 pub mod ffi_callback;
 pub mod integer;
+#[cfg(not(target_family = "wasm"))]
 pub mod net;
 pub mod rational;
+#[cfg(not(target_family = "wasm"))]
 pub mod net_builtin;
+#[cfg(not(target_family = "wasm"))]
 pub mod x509;
 pub mod os;
 pub mod readtable;

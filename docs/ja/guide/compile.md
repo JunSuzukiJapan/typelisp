@@ -196,6 +196,31 @@ $ typl -c hello.typl --no-cons              # cons セルを使わない
 cons アリーナもメモリの上限に数えられるので、アリーナがそのまま入らない上限を指定すると、
 プログラムが始まる前に止まります。
 
+### 3.6 WebAssembly 向けにコンパイルする
+
+`--target wasm32-wasip1` を付けると、実行ファイルの代わりに WebAssembly のモジュール（WASI
+preview 1 のコマンド）を作ります。`-o` を省くと、ソースの `.typl` を `.wasm` に変えた名前になります。
+
+```sh
+$ typl -c hello.typl --target wasm32-wasip1      # hello.wasm ができる
+$ wasmtime hello.wasm a b                        # WASI に対応した実行環境で実行する
+args: #(hello.wasm a b)
+fib(25) = 75025
+```
+
+- 準備がいります。この機能は、リポジトリでビルドしたデバッグビルドの `typl` でだけ使えます。
+  rustup で `rustup target add wasm32-wasip1` を実行してから、リポジトリで
+  `scripts/build-wasm-runtime.sh` を実行してください。
+- 実行ファイルと同じに振る舞います。標準出力・標準エラー・終了コード、`(command-line-args)`、
+  ファイルの読み書き、`throw`/`catch`/`panic`、タスク・チャネル・`sleep`、`eval` が使えます。
+  タスクは 1 つのスレッドで順に実行されます。ファイルは、実行環境がモジュールに見せている
+  ディレクトリの中だけを読み書きできます（wasmtime なら `--dir` で指定します）。
+- WebAssembly にないものを使うプログラムは**コンパイルエラー**になります。エラーには、使ったものと、
+  `main` からそこへ届く関数の並びが表示されます。使えないのは、ソケット（TCP・UDP・Unix ドメイン・
+  TLS・名前解決）、OS スレッド（`Thread`）、C の関数（`defffi`）、`get-internal-run-time`、
+  `machine-instance`、`software-version`、`file-author`、ローカルのタイムゾーン、`ed` です。
+- `--heap-cells`、`--max-memory`、`--no-cons`、`-O<N>`、`--release` はそのまま使えます。
+
 ## 4. ダンプ
 
 いまのセッションの定義を 1 ファイルに保存し、次回はそこから起動できます。

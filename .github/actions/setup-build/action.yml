@@ -83,6 +83,15 @@ runs:
         fi
         retry rustup toolchain install "${{ inputs.rust-version }}" --profile minimal
         rustup default "${{ inputs.rust-version }}"
+        # The runtime `typl -c --target wasm32-wasip1` links
+        # (scripts/build-wasm-runtime.sh) is built for this target.
+        retry rustup target add wasm32-wasip1
+
+    # What the wasm32-wasip1 tests run the modules they build under
+    # (scripts/run-wasi.mjs); the containers have none.
+    - uses: actions/setup-node@v4
+      with:
+        node-version: 24
 
     # LLVM_SYS_221_PREFIX (Homebrew's llvm@22, or the distribution's found by
     # scripts/linux-llvm-prefix.sh) and, on macOS, the minimum OS version.

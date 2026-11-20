@@ -459,7 +459,9 @@ pub fn poll_ready(_fds: &[(i32, Interest)], _timeout: Option<std::time::Duration
 /// reads until there is nothing. Close-on-exec, so a `run-program` child
 /// does not inherit it.
 pub struct SelfPipe {
+    #[cfg(unix)]
     read: i32,
+    #[cfg(unix)]
     write: i32,
 }
 
@@ -513,7 +515,29 @@ impl SelfPipe {
     }
 }
 
-#[cfg(not(unix))]
+/// One thread runs every task on WebAssembly, so there is no other thread to
+/// wake and no socket to poll: the scheduler makes one of these and never
+/// polls ([`crate::sched::SchedShared`]).
+#[cfg(target_family = "wasm")]
+impl SelfPipe {
+    pub fn new() -> std::io::Result<SelfPipe> {
+        Ok(SelfPipe {})
+    }
+
+    pub fn read_fd(&self) -> i32 {
+        unreachable!("WebAssembly has no sockets for the scheduler to poll")
+    }
+
+    pub fn kick(&self) {
+        unreachable!("WebAssembly has no sockets for the scheduler to poll")
+    }
+
+    pub fn drain(&self) {
+        unreachable!("WebAssembly has no sockets for the scheduler to poll")
+    }
+}
+
+#[cfg(all(not(unix), not(target_family = "wasm")))]
 impl SelfPipe {
     pub fn new() -> std::io::Result<SelfPipe> {
         unimplemented!("the scheduler's poller wakes through a pipe, which is POSIX")

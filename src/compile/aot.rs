@@ -71,7 +71,8 @@ use crate::{Checker, Heap, Interp, Path, Reader, TopLevelForm, Value};
 use typelisp_mem::{wk, ConcreteNames};
 mod archive;
 mod native;
-mod no_cons;
+mod reach;
+mod wasm;
 
 pub use archive::*;
 pub(crate) use native::*;
@@ -291,9 +292,31 @@ pub struct BuildOptions {
     /// (`--max-memory`, `typelisp_rt::mem_limit`). `None` is no bound.
     pub max_memory: Option<usize>,
     /// No cons arena at all (`--no-cons`): a program that would take a cell
-    /// from it is refused at compile time (`no_cons`), and the executable's
+    /// from it is refused at compile time (`reach`), and the executable's
     /// arena has no cells. Not with [`Self::heap_cells`].
     pub no_cons: bool,
+    /// What the executable runs on (`--target`).
+    pub target: Target,
+}
+
+/// What an executable is built to run on.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Target {
+    /// The machine `typl` runs on: a native executable.
+    #[default]
+    Host,
+    /// `wasm32-wasip1`: a WebAssembly module for a WASI (preview 1) host.
+    Wasip1,
+}
+
+impl Target {
+    /// The target `--target` names.
+    pub fn parse(name: &str) -> Result<Target, String> {
+        match name {
+            "wasm32-wasip1" => Ok(Target::Wasip1),
+            _ => Err(format!("--target: unknown target `{}` (the one there is: wasm32-wasip1)", name)),
+        }
+    }
 }
 
 /// [`compile_file`] with the run-time resources `options` gives.
@@ -701,10 +724,27 @@ pub fn compile_file_with(source_path: &str, output_path: &str, options: &BuildOp
                     return Ok(());
                 }
                 let entry = m.get_function(ENTRY_POINT_NAME).expect("build_main_wrapper defined `main`");
-                let uses = no_cons::cons_uses(&m, entry);
-                if uses.is_empty() { Ok(()) } else { Err(no_cons::report(&uses)) }
+                let uses = reach::uses(&m, entry, |name| {
+                    crate::compile::externs::CONS_MAKING_SHIMS.iter().find(|(shim, _)| *shim == name).map(|(_, what)| what.to_string())
+                });
+                if uses.is_empty() { Ok(()) } else { Err(reach::report("--no-cons: the program uses cons cells:", &uses)) }
             })
-            .and_then(|()| write_executable(&m, output_path, &link_libraries, &items))
+            .and_then(|()| match options.target {
+                Target::Host => write_executable(&m, output_path, &link_libraries, &items),
+                Target::Wasip1 => {
+                    let entry = m.get_function(ENTRY_POINT_NAME).expect("build_main_wrapper defined `main`");
+                    let uses = reach::uses(&m, entry, |name| {
+                        if let Some(what) = crate::compile::externs::wasm_unavailable(name) {
+                            return Some(what.to_string());
+                        }
+                        ffi_decls.iter().any(|d| d.c_symbol == name).then(|| format!("the C function `{}`", name))
+                    });
+                    if !uses.is_empty() {
+                        return Err(reach::report("--target wasm32-wasip1: the program uses what WebAssembly does not have:", &uses));
+                    }
+                    wasm::write_module(&m, output_path, &items)
+                }
+            })
     };
     // Destroyed here with the guard still held rather than left to fall out
     // of scope: `~Module` unregisters every value name from the shared LLVM

@@ -352,7 +352,7 @@ pub(crate) fn never_raises(name: &str) -> bool {
 
 /// The shims that take cells from the cons arena, each with the operation a
 /// program reaches it through: what `typl -c --no-cons` refuses a program
-/// for (`compile::aot::no_cons`).
+/// for (`compile::aot::reach`).
 ///
 /// The arena has one allocator, `typelisp_mem::Heap::cons`, and these are
 /// the shims whose bodies reach it: building a `Sexpr` cons, turning a path
@@ -372,6 +372,41 @@ pub(crate) const CONS_MAKING_SHIMS: [(&str, &str); 9] = [
     ("rt_macroexpand", "`macroexpand`"),
     ("rt_macroexpand_1", "`macroexpand-1`"),
 ];
+
+/// The shims a WebAssembly executable has not got, each with what a program
+/// reaches it through: what `typl -c --target wasm32-wasip1` refuses a
+/// program for (`compile::aot::reach`), so that it fails to compile rather
+/// than to link or to run.
+///
+/// Two kinds. The sockets are not in the WebAssembly runtime at all (every
+/// `rt_net_` shim, [`WASM_UNAVAILABLE_PREFIX`], and the waits on one). The
+/// rest are in it but need what WASI does not give: another OS thread, CPU
+/// time, the host's name and OS release, a file's owner, the local time
+/// zone, and starting a process.
+pub(crate) const WASM_UNAVAILABLE_SHIMS: [(&str, &str); 10] = [
+    ("rt_suspend_io", "waiting on a socket"),
+    ("rt_suspend_io_for", "waiting on a socket"),
+    ("rt_suspend_thread", "an OS thread (`thread`)"),
+    ("rt_get_internal_run_time", "`get-internal-run-time`"),
+    ("rt_machine_instance", "`machine-instance`"),
+    ("rt_software_version", "`software-version`"),
+    ("rt_file_owner_name", "`file-author`"),
+    ("rt_timezone_offset_seconds", "the local time zone"),
+    ("rt_timezone_daylight_p", "the local time zone"),
+    ("rt_ed_open", "`ed`, which starts an editor"),
+];
+
+/// The prefix of the socket shims, none of which a WebAssembly runtime has.
+pub(crate) const WASM_UNAVAILABLE_PREFIX: (&str, &str) = ("rt_net_", "a socket");
+
+/// What `name` is, when it is a shim a WebAssembly executable has not got
+/// ([`WASM_UNAVAILABLE_SHIMS`]).
+pub(crate) fn wasm_unavailable(name: &str) -> Option<&'static str> {
+    if name.starts_with(WASM_UNAVAILABLE_PREFIX.0) {
+        return Some(WASM_UNAVAILABLE_PREFIX.1);
+    }
+    WASM_UNAVAILABLE_SHIMS.iter().find(|(shim, _)| *shim == name).map(|(_, what)| *what)
+}
 
 /// The suspension [`needs_interpreter`]'s calls are preceded by —
 /// `call_state::SUSPEND_MAIN`.
@@ -1373,6 +1408,16 @@ mod cons_making_shim_tests {
         for name in super::NEVER_RAISING_SHIMS {
             assert!(shims.iter().any(|(n, _)| *n == name), "{} is not in rt_extern_functions", name);
         }
+    }
+
+    #[test]
+    fn every_wasm_unavailable_shim_is_a_shim() {
+        let shims = rt_extern_functions();
+        for (name, _) in super::WASM_UNAVAILABLE_SHIMS {
+            assert!(shims.iter().any(|(n, _)| *n == name), "{} is not in rt_extern_functions", name);
+        }
+        let prefix = super::WASM_UNAVAILABLE_PREFIX.0;
+        assert!(shims.iter().any(|(n, _)| n.starts_with(prefix)), "no shim starts with {}", prefix);
     }
 
     #[test]

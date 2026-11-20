@@ -233,3 +233,30 @@ pub fn set_lib_dir(dir: std::path::PathBuf) -> Result<(), String> {
     }
     LIB_DIR.set(dir).map_err(|_| "the library folder is already set".to_string())
 }
+
+/// The folder holding what a `wasm32-wasip1` module links: the runtime
+/// archive built for that target, WASI's C library and start file from the
+/// same Rust toolchain, and the linker (`scripts/build-wasm-runtime.sh`
+/// puts them there).
+///
+/// `<target dir>/wasm-runtime/<profile>/wasm32-wasip1/`, beside the native
+/// archive of the same profile. A release `typl` carries no WebAssembly
+/// runtime, so there is no folder for it to name.
+pub(super) fn wasm_runtime_dir() -> Result<std::path::PathBuf, String> {
+    if cfg!(typelisp_bundled_runtime) {
+        return Err("this typl carries no WebAssembly runtime: --target needs a debug build of typl, which links the runtimes of its source tree".to_string());
+    }
+    let profile_dir = std::path::Path::new(env!("TYPELISP_PROFILE_DIR"));
+    let (Some(target_dir), Some(profile)) = (profile_dir.parent(), profile_dir.file_name()) else {
+        return Err(format!("internal error: {} is not <target dir>/<profile>", profile_dir.display()));
+    };
+    let dir = target_dir.join("wasm-runtime").join(profile).join("wasm32-wasip1");
+    if !dir.join(STATICLIB_NAME).is_file() {
+        return Err(format!(
+            "{} has no WebAssembly runtime; build it with scripts/build-wasm-runtime.sh {}",
+            dir.display(),
+            profile.to_string_lossy()
+        ));
+    }
+    Ok(dir)
+}

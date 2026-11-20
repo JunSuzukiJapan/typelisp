@@ -56,6 +56,12 @@ jobs:
         run: cargo check --workspace --all-targets --locked
         env:
           RUSTFLAGS: -D warnings
+      # The runtime as `typl -c --target wasm32-wasip1` links it: what is left
+      # out there (the sockets, TLS) must leave nothing behind that warns.
+      - name: Check the wasm32-wasip1 runtime (warnings are errors)
+        run: cargo check -p typelisp-front --target wasm32-wasip1 --locked
+        env:
+          RUSTFLAGS: -D warnings
       - name: Build
         run: cargo build --workspace --locked
 
@@ -99,6 +105,12 @@ jobs:
           key: ${{ matrix.distro }}
       - name: Check (warnings are errors)
         run: cargo check --workspace --all-targets --locked
+        env:
+          RUSTFLAGS: -D warnings
+      # The runtime as `typl -c --target wasm32-wasip1` links it: what is left
+      # out there (the sockets, TLS) must leave nothing behind that warns.
+      - name: Check the wasm32-wasip1 runtime (warnings are errors)
+        run: cargo check -p typelisp-front --target wasm32-wasip1 --locked
         env:
           RUSTFLAGS: -D warnings
       - name: Build
