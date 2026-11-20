@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ 3394dc00d5681022b29cf8e2f0ac2199e52846b5 -->
+<!-- translated-from: docs/ja/guide/compile.md @ 0269bbc25c244db48a107288b49aa6d3cb9da715 -->
 # Kompilasi
 
 Jika Anda tidak melakukan apa-apa lagi, program typelisp berjalan di interpreter. Selain itu ada dua
@@ -177,6 +177,29 @@ $ typl -c hello.typl --no-cons              # tidak memakai sel cons
 - `--no-cons` membuat berkas eksekusi yang tidak memakai sel cons. Ia tidak punya arena cons, jadi program yang melakukan sesuatu yang memerlukan sel cons menjadi **galat kompilasi**, yang menampilkan operasi itu dan rangkaian fungsi dari `main` yang mencapainya. Sel cons diperlukan untuk membuat list `Sexpr` (termasuk list yang di-quote dan yang dibuat dengan quasiquote) atau argumen `&rest`, serta oleh `read`, `eval`, dan `macroexpand`. Operasi pada angka, string, vektor, tabel hash, struct, kanal, dan sejenisnya, serta `print`/`println`/`format`, tidak memakainya. Tidak dapat diberikan bersama `--heap-cells`, dan ditulis setelah `-c`.
 
 `--max-memory` ditulis setelah `-c`. `--heap-cells` boleh ditulis sebelum atau setelah `-c`, dan menjadi kapasitas arena cons berkas eksekusi. Arena cons ikut dihitung dalam batas memori, jadi dengan batas yang tidak memuat arena, program berhenti sebelum mulai.
+
+### 3.6 Mengompilasi untuk WebAssembly
+
+Dengan `--target wasm32-wasip1`, `typl -c` membuat modul WebAssembly (perintah WASI preview 1) alih-alih berkas eksekusi. Tanpa `-o`, namanya adalah nama sumber dengan `.typl` diganti `.wasm`.
+
+```sh
+$ typl -c hello.typl --target wasm32-wasip1      # membuat hello.wasm
+$ wasmtime hello.wasm a b                        # jalankan dengan lingkungan yang mendukung WASI
+args: #(hello.wasm a b)
+fib(25) = 75025
+```
+
+- Ini memerlukan persiapan dan hanya bekerja dengan build debug `typl` yang dibangun di repositori.
+  Jalankan `rustup target add wasm32-wasip1` dengan rustup, lalu jalankan `scripts/build-wasm-runtime.sh` di repositori.
+- Modul berperilaku seperti berkas eksekusi: keluaran standar, galat standar, dan kode keluar, `(command-line-args)`,
+  membaca dan menulis berkas, `throw`/`catch`/`panic`, tugas, kanal, dan `sleep`, serta `eval` berfungsi.
+  Tugas berjalan bergantian dalam satu thread. Berkas hanya bisa dibaca dan ditulis di dalam direktori
+  yang diperlihatkan lingkungan kepada modul (pada wasmtime, ditentukan dengan `--dir`).
+- Program yang memakai sesuatu yang tidak dimiliki WebAssembly adalah **galat kompilasi**. Galat menampilkan apa yang dipakai
+  dan rantai fungsi dari `main` yang mencapainya. Yang tidak bisa dipakai: soket (TCP, UDP, domain Unix,
+  TLS, resolusi nama), thread OS (`Thread`), fungsi C (`defffi`), `get-internal-run-time`, `machine-instance`, `software-version`, `file-author`,
+  zona waktu lokal, dan `ed`.
+- `--heap-cells`, `--max-memory`, `--no-cons`, `-O<N>`, dan `--release` berlaku seperti untuk berkas eksekusi.
 
 ## 4. Dump
 

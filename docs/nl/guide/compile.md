@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ 3394dc00d5681022b29cf8e2f0ac2199e52846b5 -->
+<!-- translated-from: docs/ja/guide/compile.md @ 0269bbc25c244db48a107288b49aa6d3cb9da715 -->
 # Compileren
 
 Tenzij je iets anders doet, draaien typelisp-programma's in de interpreter. Daarnaast zijn er twee
@@ -182,6 +182,29 @@ $ typl -c hello.typl --no-cons              # gebruik geen cons-cellen
 - `--no-cons` maakt een uitvoerbaar bestand dat geen cons-cellen gebruikt. Het heeft geen cons-arena, dus een programma dat iets doet waarvoor cons-cellen nodig zijn is een **compileerfout**, die die bewerking toont en de keten van functies vanaf `main` die haar bereikt. Cons-cellen zijn nodig om een `Sexpr`-lijst (ook een gequote lijst of een die met quasiquote is gebouwd) of een `&rest`-argument te bouwen, en voor `read`, `eval` en `macroexpand`. Bewerkingen op getallen, strings, vectoren, hashtabellen, structs, kanalen en dergelijke, en `print`/`println`/`format`, gebruiken er geen. Kan niet samen met `--heap-cells` worden opgegeven en staat na `-c`.
 
 `--max-memory` schrijf je na `-c`. `--heap-cells` mag voor of na `-c` staan en is dan de capaciteit van de cons-arena van het uitvoerbare bestand. De cons-arena telt mee voor de geheugengrens: bij een grens waar de arena niet in past, stopt het programma voordat het begint.
+
+### 3.6 Compileren voor WebAssembly
+
+Met `--target wasm32-wasip1` maakt `typl -c` een WebAssembly-module (een WASI preview 1-commando) in plaats van een uitvoerbaar bestand. Zonder `-o` krijgt die de naam van de bron, met `.wasm` in plaats van `.typl`.
+
+```sh
+$ typl -c hello.typl --target wasm32-wasip1      # maakt hello.wasm
+$ wasmtime hello.wasm a b                        # uitvoeren met een omgeving die WASI ondersteunt
+args: #(hello.wasm a b)
+fib(25) = 75025
+```
+
+- Dit vraagt voorbereiding en werkt alleen met een debug-build van `typl` die in de repository is gebouwd.
+  Voer met rustup `rustup target add wasm32-wasip1` uit en daarna in de repository `scripts/build-wasm-runtime.sh`.
+- De module gedraagt zich als het uitvoerbare bestand: standaarduitvoer, standaardfout en exitcode, `(command-line-args)`,
+  bestanden lezen en schrijven, `throw`/`catch`/`panic`, taken, kanalen en `sleep`, en `eval` werken.
+  Taken draaien na elkaar op één thread. Bestanden kunnen alleen gelezen en geschreven worden in de mappen
+  die de omgeving aan de module toont (bij wasmtime opgegeven met `--dir`).
+- Een programma dat iets gebruikt wat WebAssembly niet heeft, is een **compileerfout**. De fout toont wat gebruikt is
+  en de keten van functies vanaf `main` die er komt. Niet beschikbaar: sockets (TCP, UDP, Unix-domein,
+  TLS, naamresolutie), OS-threads (`Thread`), C-functies (`defffi`), `get-internal-run-time`, `machine-instance`, `software-version`, `file-author`,
+  de lokale tijdzone en `ed`.
+- `--heap-cells`, `--max-memory`, `--no-cons`, `-O<N>` en `--release` werken zoals bij een uitvoerbaar bestand.
 
 ## 4. Dumps
 

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ 3394dc00d5681022b29cf8e2f0ac2199e52846b5 -->
+<!-- translated-from: docs/ja/guide/compile.md @ 0269bbc25c244db48a107288b49aa6d3cb9da715 -->
 # 컴파일
 
 아무것도 하지 않으면 typelisp 프로그램은 인터프리터에서 실행된다. 그 밖에 네이티브 코드로 컴파일하는 방법이 두 가지,
@@ -166,6 +166,29 @@ $ typl -c hello.typl --no-cons              # cons 셀을 쓰지 않는다
 - `--no-cons`는 cons 셀을 쓰지 않는 실행 파일을 만든다. cons 영역이 없으므로, cons 셀이 필요한 조작을 하는 프로그램은 **컴파일 오류**가 된다. 오류에는 그 조작과, `main`에서 거기까지 닿는 함수의 연쇄가 표시된다. cons 셀이 필요한 것은 `Sexpr` 리스트(인용한 리스트나 준인용으로 만드는 것 포함)나 `&rest` 인수를 만들 때, `read`, `eval`, `macroexpand`를 쓸 때다. 수, 문자열, 벡터, 해시 표, 구조체, 채널 등의 조작과 `print`/`println`/`format`은 cons 셀을 쓰지 않는다. `--heap-cells`와 함께 지정할 수 없으며, `-c` 뒤에 쓴다.
 
 `--max-memory`는 `-c` 뒤에 쓴다. `--heap-cells`는 `-c` 앞에도 뒤에도 쓸 수 있으며, 이때 실행 파일의 cons 영역의 용량이 된다. cons 영역도 메모리 상한에 포함되므로, 영역이 들어가지 않는 상한을 지정하면 프로그램이 시작되기 전에 멈춘다.
+
+### 3.6 WebAssembly용으로 컴파일하기
+
+`--target wasm32-wasip1`을 붙이면 `typl -c`는 실행 파일 대신 WebAssembly 모듈(WASI preview 1 명령)을 만듭니다. `-o`를 생략하면 소스 이름의 `.typl`을 `.wasm`으로 바꾼 이름이 됩니다.
+
+```sh
+$ typl -c hello.typl --target wasm32-wasip1      # hello.wasm이 만들어진다
+$ wasmtime hello.wasm a b                        # WASI를 지원하는 실행 환경에서 실행한다
+args: #(hello.wasm a b)
+fib(25) = 75025
+```
+
+- 준비가 필요합니다. 이 기능은 저장소에서 빌드한 디버그 빌드 `typl`에서만 쓸 수 있습니다.
+  rustup으로 `rustup target add wasm32-wasip1`을 실행한 뒤, 저장소에서 `scripts/build-wasm-runtime.sh`를 실행하세요.
+- 실행 파일과 똑같이 동작합니다. 표준 출력, 표준 오류, 종료 코드, `(command-line-args)`,
+  파일 읽기와 쓰기, `throw`/`catch`/`panic`, 태스크, 채널, `sleep`, `eval`을 쓸 수 있습니다.
+  태스크는 하나의 스레드에서 차례로 실행됩니다. 파일은 실행 환경이 모듈에 보여 주는
+  디렉터리 안에서만 읽고 쓸 수 있습니다(wasmtime에서는 `--dir`로 지정합니다).
+- WebAssembly에 없는 것을 쓰는 프로그램은 **컴파일 오류**가 됩니다. 오류에는 쓴 것과
+  `main`에서 그곳에 이르는 함수의 연쇄가 표시됩니다. 쓸 수 없는 것은 소켓(TCP, UDP, Unix 도메인,
+  TLS, 이름 해석), OS 스레드(`Thread`), C 함수(`defffi`), `get-internal-run-time`, `machine-instance`, `software-version`, `file-author`,
+  로컬 시간대, `ed`입니다.
+- `--heap-cells`, `--max-memory`, `--no-cons`, `-O<N>`, `--release`는 그대로 쓸 수 있습니다.
 
 ## 4. 덤프
 

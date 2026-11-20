@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ 3394dc00d5681022b29cf8e2f0ac2199e52846b5 -->
+<!-- translated-from: docs/ja/guide/compile.md @ 0269bbc25c244db48a107288b49aa6d3cb9da715 -->
 # 編譯
 
 不做任何處理的話，typelisp 程式由直譯器執行。此外還有兩種編譯為原生碼的方法，以及一種保存環境的方法。規格的詳情見
@@ -158,6 +158,29 @@ $ typl -c hello.typl --no-cons              # 不使用 cons 單元
 - `--no-cons` 產生不使用 cons 單元的執行檔。它沒有 cons 區域，因此進行需要 cons 單元之操作的程式會成為**編譯錯誤**。錯誤中會顯示該操作，以及從 `main` 到達那裡的函式序列。需要 cons 單元的情況是：建構 `Sexpr` 串列（包括引用的串列與用準引用建構的串列）或 `&rest` 引數時，以及使用 `read`、`eval`、`macroexpand` 時。數值、字串、向量、雜湊表、結構、通道等的操作，以及 `print`/`println`/`format` 都不使用 cons 單元。不能與 `--heap-cells` 一起指定，寫在 `-c` 之後。
 
 `--max-memory` 寫在 `-c` 之後。`--heap-cells` 寫在 `-c` 之前或之後都可以，這時它是執行檔的 cons 區域的容量。cons 區域也計入記憶體上限，所以指定了放不下區域的上限時，程式會在開始之前停止。
+
+### 3.6 編譯為 WebAssembly
+
+加上 `--target wasm32-wasip1` 後，`typl -c` 產生的不是執行檔，而是 WebAssembly 模組（WASI preview 1 命令）。省略 `-o` 時，名稱是把原始檔的 `.typl` 換成 `.wasm`。
+
+```sh
+$ typl -c hello.typl --target wasm32-wasip1      # 產生 hello.wasm
+$ wasmtime hello.wasm a b                        # 用支援 WASI 的執行環境執行
+args: #(hello.wasm a b)
+fib(25) = 75025
+```
+
+- 需要準備，且只能用在儲存庫中建置的除錯版 `typl`。
+  先用 rustup 執行 `rustup target add wasm32-wasip1`，再在儲存庫中執行 `scripts/build-wasm-runtime.sh`。
+- 模組的行為與執行檔相同：標準輸出、標準錯誤和結束碼、`(command-line-args)`、
+  檔案讀寫、`throw`/`catch`/`panic`、任務、通道和 `sleep`，以及 `eval` 都可以使用。
+  任務在一個執行緒上依序執行。檔案只能在執行環境向模組公開的目錄中讀寫
+  （wasmtime 用 `--dir` 指定）。
+- 使用 WebAssembly 所沒有的東西的程式是**編譯錯誤**。錯誤會顯示用到的東西，
+  以及從 `main` 到達那裡的函式鏈。不能使用的有：通訊端（TCP、UDP、Unix 網域、
+  TLS、名稱解析）、作業系統執行緒（`Thread`）、C 函式（`defffi`）、`get-internal-run-time`, `machine-instance`, `software-version`, `file-author`、
+  本地時區，以及 `ed`。
+- `--heap-cells`、`--max-memory`、`--no-cons`、`-O<N>`、`--release` 照常可用。
 
 ## 4. 傾印
 

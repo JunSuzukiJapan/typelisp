@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ 3394dc00d5681022b29cf8e2f0ac2199e52846b5 -->
+<!-- translated-from: docs/ja/guide/compile.md @ 0269bbc25c244db48a107288b49aa6d3cb9da715 -->
 # Compiling
 
 Unless you do anything else, typelisp programs run in the interpreter. In addition there are two
@@ -181,6 +181,29 @@ $ typl -c hello.typl --no-cons              # use no cons cells
 `--max-memory` is written after `-c`. `--heap-cells` may be written before or after `-c`. The cons
 arena counts toward the memory bound, so a bound the arena does not fit in stops the program before
 it starts.
+
+### 3.6 Compiling for WebAssembly
+
+With `--target wasm32-wasip1`, `typl -c` makes a WebAssembly module (a WASI preview 1 command) instead of an executable. Without `-o`, it is named after the source with `.typl` replaced by `.wasm`.
+
+```sh
+$ typl -c hello.typl --target wasm32-wasip1      # makes hello.wasm
+$ wasmtime hello.wasm a b                        # run it with a runtime that supports WASI
+args: #(hello.wasm a b)
+fib(25) = 75025
+```
+
+- This needs preparation, and works only with a debug build of `typl` built in the repository.
+  Run `rustup target add wasm32-wasip1` with rustup, then run `scripts/build-wasm-runtime.sh` in the repository.
+- The module behaves as the executable does: standard output, standard error and the exit code, `(command-line-args)`,
+  reading and writing files, `throw`/`catch`/`panic`, tasks, channels and `sleep`, and `eval` all work.
+  Tasks run one after another on a single thread. Files can be read and written only inside the directories
+  the runtime exposes to the module (with wasmtime, name them with `--dir`).
+- A program that uses something WebAssembly does not have is a **compile error**. The error shows what was used and
+  the chain of functions from `main` that reaches it. What cannot be used: sockets (TCP, UDP, Unix domain,
+  TLS, name resolution), OS threads (`Thread`), C functions (`defffi`), `get-internal-run-time`, `machine-instance`, `software-version`, `file-author`,
+  the local time zone, and `ed`.
+- `--heap-cells`, `--max-memory`, `--no-cons`, `-O<N>` and `--release` work as they do for an executable.
 
 ## 4. Dumps
 

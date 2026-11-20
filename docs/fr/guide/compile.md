@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ 3394dc00d5681022b29cf8e2f0ac2199e52846b5 -->
+<!-- translated-from: docs/ja/guide/compile.md @ 0269bbc25c244db48a107288b49aa6d3cb9da715 -->
 # Compilation
 
 Sauf indication contraire, les programmes typelisp s'exécutent dans l'interpréteur. Il existe en outre deux façons
@@ -176,6 +176,29 @@ $ typl -c hello.typl --no-cons              # n'utilise aucune cellule cons
 - `--no-cons` produit un exécutable qui n'utilise aucune cellule cons. Il n'a pas d'arène cons : un programme qui fait quelque chose nécessitant des cellules cons est donc une **erreur de compilation**, qui montre cette opération et la chaîne de fonctions depuis `main` qui y mène. Les cellules cons sont nécessaires pour construire une liste `Sexpr` (y compris une liste quotée ou construite par quasi-quote) ou un argument `&rest`, ainsi que pour `read`, `eval` et `macroexpand`. Les opérations sur les nombres, chaînes, vecteurs, tables de hachage, structures, canaux, etc., et `print`/`println`/`format` n'en utilisent aucune. Ne peut pas être donné avec `--heap-cells`, et s'écrit après `-c`.
 
 `--max-memory` s'écrit après `-c`. `--heap-cells` peut s'écrire avant ou après `-c`, et donne alors la capacité de l'arène cons de l'exécutable. L'arène cons compte dans la borne de mémoire : avec une borne où l'arène ne tient pas, le programme s'arrête avant de commencer.
+
+### 3.6 Compiler pour WebAssembly
+
+Avec `--target wasm32-wasip1`, `typl -c` produit un module WebAssembly (une commande WASI preview 1) au lieu d'un exécutable. Sans `-o`, il porte le nom de la source avec `.typl` remplacé par `.wasm`.
+
+```sh
+$ typl -c hello.typl --target wasm32-wasip1      # produit hello.wasm
+$ wasmtime hello.wasm a b                        # l'exécuter avec un environnement compatible WASI
+args: #(hello.wasm a b)
+fib(25) = 75025
+```
+
+- Une préparation est nécessaire, et cela ne marche qu'avec une version de débogage de `typl` compilée dans le dépôt.
+  Lancez `rustup target add wasm32-wasip1` avec rustup, puis `scripts/build-wasm-runtime.sh` dans le dépôt.
+- Le module se comporte comme l'exécutable : sortie standard, erreur standard et code de sortie, `(command-line-args)`,
+  lecture et écriture de fichiers, `throw`/`catch`/`panic`, tâches, canaux et `sleep`, et `eval` fonctionnent.
+  Les tâches s'exécutent l'une après l'autre sur un seul thread. Les fichiers ne peuvent être lus et écrits que
+  dans les répertoires que l'environnement montre au module (avec wasmtime, on les donne avec `--dir`).
+- Un programme qui utilise ce que WebAssembly n'a pas est une **erreur de compilation**. L'erreur indique ce qui est utilisé
+  et la chaîne de fonctions depuis `main` qui y mène. Indisponibles : les sockets (TCP, UDP, domaine Unix,
+  TLS, résolution de noms), les threads du système (`Thread`), les fonctions C (`defffi`), `get-internal-run-time`, `machine-instance`, `software-version`, `file-author`,
+  le fuseau horaire local et `ed`.
+- `--heap-cells`, `--max-memory`, `--no-cons`, `-O<N>` et `--release` s'appliquent comme pour un exécutable.
 
 ## 4. Dumps
 

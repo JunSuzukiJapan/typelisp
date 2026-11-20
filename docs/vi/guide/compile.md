@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ 3394dc00d5681022b29cf8e2f0ac2199e52846b5 -->
+<!-- translated-from: docs/ja/guide/compile.md @ 0269bbc25c244db48a107288b49aa6d3cb9da715 -->
 # Biên dịch
 
 Nếu bạn không làm gì thêm, chương trình typelisp chạy trong trình thông dịch. Ngoài ra còn có hai
@@ -171,6 +171,29 @@ $ typl -c hello.typl --no-cons              # không dùng ô cons
 - `--no-cons` tạo tệp thực thi không dùng ô cons nào. Nó không có vùng cons, nên một chương trình làm việc cần đến ô cons là **lỗi biên dịch**, hiển thị thao tác đó và chuỗi hàm từ `main` dẫn tới nó. Ô cons cần cho việc tạo danh sách `Sexpr` (kể cả danh sách được quote và danh sách tạo bằng quasiquote) hoặc đối số `&rest`, và cho `read`, `eval`, `macroexpand`. Các thao tác trên số, chuỗi, vector, bảng băm, struct, kênh và những thứ tương tự, cùng `print`/`println`/`format`, không dùng ô nào. Không thể chỉ định cùng `--heap-cells`, và được viết sau `-c`.
 
 `--max-memory` được viết sau `-c`. `--heap-cells` có thể viết trước hoặc sau `-c`, và khi đó là dung lượng vùng cons của tệp thực thi. Vùng cons được tính vào giới hạn bộ nhớ, nên với một giới hạn không chứa nổi vùng, chương trình dừng trước khi bắt đầu.
+
+### 3.6 Biên dịch sang WebAssembly
+
+Với `--target wasm32-wasip1`, `typl -c` tạo một mô-đun WebAssembly (một lệnh WASI preview 1) thay cho tệp thực thi. Không có `-o` thì tên là tên tệp nguồn với `.typl` đổi thành `.wasm`.
+
+```sh
+$ typl -c hello.typl --target wasm32-wasip1      # tạo hello.wasm
+$ wasmtime hello.wasm a b                        # chạy bằng môi trường hỗ trợ WASI
+args: #(hello.wasm a b)
+fib(25) = 75025
+```
+
+- Cần chuẩn bị, và chỉ dùng được với bản build debug của `typl` được build trong kho mã.
+  Chạy `rustup target add wasm32-wasip1` bằng rustup, rồi chạy `scripts/build-wasm-runtime.sh` trong kho mã.
+- Mô-đun hoạt động như tệp thực thi: đầu ra chuẩn, lỗi chuẩn và mã thoát, `(command-line-args)`,
+  đọc ghi tệp, `throw`/`catch`/`panic`, tác vụ, kênh và `sleep`, cùng `eval` đều dùng được.
+  Các tác vụ chạy lần lượt trên một luồng. Chỉ đọc ghi được tệp trong các thư mục
+  mà môi trường cho mô-đun thấy (với wasmtime, chỉ định bằng `--dir`).
+- Chương trình dùng thứ mà WebAssembly không có là **lỗi biên dịch**. Lỗi cho biết thứ đã dùng và
+  chuỗi hàm từ `main` dẫn tới đó. Không dùng được: socket (TCP, UDP, miền Unix,
+  TLS, phân giải tên), luồng của hệ điều hành (`Thread`), hàm C (`defffi`), `get-internal-run-time`, `machine-instance`, `software-version`, `file-author`,
+  múi giờ cục bộ và `ed`.
+- `--heap-cells`, `--max-memory`, `--no-cons`, `-O<N>` và `--release` dùng được như với tệp thực thi.
 
 ## 4. Dump
 

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ 3394dc00d5681022b29cf8e2f0ac2199e52846b5 -->
+<!-- translated-from: docs/ja/guide/compile.md @ 0269bbc25c244db48a107288b49aa6d3cb9da715 -->
 # Kompilierung
 
 Ohne weiteres Zutun laufen typelisp-Programme im Interpreter. Darüber hinaus gibt es zwei Wege, in nativen
@@ -178,6 +178,29 @@ $ typl -c hello.typl --no-cons              # keine cons-Zellen verwenden
 - `--no-cons` erzeugt ein Programm, das keine cons-Zellen verwendet. Es hat keine cons-Arena; ein Programm, das etwas tut, wofür cons-Zellen nötig sind, ist daher ein **Kompilierfehler**, der diese Operation und die Kette der Funktionen von `main` bis dorthin zeigt. Cons-Zellen braucht man, um eine `Sexpr`-Liste (auch eine quotierte oder per Quasiquote gebaute) oder ein `&rest`-Argument zu bauen, sowie für `read`, `eval` und `macroexpand`. Operationen auf Zahlen, Zeichenketten, Vektoren, Hashtabellen, Strukturen, Kanälen und Ähnlichem sowie `print`/`println`/`format` brauchen keine. Lässt sich nicht zusammen mit `--heap-cells` angeben und steht nach `-c`.
 
 `--max-memory` steht nach `-c`. `--heap-cells` darf vor oder nach `-c` stehen und gibt dann die Kapazität der cons-Arena des Programms an. Die cons-Arena zählt zur Speichergrenze; bei einer Grenze, in die die Arena nicht passt, endet das Programm, bevor es beginnt.
+
+### 3.6 Für WebAssembly kompilieren
+
+Mit `--target wasm32-wasip1` erzeugt `typl -c` statt eines ausführbaren Programms ein WebAssembly-Modul (ein WASI-preview-1-Kommando). Ohne `-o` heißt es wie die Quelle, mit `.wasm` statt `.typl`.
+
+```sh
+$ typl -c hello.typl --target wasm32-wasip1      # erzeugt hello.wasm
+$ wasmtime hello.wasm a b                        # mit einer WASI-fähigen Laufzeitumgebung ausführen
+args: #(hello.wasm a b)
+fib(25) = 75025
+```
+
+- Das braucht Vorbereitung und geht nur mit einem im Repository gebauten Debug-Build von `typl`.
+  Führen Sie mit rustup `rustup target add wasm32-wasip1` aus und danach im Repository `scripts/build-wasm-runtime.sh`.
+- Das Modul verhält sich wie das ausführbare Programm: Standardausgabe, Standardfehler und Exit-Code, `(command-line-args)`,
+  Dateien lesen und schreiben, `throw`/`catch`/`panic`, Tasks, Kanäle und `sleep` sowie `eval` funktionieren.
+  Tasks laufen nacheinander in einem einzigen Thread. Dateien lassen sich nur in den Verzeichnissen lesen und
+  schreiben, die die Laufzeitumgebung dem Modul zeigt (bei wasmtime mit `--dir` angegeben).
+- Ein Programm, das etwas benutzt, das WebAssembly nicht hat, ist ein **Kompilierfehler**. Der Fehler zeigt, was benutzt wurde,
+  und die Kette der Funktionen von `main` bis dorthin. Nicht verfügbar sind: Sockets (TCP, UDP, Unix-Domain,
+  TLS, Namensauflösung), OS-Threads (`Thread`), C-Funktionen (`defffi`), `get-internal-run-time`, `machine-instance`, `software-version`, `file-author`,
+  die lokale Zeitzone und `ed`.
+- `--heap-cells`, `--max-memory`, `--no-cons`, `-O<N>` und `--release` wirken wie bei einem ausführbaren Programm.
 
 ## 4. Dumps
 

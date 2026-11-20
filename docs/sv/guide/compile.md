@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ 3394dc00d5681022b29cf8e2f0ac2199e52846b5 -->
+<!-- translated-from: docs/ja/guide/compile.md @ 0269bbc25c244db48a107288b49aa6d3cb9da715 -->
 # Kompilering
 
 Om du inte gör något annat körs typelisp-program i tolken. Dessutom finns två sätt att kompilera till
@@ -175,6 +175,29 @@ $ typl -c hello.typl --no-cons              # använd inga cons-celler
 - `--no-cons` bygger en körbar fil som inte använder några cons-celler. Den har ingen cons-arena, så ett program som gör något som kräver cons-celler är ett **kompileringsfel**, som visar operationen och kedjan av funktioner från `main` som når den. Cons-celler behövs för att bygga en `Sexpr`-lista (även en citerad lista och en som byggs med kvasicitering) eller ett `&rest`-argument, och av `read`, `eval` och `macroexpand`. Operationer på tal, strängar, vektorer, hashtabeller, structar, kanaler och liknande, och `print`/`println`/`format`, använder inga. Kan inte anges tillsammans med `--heap-cells` och skrivs efter `-c`.
 
 `--max-memory` skrivs efter `-c`. `--heap-cells` kan skrivas före eller efter `-c` och är då kapaciteten för den körbara filens cons-arena. Cons-arenan räknas in i minnesgränsen, så med en gräns som arenan inte ryms i stannar programmet innan det börjar.
+
+### 3.6 Kompilera för WebAssembly
+
+Med `--target wasm32-wasip1` gör `typl -c` en WebAssembly-modul (ett WASI preview 1-kommando) i stället för en körbar fil. Utan `-o` får den källans namn med `.typl` utbytt mot `.wasm`.
+
+```sh
+$ typl -c hello.typl --target wasm32-wasip1      # gör hello.wasm
+$ wasmtime hello.wasm a b                        # kör den med en miljö som stöder WASI
+args: #(hello.wasm a b)
+fib(25) = 75025
+```
+
+- Det kräver förberedelse och fungerar bara med en debug-version av `typl` byggd i repot.
+  Kör `rustup target add wasm32-wasip1` med rustup och sedan `scripts/build-wasm-runtime.sh` i repot.
+- Modulen beter sig som den körbara filen: standard ut, standard fel och slutkod, `(command-line-args)`,
+  läsa och skriva filer, `throw`/`catch`/`panic`, uppgifter, kanaler och `sleep`, och `eval` fungerar.
+  Uppgifterna körs efter varandra i en enda tråd. Filer kan bara läsas och skrivas i de kataloger
+  som miljön visar för modulen (i wasmtime anges de med `--dir`).
+- Ett program som använder något WebAssembly saknar är ett **kompileringsfel**. Felet visar vad som användes och
+  kedjan av funktioner från `main` som når dit. Det som inte kan användas: socketar (TCP, UDP, Unix-domän,
+  TLS, namnuppslagning), OS-trådar (`Thread`), C-funktioner (`defffi`), `get-internal-run-time`, `machine-instance`, `software-version`, `file-author`,
+  den lokala tidszonen och `ed`.
+- `--heap-cells`, `--max-memory`, `--no-cons`, `-O<N>` och `--release` fungerar som för en körbar fil.
 
 ## 4. Dumpar
 

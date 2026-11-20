@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ 3394dc00d5681022b29cf8e2f0ac2199e52846b5 -->
+<!-- translated-from: docs/ja/guide/compile.md @ 0269bbc25c244db48a107288b49aa6d3cb9da715 -->
 # Compilação
 
 Se você não fizer nada além disso, os programas typelisp são executados no interpretador. Além disso há duas
@@ -173,6 +173,29 @@ $ typl -c hello.typl --no-cons              # não usa células cons
 - `--no-cons` cria um executável que não usa células cons. Ele não tem arena de cons, então um programa que faça algo que precise de células cons é um **erro de compilação**, que mostra essa operação e a cadeia de funções desde `main` que chega a ela. Células cons são necessárias para construir uma lista `Sexpr` (incluindo uma lista citada e uma construída com quasiquote) ou um argumento `&rest`, e para `read`, `eval` e `macroexpand`. Operações com números, strings, vetores, tabelas hash, structs, canais e afins, e `print`/`println`/`format`, não usam nenhuma. Não pode ser passado junto com `--heap-cells` e é escrito depois de `-c`.
 
 `--max-memory` é escrito depois de `-c`. `--heap-cells` pode ser escrito antes ou depois de `-c`, e então é a capacidade da arena de cons do executável. A arena de cons conta para o limite de memória, então com um limite em que a arena não cabe o programa para antes de começar.
+
+### 3.6 Compilar para WebAssembly
+
+Com `--target wasm32-wasip1`, `typl -c` cria um módulo WebAssembly (um comando WASI preview 1) em vez de um executável. Sem `-o`, o nome é o da fonte com `.typl` trocado por `.wasm`.
+
+```sh
+$ typl -c hello.typl --target wasm32-wasip1      # cria hello.wasm
+$ wasmtime hello.wasm a b                        # executar com um ambiente compatível com WASI
+args: #(hello.wasm a b)
+fib(25) = 75025
+```
+
+- Exige preparação e só funciona com uma build de depuração do `typl` feita no repositório.
+  Execute `rustup target add wasm32-wasip1` com o rustup e depois `scripts/build-wasm-runtime.sh` no repositório.
+- O módulo se comporta como o executável: saída padrão, erro padrão e código de saída, `(command-line-args)`,
+  leitura e escrita de arquivos, `throw`/`catch`/`panic`, tarefas, canais e `sleep`, e `eval` funcionam.
+  As tarefas rodam uma após a outra em uma única thread. Só é possível ler e escrever arquivos dentro dos
+  diretórios que o ambiente mostra ao módulo (no wasmtime, indicados com `--dir`).
+- Um programa que usa algo que o WebAssembly não tem é um **erro de compilação**. O erro mostra o que foi usado e
+  a cadeia de funções a partir de `main` que chega até lá. Não podem ser usados: sockets (TCP, UDP, domínio Unix,
+  TLS, resolução de nomes), threads do sistema (`Thread`), funções C (`defffi`), `get-internal-run-time`, `machine-instance`, `software-version`, `file-author`,
+  o fuso horário local e `ed`.
+- `--heap-cells`, `--max-memory`, `--no-cons`, `-O<N>` e `--release` funcionam como para um executável.
 
 ## 4. Dumps
 

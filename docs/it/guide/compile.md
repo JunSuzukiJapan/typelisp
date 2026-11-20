@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ 3394dc00d5681022b29cf8e2f0ac2199e52846b5 -->
+<!-- translated-from: docs/ja/guide/compile.md @ 0269bbc25c244db48a107288b49aa6d3cb9da715 -->
 # Compilazione
 
 Se non fai altro, i programmi typelisp vengono eseguiti nell'interprete. Inoltre esistono due modi per
@@ -176,6 +176,29 @@ $ typl -c hello.typl --no-cons              # non usa celle cons
 - `--no-cons` crea un eseguibile che non usa celle cons. Non ha un'arena cons, quindi un programma che fa qualcosa che richiede celle cons è un **errore di compilazione**, che mostra quell'operazione e la catena di funzioni da `main` che la raggiunge. Le celle cons servono per costruire una lista `Sexpr` (anche una lista quotata o costruita con il quasiquote) o un argomento `&rest`, e per `read`, `eval` e `macroexpand`. Le operazioni su numeri, stringhe, vettori, tabelle hash, struct, canali e simili, e `print`/`println`/`format`, non ne usano. Non si può indicare insieme a `--heap-cells` e si scrive dopo `-c`.
 
 `--max-memory` si scrive dopo `-c`. `--heap-cells` si può scrivere prima o dopo `-c`, e allora è la capacità dell'arena cons dell'eseguibile. L'arena cons conta nel limite di memoria, quindi con un limite in cui l'arena non entra il programma si ferma prima di iniziare.
+
+### 3.6 Compilare per WebAssembly
+
+Con `--target wasm32-wasip1`, `typl -c` crea un modulo WebAssembly (un comando WASI preview 1) invece di un eseguibile. Senza `-o`, prende il nome della sorgente con `.typl` sostituito da `.wasm`.
+
+```sh
+$ typl -c hello.typl --target wasm32-wasip1      # crea hello.wasm
+$ wasmtime hello.wasm a b                        # eseguirlo con un ambiente che supporta WASI
+args: #(hello.wasm a b)
+fib(25) = 75025
+```
+
+- Serve una preparazione, e funziona solo con una build di debug di `typl` compilata nel repository.
+  Eseguite `rustup target add wasm32-wasip1` con rustup, poi `scripts/build-wasm-runtime.sh` nel repository.
+- Il modulo si comporta come l'eseguibile: output standard, errore standard e codice di uscita, `(command-line-args)`,
+  lettura e scrittura di file, `throw`/`catch`/`panic`, task, canali e `sleep`, ed `eval` funzionano.
+  I task vengono eseguiti uno dopo l'altro su un solo thread. I file si possono leggere e scrivere solo nelle
+  directory che l'ambiente mostra al modulo (con wasmtime si indicano con `--dir`).
+- Un programma che usa qualcosa che WebAssembly non ha è un **errore di compilazione**. L'errore mostra cosa è stato usato
+  e la catena di funzioni da `main` che ci arriva. Non si possono usare: socket (TCP, UDP, dominio Unix,
+  TLS, risoluzione dei nomi), thread del sistema (`Thread`), funzioni C (`defffi`), `get-internal-run-time`, `machine-instance`, `software-version`, `file-author`,
+  il fuso orario locale ed `ed`.
+- `--heap-cells`, `--max-memory`, `--no-cons`, `-O<N>` e `--release` valgono come per un eseguibile.
 
 ## 4. Dump
 

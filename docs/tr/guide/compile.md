@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ 3394dc00d5681022b29cf8e2f0ac2199e52846b5 -->
+<!-- translated-from: docs/ja/guide/compile.md @ 0269bbc25c244db48a107288b49aa6d3cb9da715 -->
 # Derleme
 
 Başka bir şey yapmazsanız typelisp programları yorumlayıcıda çalışır. Buna ek olarak yerel koda
@@ -174,6 +174,29 @@ $ typl -c hello.typl --no-cons              # cons hücresi kullanma
 - `--no-cons`, cons hücresi kullanmayan bir çalıştırılabilir dosya oluşturur. Cons alanı yoktur; bu yüzden cons hücresi gerektiren bir şey yapan program bir **derleme hatasıdır** ve bu işlemi ve `main`'den ona ulaşan fonksiyon zincirini gösterir. Cons hücreleri bir `Sexpr` listesi (alıntılanmış liste ve quasiquote ile kurulan liste dahil) veya bir `&rest` argümanı kurmak için, ayrıca `read`, `eval` ve `macroexpand` için gerekir. Sayılar, dizgeler, vektörler, karma tablolar, yapılar, kanallar ve benzerleri üzerindeki işlemler ile `print`/`println`/`format` hiç kullanmaz. `--heap-cells` ile birlikte verilemez ve `-c`'den sonra yazılır.
 
 `--max-memory`, `-c`'den sonra yazılır. `--heap-cells`, `-c`'den önce veya sonra yazılabilir ve o zaman çalıştırılabilir dosyanın cons alanının kapasitesidir. Cons alanı bellek sınırına dahildir; alanın sığmadığı bir sınırla program başlamadan durur.
+
+### 3.6 WebAssembly için derlemek
+
+`--target wasm32-wasip1` ile `typl -c`, çalıştırılabilir dosya yerine bir WebAssembly modülü (WASI preview 1 komutu) üretir. `-o` verilmezse adı, kaynağın adında `.typl` yerine `.wasm` konmuş halidir.
+
+```sh
+$ typl -c hello.typl --target wasm32-wasip1      # hello.wasm üretir
+$ wasmtime hello.wasm a b                        # WASI destekleyen bir ortamda çalıştırmak
+args: #(hello.wasm a b)
+fib(25) = 75025
+```
+
+- Hazırlık gerekir ve yalnızca depoda derlenmiş bir hata ayıklama (debug) `typl` ile çalışır.
+  rustup ile `rustup target add wasm32-wasip1` çalıştırın, ardından depoda `scripts/build-wasm-runtime.sh` çalıştırın.
+- Modül çalıştırılabilir dosya gibi davranır: standart çıktı, standart hata ve çıkış kodu, `(command-line-args)`,
+  dosya okuma ve yazma, `throw`/`catch`/`panic`, görevler, kanallar ve `sleep`, ve `eval` çalışır.
+  Görevler tek bir iş parçacığında sırayla çalışır. Dosyalar yalnızca ortamın modüle gösterdiği dizinlerde
+  okunup yazılabilir (wasmtime'da `--dir` ile belirtilir).
+- WebAssembly'de olmayan bir şeyi kullanan program bir **derleme hatasıdır**. Hata, kullanılanı ve oraya ulaşan,
+  `main`'den başlayan fonksiyon zincirini gösterir. Kullanılamayanlar: soketler (TCP, UDP, Unix alanı,
+  TLS, ad çözümleme), işletim sistemi iş parçacıkları (`Thread`), C fonksiyonları (`defffi`), `get-internal-run-time`, `machine-instance`, `software-version`, `file-author`,
+  yerel saat dilimi ve `ed`.
+- `--heap-cells`, `--max-memory`, `--no-cons`, `-O<N>` ve `--release` çalıştırılabilir dosyada olduğu gibi çalışır.
 
 ## 4. Dump'lar
 
