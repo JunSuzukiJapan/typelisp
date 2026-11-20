@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ 804fb3914b90de67225569295b86c07e97db869d -->
+<!-- translated-from: docs/ja/guide/compile.md @ a36274f320d8c5d5cb4466ab6e64fa298bc602c3 -->
 # Compilação
 
 Se você não fizer nada além disso, os programas typelisp são executados no interpretador. Além disso há duas
@@ -90,7 +90,7 @@ fib(25) = 75025
 
 Sem `-o`, o executável recebe o nome do arquivo-fonte sem `.typl` e é colocado na mesma pasta do
 arquivo-fonte. Se o nome do arquivo-fonte não terminar em `.typl`, `-o` é obrigatório. Com `-c`
-(`--compile`), não é possível passar `--image`, `--heap-cells` nem `--feature`.
+(`--compile`), não é possível passar `--image` nem `--feature`.
 
 Com `--release`, o `typl` faz um **build de release**, que remove `eprint`/`eprintln` (saída de erro padrão para investigação; [Impressão](../reference/functions/printing.md)) junto com seus argumentos. O que ele remove continua sendo verificado por tipos, então um erro de tipo ali faz a compilação falhar. `--release` é uma opção do `typl` como um todo: funciona do mesmo jeito não só com `-c`, mas também ao executar um arquivo, no REPL e no `typl test`. Um `compile-file` chamado dentro de um `typl` iniciado com `--release` também faz um build de release, e `eprint`/`eprintln` também são removidos do código avaliado com `eval` dentro do executável feito assim.
 
@@ -157,6 +157,20 @@ Se a pasta informada não tiver `libtypelisp_front.a`, o `typl` para com um erro
   `typl hello.typl a b` ou como `./hello a b`. O primeiro elemento é o nome do programa.
 - O código de saída é definido com `(exit n)`. Se `main` retornar normalmente, ele é 0.
 - Em um `panic`, o programa imprime a mensagem e sai com um código diferente de zero.
+
+### 3.5 Recursos que o executável usa
+
+`typl -c` tem opções que dizem quais recursos o executável pode usar enquanto roda.
+
+```sh
+$ typl --heap-cells 100000 -c hello.typl    # fixa a arena de cons em 100000 células
+$ typl -c hello.typl --max-memory 64M       # aloca no máximo 64 MiB
+```
+
+- `--heap-cells N` fixa a capacidade da arena de células cons em `N` células. A arena não cresce além disso: se a coleta de lixo não conseguir liberar uma célula, o programa para com um erro de execução. Sem a opção, a arena começa com 65536 células e cresce conforme necessário.
+- `--max-memory SIZE` limita a memória total que o executável aloca. Tudo conta: a arena de cons, strings, valores como vetores e tabelas hash, e a memória que o próprio runtime usa. `SIZE` é um número de bytes e pode ser seguido de `K`, `M` ou `G` (1024, 1024² e 1024³ vezes). Uma alocação que passaria do limite é informada, e o programa termina com o código de saída 1. Essa saída não pode ser capturada com `catch`. Sem a opção, não há limite.
+
+`--max-memory` é escrito depois de `-c`. `--heap-cells` pode ser escrito antes ou depois de `-c`, e então é a capacidade da arena de cons do executável. A arena de cons conta para o limite de memória, então com um limite em que a arena não cabe o programa para antes de começar.
 
 ## 4. Dumps
 

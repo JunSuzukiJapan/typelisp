@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ 804fb3914b90de67225569295b86c07e97db869d -->
+<!-- translated-from: docs/ja/guide/compile.md @ a36274f320d8c5d5cb4466ab6e64fa298bc602c3 -->
 # Kompilierung
 
 Ohne weiteres Zutun laufen typelisp-Programme im Interpreter. Darüber hinaus gibt es zwei Wege, in nativen
@@ -92,7 +92,7 @@ fib(25) = 75025
 
 Ohne `-o` erhält das Programm den Namen der Quelldatei ohne `.typl` und landet im selben Ordner wie die
 Quelldatei. Endet der Name der Quelldatei nicht auf `.typl`, ist `-o` Pflicht. Zusammen mit `-c` (`--compile`)
-lassen sich `--image`, `--heap-cells` und `--feature` nicht angeben.
+lassen sich `--image` und `--feature` nicht angeben.
 
 Mit `--release` erzeugt `typl` einen **Release-Build**, der `eprint`/`eprintln` (Ausgaben zur Untersuchung auf der Standardfehlerausgabe; [Ausgabe](../reference/functions/printing.md)) samt Argumenten entfernt. Was entfernt wird, wird trotzdem typgeprüft; ein Typfehler darin lässt die Kompilierung also fehlschlagen. `--release` ist eine Option von `typl` als Ganzem: Sie wirkt nicht nur bei `-c`, sondern ebenso beim Ausführen einer Datei, in der REPL und bei `typl test`. Auch ein `compile-file`, das in einem mit `--release` gestarteten `typl` aufgerufen wird, erzeugt einen Release-Build, und auch aus Code, der in einer so erzeugten ausführbaren Datei mit `eval` ausgeführt wird, werden `eprint`/`eprintln` entfernt.
 
@@ -162,6 +162,20 @@ sie erneut.
   `typl hello.typl a b` oder als `./hello a b` ausgeführt. Das erste Element ist der Programmname.
 - Den Exit-Code setzt man mit `(exit n)`. Kehrt `main` normal zurück, ist er 0.
 - Bei einem `panic` gibt das Programm die Meldung aus und endet mit einem Code ungleich null.
+
+### 3.5 Ressourcen des Programms
+
+`typl -c` hat Optionen, die festlegen, welche Ressourcen das Programm während des Laufs verwenden darf.
+
+```sh
+$ typl --heap-cells 100000 -c hello.typl    # die cons-Arena auf 100000 Zellen festlegen
+$ typl -c hello.typl --max-memory 64M       # höchstens 64 MiB belegen
+```
+
+- `--heap-cells N` legt die Kapazität der Arena der cons-Zellen auf `N` Zellen fest. Die Arena wächst nicht darüber hinaus: Kann die Garbage Collection keine Zelle freigeben, endet das Programm mit einem Laufzeitfehler. Ohne die Option beginnt die Arena mit 65536 Zellen und wächst nach Bedarf.
+- `--max-memory SIZE` begrenzt den gesamten Speicher, den das Programm belegt. Alles zählt: die cons-Arena, Zeichenketten, Werte wie Vektoren und Hashtabellen und der Speicher der Laufzeit selbst. `SIZE` ist eine Anzahl Bytes, gefolgt optional von `K`, `M` oder `G` (das 1024-, 1024²- und 1024³-fache). Eine Belegung über die Grenze hinaus wird gemeldet, und das Programm endet mit dem Exit-Code 1. Dieses Ende lässt sich nicht mit `catch` abfangen. Ohne die Option gibt es keine Grenze.
+
+`--max-memory` steht nach `-c`. `--heap-cells` darf vor oder nach `-c` stehen und gibt dann die Kapazität der cons-Arena des Programms an. Die cons-Arena zählt zur Speichergrenze; bei einer Grenze, in die die Arena nicht passt, endet das Programm, bevor es beginnt.
 
 ## 4. Dumps
 

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ 804fb3914b90de67225569295b86c07e97db869d -->
+<!-- translated-from: docs/ja/guide/compile.md @ a36274f320d8c5d5cb4466ab6e64fa298bc602c3 -->
 # Derleme
 
 Başka bir şey yapmazsanız typelisp programları yorumlayıcıda çalışır. Buna ek olarak yerel koda
@@ -91,7 +91,7 @@ fib(25) = 75025
 
 `-o` olmadan çalıştırılabilir dosya, kaynak dosyanın adından `.typl` çıkarılarak adlandırılır ve
 kaynak dosyayla aynı klasöre konur. Kaynak dosya adı `.typl` ile bitmiyorsa `-o` zorunludur.
-`-c` (`--compile`) ile `--image`, `--heap-cells` ve `--feature` verilemez.
+`-c` (`--compile`) ile `--image` ve `--feature` verilemez.
 
 `--release` ile `typl` bir **release derlemesi** yapar; bu, `eprint`/`eprintln`'i (inceleme amaçlı standart hata çıktısı; [Yazdırma](../reference/functions/printing.md)) argümanlarıyla birlikte kaldırır. Kaldırılanlar yine de tür denetiminden geçer, bu yüzden oradaki bir tür hatası derlemeyi başarısız kılar. `--release`, `typl`'ın bütününe ait bir seçenektir: yalnızca `-c` için değil, bir dosyayı çalıştırırken, REPL'de ve `typl test` için de aynı şekilde etkilidir. `--release` ile başlatılan bir `typl` içinde çağrılan `compile-file` da release derlemesi yapar ve böyle yapılan çalıştırılabilir dosyanın içinde `eval` ile çalıştırılan koddan da `eprint`/`eprintln` kaldırılır.
 
@@ -158,6 +158,20 @@ derlenmiş `typl` ile çalışır. `typl`'yi yeniden derledikten sonra onu yenid
   biçimde bir `Vector<string>` döndürür. İlk eleman program adıdır.
 - Çıkış kodunu `(exit n)` ile ayarlayın. `main` normal şekilde dönerse kod 0'dır.
 - `panic` durumunda program mesajı yazdırır ve sıfırdan farklı bir kodla çıkar.
+
+### 3.5 Çalıştırılabilir dosyanın kullandığı kaynaklar
+
+`typl -c`, çalıştırılabilir dosyanın çalışırken hangi kaynakları kullanabileceğini belirten seçeneklere sahiptir.
+
+```sh
+$ typl --heap-cells 100000 -c hello.typl    # cons alanını 100000 hücrede sabitle
+$ typl -c hello.typl --max-memory 64M       # en çok 64 MiB ayır
+```
+
+- `--heap-cells N`, cons hücre alanının kapasitesini `N` hücrede sabitler. Alan bunun ötesine büyümez: çöp toplama tek bir hücre bile boşaltamazsa program bir çalışma zamanı hatasıyla durur. Seçenek verilmezse alan 65536 hücreyle başlar ve gerektikçe büyür.
+- `--max-memory SIZE`, çalıştırılabilir dosyanın ayırdığı toplam belleği sınırlar. Her şey sayılır: cons alanı, dizgeler, vektörler ve karma tablolar gibi değerler ve çalışma zamanının kendisinin kullandığı bellek. `SIZE` bir bayt sayısıdır ve ardından `K`, `M` veya `G` (1024, 1024² ve 1024³ katı) gelebilir. Sınırı aşacak bir ayırma bildirilir ve program 1 çıkış koduyla sonlanır. Bu sonlanma `catch` ile yakalanamaz. Seçenek verilmezse sınır yoktur.
+
+`--max-memory`, `-c`'den sonra yazılır. `--heap-cells`, `-c`'den önce veya sonra yazılabilir ve o zaman çalıştırılabilir dosyanın cons alanının kapasitesidir. Cons alanı bellek sınırına dahildir; alanın sığmadığı bir sınırla program başlamadan durur.
 
 ## 4. Dump'lar
 

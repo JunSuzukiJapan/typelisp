@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ 804fb3914b90de67225569295b86c07e97db869d -->
+<!-- translated-from: docs/ja/guide/compile.md @ a36274f320d8c5d5cb4466ab6e64fa298bc602c3 -->
 # Compilation
 
 Sauf indication contraire, les programmes typelisp s'exécutent dans l'interpréteur. Il existe en outre deux façons
@@ -90,7 +90,7 @@ fib(25) = 75025
 
 Sans `-o`, l'exécutable porte le nom du fichier source sans `.typl` et est placé dans le même dossier que le
 fichier source. Si le nom du fichier source ne se termine pas par `.typl`, `-o` est obligatoire. Avec `-c`
-(`--compile`), on ne peut pas donner `--image`, `--heap-cells` ni `--feature`.
+(`--compile`), on ne peut pas donner `--image` ni `--feature`.
 
 Avec `--release`, `typl` produit une **compilation release**, qui retire `eprint`/`eprintln` (sortie d'erreur standard pour l'investigation ; [Affichage](../reference/functions/printing.md)) avec leurs arguments. Ce qui est retiré est tout de même vérifié par les types : une erreur de type à cet endroit fait donc échouer la compilation. `--release` est une option de `typl` dans son ensemble : elle agit de la même façon non seulement pour `-c`, mais aussi lors de l'exécution d'un fichier, dans le REPL et pour `typl test`. Un `compile-file` appelé dans un `typl` lancé avec `--release` produit lui aussi une compilation release, et `eprint`/`eprintln` sont aussi retirés du code évalué par `eval` dans l'exécutable ainsi produit.
 
@@ -160,6 +160,20 @@ nouveau.
   `./hello a b`. Le premier élément est le nom du programme.
 - Fixez le code de sortie avec `(exit n)`. Si `main` revient normalement, il vaut 0.
 - En cas de `panic`, le programme affiche le message et se termine avec un code non nul.
+
+### 3.5 Ressources utilisées par l'exécutable
+
+`typl -c` a des options qui indiquent les ressources que l'exécutable peut utiliser pendant son exécution.
+
+```sh
+$ typl --heap-cells 100000 -c hello.typl    # fixe l'arène cons à 100000 cellules
+$ typl -c hello.typl --max-memory 64M       # alloue au plus 64 Mio
+```
+
+- `--heap-cells N` fixe la capacité de l'arène des cellules cons à `N` cellules. L'arène ne grandit pas au-delà : si le ramasse-miettes ne peut libérer aucune cellule, le programme s'arrête sur une erreur d'exécution. Sans l'option, l'arène commence à 65536 cellules et grandit selon les besoins.
+- `--max-memory SIZE` borne la mémoire totale que l'exécutable alloue. Tout compte : l'arène cons, les chaînes, les valeurs comme les vecteurs et les tables de hachage, et la mémoire du runtime lui-même. `SIZE` est un nombre d'octets, éventuellement suivi de `K`, `M` ou `G` (1024, 1024² et 1024³ fois). Une allocation qui dépasserait la borne est signalée, et le programme se termine avec le code de sortie 1. Cette sortie ne peut pas être interceptée par `catch`. Sans l'option, il n'y a pas de borne.
+
+`--max-memory` s'écrit après `-c`. `--heap-cells` peut s'écrire avant ou après `-c`, et donne alors la capacité de l'arène cons de l'exécutable. L'arène cons compte dans la borne de mémoire : avec une borne où l'arène ne tient pas, le programme s'arrête avant de commencer.
 
 ## 4. Dumps
 

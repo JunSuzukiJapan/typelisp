@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ 804fb3914b90de67225569295b86c07e97db869d -->
+<!-- translated-from: docs/ja/guide/compile.md @ a36274f320d8c5d5cb4466ab6e64fa298bc602c3 -->
 # Kompilering
 
 Om du inte gör något annat körs typelisp-program i tolken. Dessutom finns två sätt att kompilera till
@@ -89,8 +89,8 @@ fib(25) = 75025
 ```
 
 Utan `-o` får den körbara filen namnet på källfilen utan `.typl` och läggs i samma mapp som källfilen.
-Om källfilens namn inte slutar på `.typl` krävs `-o`. Med `-c` (`--compile`) kan `--image`,
-`--heap-cells` och `--feature` inte anges.
+Om källfilens namn inte slutar på `.typl` krävs `-o`. Med `-c` (`--compile`) kan `--image`
+och `--feature` inte anges.
 
 Med `--release` gör `typl` ett **release-bygge**, som tar bort `eprint`/`eprintln` (utdata till standard fel för felsökning; [Utskrift](../reference/functions/printing.md)) tillsammans med deras argument. Det som tas bort typkontrolleras ändå, så ett typfel där får kompileringen att misslyckas. `--release` är ett alternativ för `typl` som helhet: det verkar likadant inte bara för `-c` utan också när man kör en fil, i REPL:en och för `typl test`. En `compile-file` som anropas i en `typl` startad med `--release` gör också ett release-bygge, och `eprint`/`eprintln` tas bort även ur kod som körs med `eval` i den körbara fil som byggts så.
 
@@ -159,6 +159,20 @@ bara med den `typl` som byggdes tillsammans med den. Efter att ha byggt om `typl
   `typl hello.typl a b` eller som `./hello a b`. Det första elementet är programnamnet.
 - Ange slutkoden med `(exit n)`. Om `main` returnerar normalt är den 0.
 - Vid `panic` skriver programmet ut meddelandet och avslutar med en slutkod som inte är noll.
+
+### 3.5 Resurser som den körbara filen använder
+
+`typl -c` har flaggor som anger vilka resurser den körbara filen får använda medan den kör.
+
+```sh
+$ typl --heap-cells 100000 -c hello.typl    # lås cons-arenan vid 100000 celler
+$ typl -c hello.typl --max-memory 64M       # allokera högst 64 MiB
+```
+
+- `--heap-cells N` låser kapaciteten för arenan av cons-celler vid `N` celler. Arenan växer inte förbi den: kan skräpsamlingen inte frigöra någon cell stannar programmet med ett körtidsfel. Utan flaggan börjar arenan med 65536 celler och växer efter behov.
+- `--max-memory SIZE` begränsar det totala minne den körbara filen allokerar. Allt räknas: cons-arenan, strängar, värden som vektorer och hashtabeller, och minnet som körtidsmiljön själv använder. `SIZE` är ett antal byte och kan följas av `K`, `M` eller `G` (1024, 1024² och 1024³ gånger). En allokering som skulle gå över gränsen rapporteras, och programmet avslutas med slutkod 1. Detta avslut kan inte fångas med `catch`. Utan flaggan finns ingen gräns.
+
+`--max-memory` skrivs efter `-c`. `--heap-cells` kan skrivas före eller efter `-c` och är då kapaciteten för den körbara filens cons-arena. Cons-arenan räknas in i minnesgränsen, så med en gräns som arenan inte ryms i stannar programmet innan det börjar.
 
 ## 4. Dumpar
 

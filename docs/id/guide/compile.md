@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ 804fb3914b90de67225569295b86c07e97db869d -->
+<!-- translated-from: docs/ja/guide/compile.md @ a36274f320d8c5d5cb4466ab6e64fa298bc602c3 -->
 # Kompilasi
 
 Jika Anda tidak melakukan apa-apa lagi, program typelisp berjalan di interpreter. Selain itu ada dua
@@ -91,7 +91,7 @@ fib(25) = 75025
 
 Tanpa `-o`, berkas eksekusi dinamai sesuai berkas sumber tanpa `.typl` dan ditaruh di folder yang
 sama dengan berkas sumber. Jika nama berkas sumber tidak berakhiran `.typl`, `-o` wajib diberikan.
-Bersama `-c` (`--compile`), `--image`, `--heap-cells`, dan `--feature` tidak dapat diberikan.
+Bersama `-c` (`--compile`), `--image` dan `--feature` tidak dapat diberikan.
 
 Dengan `--release`, `typl` membuat **build rilis**, yang menghapus `eprint`/`eprintln` (keluaran galat standar untuk menyelidiki masalah; [Pencetakan](../reference/functions/printing.md)) beserta argumennya. Yang dihapus tetap diperiksa tipenya, sehingga galat tipe di sana membuat kompilasi gagal. `--release` adalah opsi `typl` secara keseluruhan: berlaku sama bukan hanya untuk `-c`, tetapi juga saat menjalankan file, di REPL, dan untuk `typl test`. `compile-file` yang dipanggil di dalam `typl` yang dijalankan dengan `--release` juga membuat build rilis, dan `eprint`/`eprintln` juga dihapus dari kode yang dijalankan dengan `eval` di dalam berkas eksekusi yang dibuat dengan cara itu.
 
@@ -161,6 +161,20 @@ salin lagi.
   sebagai `typl hello.typl a b` maupun `./hello a b`. Elemen pertama adalah nama program.
 - Setel kode keluar dengan `(exit n)`. Jika `main` kembali secara normal, kodenya 0.
 - Pada `panic`, program mencetak pesan dan keluar dengan kode bukan nol.
+
+### 3.5 Sumber daya yang dipakai berkas eksekusi
+
+`typl -c` punya opsi yang menentukan sumber daya apa yang boleh dipakai berkas eksekusi saat berjalan.
+
+```sh
+$ typl --heap-cells 100000 -c hello.typl    # tetapkan arena cons pada 100000 sel
+$ typl -c hello.typl --max-memory 64M       # alokasikan paling banyak 64 MiB
+```
+
+- `--heap-cells N` menetapkan kapasitas arena sel cons pada `N` sel. Arena tidak tumbuh melebihinya: jika pengumpulan sampah tidak bisa membebaskan satu sel pun, program berhenti dengan galat waktu jalan. Tanpa opsi ini, arena dimulai dengan 65536 sel dan tumbuh sesuai kebutuhan.
+- `--max-memory SIZE` membatasi total memori yang dialokasikan berkas eksekusi. Semuanya dihitung: arena cons, string, nilai seperti vektor dan tabel hash, serta memori yang dipakai runtime itu sendiri. `SIZE` adalah jumlah byte dan boleh diikuti `K`, `M`, atau `G` (1024, 1024², dan 1024³ kali). Alokasi yang akan melewati batas dilaporkan, dan program keluar dengan kode keluar 1. Keluar seperti ini tidak dapat ditangkap dengan `catch`. Tanpa opsi ini, tidak ada batas.
+
+`--max-memory` ditulis setelah `-c`. `--heap-cells` boleh ditulis sebelum atau setelah `-c`, dan menjadi kapasitas arena cons berkas eksekusi. Arena cons ikut dihitung dalam batas memori, jadi dengan batas yang tidak memuat arena, program berhenti sebelum mulai.
 
 ## 4. Dump
 

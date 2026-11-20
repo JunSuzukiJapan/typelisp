@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ 804fb3914b90de67225569295b86c07e97db869d -->
+<!-- translated-from: docs/ja/guide/compile.md @ a36274f320d8c5d5cb4466ab6e64fa298bc602c3 -->
 # Kompilacja
 
 O ile nie zrobisz nic więcej, programy typelisp działają w interpreterze. Ponadto istnieją dwa
@@ -89,7 +89,7 @@ fib(25) = 75025
 
 Bez `-o` plik wykonywalny dostaje nazwę pliku źródłowego bez `.typl` i trafia do
 tego samego katalogu co plik źródłowy. Jeśli nazwa pliku źródłowego nie kończy się na `.typl`, `-o` jest
-wymagane. Przy `-c` (`--compile`) nie można podawać `--image`, `--heap-cells` ani `--feature`.
+wymagane. Przy `-c` (`--compile`) nie można podawać `--image` ani `--feature`.
 
 Z `--release` `typl` tworzy **kompilację release**, która usuwa `eprint`/`eprintln` (wyjście na standardowe wyjście błędów służące badaniu problemów; [Wypisywanie](../reference/functions/printing.md)) razem z ich argumentami. To, co usuwa, i tak jest sprawdzane pod względem typów, więc błąd typu w tym miejscu powoduje niepowodzenie kompilacji. `--release` to opcja całego `typl`: działa tak samo nie tylko przy `-c`, ale też przy uruchamianiu pliku, w REPL i w `typl test`. `compile-file` wywołane w `typl` uruchomionym z `--release` również tworzy kompilację release, a `eprint`/`eprintln` są usuwane także z kodu wykonywanego przez `eval` w tak utworzonym pliku wykonywalnym.
 
@@ -156,6 +156,20 @@ z `typl` zbudowanym razem z nim. Po przebudowaniu `typl` skopiuj go ponownie.
   `typl hello.typl a b`, czy `./hello a b`. Pierwszym elementem jest nazwa programu.
 - Kod wyjścia ustawia się za pomocą `(exit n)`. Jeśli `main` zakończy się normalnie, wynosi 0.
 - Przy `panic` program wypisuje komunikat i kończy działanie z niezerowym kodem.
+
+### 3.5 Zasoby używane przez plik wykonywalny
+
+`typl -c` ma opcje określające, jakich zasobów plik wykonywalny może używać podczas działania.
+
+```sh
+$ typl --heap-cells 100000 -c hello.typl    # ustala arenę cons na 100000 komórek
+$ typl -c hello.typl --max-memory 64M       # przydziela najwyżej 64 MiB
+```
+
+- `--heap-cells N` ustala pojemność areny komórek cons na `N` komórek. Arena ponad to nie rośnie: jeśli odśmiecanie nie zwolni żadnej komórki, program zatrzymuje się z błędem wykonania. Bez tej opcji arena zaczyna od 65536 komórek i rośnie w miarę potrzeby.
+- `--max-memory SIZE` ogranicza całkowitą pamięć przydzielaną przez plik wykonywalny. Liczy się wszystko: arena cons, napisy, wartości takie jak wektory i tablice haszujące oraz pamięć samego środowiska uruchomieniowego. `SIZE` to liczba bajtów, po której może stać `K`, `M` lub `G` (1024, 1024² i 1024³ razy). Przydział, który przekroczyłby granicę, jest zgłaszany, a program kończy się z kodem wyjścia 1. Tego zakończenia nie da się przechwycić przez `catch`. Bez tej opcji nie ma granicy.
+
+`--max-memory` pisze się po `-c`. `--heap-cells` można napisać przed `-c` lub po nim i jest wtedy pojemnością areny cons pliku wykonywalnego. Arena cons wlicza się do granicy pamięci, więc przy granicy, w której arena się nie mieści, program zatrzymuje się, zanim się zacznie.
 
 ## 4. Zrzuty (dumps)
 

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ 804fb3914b90de67225569295b86c07e97db869d -->
+<!-- translated-from: docs/ja/guide/compile.md @ a36274f320d8c5d5cb4466ab6e64fa298bc602c3 -->
 # Compilazione
 
 Se non fai altro, i programmi typelisp vengono eseguiti nell'interprete. Inoltre esistono due modi per
@@ -92,7 +92,7 @@ fib(25) = 75025
 
 Senza `-o`, l'eseguibile prende il nome del file sorgente senza `.typl` e viene collocato nella stessa
 cartella del file sorgente. Se il nome del file sorgente non termina con `.typl`, `-o` è obbligatorio.
-Con `-c` (`--compile`), non si possono indicare `--image`, `--heap-cells` e `--feature`.
+Con `-c` (`--compile`), non si possono indicare `--image` e `--feature`.
 
 Con `--release`, `typl` produce una **build release**, che rimuove `eprint`/`eprintln` (output su standard error per l'indagine; [Stampa](../reference/functions/printing.md)) insieme ai loro argomenti. Ciò che rimuove viene comunque controllato nei tipi, quindi un errore di tipo lì fa fallire la compilazione. `--release` è un'opzione di `typl` nel suo insieme: vale allo stesso modo non solo per `-c`, ma anche quando si esegue un file, nella REPL e per `typl test`. Anche un `compile-file` chiamato dentro un `typl` avviato con `--release` produce una build release, e `eprint`/`eprintln` vengono rimossi anche dal codice valutato con `eval` dentro l'eseguibile così prodotto.
 
@@ -160,6 +160,20 @@ funziona solo con il `typl` compilato insieme ad esso. Dopo aver ricompilato `ty
   programma.
 - Imposta il codice di uscita con `(exit n)`. Se `main` ritorna normalmente, è 0.
 - In caso di `panic`, il programma stampa il messaggio ed esce con un codice diverso da zero.
+
+### 3.5 Risorse usate dall'eseguibile
+
+`typl -c` ha opzioni che indicano quali risorse l'eseguibile può usare durante l'esecuzione.
+
+```sh
+$ typl --heap-cells 100000 -c hello.typl    # fissa l'arena cons a 100000 celle
+$ typl -c hello.typl --max-memory 64M       # alloca al massimo 64 MiB
+```
+
+- `--heap-cells N` fissa la capacità dell'arena delle celle cons a `N` celle. L'arena non cresce oltre: se la garbage collection non riesce a liberare una cella, il programma si ferma con un errore di esecuzione. Senza l'opzione, l'arena parte da 65536 celle e cresce quando serve.
+- `--max-memory SIZE` limita la memoria totale che l'eseguibile alloca. Conta tutto: l'arena cons, le stringhe, valori come vettori e tabelle hash, e la memoria del runtime stesso. `SIZE` è un numero di byte e può essere seguito da `K`, `M` o `G` (1024, 1024² e 1024³ volte). Un'allocazione che supererebbe il limite viene segnalata e il programma termina con codice di uscita 1. Questa uscita non si può intercettare con `catch`. Senza l'opzione non c'è limite.
+
+`--max-memory` si scrive dopo `-c`. `--heap-cells` si può scrivere prima o dopo `-c`, e allora è la capacità dell'arena cons dell'eseguibile. L'arena cons conta nel limite di memoria, quindi con un limite in cui l'arena non entra il programma si ferma prima di iniziare.
 
 ## 4. Dump
 

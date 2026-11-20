@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ 804fb3914b90de67225569295b86c07e97db869d -->
+<!-- translated-from: docs/ja/guide/compile.md @ a36274f320d8c5d5cb4466ab6e64fa298bc602c3 -->
 # 编译
 
 如果不做任何处理，typelisp 程序由解释器执行。除此之外，还有两种编译为本机代码的方法，以及一种保存环境的方法。
@@ -81,7 +81,7 @@ fib(25) = 75025
 ```
 
 省略 `-o` 时，会在源文件所在文件夹生成以源文件名去掉 `.typl` 命名的可执行文件。源文件名不以 `.typl` 结尾时需要
-`-o`。使用 `-c`（`--compile`）时，不能指定 `--image`、`--heap-cells`、`--feature`。
+`-o`。使用 `-c`（`--compile`）时，不能指定 `--image`、`--feature`。
 
 给 `typl` 加上 `--release` 就是**发布构建**，会连同参数一起移除 `eprint`/`eprintln`（用于调查的标准错误输出。[打印](../reference/functions/printing.md)）。被移除的部分也会进行类型检查，所以其中有类型错误时编译会失败。`--release` 是整个 `typl` 的选项，不仅对 `-c`，对运行文件、REPL 和 `typl test` 也同样有效。在加了 `--release` 的 `typl` 中调用的 `compile-file` 也会是发布构建，在这样生成的可执行文件中用 `eval` 执行的代码里，`eprint`/`eprintln` 也会被移除。
 
@@ -145,6 +145,20 @@ $ typl --lib-dir ~/lib/typelisp build.typl
   `Vector<string>`。第一个元素是程序名。
 - 退出码用 `(exit n)` 指定。`main` 正常返回时为 0。
 - 发生 panic 时显示消息，并以非 0 退出。
+
+### 3.5 可执行文件使用的资源
+
+`typl -c` 有一些选项，用来指定可执行文件运行时可以使用的资源。
+
+```sh
+$ typl --heap-cells 100000 -c hello.typl    # 把 cons 区域固定为 100000 个单元
+$ typl -c hello.typl --max-memory 64M       # 最多分配 64 MiB 内存
+```
+
+- `--heap-cells N` 把 cons 单元区域的容量固定为 `N` 个单元。区域不会再变大。垃圾回收后仍无法腾出空单元时，以运行时错误停止。不指定时从 65536 个单元开始，按需变大。
+- `--max-memory SIZE` 是可执行文件分配的内存总量的上限。cons 区域、字符串、向量和哈希表等值、运行时自身使用的内存全部计算在内。`SIZE` 是字节数，可以加上 `K` `M` `G`（分别为 1024 倍、1024² 倍、1024³ 倍）。试图超过上限分配时，会显示这一情况并以退出码 1 结束。这种结束无法用 `catch` 捕获。不指定时没有上限。
+
+`--max-memory` 写在 `-c` 之后。`--heap-cells` 写在 `-c` 之前或之后都可以，这时它是可执行文件的 cons 区域的容量。cons 区域也计入内存上限，所以指定了放不下区域的上限时，程序会在开始之前停止。
 
 ## 4. 转储
 

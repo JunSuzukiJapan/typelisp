@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ 804fb3914b90de67225569295b86c07e97db869d -->
+<!-- translated-from: docs/ja/guide/compile.md @ a36274f320d8c5d5cb4466ab6e64fa298bc602c3 -->
 # Compileren
 
 Tenzij je iets anders doet, draaien typelisp-programma's in de interpreter. Daarnaast zijn er twee
@@ -94,7 +94,7 @@ fib(25) = 75025
 
 Zonder `-o` krijgt het uitvoerbare bestand de naam van het bronbestand zonder `.typl` en wordt het in
 dezelfde map als het bronbestand geplaatst. Eindigt de naam van het bronbestand niet op `.typl`, dan
-is `-o` verplicht. Bij `-c` (`--compile`) kunnen `--image`, `--heap-cells` en `--feature` niet worden
+is `-o` verplicht. Bij `-c` (`--compile`) kunnen `--image` en `--feature` niet worden
 opgegeven.
 
 Met `--release` maakt `typl` een **release-build**, die `eprint`/`eprintln` (uitvoer naar standaardfout om iets te onderzoeken; [Afdrukken](../reference/functions/printing.md)) samen met hun argumenten verwijdert. Wat wordt verwijderd, wordt toch op types gecontroleerd, dus een typefout daarin laat de compilatie mislukken. `--release` is een optie van `typl` als geheel: ze werkt niet alleen bij `-c`, maar ook bij het uitvoeren van een bestand, in de REPL en bij `typl test`. Een `compile-file` dat wordt aangeroepen in een `typl` met `--release` maakt ook een release-build, en ook uit code die met `eval` wordt uitgevoerd in een zo gemaakt uitvoerbaar bestand worden `eprint`/`eprintln` verwijderd.
@@ -166,6 +166,20 @@ gebouwd.
   `typl hello.typl a b` of `./hello a b` uitvoert. Het eerste element is de programmanaam.
 - Stel de afsluitcode in met `(exit n)`. Als `main` normaal terugkeert, is die 0.
 - Bij `panic` drukt het programma de melding af en eindigt met een code ongelijk aan nul.
+
+### 3.5 Middelen die het uitvoerbare bestand gebruikt
+
+`typl -c` heeft opties die bepalen welke middelen het uitvoerbare bestand tijdens het draaien mag gebruiken.
+
+```sh
+$ typl --heap-cells 100000 -c hello.typl    # zet de cons-arena vast op 100000 cellen
+$ typl -c hello.typl --max-memory 64M       # alloceer hoogstens 64 MiB
+```
+
+- `--heap-cells N` zet de capaciteit van de arena van cons-cellen vast op `N` cellen. De arena groeit daar niet voorbij: kan de garbage collection geen cel vrijmaken, dan stopt het programma met een runtimefout. Zonder de optie begint de arena met 65536 cellen en groeit ze naar behoefte.
+- `--max-memory SIZE` begrenst het totale geheugen dat het uitvoerbare bestand alloceert. Alles telt mee: de cons-arena, strings, waarden zoals vectoren en hashtabellen, en het geheugen van de runtime zelf. `SIZE` is een aantal bytes, eventueel gevolgd door `K`, `M` of `G` (1024, 1024² en 1024³ keer). Een allocatie die over de grens zou gaan wordt gemeld, en het programma eindigt met exitcode 1. Dit einde is niet met `catch` op te vangen. Zonder de optie is er geen grens.
+
+`--max-memory` schrijf je na `-c`. `--heap-cells` mag voor of na `-c` staan en is dan de capaciteit van de cons-arena van het uitvoerbare bestand. De cons-arena telt mee voor de geheugengrens: bij een grens waar de arena niet in past, stopt het programma voordat het begint.
 
 ## 4. Dumps
 

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ 804fb3914b90de67225569295b86c07e97db869d -->
+<!-- translated-from: docs/ja/guide/compile.md @ a36274f320d8c5d5cb4466ab6e64fa298bc602c3 -->
 # Compiling
 
 Unless you do anything else, typelisp programs run in the interpreter. In addition there are two
@@ -90,7 +90,7 @@ fib(25) = 75025
 
 Without `-o`, the executable is named after the source file with `.typl` removed and is placed in
 the same folder as the source file. If the source file name does not end in `.typl`, `-o` is
-required. With `-c` (`--compile`), `--image`, `--heap-cells` and `--feature` cannot be given.
+required. With `-c` (`--compile`), `--image` and `--feature` cannot be given. `--heap-cells` given with `-c` is the capacity of the executable's cons arena ([3.5](#35-resources-the-executable-uses)).
 
 With `--release`, `typl` makes a **release build**, which removes `eprint`/`eprintln` (standard error output for investigating; [Printing](../reference/functions/printing.md)) together with their arguments. What it removes is still type-checked, so a type error there makes the compilation fail. `--release` is an option of `typl` as a whole: it works the same not only for `-c` but also when running a file, in the REPL, and for `typl test`. A `compile-file` called inside a `typl` given `--release` also makes a release build, and `eprint`/`eprintln` are removed from code `eval`ed inside the executable made that way too.
 
@@ -157,6 +157,28 @@ with the `typl` built together with it. After rebuilding `typl`, copy it again.
   `typl hello.typl a b` or as `./hello a b`. The first element is the program name.
 - Set the exit code with `(exit n)`. If `main` returns normally, it is 0.
 - On `panic`, the program prints the message and exits with a nonzero code.
+
+### 3.5 Resources the executable uses
+
+`typl -c` has options that say what resources the executable may use while it runs.
+
+```sh
+$ typl --heap-cells 100000 -c hello.typl    # fix the cons arena at 100000 cells
+$ typl -c hello.typl --max-memory 64M       # allocate at most 64 MiB
+```
+
+- `--heap-cells N` fixes the capacity of the cons cell arena at `N` cells. The arena does not grow
+  past it: if garbage collection cannot free a cell, the program stops with a runtime error. Without
+  it, the arena starts at 65536 cells and grows as needed.
+- `--max-memory SIZE` bounds the total memory the executable allocates. Everything counts: the cons
+  arena, strings, values such as vectors and hash tables, and the memory the runtime itself uses.
+  `SIZE` is a number of bytes and may be followed by `K`, `M` or `G` (1024, 1024² and 1024³ times).
+  An allocation that would go past the bound is reported, and the program exits with exit code 1.
+  This exit cannot be caught with `catch`. Without it, there is no bound.
+
+`--max-memory` is written after `-c`. `--heap-cells` may be written before or after `-c`. The cons
+arena counts toward the memory bound, so a bound the arena does not fit in stops the program before
+it starts.
 
 ## 4. Dumps
 

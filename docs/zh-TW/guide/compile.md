@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ 804fb3914b90de67225569295b86c07e97db869d -->
+<!-- translated-from: docs/ja/guide/compile.md @ a36274f320d8c5d5cb4466ab6e64fa298bc602c3 -->
 # 編譯
 
 不做任何處理的話，typelisp 程式由直譯器執行。此外還有兩種編譯為原生碼的方法，以及一種保存環境的方法。規格的詳情見
@@ -80,7 +80,7 @@ fib(25) = 75025
 ```
 
 省略 `-o` 時，會在原始檔所在資料夾產生以原始檔名去掉 `.typl` 命名的執行檔。原始檔名不以 `.typl` 結尾時需要 `-o`。使用 `-c`
-（`--compile`）時，不能指定 `--image`、`--heap-cells`、`--feature`。
+（`--compile`）時，不能指定 `--image`、`--feature`。
 
 給 `typl` 加上 `--release` 就是**發行建置**，會連同引數一起移除 `eprint`/`eprintln`（用於調查的標準錯誤輸出。[列印](../reference/functions/printing.md)）。被移除的部分也會進行型別檢查，所以其中有型別錯誤時編譯會失敗。`--release` 是整個 `typl` 的選項，不僅對 `-c`，對執行檔案、REPL 和 `typl test` 也同樣有效。在加了 `--release` 的 `typl` 中呼叫的 `compile-file` 也會是發行建置，在這樣產生的執行檔中用 `eval` 執行的程式碼裡，`eprint`/`eprintln` 也會被移除。
 
@@ -142,6 +142,20 @@ $ typl --lib-dir ~/lib/typelisp build.typl
   程式名稱。
 - 結束碼以 `(exit n)` 指定。`main` 正常返回時為 0。
 - 發生 panic 時會顯示訊息，並以非 0 結束。
+
+### 3.5 執行檔使用的資源
+
+`typl -c` 有一些選項，用來指定執行檔執行時可以使用的資源。
+
+```sh
+$ typl --heap-cells 100000 -c hello.typl    # 把 cons 區域固定為 100000 個單元
+$ typl -c hello.typl --max-memory 64M       # 最多配置 64 MiB 記憶體
+```
+
+- `--heap-cells N` 把 cons 單元區域的容量固定為 `N` 個單元。區域不會再變大。垃圾回收後仍無法騰出空單元時，以執行期錯誤停止。不指定時從 65536 個單元開始，視需要變大。
+- `--max-memory SIZE` 是執行檔配置的記憶體總量的上限。cons 區域、字串、向量與雜湊表等值、執行環境本身使用的記憶體全部計算在內。`SIZE` 是位元組數，可以加上 `K` `M` `G`（分別為 1024 倍、1024² 倍、1024³ 倍）。試圖超過上限配置時，會顯示這件事並以結束碼 1 結束。這種結束無法用 `catch` 捕捉。不指定時沒有上限。
+
+`--max-memory` 寫在 `-c` 之後。`--heap-cells` 寫在 `-c` 之前或之後都可以，這時它是執行檔的 cons 區域的容量。cons 區域也計入記憶體上限，所以指定了放不下區域的上限時，程式會在開始之前停止。
 
 ## 4. 傾印
 
