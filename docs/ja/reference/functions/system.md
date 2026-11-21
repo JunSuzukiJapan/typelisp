@@ -43,6 +43,8 @@
 
 `zone` を明示したときは CL の規定どおり `daylight-p` は `false`、`zone` は渡した値そのもの
 （*If a time-zone is supplied, daylight saving time information is ignored*）。
+`zone` を省いて夏時間の中の時刻を読むと、`daylight-p` は `true`、`zone` は夏時間を含まない
+標準のずれになる（CL と同じ。ニューヨークは 7 月でも `5.0`）。
 
 夏時間の切り替わりの中にある地方時はそもそも一意でなく、CL もどちらを取るとは言っていない。
 `encode-universal-time` はそのような時刻にもどちらか一方の答えを返す。

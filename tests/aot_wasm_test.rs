@@ -222,6 +222,37 @@ fn a_socket_is_refused_at_compile_time_with_the_chain_that_reaches_it() {
     assert!(err.contains("a socket (reached by main -> prog::main -> std::net::tcp-listen"), "{}", err);
 }
 
+/// WASI has no time zone. Decoding at a zone given runs as natively; asking
+/// for the local one is a runtime panic, not a refusal to compile, since both
+/// are the same function.
+#[test]
+fn a_given_zone_decodes_and_the_local_one_is_unknown() {
+    let (out, _, code) = same_as_native(
+        "wasm_given_zone",
+        r#"
+(use std::time::decode-universal-time)
+(defun main () ()
+  (println "~a" (decode-universal-time (make-instance 'universal-time :day 46216 :second 43200) -9)))
+"#,
+        &[],
+    );
+    assert_eq!(out, "#<decoded-time 2026-07-15 21:00:00 +09:00 Wed>\n");
+    assert_eq!(code, Some(0));
+    let wasm = built(
+        "wasm_local_zone",
+        r#"
+(use std::time::get-decoded-time)
+(defun main () () (println "~a" (get-decoded-time)))
+"#,
+        "prog.wasm",
+        &["--target", "wasm32-wasip1"],
+    );
+    let out = run_wasm(&wasm, &[]);
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(err.contains("the local time zone at this universal time is unknown"), "{}", err);
+    assert_eq!(out.status.code(), Some(1));
+}
+
 #[test]
 fn an_os_thread_is_refused_at_compile_time() {
     let err = refused(

@@ -292,7 +292,22 @@ pub fn timezone_at(unix_secs: i64) -> Option<(i32, bool)> {
     }
 }
 
-#[cfg(not(unix))]
+/// In a `wasm32-unknown-unknown` module the page or program that loaded it
+/// answers, from JavaScript's `Date`.
+#[cfg(all(target_family = "wasm", target_os = "unknown"))]
+pub fn timezone_at(unix_secs: i64) -> Option<(i32, bool)> {
+    typelisp_mem::host::timezone_at(unix_secs)
+}
+
+/// WASI preview 1 has no time zone to ask about, so the local one is unknown
+/// at every instant: the prelude's `local-zone-west` panics on that `None`,
+/// which is where a program that decodes into local time stops.
+#[cfg(target_os = "wasi")]
+pub fn timezone_at(_unix_secs: i64) -> Option<(i32, bool)> {
+    None
+}
+
+#[cfg(all(not(unix), not(target_family = "wasm")))]
 pub fn timezone_at(_unix_secs: i64) -> Option<(i32, bool)> {
     unimplemented!("the local time zone needs localtime_r and tm_gmtoff, which are POSIX")
 }

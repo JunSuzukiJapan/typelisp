@@ -1,6 +1,7 @@
 // Runs the WebAssembly module typl compiled beside this file
 // (`typl -c --target wasm32-unknown-unknown`), giving it what it imports from
-// `typelisp`: standard output and error, exit, the time and sleeping.
+// `typelisp`: standard output and error, exit, the time, sleeping and the
+// local time zone.
 //
 // From the command line, under Node:
 //
@@ -95,6 +96,19 @@ export async function run(options = {}) {
       sleep(ms) {
         sleeper ??= new Int32Array(new SharedArrayBuffer(4));
         Atomics.wait(sleeper, 0, 0, ms);
+      },
+      // `getTimezoneOffset` is minutes west, the direction CL's zone runs.
+      // An instant `Date` cannot represent gives NaN.
+      timezone_offset(ms) {
+        return new Date(ms).getTimezoneOffset();
+      },
+      // In force when the offset is less than the year's larger one, which
+      // is the zone's standard offset in either hemisphere.
+      daylight(ms) {
+        const at = new Date(ms);
+        const year = at.getFullYear();
+        const standard = Math.max(new Date(year, 0, 1).getTimezoneOffset(), new Date(year, 6, 1).getTimezoneOffset());
+        return at.getTimezoneOffset() < standard ? 1 : 0;
       },
     },
   };

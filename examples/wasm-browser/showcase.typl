@@ -6,7 +6,7 @@
 ;; WebAssembly のモジュールでできることを、機能ごとに 1 節ずつ見せる。ネイティブ、
 ;; Node、ブラウザで同じに動く（このファイルの隣の README.md を参照）。
 (use std::sync::Chan)
-(use std::time::get-universal-time)
+(use std::time::get-universal-time std::time::decode-universal-time)
 (use std::num::parse-int)
 
 (defun section ((title string)) ()
@@ -157,9 +157,11 @@
 ;; ---- the host: time, standard error, exit code ----
 (defun host () ()
   (section "host")
+  ;; Zone 0 is Greenwich; with no zone the host's local time zone is used
+  ;; (in a browser, the one JavaScript's `Date` reports).
   (let ((now (get-universal-time)))
-    (println "now (UTC): day ~d since 1900, ~2,'0d:~2,'0d:~2,'0d"
-             now::day (floor now::second 3600) (mod (floor now::second 60) 60) (mod now::second 60)))
+    (println "UTC:   ~a" (decode-universal-time now 0))
+    (println "local: ~a" (decode-universal-time now)))
   (eprintln "this line goes to standard error"))
 
 (defun main () int

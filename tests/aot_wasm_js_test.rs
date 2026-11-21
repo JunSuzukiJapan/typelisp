@@ -168,6 +168,34 @@ fn the_universal_time_is_the_host_s() {
     assert!(secs > 3_904_000_000, "{}", secs);
 }
 
+/// The local time zone is the host's: with no zone, `decode-universal-time`
+/// asks the loader, which reads JavaScript's `Date`. Run with the same `TZ`
+/// as the native executable, the two decode a winter and a summer instant
+/// (daylight saving in New York) the same.
+#[test]
+fn the_local_time_zone_is_the_host_s() {
+    let source = r#"
+(use std::time::decode-universal-time)
+(defun main () ()
+  ;; 2026-01-15 and 2026-07-15, 12:00 UTC.
+  (println "~a" (decode-universal-time (make-instance 'universal-time :day 46035 :second 43200)))
+  (println "~a" (decode-universal-time (make-instance 'universal-time :day 46216 :second 43200)))
+  (println "~a" (decode-universal-time (make-instance 'universal-time :day 46216 :second 43200) 0)))
+"#;
+    let wasm = module("wasmjs_local_zone", source, &[]);
+    let native = built("wasmjs_local_zone", source, "prog", &[]);
+    let w = Command::new("node").arg(wasm.with_extension("mjs")).env("TZ", "America/New_York").output().expect("failed to start node");
+    let n = Command::new(&native).env("TZ", "America/New_York").output().expect("failed to run the native executable");
+    assert!(w.status.success(), "{}", text(&w.stderr));
+    assert_eq!(text(&w.stdout), text(&n.stdout));
+    assert_eq!(
+        text(&w.stdout),
+        "#<decoded-time 2026-01-15 07:00:00 -05:00 Thu>\n\
+         #<decoded-time 2026-07-15 08:00:00 -04:00 Wed dst>\n\
+         #<decoded-time 2026-07-15 12:00:00 +00:00 Wed>\n"
+    );
+}
+
 #[test]
 fn eval_and_arithmetic_run_in_the_module() {
     let (out, _, _) = same_as_native(

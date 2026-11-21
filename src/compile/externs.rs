@@ -381,9 +381,12 @@ pub(crate) const CONS_MAKING_SHIMS: [(&str, &str); 9] = [
 /// Two kinds. The sockets are not in the WebAssembly runtime at all (every
 /// `rt_net_` shim, [`WASM_UNAVAILABLE_PREFIX`], and the waits on one). The
 /// rest are in it but need what WASI does not give: another OS thread, CPU
-/// time, the host's name and OS release, a file's owner, the local time
-/// zone, and starting a process.
-pub(crate) const WASM_UNAVAILABLE_SHIMS: [(&str, &str); 10] = [
+/// time, the host's name and OS release, a file's owner, and starting a
+/// process. The local time zone is not here: a call that passes a zone is
+/// the same function as one that asks for the local one, so refusing the
+/// shim would refuse both; the runtime answers that the local zone is unknown
+/// instead (`typelisp_rt::os::timezone_at`).
+pub(crate) const WASM_UNAVAILABLE_SHIMS: [(&str, &str); 8] = [
     ("rt_suspend_io", "waiting on a socket"),
     ("rt_suspend_io_for", "waiting on a socket"),
     ("rt_suspend_thread", "an OS thread (`thread`)"),
@@ -391,8 +394,6 @@ pub(crate) const WASM_UNAVAILABLE_SHIMS: [(&str, &str); 10] = [
     ("rt_machine_instance", "`machine-instance`"),
     ("rt_software_version", "`software-version`"),
     ("rt_file_owner_name", "`file-author`"),
-    ("rt_timezone_offset_seconds", "the local time zone"),
-    ("rt_timezone_daylight_p", "the local time zone"),
     ("rt_ed_open", "`ed`, which starts an editor"),
 ];
 

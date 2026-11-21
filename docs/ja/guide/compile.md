@@ -222,7 +222,10 @@ fib(25) = 75025
 - WebAssembly にないものを使うプログラムは**コンパイルエラー**になります。エラーには、使ったものと、
   `main` からそこへ届く関数の並びが表示されます。使えないのは、ソケット（TCP・UDP・Unix ドメイン・
   TLS・名前解決）、OS スレッド（`Thread`）、C の関数（`defffi`）、`get-internal-run-time`、
-  `machine-instance`、`software-version`、`file-author`、ローカルのタイムゾーン、`ed` です。
+  `machine-instance`、`software-version`、`file-author`、`ed` です。
+- WASI には時間帯を知る手段がないので、地方時は分かりません。`zone` を省いた
+  `decode-universal-time`・`encode-universal-time` と `get-decoded-time` は、実行時に panic します。
+  `zone` を渡せば使えます。
 - `--heap-cells`、`--max-memory`、`--no-cons`、`-O<N>`、`--release` はそのまま使えます。
 
 ### 3.7 ブラウザや Node.js で動かす
@@ -251,6 +254,8 @@ const code = await run({ write: (fd, text) => { /* 画面に出すなど */ } })
   読み込めません）。
 - `sleep` は `Atomics.wait` で待ちます。ブラウザでは、これが使えるのはクロスオリジン分離された
   ページの Worker の中だけなので、`sleep` を使うプログラムは Worker で実行してください。
+- 地方時（`zone` を省いた `decode-universal-time` など）は、JavaScript の `Date` が報告する
+  時間帯で求めます。
 - 3.6 節で使えないものに加えて、ファイルとディレクトリの操作が**コンパイルエラー**になります。
   標準入力は空として読まれ、`(command-line-args)` は空のベクタです。
 

@@ -6657,9 +6657,13 @@ user-visible capacity."
 
 (module %internal (pub defun decode-at-west ((ut universal-time) (west int) (daylight bool)) decoded-time
   "`ut` broken into calendar components `west` seconds west of Greenwich.
-   The shared body of both of `decode-universal-time`'s arms; the reported
-   `zone` is `west` back in CL's hours, where a half-hour offset survives as
-   a fraction."
+   The shared body of both of `decode-universal-time`'s arms.
+
+   `west` is the whole offset, daylight saving included, because that is
+   what moves the clock. The reported `zone` is CL's, which leaves daylight
+   saving out (New York is 5 in July too, with `daylight-p` true), so the
+   hour daylight saving took off is put back; it is in hours, where a
+   half-hour offset survives as a fraction."
   (if (< ut::day 0)
       (panic "decode-universal-time: universal time is never negative")
       (let ((local (- ut::second west))
@@ -6686,7 +6690,7 @@ user-visible capacity."
           (make-instance 'decoded-time :second (mod secs 60) :minute (mod (truncate secs 60) 60) :hour (truncate secs 3600)
                              :date d :month m :year y :day-of-week (mod days 7)
                              :daylight-p daylight
-                             :zone (/ (int->float west) (int->float 3600))))))))
+                             :zone (/ (int->float (+ west (if daylight 3600 0))) (int->float 3600))))))))
 
 (module time
 (pub defun decode-universal-time ((ut universal-time) &optional (zone int)) decoded-time

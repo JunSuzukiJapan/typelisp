@@ -10,10 +10,15 @@ import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
 import { extname, join, normalize, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { argv } from 'node:process';
+import process, { argv } from 'node:process';
 
 const root = fileURLToPath(new URL('.', import.meta.url));
-const port = Number(argv[2] ?? 8000);
+const port = argv[2] === undefined ? 8000 : Number(argv[2]);
+if (!Number.isInteger(port) || port < 0 || port > 65535) {
+  console.error(`serve.mjs: not a port number: ${argv[2]}`);
+  console.error('usage: node serve.mjs [PORT]');
+  process.exit(2);
+}
 const types = {
   '.html': 'text/html; charset=utf-8',
   '.mjs': 'text/javascript; charset=utf-8',

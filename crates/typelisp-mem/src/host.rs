@@ -1,5 +1,6 @@
 //! What the runtime asks of the machine it runs on: writing to standard output
-//! and standard error, ending the process, the time, and sleeping.
+//! and standard error, ending the process, the time, sleeping, and (on
+//! `wasm32-unknown-unknown` only) the local time zone.
 //!
 //! Everywhere but `wasm32-unknown-unknown` these are `std`'s. That target has
 //! no operating system under it: its `std` throws standard output and error
@@ -28,6 +29,13 @@ mod imports {
         pub fn unix_time() -> f64;
         /// Waits `ms` milliseconds.
         pub fn sleep(ms: f64);
+        /// Minutes west of Greenwich in the local time zone at `ms`
+        /// milliseconds since 1970-01-01T00:00:00Z, or NaN when the host
+        /// cannot represent that instant.
+        pub fn timezone_offset(ms: f64) -> f64;
+        /// 1 when daylight saving time is in force locally at `ms`, 0 when
+        /// not.
+        pub fn daylight(ms: f64) -> i32;
     }
 }
 
@@ -133,6 +141,22 @@ pub fn unix_time() -> Result<Duration, Duration> {
     }
     #[cfg(not(all(target_family = "wasm", target_os = "unknown")))]
     std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_err(|e| e.duration())
+}
+
+/// The local time zone at `unix_secs` seconds since 1970-01-01T00:00:00Z, as
+/// `(seconds west of Greenwich, daylight saving in force)`, or `None` when the
+/// host cannot represent that instant. Elsewhere the C library answers
+/// (`typelisp_rt::os::timezone_at`).
+#[cfg(all(target_family = "wasm", target_os = "unknown"))]
+pub fn timezone_at(unix_secs: i64) -> Option<(i32, bool)> {
+    let ms = unix_secs as f64 * 1000.0;
+    // SAFETY: imports with no preconditions.
+    let west = unsafe { imports::timezone_offset(ms) };
+    if !west.is_finite() {
+        return None;
+    }
+    let daylight = unsafe { imports::daylight(ms) } != 0;
+    Some(((west * 60.0).round() as i32, daylight))
 }
 
 #[cfg(not(all(target_family = "wasm", target_os = "unknown")))]
