@@ -12,12 +12,160 @@ use crate::{Loc, Value};
 use typelisp_mem::SymRef;
 
 /// A checked expression: what it does, its type, and where it was written.
-#[derive(Debug, serde::Serialize, serde::Deserialize)]
+///
+/// Written flat ([`flat`]): reading a tree back does not recurse once per
+/// level of it, which a WebAssembly module's stack could not hold.
+#[derive(Debug)]
 pub(crate) struct Typed {
     pub(crate) node: Node,
     pub(crate) ty: Type,
-    #[serde(with = "crate::owned_form::loc_serde::opt")]
     pub(crate) loc: Option<Loc>,
+}
+
+/// How a [`Typed`] tree is written and read: as the list of its expressions,
+/// breadth first in [`Typed::children`] order, each written without the
+/// expressions inside it (each of those is a unit). Reading builds the list,
+/// then puts each expression's children into it from the last one back, so
+/// neither direction recurses once per level of the tree.
+///
+/// Serde's own derive recurses through several functions per level, and
+/// stacker cannot grow a WebAssembly module's stack: there, a tree of an
+/// ordinary depth runs out of the stack a browser gives a Worker.
+mod flat {
+    use super::{Node, Typed};
+    use crate::types::Type;
+    use crate::Loc;
+    use serde::de::Error as _;
+    use serde::ser::{Error as _, SerializeSeq};
+    use std::cell::Cell;
+
+    thread_local! {
+        /// While one expression of a list is written or read: the
+        /// expressions met inside it so far, which are its children, written
+        /// as units.
+        static INNER: Cell<Option<usize>> = const { Cell::new(None) };
+    }
+
+    /// Sets [`INNER`] for one expression, and puts back what it was however
+    /// the writing or reading ends.
+    struct Inner(Option<usize>);
+
+    impl Inner {
+        fn enter() -> Inner {
+            Inner(INNER.with(|c| c.replace(Some(0))))
+        }
+
+        /// The children met since [`Self::enter`].
+        fn met(&self) -> usize {
+            INNER.with(|c| c.get()).expect("set by enter")
+        }
+    }
+
+    impl Drop for Inner {
+        fn drop(&mut self) {
+            INNER.with(|c| c.set(self.0));
+        }
+    }
+
+    /// True, and the child counted, when this is an expression inside the
+    /// one being written or read.
+    fn inside() -> bool {
+        INNER.with(|c| match c.get() {
+            Some(n) => {
+                c.set(Some(n + 1));
+                true
+            }
+            None => false,
+        })
+    }
+
+    #[derive(serde::Serialize)]
+    struct ShellRef<'a> {
+        node: &'a Node,
+        ty: &'a Type,
+        #[serde(serialize_with = "loc_ref")]
+        loc: &'a Option<Loc>,
+    }
+
+    fn loc_ref<S: serde::Serializer>(v: &&Option<Loc>, s: S) -> Result<S::Ok, S::Error> {
+        crate::owned_form::loc_serde::opt::serialize(v, s)
+    }
+
+    #[derive(serde::Deserialize)]
+    struct Shell {
+        node: Node,
+        ty: Type,
+        #[serde(with = "crate::owned_form::loc_serde::opt")]
+        loc: Option<Loc>,
+    }
+
+    impl serde::Serialize for Typed {
+        fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+            if inside() {
+                return s.serialize_unit();
+            }
+            let mut order: Vec<&Typed> = vec![self];
+            let mut at = 0;
+            while at < order.len() {
+                let children = order[at].children();
+                order.extend(children);
+                at += 1;
+            }
+            let mut seq = s.serialize_seq(Some(order.len()))?;
+            for t in order {
+                let inner = Inner::enter();
+                seq.serialize_element(&ShellRef { node: &t.node, ty: &t.ty, loc: &t.loc })?;
+                let expected = t.children().len();
+                if inner.met() != expected {
+                    return Err(S::Error::custom(format!(
+                        "a typed expression holds {} expressions but lists {} as its children",
+                        inner.met(),
+                        expected
+                    )));
+                }
+            }
+            seq.end()
+        }
+    }
+
+    /// What stands for a child until the list is put together.
+    fn placeholder() -> Typed {
+        Typed { node: Node::Hole, ty: Type::Never, loc: None }
+    }
+
+    impl<'de> serde::Deserialize<'de> for Typed {
+        fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Typed, D::Error> {
+            if inside() {
+                <() as serde::Deserialize>::deserialize(d)?;
+                return Ok(placeholder());
+            }
+            let shells = {
+                let _inner = Inner::enter();
+                <Vec<Shell> as serde::Deserialize>::deserialize(d)?
+            };
+            let mut list: Vec<Option<Typed>> =
+                shells.into_iter().map(|s| Some(Typed { node: s.node, ty: s.ty, loc: s.loc })).collect();
+            // Breadth first: each expression's children follow those of the
+            // expressions before it.
+            let mut first = Vec::with_capacity(list.len());
+            let mut next = 1;
+            for t in &mut list {
+                first.push(next);
+                next += t.as_mut().expect("not taken yet").children_mut().len();
+            }
+            if next != list.len() || list.is_empty() {
+                return Err(D::Error::custom(format!("a typed tree of {} expressions names {} as children", list.len(), next - 1)));
+            }
+            for i in (0..list.len()).rev() {
+                let mut t = list[i].take().expect("taken only here");
+                for (k, slot) in t.children_mut().into_iter().enumerate() {
+                    *slot = list[first[i] + k].take().expect("each child is put in one place");
+                }
+                list[i] = Some(t);
+            }
+            Ok(list[0].take().expect("the root"))
+        }
+    }
 }
 
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
@@ -548,3 +696,53 @@ fn option_path() -> Path {
 pub(crate) const OPTION_SOME: usize = 0;
 
 pub(crate) const OPTION_NONE: usize = 1;
+
+#[cfg(test)]
+mod flat_tests {
+    use super::{Node, Typed};
+    use crate::types::Type;
+
+    fn unit() -> Typed {
+        Typed { node: Node::Literal { tag: 0, value: None }, ty: Type::Unit, loc: None }
+    }
+
+    /// `depth` `if`s, each the `else` of the one around it, with a unit
+    /// condition and `then`.
+    fn nested(depth: usize) -> Typed {
+        let mut t = unit();
+        for _ in 0..depth {
+            t = Typed { node: Node::If { cond: Box::new(unit()), then: Box::new(unit()), els: Box::new(t) }, ty: Type::Unit, loc: None };
+        }
+        t
+    }
+
+    fn depth(mut t: &Typed) -> usize {
+        let mut n = 0;
+        while let Node::If { els, .. } = &t.node {
+            n += 1;
+            t = els;
+        }
+        n
+    }
+
+    /// A tree far deeper than a small stack could read back recursively
+    /// comes back whole on a thread with 256 KiB of it, the order of every
+    /// expression's children kept.
+    #[test]
+    fn a_deep_tree_is_read_back_on_a_small_stack() {
+        let bytes = typelisp_mem::grow_stack(|| bincode::serialize(&nested(20_000)).unwrap());
+        let read = std::thread::Builder::new()
+            .stack_size(256 * 1024)
+            .spawn(move || {
+                let t: Typed = bincode::deserialize(&bytes).unwrap();
+                let d = depth(&t);
+                let Node::If { cond, .. } = &t.node else { panic!("not an if") };
+                let first = matches!(cond.node, Node::Literal { tag: 0, value: None });
+                (d, first)
+            })
+            .unwrap()
+            .join()
+            .unwrap();
+        assert_eq!(read, (20_000, true));
+    }
+}
