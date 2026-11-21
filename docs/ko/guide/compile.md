@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ eb0e7d31e1d6e61f64d90fcfb4f0dc5e6bfe813f -->
+<!-- translated-from: docs/ja/guide/compile.md @ 7622044725db7d28dabb691d82e592367d9284e8 -->
 # 컴파일
 
 아무것도 하지 않으면 typelisp 프로그램은 인터프리터에서 실행된다. 그 밖에 네이티브 코드로 컴파일하는 방법이 두 가지,
@@ -188,7 +188,8 @@ fib(25) = 75025
 - WebAssembly에 없는 것을 쓰는 프로그램은 **컴파일 오류**가 됩니다. 오류에는 쓴 것과
   `main`에서 그곳에 이르는 함수의 연쇄가 표시됩니다. 쓸 수 없는 것은 소켓(TCP, UDP, Unix 도메인,
   TLS, 이름 해석), OS 스레드(`Thread`), C 함수(`defffi`), `get-internal-run-time`, `machine-instance`, `software-version`, `file-author`,
-  로컬 시간대, `ed`입니다.
+  `ed`입니다.
+- WASI에는 시간대를 알아낼 방법이 없으므로 지역 시간을 알 수 없습니다. `zone`을 생략한 `decode-universal-time`·`encode-universal-time`과 `get-decoded-time`은 실행 시 panic합니다. `zone`을 주면 쓸 수 있습니다.
 - `--heap-cells`, `--max-memory`, `--no-cons`, `-O<N>`, `--release`는 그대로 쓸 수 있습니다.
 
 ### 3.7 브라우저나 Node.js에서 실행하기
@@ -212,6 +213,7 @@ const code = await run({ write: (fd, text) => { /* 예를 들어 화면에 표�
 - `write`를 넘기지 않으면 Node.js에서는 표준 출력과 표준 오류로, 브라우저에서는 콘솔로 한 줄씩 출력합니다.
 - 브라우저에서는 `hello.wasm`을 `hello.mjs`와 같은 위치에서 HTTP로 제공하세요(`file://`에서는 불러올 수 없습니다).
 - `sleep`은 `Atomics.wait`로 기다립니다. 브라우저에서는 이것을 교차 출처 격리된 페이지의 Worker 안에서만 쓸 수 있으므로, `sleep`을 쓰는 프로그램은 Worker에서 실행하세요.
+- 지역 시간(`zone`을 생략한 `decode-universal-time` 등)은 JavaScript의 `Date`가 알려 주는 시간대로 구합니다.
 - 3.6절에서 쓸 수 없는 것에 더해, 파일과 디렉터리 조작이 **컴파일 오류**가 됩니다. 표준 입력은 빈 것으로 읽히고, `(command-line-args)`는 빈 벡터입니다.
 
 ## 4. 덤프

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ eb0e7d31e1d6e61f64d90fcfb4f0dc5e6bfe813f -->
+<!-- translated-from: docs/ja/guide/compile.md @ 7622044725db7d28dabb691d82e592367d9284e8 -->
 # الترجمة
 
 إذا لم تفعل شيئًا آخر فإن برامج typelisp تعمل في المفسِّر (interpreter). وإضافة إلى ذلك توجد طريقتان
@@ -193,7 +193,8 @@ fib(25) = 75025
 - البرنامج الذي يستخدم شيئًا لا يملكه WebAssembly هو **خطأ ترجمة**. يعرض الخطأ ما استُخدم
   وسلسلة الدوال من `main` التي تصل إليه. لا يمكن استخدام: المقابس (TCP وUDP ونطاق Unix
   وTLS وتحليل الأسماء)، وخيوط نظام التشغيل (`Thread`)، ودوال C (`defffi`)، و`get-internal-run-time`, `machine-instance`, `software-version`, `file-author`،
-  والمنطقة الزمنية المحلية، و`ed`.
+  و`ed`.
+- لا تملك WASI وسيلة لمعرفة المنطقة الزمنية، لذا فالتوقيت المحلي مجهول. وتُحدث `decode-universal-time` و`encode-universal-time` بدون `zone`، وكذلك `get-decoded-time`، panic وقت التشغيل. وتعمل عند إعطاء `zone`.
 - تعمل `--heap-cells` و`--max-memory` و`--no-cons` و`-O<N>` و`--release` كما تعمل مع الملف التنفيذي.
 
 ### 3.7 التشغيل في متصفح أو في Node.js
@@ -217,6 +218,7 @@ const code = await run({ write: (fd, text) => { /* اعرضه في الصفحة 
 - بدون `write` يكتب Node.js إلى المخرج القياسي والخطأ القياسي، ويكتب المتصفح إلى وحدة التحكم سطرًا سطرًا.
 - في المتصفح، قدّم `hello.wasm` عبر HTTP من المكان نفسه الذي فيه `hello.mjs` (لا يمكن تحميله من `file://`).
 - ينتظر `sleep` بواسطة `Atomics.wait`. ولا يسمح المتصفح بذلك إلا داخل Worker في صفحة معزولة عبر الأصول، لذا شغّل البرنامج الذي يستخدم `sleep` في Worker.
+- يُحسب التوقيت المحلي (`decode-universal-time` بدون `zone` ونحوها) بالمنطقة الزمنية التي يُبلغ عنها `Date` في JavaScript.
 - إضافة إلى ما لا يمكن استخدامه في القسم 3.6، تكون عمليات الملفات والمجلدات **خطأ ترجمة**. ويُقرأ الإدخال القياسي فارغًا، و`(command-line-args)` متجه فارغ.
 
 ## 4. ملفات الـ dump

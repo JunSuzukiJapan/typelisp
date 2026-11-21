@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ eb0e7d31e1d6e61f64d90fcfb4f0dc5e6bfe813f -->
+<!-- translated-from: docs/ja/guide/compile.md @ 7622044725db7d28dabb691d82e592367d9284e8 -->
 # Compiling
 
 Unless you do anything else, typelisp programs run in the interpreter. In addition there are two
@@ -203,7 +203,8 @@ fib(25) = 75025
 - A program that uses something WebAssembly does not have is a **compile error**. The error shows what was used and
   the chain of functions from `main` that reaches it. What cannot be used: sockets (TCP, UDP, Unix domain,
   TLS, name resolution), OS threads (`Thread`), C functions (`defffi`), `get-internal-run-time`, `machine-instance`, `software-version`, `file-author`,
-  the local time zone, and `ed`.
+  and `ed`.
+- WASI has no way to learn the time zone, so local time is unknown. `decode-universal-time` and `encode-universal-time` without `zone`, and `get-decoded-time`, panic at run time. They work when `zone` is given.
 - `--heap-cells`, `--max-memory`, `--no-cons`, `-O<N>` and `--release` work as they do for an executable.
 
 ### 3.7 Running in a browser or Node.js
@@ -227,6 +228,7 @@ const code = await run({ write: (fd, text) => { /* show it on the page, for exam
 - Without `write`, Node.js writes to standard output and standard error, and a browser to the console, a line at a time.
 - In a browser, serve `hello.wasm` over HTTP from the same place as `hello.mjs` (it cannot be loaded from `file://`).
 - `sleep` waits with `Atomics.wait`. A browser allows that only inside a Worker of a cross-origin isolated page, so run a program that uses `sleep` in a Worker.
+- Local time (`decode-universal-time` without `zone`, and so on) uses the time zone JavaScript's `Date` reports.
 - Besides what section 3.6 cannot use, file and directory operations are a **compile error**. Standard input reads as empty, and `(command-line-args)` is an empty vector.
 
 ## 4. Dumps

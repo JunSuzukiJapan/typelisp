@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ eb0e7d31e1d6e61f64d90fcfb4f0dc5e6bfe813f -->
+<!-- translated-from: docs/ja/guide/compile.md @ 7622044725db7d28dabb691d82e592367d9284e8 -->
 # Compilazione
 
 Se non fai altro, i programmi typelisp vengono eseguiti nell'interprete. Inoltre esistono due modi per
@@ -197,8 +197,9 @@ fib(25) = 75025
   directory che l'ambiente mostra al modulo (con wasmtime si indicano con `--dir`).
 - Un programma che usa qualcosa che WebAssembly non ha è un **errore di compilazione**. L'errore mostra cosa è stato usato
   e la catena di funzioni da `main` che ci arriva. Non si possono usare: socket (TCP, UDP, dominio Unix,
-  TLS, risoluzione dei nomi), thread del sistema (`Thread`), funzioni C (`defffi`), `get-internal-run-time`, `machine-instance`, `software-version`, `file-author`,
-  il fuso orario locale ed `ed`.
+  TLS, risoluzione dei nomi), thread del sistema (`Thread`), funzioni C (`defffi`), `get-internal-run-time`, `machine-instance`, `software-version`, `file-author`
+  ed `ed`.
+- WASI non ha modo di conoscere il fuso orario, quindi l'ora locale è sconosciuta. `decode-universal-time` ed `encode-universal-time` senza `zone`, e `get-decoded-time`, vanno in panic durante l'esecuzione. Funzionano se si passa `zone`.
 - `--heap-cells`, `--max-memory`, `--no-cons`, `-O<N>` e `--release` valgono come per un eseguibile.
 
 ### 3.7 Eseguire in un browser o in Node.js
@@ -222,6 +223,7 @@ const code = await run({ write: (fd, text) => { /* mostrarlo nella pagina, per e
 - Senza `write`, Node.js scrive sull'output standard e sull'errore standard, un browser sulla console, una riga alla volta.
 - In un browser, servite `hello.wasm` via HTTP dallo stesso posto di `hello.mjs` (non si può caricare da `file://`).
 - `sleep` attende con `Atomics.wait`. Un browser lo consente solo dentro un Worker di una pagina con isolamento cross-origin, quindi eseguite in un Worker i programmi che usano `sleep`.
+- L'ora locale (`decode-universal-time` senza `zone`, ecc.) si calcola con il fuso orario che riporta `Date` di JavaScript.
 - Oltre a ciò che non si può usare nella sezione 3.6, le operazioni su file e directory sono un **errore di compilazione**. L'input standard si legge come vuoto e `(command-line-args)` è un vettore vuoto.
 
 ## 4. Dump

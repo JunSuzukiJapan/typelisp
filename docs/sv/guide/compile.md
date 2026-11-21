@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ eb0e7d31e1d6e61f64d90fcfb4f0dc5e6bfe813f -->
+<!-- translated-from: docs/ja/guide/compile.md @ 7622044725db7d28dabb691d82e592367d9284e8 -->
 # Kompilering
 
 Om du inte gör något annat körs typelisp-program i tolken. Dessutom finns två sätt att kompilera till
@@ -196,8 +196,9 @@ fib(25) = 75025
   som miljön visar för modulen (i wasmtime anges de med `--dir`).
 - Ett program som använder något WebAssembly saknar är ett **kompileringsfel**. Felet visar vad som användes och
   kedjan av funktioner från `main` som når dit. Det som inte kan användas: socketar (TCP, UDP, Unix-domän,
-  TLS, namnuppslagning), OS-trådar (`Thread`), C-funktioner (`defffi`), `get-internal-run-time`, `machine-instance`, `software-version`, `file-author`,
-  den lokala tidszonen och `ed`.
+  TLS, namnuppslagning), OS-trådar (`Thread`), C-funktioner (`defffi`), `get-internal-run-time`, `machine-instance`, `software-version`, `file-author`
+  och `ed`.
+- WASI har inget sätt att ta reda på tidszonen, så den lokala tiden är okänd. `decode-universal-time` och `encode-universal-time` utan `zone`, samt `get-decoded-time`, ger panic vid körning. De fungerar när `zone` anges.
 - `--heap-cells`, `--max-memory`, `--no-cons`, `-O<N>` och `--release` fungerar som för en körbar fil.
 
 ### 3.7 Köra i en webbläsare eller i Node.js
@@ -221,6 +222,7 @@ const code = await run({ write: (fd, text) => { /* visa den på sidan, till exem
 - Utan `write` skriver Node.js till standard ut och standard fel, och en webbläsare till konsolen, en rad i taget.
 - I en webbläsare ska `hello.wasm` serveras över HTTP från samma ställe som `hello.mjs` (den kan inte laddas från `file://`).
 - `sleep` väntar med `Atomics.wait`. En webbläsare tillåter det bara i en Worker på en cross-origin-isolerad sida, så kör ett program som använder `sleep` i en Worker.
+- Lokal tid (`decode-universal-time` utan `zone` och så vidare) beräknas med den tidszon som JavaScripts `Date` rapporterar.
 - Utöver det som inte kan användas i avsnitt 3.6 är fil- och katalogoperationer ett **kompileringsfel**. Standard in läses som tom, och `(command-line-args)` är en tom vektor.
 
 ## 4. Dumpar

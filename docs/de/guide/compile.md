@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ eb0e7d31e1d6e61f64d90fcfb4f0dc5e6bfe813f -->
+<!-- translated-from: docs/ja/guide/compile.md @ 7622044725db7d28dabb691d82e592367d9284e8 -->
 # Kompilierung
 
 Ohne weiteres Zutun laufen typelisp-Programme im Interpreter. Darüber hinaus gibt es zwei Wege, in nativen
@@ -199,8 +199,9 @@ fib(25) = 75025
   schreiben, die die Laufzeitumgebung dem Modul zeigt (bei wasmtime mit `--dir` angegeben).
 - Ein Programm, das etwas benutzt, das WebAssembly nicht hat, ist ein **Kompilierfehler**. Der Fehler zeigt, was benutzt wurde,
   und die Kette der Funktionen von `main` bis dorthin. Nicht verfügbar sind: Sockets (TCP, UDP, Unix-Domain,
-  TLS, Namensauflösung), OS-Threads (`Thread`), C-Funktionen (`defffi`), `get-internal-run-time`, `machine-instance`, `software-version`, `file-author`,
-  die lokale Zeitzone und `ed`.
+  TLS, Namensauflösung), OS-Threads (`Thread`), C-Funktionen (`defffi`), `get-internal-run-time`, `machine-instance`, `software-version`, `file-author`
+  und `ed`.
+- WASI kann die Zeitzone nicht erfragen, daher ist die Ortszeit unbekannt. `decode-universal-time` und `encode-universal-time` ohne `zone` sowie `get-decoded-time` lösen zur Laufzeit einen panic aus. Mit `zone` funktionieren sie.
 - `--heap-cells`, `--max-memory`, `--no-cons`, `-O<N>` und `--release` wirken wie bei einem ausführbaren Programm.
 
 ### 3.7 Im Browser oder in Node.js ausführen
@@ -224,6 +225,7 @@ const code = await run({ write: (fd, text) => { /* zum Beispiel auf der Seite an
 - Ohne `write` schreibt Node.js auf Standardausgabe und Standardfehler, ein Browser zeilenweise auf die Konsole.
 - Im Browser liefern Sie `hello.wasm` per HTTP vom selben Ort wie `hello.mjs` aus (von `file://` lässt es sich nicht laden).
 - `sleep` wartet mit `Atomics.wait`. Ein Browser erlaubt das nur in einem Worker einer cross-origin-isolierten Seite; führen Sie ein Programm, das `sleep` benutzt, daher in einem Worker aus.
+- Die Ortszeit (`decode-universal-time` ohne `zone` usw.) wird mit der Zeitzone berechnet, die JavaScripts `Date` meldet.
 - Zusätzlich zu dem, was in Abschnitt 3.6 nicht verfügbar ist, sind Datei- und Verzeichnisoperationen ein **Kompilierfehler**. Die Standardeingabe liest sich als leer, und `(command-line-args)` ist ein leerer Vektor.
 
 ## 4. Dumps

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/system.md @ 398532233e28225bb121ed5b18609d41ea1bf813 -->
+<!-- translated-from: docs/ja/reference/functions/system.md @ 7622044725db7d28dabb691d82e592367d9284e8 -->
 # Thời gian, môi trường và triển khai
 
 Các hàm về thời gian, truy vấn môi trường chạy, công cụ triển khai, phân tích và đánh giá văn bản, docstring
@@ -45,6 +45,7 @@ zone bạn tự viết là số giờ nguyên, nên đối số là `int`.
 
 Khi có `zone`, `daylight-p` là `false` và `zone` đúng bằng giá trị đã đưa, như CL quy định (*If a time-zone is
 supplied, daylight saving time information is ignored*).
+Khi đọc một thời điểm nằm trong giờ mùa hè mà bỏ `zone`, `daylight-p` là `true` và `zone` là độ lệch chuẩn không tính giờ mùa hè (như trong CL: New York vẫn là `5.0` vào tháng Bảy).
 
 Một giờ địa phương rơi vào bên trong một lần chuyển giờ mùa hè vốn đã không duy nhất, và CL không nói phải
 chọn cái nào. `encode-universal-time` trả về một trong hai đáp án cho một thời điểm như vậy.

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/system.md @ 398532233e28225bb121ed5b18609d41ea1bf813 -->
+<!-- translated-from: docs/ja/reference/functions/system.md @ 7622044725db7d28dabb691d82e592367d9284e8 -->
 # 시간, 환경, 구현
 
 시간 함수, 실행 환경에 대한 질의, 구현 도구, 텍스트의 해석과 평가, 문서 문자열, 매크로.
@@ -43,6 +43,7 @@ CL처럼 `day-of-week`는 **0이 월요일, 6이 일요일**이다.
 
 `zone`을 주면 CL이 정한 대로 `daylight-p`는 `false`이고 `zone`은 준 값 그대로이다(*If a time-zone is supplied, daylight
 saving time information is ignored*).
+`zone`을 생략하고 서머타임 중의 시각을 읽으면 `daylight-p`는 `true`, `zone`은 서머타임을 포함하지 않는 표준 차이가 된다(CL과 같다. 뉴욕은 7월에도 `5.0`).
 
 서머타임 전환 안에 드는 지역 시간은 애초에 하나로 정해지지 않으며, CL도 어느 쪽을 택할지 말하지 않는다.
 `encode-universal-time`은 그런 시간에 대해 두 답 중 하나를 반환한다.

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ eb0e7d31e1d6e61f64d90fcfb4f0dc5e6bfe813f -->
+<!-- translated-from: docs/ja/guide/compile.md @ 7622044725db7d28dabb691d82e592367d9284e8 -->
 # Biên dịch
 
 Nếu bạn không làm gì thêm, chương trình typelisp chạy trong trình thông dịch. Ngoài ra còn có hai
@@ -192,8 +192,9 @@ fib(25) = 75025
   mà môi trường cho mô-đun thấy (với wasmtime, chỉ định bằng `--dir`).
 - Chương trình dùng thứ mà WebAssembly không có là **lỗi biên dịch**. Lỗi cho biết thứ đã dùng và
   chuỗi hàm từ `main` dẫn tới đó. Không dùng được: socket (TCP, UDP, miền Unix,
-  TLS, phân giải tên), luồng của hệ điều hành (`Thread`), hàm C (`defffi`), `get-internal-run-time`, `machine-instance`, `software-version`, `file-author`,
-  múi giờ cục bộ và `ed`.
+  TLS, phân giải tên), luồng của hệ điều hành (`Thread`), hàm C (`defffi`), `get-internal-run-time`, `machine-instance`, `software-version`, `file-author`
+  và `ed`.
+- WASI không có cách nào biết múi giờ, nên giờ địa phương là không biết được. `decode-universal-time` và `encode-universal-time` khi bỏ `zone`, cùng `get-decoded-time`, sẽ panic khi chạy. Chúng dùng được khi đưa `zone`.
 - `--heap-cells`, `--max-memory`, `--no-cons`, `-O<N>` và `--release` dùng được như với tệp thực thi.
 
 ### 3.7 Chạy trong trình duyệt hoặc Node.js
@@ -217,6 +218,7 @@ const code = await run({ write: (fd, text) => { /* ví dụ hiển thị lên tr
 - Không có `write` thì Node.js ghi ra đầu ra chuẩn và lỗi chuẩn, còn trình duyệt ghi ra console, từng dòng một.
 - Trong trình duyệt, hãy phục vụ `hello.wasm` qua HTTP từ cùng chỗ với `hello.mjs` (không nạp được từ `file://`).
 - `sleep` chờ bằng `Atomics.wait`. Trình duyệt chỉ cho phép việc này trong Worker của trang được cô lập cross-origin, nên hãy chạy chương trình dùng `sleep` trong Worker.
+- Giờ địa phương (`decode-universal-time` khi bỏ `zone`, v.v.) được tính theo múi giờ mà `Date` của JavaScript báo.
 - Ngoài những thứ không dùng được ở mục 3.6, các thao tác với tệp và thư mục là **lỗi biên dịch**. Đầu vào chuẩn được đọc là rỗng, và `(command-line-args)` là một vector rỗng.
 
 ## 4. Dump

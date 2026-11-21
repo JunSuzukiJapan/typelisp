@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/system.md @ 398532233e28225bb121ed5b18609d41ea1bf813 -->
+<!-- translated-from: docs/ja/reference/functions/system.md @ 7622044725db7d28dabb691d82e592367d9284e8 -->
 # Temps, environnement et implémentation
 
 Les fonctions de temps, les questions sur l'environnement d'exécution, les outils de l'implémentation, l'analyse et
@@ -45,6 +45,7 @@ silencieusement. Une zone écrite à la main est un nombre entier d'heures ; l'a
 
 Quand `zone` est donnée, `daylight-p` vaut `false` et `zone` vaut exactement la valeur donnée, comme le spécifie CL
 (*If a time-zone is supplied, daylight saving time information is ignored*).
+Lire une heure située dans l'heure d'été sans `zone` donne `daylight-p` à `true` et un `zone` égal au décalage standard, sans l'heure d'été (comme en CL : New York vaut `5.0` en juillet aussi).
 
 Une heure locale qui tombe dans un changement d'heure n'est pas unique à la base, et CL ne dit pas laquelle prendre.
 `encode-universal-time` renvoie l'une des deux réponses pour une telle heure.

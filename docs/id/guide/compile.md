@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ eb0e7d31e1d6e61f64d90fcfb4f0dc5e6bfe813f -->
+<!-- translated-from: docs/ja/guide/compile.md @ 7622044725db7d28dabb691d82e592367d9284e8 -->
 # Kompilasi
 
 Jika Anda tidak melakukan apa-apa lagi, program typelisp berjalan di interpreter. Selain itu ada dua
@@ -199,7 +199,8 @@ fib(25) = 75025
 - Program yang memakai sesuatu yang tidak dimiliki WebAssembly adalah **galat kompilasi**. Galat menampilkan apa yang dipakai
   dan rantai fungsi dari `main` yang mencapainya. Yang tidak bisa dipakai: soket (TCP, UDP, domain Unix,
   TLS, resolusi nama), thread OS (`Thread`), fungsi C (`defffi`), `get-internal-run-time`, `machine-instance`, `software-version`, `file-author`,
-  zona waktu lokal, dan `ed`.
+  dan `ed`.
+- WASI tidak punya cara untuk mengetahui zona waktu, jadi waktu lokal tidak diketahui. `decode-universal-time` dan `encode-universal-time` tanpa `zone`, serta `get-decoded-time`, panic saat dijalankan. Keduanya bisa dipakai jika `zone` diberikan.
 - `--heap-cells`, `--max-memory`, `--no-cons`, `-O<N>`, dan `--release` berlaku seperti untuk berkas eksekusi.
 
 ### 3.7 Menjalankan di peramban atau Node.js
@@ -223,6 +224,7 @@ const code = await run({ write: (fd, text) => { /* misalnya tampilkan di halaman
 - Tanpa `write`, Node.js menulis ke keluaran standar dan galat standar, sedangkan peramban ke konsol, baris demi baris.
 - Di peramban, sajikan `hello.wasm` lewat HTTP dari tempat yang sama dengan `hello.mjs` (tidak bisa dimuat dari `file://`).
 - `sleep` menunggu dengan `Atomics.wait`. Peramban hanya mengizinkannya di dalam Worker pada halaman yang terisolasi lintas asal, jadi jalankan program yang memakai `sleep` di dalam Worker.
+- Waktu lokal (`decode-universal-time` tanpa `zone`, dan seterusnya) dihitung dengan zona waktu yang dilaporkan `Date` milik JavaScript.
 - Selain yang tidak bisa dipakai di bagian 3.6, operasi berkas dan direktori adalah **galat kompilasi**. Masukan standar terbaca kosong, dan `(command-line-args)` adalah vektor kosong.
 
 ## 4. Dump

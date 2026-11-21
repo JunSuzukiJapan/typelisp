@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/system.md @ 398532233e28225bb121ed5b18609d41ea1bf813 -->
+<!-- translated-from: docs/ja/reference/functions/system.md @ 7622044725db7d28dabb691d82e592367d9284e8 -->
 # Tid, miljö och implementation
 
 Funktioner för tid, frågor om körmiljön, implementationsverktyg, tolkning och utvärdering av text,
@@ -45,6 +45,7 @@ skriver för hand är ett helt antal timmar, så argumentet är `int`.
 
 När `zone` anges är `daylight-p` `false` och `zone` exakt det angivna värdet, som CL specificerar
 (*If a time-zone is supplied, daylight saving time information is ignored*).
+Läser man en tid inom sommartid utan `zone` blir `daylight-p` `true` och `zone` standardförskjutningen utan sommartid (som i CL: New York är `5.0` även i juli).
 
 En lokal tid som faller inom en övergång till eller från sommartid är från början inte unik, och CL säger
 inte vilken som ska tas. `encode-universal-time` returnerar ett av de två svaren för en sådan tid.

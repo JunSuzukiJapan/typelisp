@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/system.md @ 398532233e28225bb121ed5b18609d41ea1bf813 -->
+<!-- translated-from: docs/ja/reference/functions/system.md @ 7622044725db7d28dabb691d82e592367d9284e8 -->
 # Waktu, Lingkungan, dan Implementasi
 
 Fungsi untuk waktu, pertanyaan tentang lingkungan runtime, alat implementasi, penguraian dan
@@ -48,6 +48,7 @@ berbohong secara diam-diam. Zone yang Anda tulis dengan tangan adalah jam bulat,
 
 Ketika `zone` diberikan, `daylight-p` adalah `false` dan `zone` tepat sama dengan nilai yang diberikan,
 sebagaimana ditetapkan CL (*If a time-zone is supplied, daylight saving time information is ignored*).
+Membaca waktu di dalam waktu musim panas dengan `zone` dihilangkan memberi `daylight-p` `true` dan `zone` berupa selisih standar tanpa waktu musim panas (seperti di CL: New York tetap `5.0` di bulan Juli).
 
 Waktu lokal yang jatuh di dalam transisi waktu musim panas sejak awal tidak unik, dan CL tidak
 menyatakan mana yang diambil. `encode-universal-time` mengembalikan salah satu dari dua jawaban untuk

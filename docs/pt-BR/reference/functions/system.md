@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/system.md @ 398532233e28225bb121ed5b18609d41ea1bf813 -->
+<!-- translated-from: docs/ja/reference/functions/system.md @ 7622044725db7d28dabb691d82e592367d9284e8 -->
 # Tempo, ambiente e implementação
 
 Funções de tempo, consultas sobre o ambiente de execução, ferramentas da implementação, análise e avaliação de
@@ -45,6 +45,7 @@ Uma zona que você escreve à mão é um número inteiro de horas, então o argu
 
 Quando `zone` é dado, `daylight-p` é `false` e `zone` é exatamente o valor dado, como o CL especifica
 (*If a time-zone is supplied, daylight saving time information is ignored*).
+Ler uma hora dentro do horário de verão omitindo `zone` dá `daylight-p` `true` e um `zone` igual ao deslocamento padrão, sem o horário de verão (como no CL: Nova York é `5.0` também em julho).
 
 Um horário local que cai dentro de uma transição de horário de verão não é único, para começar, e o CL não diz
 qual escolher. `encode-universal-time` devolve uma das duas respostas para esse horário.

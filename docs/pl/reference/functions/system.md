@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/system.md @ 398532233e28225bb121ed5b18609d41ea1bf813 -->
+<!-- translated-from: docs/ja/reference/functions/system.md @ 7622044725db7d28dabb691d82e592367d9284e8 -->
 # Czas, środowisko i implementacja
 
 Funkcje do obsługi czasu, zapytania o środowisko uruchomieniowe, narzędzia implementacji, parsowanie i
@@ -45,6 +45,7 @@ Strefa zapisywana ręcznie to całkowita liczba godzin, więc argument jest typu
 
 Gdy podano `zone`, `daylight-p` jest `false`, a `zone` to dokładnie podana wartość, jak określa CL
 (*If a time-zone is supplied, daylight saving time information is ignored*).
+Odczyt czasu przypadającego w czasie letnim bez `zone` daje `daylight-p` równe `true` i `zone` równe standardowemu przesunięciu bez czasu letniego (jak w CL: Nowy Jork ma `5.0` także w lipcu).
 
 Czas lokalny wypadający w przejściu na czas letni nie jest w ogóle jednoznaczny, a CL
 nie mówi, który wybrać. `encode-universal-time` zwraca jedną z dwóch odpowiedzi dla takiego czasu.

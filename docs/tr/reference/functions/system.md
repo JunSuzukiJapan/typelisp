@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/system.md @ 398532233e28225bb121ed5b18609d41ea1bf813 -->
+<!-- translated-from: docs/ja/reference/functions/system.md @ 7622044725db7d28dabb691d82e592367d9284e8 -->
 # Zaman, Ortam ve Gerçekleştirim
 
 Zaman, çalışma zamanı ortamı hakkındaki sorgular, gerçekleştirim araçları, metin ayrıştırma ve
@@ -47,6 +47,7 @@ yalan söylemek olurdu. Elle yazdığınız bir zone tam sayıda saattir; bu yü
 
 `zone` verildiğinde `daylight-p` `false`'tur ve `zone`, CL'nin belirttiği gibi tam olarak verilen
 değerdir (*Bir time-zone verilirse yaz saati bilgisi yok sayılır*).
+`zone` atlanarak yaz saati içindeki bir zaman okunursa `daylight-p` `true` olur ve `zone`, yaz saati katılmamış standart farktır (CL'deki gibi: New York temmuzda da `5.0`'dır).
 
 Bir yaz saati geçişinin içine düşen yerel zaman, baştan beri benzersiz değildir ve CL hangisinin
 alınacağını söylemez. `encode-universal-time`, böyle bir zaman için iki yanıttan birini döndürür.

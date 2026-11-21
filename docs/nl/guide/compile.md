@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ eb0e7d31e1d6e61f64d90fcfb4f0dc5e6bfe813f -->
+<!-- translated-from: docs/ja/guide/compile.md @ 7622044725db7d28dabb691d82e592367d9284e8 -->
 # Compileren
 
 Tenzij je iets anders doet, draaien typelisp-programma's in de interpreter. Daarnaast zijn er twee
@@ -203,8 +203,9 @@ fib(25) = 75025
   die de omgeving aan de module toont (bij wasmtime opgegeven met `--dir`).
 - Een programma dat iets gebruikt wat WebAssembly niet heeft, is een **compileerfout**. De fout toont wat gebruikt is
   en de keten van functies vanaf `main` die er komt. Niet beschikbaar: sockets (TCP, UDP, Unix-domein,
-  TLS, naamresolutie), OS-threads (`Thread`), C-functies (`defffi`), `get-internal-run-time`, `machine-instance`, `software-version`, `file-author`,
-  de lokale tijdzone en `ed`.
+  TLS, naamresolutie), OS-threads (`Thread`), C-functies (`defffi`), `get-internal-run-time`, `machine-instance`, `software-version`, `file-author`
+  en `ed`.
+- WASI kan de tijdzone niet opvragen, dus de lokale tijd is onbekend. `decode-universal-time` en `encode-universal-time` zonder `zone`, en `get-decoded-time`, geven tijdens het uitvoeren een panic. Met `zone` werken ze.
 - `--heap-cells`, `--max-memory`, `--no-cons`, `-O<N>` en `--release` werken zoals bij een uitvoerbaar bestand.
 
 ### 3.7 Uitvoeren in een browser of in Node.js
@@ -228,6 +229,7 @@ const code = await run({ write: (fd, text) => { /* bijvoorbeeld op de pagina ton
 - Zonder `write` schrijft Node.js naar standaarduitvoer en standaardfout, en een browser regel voor regel naar de console.
 - Serveer in een browser `hello.wasm` via HTTP vanaf dezelfde plek als `hello.mjs` (vanaf `file://` kan het niet geladen worden).
 - `sleep` wacht met `Atomics.wait`. Een browser staat dat alleen toe in een Worker van een cross-origin-geïsoleerde pagina; voer een programma dat `sleep` gebruikt dus uit in een Worker.
+- De lokale tijd (`decode-universal-time` zonder `zone` enzovoort) wordt berekend met de tijdzone die `Date` van JavaScript meldt.
 - Naast wat in paragraaf 3.6 niet kan, zijn bestands- en mapbewerkingen een **compileerfout**. Standaardinvoer leest als leeg en `(command-line-args)` is een lege vector.
 
 ## 4. Dumps

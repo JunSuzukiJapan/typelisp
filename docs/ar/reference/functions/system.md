@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/system.md @ 398532233e28225bb121ed5b18609d41ea1bf813 -->
+<!-- translated-from: docs/ja/reference/functions/system.md @ 7622044725db7d28dabb691d82e592367d9284e8 -->
 # الزمن والبيئة والتنفيذ
 
 دوال الزمن والاستعلام عن بيئة التشغيل وأدوات التنفيذ وتحليل النصوص وتقييمها والسلاسل التوثيقية والماكرو.
@@ -44,6 +44,7 @@
 
 وعند إعطاء `zone` تكون `daylight-p` هي `false` وتكون `zone` هي القيمة المعطاة بالضبط، كما تحدد CL (*If a
 time-zone is supplied, daylight saving time information is ignored*).
+وعند قراءة وقت يقع داخل التوقيت الصيفي مع حذف `zone` تكون `daylight-p` هي `true` وتكون `zone` هي الفرق القياسي دون التوقيت الصيفي (كما في CL: نيويورك `5.0` في يوليو أيضًا).
 
 والتوقيت المحلي الذي يقع داخل انتقال التوقيت الصيفي ليس فريدًا أصلًا، ولا تقول CL أيهما تؤخذ.
 وتعيد `encode-universal-time` أحد الجوابين لزمن كهذا.

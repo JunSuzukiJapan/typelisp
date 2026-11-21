@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ eb0e7d31e1d6e61f64d90fcfb4f0dc5e6bfe813f -->
+<!-- translated-from: docs/ja/guide/compile.md @ 7622044725db7d28dabb691d82e592367d9284e8 -->
 # Kompilacja
 
 O ile nie zrobisz nic więcej, programy typelisp działają w interpreterze. Ponadto istnieją dwa
@@ -193,8 +193,9 @@ fib(25) = 75025
   które środowisko udostępnia modułowi (w wasmtime podaje się je przez `--dir`).
 - Program używający czegoś, czego WebAssembly nie ma, to **błąd kompilacji**. Błąd pokazuje, czego użyto,
   i łańcuch funkcji od `main`, który do tego prowadzi. Nie można używać: gniazd (TCP, UDP, domena Unix,
-  TLS, rozwiązywanie nazw), wątków systemowych (`Thread`), funkcji C (`defffi`), `get-internal-run-time`, `machine-instance`, `software-version`, `file-author`,
-  lokalnej strefy czasowej ani `ed`.
+  TLS, rozwiązywanie nazw), wątków systemowych (`Thread`), funkcji C (`defffi`), `get-internal-run-time`, `machine-instance`, `software-version`, `file-author`
+  ani `ed`.
+- WASI nie ma sposobu, by poznać strefę czasową, więc czas lokalny jest nieznany. `decode-universal-time` i `encode-universal-time` bez `zone` oraz `get-decoded-time` kończą się panic w czasie wykonania. Działają, gdy poda się `zone`.
 - `--heap-cells`, `--max-memory`, `--no-cons`, `-O<N>` i `--release` działają tak samo jak dla pliku wykonywalnego.
 
 ### 3.7 Uruchamianie w przeglądarce lub w Node.js
@@ -218,6 +219,7 @@ const code = await run({ write: (fd, text) => { /* na przykład pokaż na stroni
 - Bez `write` Node.js pisze na standardowe wyjście i standardowe wyjście błędów, a przeglądarka do konsoli, wiersz po wierszu.
 - W przeglądarce udostępnij `hello.wasm` przez HTTP z tego samego miejsca co `hello.mjs` (nie da się go załadować z `file://`).
 - `sleep` czeka przez `Atomics.wait`. Przeglądarka pozwala na to tylko w Workerze strony z izolacją cross-origin, więc program używający `sleep` uruchamiaj w Workerze.
+- Czas lokalny (`decode-universal-time` bez `zone` itd.) jest wyznaczany ze strefy czasowej, którą podaje `Date` z JavaScriptu.
 - Oprócz tego, czego nie można używać w podrozdziale 3.6, operacje na plikach i katalogach są **błędem kompilacji**. Standardowe wejście czyta się jako puste, a `(command-line-args)` jest pustym wektorem.
 
 ## 4. Zrzuty (dumps)

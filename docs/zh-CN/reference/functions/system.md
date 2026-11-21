@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/system.md @ 398532233e28225bb121ed5b18609d41ea1bf813 -->
+<!-- translated-from: docs/ja/reference/functions/system.md @ 7622044725db7d28dabb691d82e592367d9284e8 -->
 # 时间、运行环境与实现
 
 时间、运行环境的查询、实现工具、文本的解析与求值、文档字符串，以及宏相关的函数。
@@ -41,6 +41,7 @@
 
 显式给出 `zone` 时，按 CL 的规定 `daylight-p` 为 `false`，`zone` 就是传入的值本身
 （*If a time-zone is supplied, daylight saving time information is ignored*）。
+省略 `zone` 读取夏令时期间的时刻时，`daylight-p` 为 `true`，`zone` 为不含夏令时的标准偏移（与 CL 相同。纽约在 7 月也是 `5.0`）。
 
 处于夏令时切换期间的本地时间本来就不唯一，CL 也没有规定取哪一个。`encode-universal-time` 对这样的时间也返回其中一个答案。
 

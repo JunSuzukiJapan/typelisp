@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/system.md @ 398532233e28225bb121ed5b18609d41ea1bf813 -->
+<!-- translated-from: docs/ja/reference/functions/system.md @ 7622044725db7d28dabb691d82e592367d9284e8 -->
 # 時間、執行環境與實作
 
 時間、執行環境的查詢、實作工具、文字的解析與求值、文件字串，以及巨集相關的函式。
@@ -41,6 +41,7 @@
 
 明確給出 `zone` 時，依 CL 的規定 `daylight-p` 為 `false`，`zone` 就是傳入的值本身
 （*If a time-zone is supplied, daylight saving time information is ignored*）。
+省略 `zone` 讀取夏令時間期間的時刻時，`daylight-p` 為 `true`，`zone` 為不含夏令時間的標準偏移（與 CL 相同。紐約在 7 月也是 `5.0`）。
 
 處於日光節約時間切換期間的當地時間本來就不唯一，CL 也沒有規定取哪一個。`encode-universal-time` 對這樣的時間也回傳其中一個答案。
 

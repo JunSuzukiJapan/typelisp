@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/system.md @ 398532233e28225bb121ed5b18609d41ea1bf813 -->
+<!-- translated-from: docs/ja/reference/functions/system.md @ 7622044725db7d28dabb691d82e592367d9284e8 -->
 # เวลา สภาพแวดล้อม และการ implement
 
 ฟังก์ชันสำหรับเวลา การสอบถามสภาพแวดล้อมขณะรัน เครื่องมือของการ implement การแยกวิเคราะห์และ
@@ -45,6 +45,7 @@ zone ที่คุณเขียนด้วยมือเป็นจำน
 
 เมื่อให้ `zone` `daylight-p` เป็น `false` และ `zone` เป็นค่าที่ให้พอดี ตามที่ CL กำหนด
 (*If a time-zone is supplied, daylight saving time information is ignored*)
+เมื่ออ่านเวลาที่อยู่ในช่วงเวลาออมแสงโดยละ `zone` `daylight-p` จะเป็น `true` และ `zone` เป็นค่าต่างมาตรฐานที่ไม่รวมเวลาออมแสง (เหมือนใน CL: นิวยอร์กเป็น `5.0` แม้ในเดือนกรกฎาคม)
 
 เวลาท้องถิ่นที่ตกในช่วงเปลี่ยนเวลาออมแสงไม่ซ้ำกันตั้งแต่แรก และ CL
 ไม่ได้บอกว่าจะเลือกอันไหน `encode-universal-time` คืนหนึ่งในสองคำตอบสำหรับเวลาเช่นนั้น

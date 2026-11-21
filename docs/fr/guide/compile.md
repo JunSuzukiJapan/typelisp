@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ eb0e7d31e1d6e61f64d90fcfb4f0dc5e6bfe813f -->
+<!-- translated-from: docs/ja/guide/compile.md @ 7622044725db7d28dabb691d82e592367d9284e8 -->
 # Compilation
 
 Sauf indication contraire, les programmes typelisp s'exécutent dans l'interpréteur. Il existe en outre deux façons
@@ -197,8 +197,9 @@ fib(25) = 75025
   dans les répertoires que l'environnement montre au module (avec wasmtime, on les donne avec `--dir`).
 - Un programme qui utilise ce que WebAssembly n'a pas est une **erreur de compilation**. L'erreur indique ce qui est utilisé
   et la chaîne de fonctions depuis `main` qui y mène. Indisponibles : les sockets (TCP, UDP, domaine Unix,
-  TLS, résolution de noms), les threads du système (`Thread`), les fonctions C (`defffi`), `get-internal-run-time`, `machine-instance`, `software-version`, `file-author`,
-  le fuseau horaire local et `ed`.
+  TLS, résolution de noms), les threads du système (`Thread`), les fonctions C (`defffi`), `get-internal-run-time`, `machine-instance`, `software-version`, `file-author`
+  et `ed`.
+- WASI n'a aucun moyen de connaître le fuseau horaire, donc l'heure locale est inconnue. `decode-universal-time` et `encode-universal-time` sans `zone`, ainsi que `get-decoded-time`, font un panic à l'exécution. Ils fonctionnent si `zone` est donné.
 - `--heap-cells`, `--max-memory`, `--no-cons`, `-O<N>` et `--release` s'appliquent comme pour un exécutable.
 
 ### 3.7 Exécuter dans un navigateur ou avec Node.js
@@ -222,6 +223,7 @@ const code = await run({ write: (fd, text) => { /* l'afficher dans la page, par 
 - Sans `write`, Node.js écrit sur la sortie standard et l'erreur standard, et un navigateur dans la console, ligne par ligne.
 - Dans un navigateur, servez `hello.wasm` en HTTP depuis le même endroit que `hello.mjs` (il ne peut pas être chargé depuis `file://`).
 - `sleep` attend avec `Atomics.wait`. Un navigateur ne le permet que dans un Worker d'une page isolée cross-origin : exécutez donc dans un Worker un programme qui utilise `sleep`.
+- L'heure locale (`decode-universal-time` sans `zone`, etc.) est calculée avec le fuseau horaire que donne `Date` de JavaScript.
 - En plus de ce que la section 3.6 ne permet pas, les opérations sur les fichiers et les répertoires sont une **erreur de compilation**. L'entrée standard se lit comme vide, et `(command-line-args)` est un vecteur vide.
 
 ## 4. Dumps

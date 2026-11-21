@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/system.md @ 398532233e28225bb121ed5b18609d41ea1bf813 -->
+<!-- translated-from: docs/ja/reference/functions/system.md @ 7622044725db7d28dabb691d82e592367d9284e8 -->
 # Time, Environment and Implementation
 
 Functions for time, queries about the runtime environment, implementation tools, parsing and
@@ -45,6 +45,7 @@ A zone you write by hand is a whole number of hours, so the argument is `int`.
 
 When `zone` is given, `daylight-p` is `false` and `zone` is exactly the value given, as CL specifies
 (*If a time-zone is supplied, daylight saving time information is ignored*).
+Reading a time inside daylight saving time with `zone` omitted gives `daylight-p` `true` and a `zone` that is the standard offset, without daylight saving (as in CL: New York is `5.0` in July too).
 
 A local time that falls inside a daylight saving transition is not unique to begin with, and CL does
 not say which to take. `encode-universal-time` returns one of the two answers for such a time.

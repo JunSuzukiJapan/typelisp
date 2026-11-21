@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ eb0e7d31e1d6e61f64d90fcfb4f0dc5e6bfe813f -->
+<!-- translated-from: docs/ja/guide/compile.md @ 7622044725db7d28dabb691d82e592367d9284e8 -->
 # 編譯
 
 不做任何處理的話，typelisp 程式由直譯器執行。此外還有兩種編譯為原生碼的方法，以及一種保存環境的方法。規格的詳情見
@@ -179,8 +179,9 @@ fib(25) = 75025
   （wasmtime 用 `--dir` 指定）。
 - 使用 WebAssembly 所沒有的東西的程式是**編譯錯誤**。錯誤會顯示用到的東西，
   以及從 `main` 到達那裡的函式鏈。不能使用的有：通訊端（TCP、UDP、Unix 網域、
-  TLS、名稱解析）、作業系統執行緒（`Thread`）、C 函式（`defffi`）、`get-internal-run-time`, `machine-instance`, `software-version`, `file-author`、
-  本地時區，以及 `ed`。
+  TLS、名稱解析）、作業系統執行緒（`Thread`）、C 函式（`defffi`）、`get-internal-run-time`, `machine-instance`, `software-version`, `file-author`
+  以及 `ed`。
+- WASI 沒有得知時區的手段，因此本地時間未知。省略 `zone` 的 `decode-universal-time`、`encode-universal-time` 以及 `get-decoded-time` 會在執行時 panic。傳入 `zone` 即可使用。
 - `--heap-cells`、`--max-memory`、`--no-cons`、`-O<N>`、`--release` 照常可用。
 
 ### 3.7 在瀏覽器或 Node.js 中執行
@@ -204,6 +205,7 @@ const code = await run({ write: (fd, text) => { /* 例如顯示在頁面上 */ }
 - 不傳 `write` 時，Node.js 輸出到標準輸出和標準錯誤，瀏覽器則逐行輸出到主控台。
 - 在瀏覽器中，請透過 HTTP 從與 `hello.mjs` 相同的位置提供 `hello.wasm`（無法從 `file://` 載入）。
 - `sleep` 用 `Atomics.wait` 等待。瀏覽器只允許在跨來源隔離頁面的 Worker 中使用它，因此使用 `sleep` 的程式請在 Worker 中執行。
+- 本地時間（省略 `zone` 的 `decode-universal-time` 等）依 JavaScript 的 `Date` 回報的時區求得。
 - 除 3.6 節中不能使用的之外，檔案和目錄操作也是**編譯錯誤**。標準輸入讀作空，`(command-line-args)` 是空向量。
 
 ## 4. 傾印

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ eb0e7d31e1d6e61f64d90fcfb4f0dc5e6bfe813f -->
+<!-- translated-from: docs/ja/guide/compile.md @ 7622044725db7d28dabb691d82e592367d9284e8 -->
 # Compilação
 
 Se você não fizer nada além disso, os programas typelisp são executados no interpretador. Além disso há duas
@@ -194,8 +194,9 @@ fib(25) = 75025
   diretórios que o ambiente mostra ao módulo (no wasmtime, indicados com `--dir`).
 - Um programa que usa algo que o WebAssembly não tem é um **erro de compilação**. O erro mostra o que foi usado e
   a cadeia de funções a partir de `main` que chega até lá. Não podem ser usados: sockets (TCP, UDP, domínio Unix,
-  TLS, resolução de nomes), threads do sistema (`Thread`), funções C (`defffi`), `get-internal-run-time`, `machine-instance`, `software-version`, `file-author`,
-  o fuso horário local e `ed`.
+  TLS, resolução de nomes), threads do sistema (`Thread`), funções C (`defffi`), `get-internal-run-time`, `machine-instance`, `software-version`, `file-author`
+  e `ed`.
+- O WASI não tem como saber o fuso horário, então a hora local é desconhecida. `decode-universal-time` e `encode-universal-time` sem `zone`, e `get-decoded-time`, entram em panic em tempo de execução. Funcionam quando `zone` é passado.
 - `--heap-cells`, `--max-memory`, `--no-cons`, `-O<N>` e `--release` funcionam como para um executável.
 
 ### 3.7 Executar em um navegador ou no Node.js
@@ -219,6 +220,7 @@ const code = await run({ write: (fd, text) => { /* mostrar na página, por exemp
 - Sem `write`, o Node.js escreve na saída padrão e no erro padrão, e um navegador no console, uma linha por vez.
 - Em um navegador, sirva `hello.wasm` por HTTP do mesmo lugar que `hello.mjs` (não é possível carregá-lo de `file://`).
 - `sleep` espera com `Atomics.wait`. Um navegador só permite isso dentro de um Worker de uma página com isolamento de origem cruzada, então execute em um Worker os programas que usam `sleep`.
+- A hora local (`decode-universal-time` sem `zone` etc.) é calculada com o fuso horário que o `Date` do JavaScript informa.
 - Além do que não pode ser usado na seção 3.6, operações com arquivos e diretórios são um **erro de compilação**. A entrada padrão é lida como vazia, e `(command-line-args)` é um vetor vazio.
 
 ## 4. Dumps

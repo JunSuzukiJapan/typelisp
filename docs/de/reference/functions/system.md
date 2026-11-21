@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/system.md @ 398532233e28225bb121ed5b18609d41ea1bf813 -->
+<!-- translated-from: docs/ja/reference/functions/system.md @ 7622044725db7d28dabb691d82e592367d9284e8 -->
 # Zeit, Umgebung und Implementierung
 
 Funktionen für Zeit, Abfragen der Laufzeitumgebung, Werkzeuge der Implementierung, Parsen und Auswerten von
@@ -46,6 +46,7 @@ Lüge erzählen. Eine Zone, die man von Hand schreibt, ist eine ganze Zahl von S
 
 Wird `zone` angegeben, ist `daylight-p` `false` und `zone` genau der angegebene Wert, wie CL es vorschreibt
 (*If a time-zone is supplied, daylight saving time information is ignored*).
+Wird eine Zeit in der Sommerzeit ohne `zone` gelesen, ist `daylight-p` `true` und `zone` die Standardabweichung ohne Sommerzeit (wie in CL: New York ist auch im Juli `5.0`).
 
 Eine Ortszeit, die in einen Sommerzeitwechsel fällt, ist von vornherein nicht eindeutig, und CL sagt nicht,
 welche zu nehmen ist. `encode-universal-time` gibt für eine solche Zeit eine der beiden Antworten zurück.

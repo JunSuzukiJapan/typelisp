@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/system.md @ 398532233e28225bb121ed5b18609d41ea1bf813 -->
+<!-- translated-from: docs/ja/reference/functions/system.md @ 7622044725db7d28dabb691d82e592367d9284e8 -->
 # Tempo, ambiente e implementazione
 
 Funzioni per il tempo, interrogazioni sull'ambiente di esecuzione, strumenti di implementazione,
@@ -47,6 +47,7 @@ bugia. Una zona che scrivi a mano è un numero intero di ore, quindi l'argomento
 
 Quando `zone` è indicato, `daylight-p` è `false` e `zone` è esattamente il valore indicato, come specifica
 CL (*If a time-zone is supplied, daylight saving time information is ignored*).
+Leggendo un'ora che cade nell'ora legale senza `zone`, `daylight-p` è `true` e `zone` è lo scostamento standard, senza ora legale (come in CL: New York è `5.0` anche a luglio).
 
 Un'ora locale che cade dentro una transizione dell'ora legale non è comunque unica, e CL non dice quale
 scegliere. `encode-universal-time` restituisce una delle due risposte per un'ora del genere.

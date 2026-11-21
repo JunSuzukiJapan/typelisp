@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/system.md @ 398532233e28225bb121ed5b18609d41ea1bf813 -->
+<!-- translated-from: docs/ja/reference/functions/system.md @ 7622044725db7d28dabb691d82e592367d9284e8 -->
 # Tijd, omgeving en implementatie
 
 Functies voor tijd, vragen over de runtime-omgeving, implementatiehulpmiddelen, het parsen en
@@ -47,6 +47,7 @@ dus het argument is `int`.
 
 Wanneer `zone` is gegeven, is `daylight-p` `false` en is `zone` precies de gegeven waarde, zoals CL
 voorschrijft (*If a time-zone is supplied, daylight saving time information is ignored*).
+Wie een tijd binnen de zomertijd leest zonder `zone`, krijgt `daylight-p` `true` en als `zone` de standaardafwijking zonder zomertijd (zoals in CL: New York is ook in juli `5.0`).
 
 Een lokale tijd die binnen een zomertijdovergang valt is om te beginnen niet uniek, en CL zegt niet welke
 te nemen. `encode-universal-time` geeft voor zo'n tijd een van de twee antwoorden terug.

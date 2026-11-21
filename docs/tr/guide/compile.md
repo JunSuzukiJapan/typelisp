@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ eb0e7d31e1d6e61f64d90fcfb4f0dc5e6bfe813f -->
+<!-- translated-from: docs/ja/guide/compile.md @ 7622044725db7d28dabb691d82e592367d9284e8 -->
 # Derleme
 
 Başka bir şey yapmazsanız typelisp programları yorumlayıcıda çalışır. Buna ek olarak yerel koda
@@ -195,8 +195,9 @@ fib(25) = 75025
   okunup yazılabilir (wasmtime'da `--dir` ile belirtilir).
 - WebAssembly'de olmayan bir şeyi kullanan program bir **derleme hatasıdır**. Hata, kullanılanı ve oraya ulaşan,
   `main`'den başlayan fonksiyon zincirini gösterir. Kullanılamayanlar: soketler (TCP, UDP, Unix alanı,
-  TLS, ad çözümleme), işletim sistemi iş parçacıkları (`Thread`), C fonksiyonları (`defffi`), `get-internal-run-time`, `machine-instance`, `software-version`, `file-author`,
-  yerel saat dilimi ve `ed`.
+  TLS, ad çözümleme), işletim sistemi iş parçacıkları (`Thread`), C fonksiyonları (`defffi`), `get-internal-run-time`, `machine-instance`, `software-version`, `file-author`
+  ve `ed`.
+- WASI'nin saat dilimini öğrenme yolu yoktur, bu yüzden yerel saat bilinmez. `zone` verilmeden `decode-universal-time` ve `encode-universal-time` ile `get-decoded-time` çalışma zamanında panic olur. `zone` verilirse kullanılabilirler.
 - `--heap-cells`, `--max-memory`, `--no-cons`, `-O<N>` ve `--release` çalıştırılabilir dosyada olduğu gibi çalışır.
 
 ### 3.7 Tarayıcıda veya Node.js'te çalıştırmak
@@ -220,6 +221,7 @@ const code = await run({ write: (fd, text) => { /* örneğin sayfada göstermek 
 - `write` verilmezse Node.js standart çıktıya ve standart hataya, tarayıcı ise konsola satır satır yazar.
 - Tarayıcıda `hello.wasm`'ı `hello.mjs` ile aynı yerden HTTP üzerinden sunun (`file://` üzerinden yüklenemez).
 - `sleep`, `Atomics.wait` ile bekler. Tarayıcı buna yalnızca cross-origin yalıtımlı bir sayfanın Worker'ı içinde izin verir; bu yüzden `sleep` kullanan programı bir Worker'da çalıştırın.
+- Yerel saat (`zone` verilmeden `decode-universal-time` vb.), JavaScript'in `Date` nesnesinin bildirdiği saat dilimiyle hesaplanır.
 - 3.6 bölümünde kullanılamayanlara ek olarak dosya ve dizin işlemleri bir **derleme hatasıdır**. Standart girdi boş okunur ve `(command-line-args)` boş bir vektördür.
 
 ## 4. Dump'lar
