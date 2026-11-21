@@ -808,9 +808,9 @@ fn print_object_receiver(target: &CompileTarget) -> Option<typelisp_mem::TypeId>
 /// — could read a global that doesn't have a slot yet.
 ///
 /// `vtables` (one entry per trait object the file boxes, from
-/// `Interp::vtable_descriptors`) are filled in first of all, before even the
-/// heap exists: each slot is an `rt_vtable_set` call whose function-pointer
-/// argument is a `ptrtoint` *constant* the linker resolves, so unlike the
+/// `Interp::vtable_descriptors`) are filled in after the heap and
+/// `rt_eval_init` (whose `Interp::new` clears the table): each slot is an
+/// `rt_vtable_set` call whose function-pointer argument is a `ptrtoint` *constant* the linker resolves, so unlike the
 /// JIT — which patches tables with addresses only known after each module is
 /// JIT'd (`Interp::publish_vtables`) — AOT needs no runtime discovery, no
 /// thunk, and no closure to carry a method's identity.
@@ -869,90 +869,6 @@ fn build_main_wrapper(
         .map_err(|e| format!("failed to mark the ABI marker load volatile: {:?}", e))?;
 
 
-    // Trait-object vtables. Ordered before `rt_heap_init` only
-    // because nothing here touches the heap; what matters is that every
-    // table is complete before `tl_main` can reach a `:dyn` call site.
-    if !vtables.is_empty() {
-        let i64_ty = ctx.i64_type();
-        let rt_vtable_set = module
-            .get_function("rt_vtable_set")
-            .ok_or_else(|| "internal error: rt_vtable_set not declared in module".to_string())?;
-        let args_ptr = builder
-            .build_alloca(i64_ty.array_type(4), "vtable_set_args")
-            .map_err(|e| format!("failed to alloca vtable-set args: {}", e))?;
-        for (id, slots) in vtables {
-            for (slot, (type_name, method)) in slots.iter().enumerate() {
-                let symbol = ConcreteNames::method_symbol(type_name, method.name());
-                let target = module.get_function(&symbol).ok_or_else(|| {
-                    format!(
-                        "compile-file: dyn dispatch target `{}::{}` was not compiled into this file",
-                        type_name,
-                        method.name()
-                    )
-                })?;
-                let fn_ptr = target.as_global_value().as_pointer_value().const_to_int(i64_ty);
-                // `IntValue` is `Copy`, so the deref below is free — spelled
-                // out because this crate is edition 2018, where an array's
-                // `into_iter()` still yields references.
-                // The fourth word is the ABI `target` answers to. Its LLVM
-                // type is the authority -- the same question
-                // `build-make-closure` asks of the function it boxes.
-                let body_abi = if target.get_type() == crate::compile::llvm_builtins::coroutine_fn_type() {
-                    typelisp_abi::BODY_ABI_COROUTINE
-                } else {
-                    typelisp_abi::BODY_ABI_CLASSIC
-                };
-                let set_args = [
-                    i64_ty.const_int(*id as u64, false),
-                    i64_ty.const_int(slot as u64, false),
-                    fn_ptr,
-                    i64_ty.const_int(u64::from(body_abi), false),
-                ];
-                for (i, v) in set_args.iter().enumerate() {
-                    let v = *v;
-                    let p = unsafe {
-                        builder
-                            .build_gep(i64_ty, args_ptr, &[i64_ty.const_int(i as u64, false)], "vtable_set_arg_ptr")
-                            .map_err(|e| format!("failed to build vtable-set gep: {}", e))?
-                    };
-                    builder.build_store(p, v).map_err(|e| format!("failed to store vtable-set arg: {}", e))?;
-                }
-                builder
-                    .build_call(rt_vtable_set, &[args_ptr.into(), ctx.i32_type().const_int(4, false).into()], "vtable_set_result")
-                    .map_err(|e| format!("failed to build rt_vtable_set call: {}", e))?;
-            }
-        }
-    }
-    // The supertrait upcast table, for the same reason and at the same
-    // point: a `:dyn` upcast in `tl_main` reads it, and it is all constants.
-    if !upcasts.is_empty() {
-        let i64_ty = ctx.i64_type();
-        let rt_upcast_set = module
-            .get_function("rt_upcast_set")
-            .ok_or_else(|| "internal error: rt_upcast_set not declared in module".to_string())?;
-        let args_ptr = builder
-            .build_alloca(i64_ty.array_type(3), "upcast_set_args")
-            .map_err(|e| format!("failed to alloca upcast-set args: {}", e))?;
-        for (from, trait_id, to) in upcasts {
-            let set_args = [
-                i64_ty.const_int(*from as u64, false),
-                i64_ty.const_int(*trait_id as u64, false),
-                i64_ty.const_int(*to as u64, false),
-            ];
-            for (i, v) in set_args.iter().enumerate() {
-                let v = *v;
-                let p = unsafe {
-                    builder
-                        .build_gep(i64_ty, args_ptr, &[i64_ty.const_int(i as u64, false)], "upcast_set_arg_ptr")
-                        .map_err(|e| format!("failed to build upcast-set gep: {}", e))?
-                };
-                builder.build_store(p, v).map_err(|e| format!("failed to store upcast-set arg: {}", e))?;
-            }
-            builder
-                .build_call(rt_upcast_set, &[args_ptr.into(), ctx.i32_type().const_int(3, false).into()], "upcast_set_result")
-                .map_err(|e| format!("failed to build rt_upcast_set call: {}", e))?;
-        }
-    }
     // The C callback entries (`typelisp_rt::ffi_callback`): the entry's
     // address under the function's definition and the function type C calls
     // it at, which is what a callback argument looks up.
@@ -983,8 +899,7 @@ fn build_main_wrapper(
     if module_calls_any(module, &PRINT_SHIMS) {
         let i64_ty = ctx.i64_type();
         // A `(pointer, length)` pair per string, from a module-level constant
-        // — no heap involved, so this can run before `rt_heap_init` like the
-        // two tables above.
+        // — no heap involved, so this can run before `rt_heap_init`.
         let literal = |builder: &inkwell::builder::Builder<'static>, text: &str| -> Result<(inkwell::values::IntValue<'static>, inkwell::values::IntValue<'static>), String> {
             let g = builder
                 .build_global_string_ptr(text, "print_reg_str")
@@ -1117,12 +1032,97 @@ fn build_main_wrapper(
             ctx.i64_type().const_int(heap.fixed as u64, false),
         ],
     )?;
-    // Between the heap and the global inits, and that position is forced:
-    // `rt_eval_init` builds an `Interp`, and `Interp::new` resets the runtime
-    // global table — after the inits it would wipe the slots the machine code
-    // addresses. See `typelisp_front::shim`'s module doc comment.
+    // Between the heap and the vtables and global inits, and that position
+    // is forced: `rt_eval_init` builds an `Interp`, and `Interp::new` resets
+    // the runtime's global and vtable tables — after them it would wipe the
+    // slots the machine code addresses. See `typelisp_front::shim`'s module
+    // doc comment.
     if eval_env.is_some() {
         call_shim(ctx, module, &builder, "rt_eval_init", &[])?;
+    }
+    // Trait-object vtables: after `rt_eval_init` (above), whose `Interp::new`
+    // clears the table, and complete before `tl_main` can reach a `:dyn`
+    // call site.
+    if !vtables.is_empty() {
+        let i64_ty = ctx.i64_type();
+        let rt_vtable_set = module
+            .get_function("rt_vtable_set")
+            .ok_or_else(|| "internal error: rt_vtable_set not declared in module".to_string())?;
+        let args_ptr = builder
+            .build_alloca(i64_ty.array_type(4), "vtable_set_args")
+            .map_err(|e| format!("failed to alloca vtable-set args: {}", e))?;
+        for (id, slots) in vtables {
+            for (slot, (type_name, method)) in slots.iter().enumerate() {
+                let symbol = ConcreteNames::method_symbol(type_name, method.name());
+                let target = module.get_function(&symbol).ok_or_else(|| {
+                    format!(
+                        "compile-file: dyn dispatch target `{}::{}` was not compiled into this file",
+                        type_name,
+                        method.name()
+                    )
+                })?;
+                let fn_ptr = target.as_global_value().as_pointer_value().const_to_int(i64_ty);
+                // `IntValue` is `Copy`, so the deref below is free — spelled
+                // out because this crate is edition 2018, where an array's
+                // `into_iter()` still yields references.
+                // The fourth word is the ABI `target` answers to. Its LLVM
+                // type is the authority -- the same question
+                // `build-make-closure` asks of the function it boxes.
+                let body_abi = if target.get_type() == crate::compile::llvm_builtins::coroutine_fn_type() {
+                    typelisp_abi::BODY_ABI_COROUTINE
+                } else {
+                    typelisp_abi::BODY_ABI_CLASSIC
+                };
+                let set_args = [
+                    i64_ty.const_int(*id as u64, false),
+                    i64_ty.const_int(slot as u64, false),
+                    fn_ptr,
+                    i64_ty.const_int(u64::from(body_abi), false),
+                ];
+                for (i, v) in set_args.iter().enumerate() {
+                    let v = *v;
+                    let p = unsafe {
+                        builder
+                            .build_gep(i64_ty, args_ptr, &[i64_ty.const_int(i as u64, false)], "vtable_set_arg_ptr")
+                            .map_err(|e| format!("failed to build vtable-set gep: {}", e))?
+                    };
+                    builder.build_store(p, v).map_err(|e| format!("failed to store vtable-set arg: {}", e))?;
+                }
+                builder
+                    .build_call(rt_vtable_set, &[args_ptr.into(), ctx.i32_type().const_int(4, false).into()], "vtable_set_result")
+                    .map_err(|e| format!("failed to build rt_vtable_set call: {}", e))?;
+            }
+        }
+    }
+    // The supertrait upcast table, for the same reason and at the same
+    // point: a `:dyn` upcast in `tl_main` reads it, and it is all constants.
+    if !upcasts.is_empty() {
+        let i64_ty = ctx.i64_type();
+        let rt_upcast_set = module
+            .get_function("rt_upcast_set")
+            .ok_or_else(|| "internal error: rt_upcast_set not declared in module".to_string())?;
+        let args_ptr = builder
+            .build_alloca(i64_ty.array_type(3), "upcast_set_args")
+            .map_err(|e| format!("failed to alloca upcast-set args: {}", e))?;
+        for (from, trait_id, to) in upcasts {
+            let set_args = [
+                i64_ty.const_int(*from as u64, false),
+                i64_ty.const_int(*trait_id as u64, false),
+                i64_ty.const_int(*to as u64, false),
+            ];
+            for (i, v) in set_args.iter().enumerate() {
+                let v = *v;
+                let p = unsafe {
+                    builder
+                        .build_gep(i64_ty, args_ptr, &[i64_ty.const_int(i as u64, false)], "upcast_set_arg_ptr")
+                        .map_err(|e| format!("failed to build upcast-set gep: {}", e))?
+                };
+                builder.build_store(p, v).map_err(|e| format!("failed to store upcast-set arg: {}", e))?;
+            }
+            builder
+                .build_call(rt_upcast_set, &[args_ptr.into(), ctx.i32_type().const_int(3, false).into()], "upcast_set_result")
+                .map_err(|e| format!("failed to build rt_upcast_set call: {}", e))?;
+        }
     }
     // The program proper: its global initialisers and then `tl_main`.
     //

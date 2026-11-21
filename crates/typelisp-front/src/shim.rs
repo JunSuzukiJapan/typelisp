@@ -21,10 +21,11 @@
 //!
 //! [`rt_eval_init`] runs at startup rather than on the first `eval` call, and
 //! that is forced rather than chosen: `Interp::new` calls
-//! `typelisp_rt::reset_global_table`, so an `Interp` created after the
-//! program's global-init sequence would wipe the very slots the machine code
-//! addresses. The generated `main` therefore runs it *between* `rt_heap_init`
-//! and the global inits.
+//! `typelisp_rt::reset_global_table` and `typelisp_rt::reset_vtable_table`,
+//! so an `Interp` created after the program's vtables are filled or its
+//! global-init sequence has run would wipe the very slots the machine code
+//! addresses. The generated `main` therefore runs it right after
+//! `rt_heap_init`, before both.
 //!
 //! What an eval'd form gets is a tree-walking evaluation, including of the
 //! program's own functions: the dump carries their checked bodies as
@@ -279,6 +280,10 @@ unsafe fn run_program_interp(args: *const i64, argc: u32, main_returns_int: bool
         p if !p.is_null() => &*p,
         _ => fatal("rt_run_program_interp: no environment — rt_eval_init has not run on this thread"),
     };
+    // A worker prints with the executable's own tables (`install_crew`),
+    // which read the prelude's control variables from their compiled slots:
+    // the id -> slot table is the runtime's, as under `rt_run_program`.
+    typelisp_print::aot::set_global_slots(typelisp_rt::global_perm_idx);
     let heap = active_heap();
     let inits: Vec<usize> = program.inits.iter().map(|f| *f as usize).collect();
     let entry = program.entry as usize;

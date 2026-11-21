@@ -1255,6 +1255,59 @@ fn an_aot_executable_evaluates_a_read_of_a_global_the_program_wrote() {
     );
 }
 
+/// A program that calls `eval` dispatches through its own vtables: the
+/// environment `eval` runs in is built at startup, and building it must not
+/// clear the tables the compiled `:dyn` call sites read.
+#[test]
+fn an_aot_executable_that_calls_eval_dispatches_trait_objects() {
+    assert_eq!(
+        compile_and_run(
+            "aot_eval_dyn_dispatch",
+            r#"
+            (deftrait Greeter ()
+              (defmethod name (self) string)
+              (defmethod greet (self) string (format false "hello from ~a" (name self))))
+            (defstruct Browser (vendor string))
+            (impl Greeter Browser
+              (defmethod name (self) string self::vendor))
+            (defun main () int
+              (let ((g (the :dyn Greeter (make-instance 'Browser :vendor "the page"))))
+                (match (eval (quote (* 6 7)))
+                  ((Ok v) (if (and (equal (greet g) "hello from the page") (= (sexpr-int v) 42)) 0 2))
+                  ((Err _) 3))))
+            "#
+        ),
+        0
+    );
+}
+
+/// And a task on a worker thread formats with the executable's printer,
+/// which reads the prelude's control variables from their compiled slots:
+/// the program runs under its `Interp`'s scheduler, which has to install the
+/// table those slots are found by. The `sleep` is what moves the task off
+/// the main thread.
+#[test]
+fn an_aot_executable_that_calls_eval_formats_on_a_worker() {
+    assert_eq!(
+        compile_and_run(
+            "aot_eval_worker_format",
+            r#"
+            (use std::sync::Chan)
+            (defun worker ((results Chan<string>)) ()
+              (sleep 0.05)
+              (send results (format false "n=~a" 5)))
+            (defun main () int
+              (let ((results (the Chan<string> (Chan::new 1))))
+                (task (worker results))
+                (match (eval (quote (+ 1 2)))
+                  ((Ok v) (if (and (equal (unwrap (recv results)) "n=5") (= (sexpr-int v) 3)) 0 2))
+                  ((Err _) 3))))
+            "#
+        ),
+        0
+    );
+}
+
 /// And the other direction: an eval'd write lands where the compiled code
 /// reads. Same slot or the test cannot pass.
 #[test]
