@@ -1,0 +1,70 @@
+<!doctype html>
+<!--
+  Runs showcase.wasm in a Worker (worker.mjs) and shows what it prints:
+  standard output as it is, standard error in red, then the exit code.
+  showcase.wasm を Worker（worker.mjs）で実行し、出力を表示する。標準出力は
+  そのまま、標準エラーは赤で、最後に終了コードを出す。
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>typelisp in WebAssembly</title>
+<style>
+  :root { color-scheme: light dark; }
+  body { font-family: system-ui, sans-serif; margin: 2rem auto; max-width: 52rem; padding: 0 1rem; }
+  pre { background: #8881; border: 1px solid #8884; padding: 1rem; overflow-x: auto; white-space: pre-wrap; min-height: 10rem; }
+  .err { color: #d33; }
+  #status { font-weight: bold; }
+</style>
+</head>
+<body>
+<h1>typelisp in WebAssembly</h1>
+<p>
+  <button id="run">Run</button>
+  <span id="status"></span>
+</p>
+<pre id="out"></pre>
+<script type="module">
+  const out = document.getElementById('out');
+  const status = document.getElementById('status');
+  const button = document.getElementById('run');
+
+  function append(text, cls) {
+    const span = document.createElement('span');
+    if (cls) span.className = cls;
+    span.textContent = text;
+    out.append(span);
+  }
+
+  function start() {
+    out.textContent = '';
+    if (!crossOriginIsolated) {
+      status.textContent = 'This page is not cross-origin isolated, so sleep cannot work: serve it with serve.mjs.';
+      return;
+    }
+    status.textContent = 'running...';
+    button.disabled = true;
+    const worker = new Worker('./worker.mjs', { type: 'module' });
+    worker.onmessage = ({ data }) => {
+      if (data.text !== undefined) {
+        append(data.text, data.fd === 2 ? 'err' : null);
+        return;
+      }
+      status.textContent = data.error !== undefined
+        ? `failed: ${data.error}`
+        : `exit code ${data.exit}`;
+      button.disabled = false;
+      worker.terminate();
+    };
+    worker.onerror = (e) => {
+      status.textContent = `failed: ${e.message}`;
+      button.disabled = false;
+    };
+  }
+
+  button.addEventListener('click', start);
+  start();
+</script>
+</body>
+</html>

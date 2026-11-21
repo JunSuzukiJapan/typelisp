@@ -1,0 +1,179 @@
+;; A tour of what a WebAssembly module compiled with
+;; `typl -c showcase.typl --target wasm32-unknown-unknown` can do, one section
+;; per feature. Runs the same natively, under Node and in a browser (see
+;; README.md beside this file).
+;; `typl -c showcase.typl --target wasm32-unknown-unknown` でコンパイルした
+;; WebAssembly のモジュールでできることを、機能ごとに 1 節ずつ見せる。ネイティブ、
+;; Node、ブラウザで同じに動く（このファイルの隣の README.md を参照）。
+(use std::sync::Chan)
+(use std::time::get-universal-time)
+(use std::num::parse-int)
+
+(defun section ((title string)) ()
+  (println "")
+  (println "== ~a ==" title))
+
+;; ---- numbers ----
+(defun fact ((n int)) int (if (= n 0) 1 (* n (fact (- n 1)))))
+
+(defun numbers () ()
+  (section "numbers")
+  (println "30! = ~a" (fact 30))
+  (println "1/3 + 1/6 = ~a" (+ 1/3 1/6))
+  (println "sqrt 2 = ~,6f" (sqrt 2.0))
+  (println "255 in hex ~x, binary ~b, roman ~@r" 255 255 1999)
+  (println "~r" 42))
+
+;; ---- strings and characters ----
+(defun strings () ()
+  (section "strings")
+  (let ((s "WebAssembly"))
+    (println "~a has ~d characters" s (length s))
+    (println "upcase: ~a" (upcase s))
+    (println "first char: ~s" (ref s 0))
+    (println "non-ASCII: ~a has ~d characters" "日本語" (length "日本語"))
+    (println "padded: [~10a] [~10@a]" "left" "right")
+    (println "~{~a~^, ~}" (list "one" "two" "three"))))
+
+;; ---- lists, vectors and hash tables ----
+(defun collections () ()
+  (section "collections")
+  (let ((xs (the (int string bool) (list 1 "two" true))))
+    (println "list: ~a" xs))
+  (println "quoted: ~s" (quote (a (b c) "d" 4)))
+  (let ((v (the Vector<int> (Vector::new))))
+    (dotimes (i 5) (push v (* i 10)))
+    (println "vector: ~a" v)
+    (println "squares: ~a" (map (iter v) (lambda ((x int)) int (* x x)))))
+  (let ((h (the HashTable<string, int> (HashTable::new :test 'equal))))
+    (set h "apple" 3)
+    (set h "pear" 5)
+    (println "pear -> ~a" (get h "pear"))
+    (println "plum -> ~a" (get h "plum"))))
+
+;; ---- structs, enums and match ----
+(defstruct Point (x int) (y int))
+
+(defenum Shape
+  (Circle int)
+  (Rect int int))
+
+(use Shape::*)
+
+(defun area ((s Shape)) int
+  (match s
+    ((Circle r) (* 3 r r))
+    ((Rect w h) (* w h))))
+
+(defun data-types () ()
+  (section "structs and enums")
+  (let ((p (make-instance 'Point :x 3 :y 4)))
+    (setf p::x 6)
+    (println "point (~a, ~a)" p::x p::y))
+  (let ((shapes (the Vector<Shape> (Vector::new))))
+    (push shapes (Circle 2))
+    (push shapes (Rect 3 5))
+    (doiter (s (iter shapes))
+      (println "area ~a" (area s)))))
+
+;; ---- traits ----
+(deftrait Greeter ()
+  (defmethod name (self) string)
+  (defmethod greet (self) string (format false "hello from ~a" (name self))))
+
+(defstruct Browser (vendor string))
+(impl Greeter Browser
+  (defmethod name (self) string self::vendor))
+
+(defun traits () ()
+  (section "traits")
+  (let ((g (the :dyn Greeter (make-instance 'Browser :vendor "the page"))))
+    (println "~a" (greet g))))
+
+;; ---- macros ----
+(defmacro twice (&rest body)
+  `(progn ,@body ,@body))
+
+(defun macros () ()
+  (section "macros")
+  (twice (println "printed by a macro")))
+
+;; ---- errors: Result, catch/throw, unwind-protect, block ----
+(defun parse ((s string)) string
+  (match (parse-int s)
+    ((Ok n) (format false "~a -> ~a" s n))
+    ((Err e) (format false "~s -> error: ~a" s (message e)))))
+
+(defun deep ((n int)) int (throw 'found (* n 2)))
+
+(defun errors () ()
+  (section "errors")
+  (println "~a" (parse "123"))
+  (println "~a" (parse "12x"))
+  (println "caught ~a" (catch 'found (+ 1 (deep 21))))
+  (catch 'found
+    (unwind-protect (deep 1)
+      (println "cleanup ran")))
+  (println "block -> ~a"
+           (block search
+             (dotimes (i 100)
+               (if (= (* i i) 49) (return-from search i) ()))
+             -1)))
+
+;; ---- tasks, channels and sleep ----
+(defun worker ((jobs Chan<int>) (results Chan<string>)) ()
+  (doiter (n jobs)
+    (sleep 0.05)
+    (send results (format false "~a squared is ~a" n (* n n)))))
+
+(defun tasks () ()
+  (section "tasks")
+  (let ((jobs (the Chan<int> (Chan::new 0)))
+        (results (the Chan<string> (Chan::new 10))))
+    (task (worker jobs results))
+    (task (worker jobs results))
+    (dotimes (i 4) (send jobs (+ i 1)))
+    (close jobs)
+    (let ((lines (the Vector<string> (Vector::new))))
+      (dotimes (i 4) (push lines (unwrap (recv results))))
+      ;; Which worker takes which number, and the order they finish in, differ
+      ;; from run to run; sorted by number, the lines come out the same.
+      (doiter (l (iter (sort (iter lines) (lambda ((a string) (b string)) bool (< a b)))))
+        (println "~a" l))))
+  ;; `select` takes whichever channel is ready, or `:else` when none is.
+  (let ((idle (the Chan<int> (Chan::new 1))))
+    (println "select: ~a" (select ((v (recv idle)) (format false "got ~a" (unwrap v)))
+                                  (:else "nothing ready")))
+    (send idle 9)
+    (println "select: ~a" (select ((v (recv idle)) (format false "got ~a" (unwrap v)))
+                                  (:else "nothing ready")))))
+
+;; ---- eval ----
+(defun evaluation () ()
+  (section "eval")
+  (println "~a" (eval (quote (* 6 7))))
+  (println "~a" (eval (list (quote +) 1 2 3))))
+
+;; ---- the host: time, standard error, exit code ----
+(defun host () ()
+  (section "host")
+  (let ((now (get-universal-time)))
+    (println "now (UTC): day ~d since 1900, ~2,'0d:~2,'0d:~2,'0d"
+             now::day (floor now::second 3600) (mod (floor now::second 60) 60) (mod now::second 60)))
+  (eprintln "this line goes to standard error"))
+
+(defun main () int
+  (println "typelisp in WebAssembly")
+  (numbers)
+  (strings)
+  (collections)
+  (data-types)
+  (traits)
+  (macros)
+  (errors)
+  (tasks)
+  (evaluation)
+  (host)
+  (println "")
+  (println "done; exit code 3")
+  3)
