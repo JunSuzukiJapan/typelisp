@@ -37,3 +37,6 @@ graphify-out/cache/
 tmp/
 tmp/*
 AGENTS.md
+
+# Serena (language-server tooling) project state
+.serena/
