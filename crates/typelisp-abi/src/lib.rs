@@ -20,6 +20,11 @@
 //! would mean a printer shim looking for a heap the interpreter registered in
 //! the other one.
 
+#![cfg_attr(not(feature = "std"), no_std)]
+
+extern crate alloc;
+
+#[cfg(feature = "std")]
 pub mod dribble;
 
 // The ABI version: which `docs/dev/api_version/history/api_<VERSION>.md`
@@ -54,7 +59,9 @@ pub const ABI_SYMBOL: &str = with_abi_version!(marker_symbol);
 #[export_name = with_abi_version!(marker_symbol)]
 pub static ABI_MARKER: u8 = 0;
 
-use std::cell::{Cell, RefCell};
+use core::cell::{Cell, RefCell};
+
+use typelisp_mem::prelude::*;
 
 use typelisp_mem::{Heap, Value};
 
@@ -75,9 +82,9 @@ use typelisp_mem::{Heap, Value};
 // hazard. A single-threaded AOT-compiled executable (its own OS process)
 // just has the one thread's slot — behaves identically to a plain global
 // there.
-thread_local! {
+typelisp_mem::thread_local! {
     static THREAD: ThreadState = const {
-        ThreadState { heap: Cell::new(std::ptr::null_mut()), call: RefCell::new(call_state::State::new()) }
+        ThreadState { heap: Cell::new(core::ptr::null_mut()), call: RefCell::new(call_state::State::new()) }
     };
 }
 
@@ -149,7 +156,7 @@ pub unsafe fn active_heap() -> &'static mut Heap {
 /// runtime is broken.
 pub fn fatal(msg: &str) -> ! {
     typelisp_mem::host::eprintln(format_args!("typelisp runtime error: {}", msg));
-    std::process::abort();
+    typelisp_mem::host::abort();
 }
 
 /// The payload a compiled `(panic ...)` unwinds with, so the interpreter can
@@ -192,10 +199,10 @@ pub struct InterpretedUnwind;
 #[derive(Debug)]
 pub struct CompiledThrow;
 
-thread_local! {
+typelisp_mem::thread_local! {
     /// The unwind raised on this thread that no driver or boundary has taken
     /// yet — see [`raise`].
-    static RAISED: std::cell::RefCell<Option<Box<dyn std::any::Any + Send>>> = const { std::cell::RefCell::new(None) };
+    static RAISED: core::cell::RefCell<Option<Box<dyn core::any::Any + Send>>> = const { core::cell::RefCell::new(None) };
 }
 
 /// Proof that an unwind has been raised on this thread and is waiting to be
@@ -236,7 +243,7 @@ pub fn raise(msg: String) -> Raised {
 ///
 /// An unwind raised while another waits replaces it — a cleanup that fails
 /// while an exit travels wins, as CLHS says.
-pub fn raise_payload(payload: Box<dyn std::any::Any + Send>) -> Raised {
+pub fn raise_payload(payload: Box<dyn core::any::Any + Send>) -> Raised {
     RAISED.with(|r| *r.borrow_mut() = Some(payload));
     Raised(())
 }
@@ -260,7 +267,7 @@ pub fn raised() -> Result<(), Raised> {
 
 /// Takes the unwind waiting on this thread — what a driver does when an
 /// activation returns, and a boundary when the compiled code it called does.
-pub fn take_raised() -> Option<Box<dyn std::any::Any + Send>> {
+pub fn take_raised() -> Option<Box<dyn core::any::Any + Send>> {
     RAISED.with(|r| r.borrow_mut().take())
 }
 
@@ -371,6 +378,7 @@ pub const FRAME_RESERVED_SLOTS: usize = 3;
 /// the two sides. Nothing may allocate in those windows: the words are raw and
 /// tagged, sitting in Rust `Vec`s the collector does not trace.
 pub mod call_state {
+    use typelisp_mem::prelude::*;
     use typelisp_mem::Heap;
 
     /// How many emptied argument vectors [`State`] keeps.
@@ -471,7 +479,7 @@ pub mod call_state {
             let frame = if self.current_frames.len() > published { self.current_frames.pop() } else { None };
             self.current_frames.truncate(published);
             if self.spare_args.len() < SPARE_ARGS_LEN {
-                self.spare_args.push(std::mem::take(&mut self.pending_args));
+                self.spare_args.push(core::mem::take(&mut self.pending_args));
             }
             frame
         }
@@ -633,7 +641,7 @@ pub mod call_state {
 
     /// Takes them back out.
     pub fn take_pending_select() -> Vec<i64> {
-        with(|s| std::mem::take(&mut s.pending_select))
+        with(|s| core::mem::take(&mut s.pending_select))
     }
 
     /// Records what the frame about to return `STATUS_SUSPEND` is waiting for.

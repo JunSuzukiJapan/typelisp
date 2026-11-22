@@ -40,9 +40,9 @@ repository = "https://github.com/JunSuzukiJapan/typelisp"
 # what crates.io resolves them by once published; `path` is what a build from
 # this tree uses.
 [workspace.dependencies]
-typelisp-abi = { path = "crates/typelisp-abi", version = "0.3.7" }
+typelisp-abi = { path = "crates/typelisp-abi", version = "0.3.7", default-features = false }
 typelisp-front = { path = "crates/typelisp-front", version = "0.3.7" }
-typelisp-mem = { path = "crates/typelisp-mem", version = "0.3.7" }
+typelisp-mem = { path = "crates/typelisp-mem", version = "0.3.7", default-features = false }
 typelisp-print = { path = "crates/typelisp-print", version = "0.3.7" }
 typelisp-read = { path = "crates/typelisp-read", version = "0.3.7" }
 typelisp-rt = { path = "crates/typelisp-rt", version = "0.3.7" }
@@ -55,9 +55,9 @@ num-traits = "0.2"
 num-integer = "0.1"
 rustyline = "18"
 inkwell = { version = "0.9", features = ["llvm22-1"] }
-typelisp-abi.workspace = true
+typelisp-abi = { workspace = true, features = ["std"] }
 typelisp-front.workspace = true
-typelisp-mem.workspace = true
+typelisp-mem = { workspace = true, features = ["std"] }
 typelisp-print.workspace = true
 typelisp-read.workspace = true
 typelisp-rt.workspace = true

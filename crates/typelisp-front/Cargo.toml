@@ -24,8 +24,8 @@ name = "typelisp_front"
 crate-type = ["rlib", "staticlib"]
 
 [dependencies]
-typelisp-abi.workspace = true
-typelisp-mem.workspace = true
+typelisp-abi = { workspace = true, features = ["std"] }
+typelisp-mem = { workspace = true, features = ["std"] }
 typelisp-print.workspace = true
 typelisp-read.workspace = true
 typelisp-rt.workspace = true

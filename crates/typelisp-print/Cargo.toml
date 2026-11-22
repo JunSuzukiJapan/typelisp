@@ -25,8 +25,8 @@ name = "typelisp_print"
 # `~r`/`~d`'s radix printing and `~f`/`~e`/`~$`'s float formatting reach for
 # `ToPrimitive`; nothing else here needs the numeric stack.
 num-traits = "0.2"
-typelisp-abi.workspace = true
-typelisp-mem.workspace = true
+typelisp-abi = { workspace = true, features = ["std"] }
+typelisp-mem = { workspace = true, features = ["std"] }
 # `PrintShared`'s lock (`docs/dev/os-threads-design.md` §5/Phase 1d) —
 # non-poisoning, same as `typelisp-mem`'s `HeapShared` already uses.
 parking_lot = "0.12"
