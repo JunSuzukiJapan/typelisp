@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ ac5a6b3adada21a0a55e0e1c4b0e1fabf4854908 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ cec1c96be6655e3c218d04c38f2fbe63a5baf936 -->
 # typelisp 语法参考
 
 typelisp 是一种静态类型的 Lisp，语法采用 S 表达式。内置函数和方法的一览见[内置函数](functions/README.md)，类型一览见
@@ -1793,9 +1793,8 @@ typl --image session.typld             # REPL 也一样
   线程，之后一直留在那里**（不会回去）。长时间的处理中途只要接触过一次解释执行的代码，剩余部分就在解释器的线程上运行。
 - **`typl` 的工作线程只存活一次顶层求值的时间。** 在 REPL 等待输入期间以及顶层形式之间，其他线程不推进任务（剩下的任务在下次求值时
   接着运行）。求值结束时会等待各线程完成当前的一步，所以如果 `thread` 中有持续阻塞的 C 函数（`defffi`），在它返回之前求值不会结束。
-- **worker 上的打印**：解释执行的 `print-object` 方法，以及 `~/name/` 所调用的解释执行的函数和方法，
-  不能在其他线程上运行，所以在其他线程打印这样的值会产生与 `(panic ...)` 同等对待的 panic
-  （`(compile T::print-object)`，或者从主任务打印）。
+- **worker 上的打印**：解释执行的 `print-object` 方法不能在其他线程上运行，所以在其他线程打印这样的值
+  会产生与 `(panic ...)` 同等对待的 panic（`(compile T::print-object)`，或者从主任务打印）。
 - **数据竞争是未定义的**（与 Go 立场相同）。不经过 `Mutex<T>`・`Chan<T>` 从多个任务修改同一个值的结果没有保证。
 - **`task` 返回值。** 与 Go 的 `go` 语句不同，它返回 `Task<T>`，用 `(wait t)` 可以取得结果。
 - **没有 nil 通道。** Go 的 fan-in 惯用法（把关闭的通道设为 `nil` 以从 `select` 的分支中去掉）无法写出，所以为每个输入启动一个任务，

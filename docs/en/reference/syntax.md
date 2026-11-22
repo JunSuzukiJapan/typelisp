@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ ac5a6b3adada21a0a55e0e1c4b0e1fabf4854908 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ cec1c96be6655e3c218d04c38f2fbe63a5baf936 -->
 # typelisp Syntax Reference
 
 typelisp is a statically typed Lisp, written in S-expressions. For the list of built-in functions and
@@ -2212,10 +2212,9 @@ panic like `` `recv` cannot block: ... ``, treated the same as a `(panic ...)`).
   left off in the next evaluation). At the end of an evaluation, it waits for each thread to finish its
   current step, so if a C function (`defffi`) keeps blocking inside a `thread`, the evaluation does not end
   until it returns.
-- **Printing on workers**: interpreted `print-object` methods, and interpreted functions and methods
-  called by `~/name/`, cannot run on other threads, so printing such values on another thread is a
-  panic treated the same as a `(panic ...)` (`(compile T::print-object)`, or print from the main
-  task).
+- **Printing on workers**: interpreted `print-object` methods cannot run on other threads, so printing
+  such values on another thread is a panic treated the same as a `(panic ...)`
+  (`(compile T::print-object)`, or print from the main task).
 - **Data races are undefined** (the same position as Go). The result of several tasks changing the same
   value without going through `Mutex<T>` / `Chan<T>` is not guaranteed.
 - **`task` returns a value.** Unlike Go's `go` statement, it returns a `Task<T>`, and `(wait t)` gets the

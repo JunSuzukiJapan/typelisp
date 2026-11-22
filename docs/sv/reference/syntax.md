@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ ac5a6b3adada21a0a55e0e1c4b0e1fabf4854908 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ cec1c96be6655e3c218d04c38f2fbe63a5baf936 -->
 # Syntaxreferens för typelisp
 
 typelisp är ett statiskt typat Lisp, skrivet med S-uttryck. För listan över inbyggda funktioner och
@@ -2206,9 +2206,9 @@ panic som `` `recv` cannot block: ... ``, behandlad på samma sätt som en `(pan
   nästa utvärdering). Vid slutet av en utvärdering väntar den på att varje tråd ska bli klar med sitt
   aktuella steg, så om en C-funktion (`defffi`) fortsätter blockera inuti en `thread` tar utvärderingen inte
   slut förrän den returnerar.
-- **Utskrift på workers**: tolkade `print-object`-metoder, och tolkade funktioner och metoder som `~/name/`
-  anropar, kan inte köras på andra trådar, så att skriva ut sådana värden på en annan tråd är en panic som
-  behandlas som en `(panic ...)` (`(compile T::print-object)`, eller skriv ut från huvuduppgiften).
+- **Utskrift på workers**: tolkade `print-object`-metoder kan inte köras på andra trådar, så att skriva
+  ut sådana värden på en annan tråd är en panic som behandlas som en `(panic ...)`
+  (`(compile T::print-object)`, eller skriv ut från huvuduppgiften).
 - **Dataracer är odefinierade** (samma ståndpunkt som Go). Resultatet av att flera tasks ändrar samma värde
   utan att gå genom `Mutex<T>` / `Chan<T>` är inte garanterat.
 - **`task` returnerar ett värde.** Till skillnad från Gos `go`-sats returnerar den en `Task<T>`, och

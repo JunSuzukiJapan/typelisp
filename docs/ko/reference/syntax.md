@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ ac5a6b3adada21a0a55e0e1c4b0e1fabf4854908 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ cec1c96be6655e3c218d04c38f2fbe63a5baf936 -->
 # typelisp 문법 레퍼런스
 
 typelisp는 S 식으로 쓰는 정적 타입 Lisp이다. 내장 함수와 메서드의 목록은 [내장 함수](functions/README.md), 타입 목록은
@@ -1931,9 +1931,9 @@ OS를 기다린다.
 - **`typl`의 워커는 최상위 평가 한 번 동안만 산다.** REPL이 입력을 기다리는 동안과 최상위 형식 사이에서는 다른 스레드가
   태스크를 진행하지 않는다(남은 태스크는 다음 평가에서 이어서 실행된다). 평가가 끝날 때 각 스레드가 지금의 한 단계를 마치기를
   기다리므로, `thread` 안에서 계속 블로킹하는 C 함수(`defffi`)가 있으면 그것이 반환될 때까지 평가가 끝나지 않는다.
-- **워커에서의 인쇄**: 해석 실행되는 `print-object` 메서드나, `~/name/`이 호출하는 해석 실행의 함수·메서드는
-  다른 스레드에서 실행할 수 없으므로, 그런 값을 다른 스레드에서 인쇄하면 `(panic ...)`과 같은 취급의
-  panic이 된다(`(compile T::print-object)`를 하거나 메인 태스크에서 인쇄한다).
+- **워커에서의 인쇄**: 해석 실행되는 `print-object` 메서드는 다른 스레드에서 실행할 수 없으므로, 그런 값을
+  다른 스레드에서 인쇄하면 `(panic ...)`과 같은 취급의 panic이 된다(`(compile T::print-object)`를 하거나
+  메인 태스크에서 인쇄한다).
 - **데이터 경합은 정의되지 않는다**(Go와 같은 입장). `Mutex<T>`・`Chan<T>`를 거치지 않고 여러 태스크가 같은 값을 바꾼 결과는
   보장되지 않는다.
 - **`task`는 값을 반환한다.** Go의 `go` 문과 달리 `Task<T>`를 반환하며 `(wait t)`로 결과를 얻을 수 있다.

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ ac5a6b3adada21a0a55e0e1c4b0e1fabf4854908 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ cec1c96be6655e3c218d04c38f2fbe63a5baf936 -->
 # Référence de la syntaxe de typelisp
 
 typelisp est un Lisp à typage statique, écrit en S-expressions. Pour la liste des fonctions et méthodes intégrées,
@@ -2234,10 +2234,9 @@ panic comme `` `recv` cannot block: ... ``, traité comme un `(panic ...)`).
   restantes reprennent là où elles en étaient à l'évaluation suivante). À la fin d'une évaluation, il attend que chaque
   thread termine son pas en cours ; si une fonction C (`defffi`) continue de bloquer à l'intérieur d'un `thread`,
   l'évaluation ne se termine donc pas avant son retour.
-- **Impression sur les workers** : les méthodes `print-object` interprétées, ainsi que les fonctions et
-  méthodes interprétées qu'appelle `~/name/`, ne peuvent pas s'exécuter sur d'autres threads ; imprimer de
-  telles valeurs sur un autre thread est donc un panic traité comme un `(panic ...)`
-  (`(compile T::print-object)`, ou imprimer depuis la tâche principale).
+- **Impression sur les workers** : les méthodes `print-object` interprétées ne peuvent pas s'exécuter
+  sur d'autres threads ; imprimer de telles valeurs sur un autre thread est donc un panic traité comme un
+  `(panic ...)` (`(compile T::print-object)`, ou imprimer depuis la tâche principale).
 - **Les courses de données sont indéfinies** (la même position que Go). Le résultat de plusieurs tâches modifiant la
   même valeur sans passer par `Mutex<T>` / `Chan<T>` n'est pas garanti.
 - **`task` renvoie une valeur.** Contrairement à l'instruction `go` de Go, il renvoie un `Task<T>`, et `(wait t)`

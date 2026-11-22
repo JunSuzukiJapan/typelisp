@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ ac5a6b3adada21a0a55e0e1c4b0e1fabf4854908 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ cec1c96be6655e3c218d04c38f2fbe63a5baf936 -->
 # Referensi Sintaks typelisp
 
 typelisp adalah Lisp dengan tipe statis, ditulis dalam S-expression. Untuk daftar fungsi bawaan dan
@@ -2292,10 +2292,9 @@ adalah kesalahan** (bukan menghentikan proses saat itu juga, tetapi panic sepert
   dari tempat berhenti pada evaluasi berikutnya). Di akhir evaluasi, ia menunggu setiap thread
   menyelesaikan langkahnya saat ini, sehingga jika fungsi C (`defffi`) terus memblokir di dalam
   `thread`, evaluasi tidak berakhir sampai ia kembali.
-- **Mencetak di worker**: metode `print-object` yang diinterpretasikan, serta fungsi dan metode
-  terinterpretasi yang dipanggil `~/name/`, tidak dapat berjalan di thread lain, sehingga mencetak nilai
-  seperti itu di thread lain adalah panic yang diperlakukan sama dengan `(panic ...)`
-  (`(compile T::print-object)`, atau cetak dari tugas utama).
+- **Mencetak di worker**: metode `print-object` yang diinterpretasikan tidak dapat berjalan di thread
+  lain, sehingga mencetak nilai seperti itu di thread lain adalah panic yang diperlakukan sama dengan
+  `(panic ...)` (`(compile T::print-object)`, atau cetak dari tugas utama).
 - **Data race tidak terdefinisi** (posisi yang sama seperti Go). Hasil beberapa task yang mengubah
   nilai yang sama tanpa melalui `Mutex<T>` / `Chan<T>` tidak dijamin.
 - **`task` mengembalikan nilai.** Tidak seperti pernyataan `go` pada Go, ia mengembalikan `Task<T>`,

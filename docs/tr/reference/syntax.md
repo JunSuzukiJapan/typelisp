@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ ac5a6b3adada21a0a55e0e1c4b0e1fabf4854908 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ cec1c96be6655e3c218d04c38f2fbe63a5baf936 -->
 # typelisp Sözdizimi Başvurusu
 
 typelisp, S-ifadelerle yazılan, statik tür denetimli bir Lisp'tir. Yerleşik fonksiyonların ve metotların
@@ -2204,10 +2204,9 @@ gibi bir panic, bir `(panic ...)` ile aynı şekilde ele alınır).
   kaldıkları yerden sürer). Bir değerlendirmenin sonunda her thread'in geçerli adımını bitirmesini bekler;
   bu yüzden bir `thread` içinde bir C fonksiyonu (`defffi`) bloke olmaya devam ederse değerlendirme o
   dönene kadar bitmez.
-- **Worker'larda yazdırma**: yorumlanan `print-object` metotları ve `~/name/`'in çağırdığı yorumlanan
-  fonksiyon ve metotlar başka iş parçacıklarında çalışamaz, bu yüzden böyle değerleri başka bir iş
-  parçacığında yazdırmak `(panic ...)` gibi ele alınan bir panic'tir (`(compile T::print-object)` ya da ana
-  görevden yazdırın).
+- **Worker'larda yazdırma**: yorumlanan `print-object` metotları başka iş parçacıklarında çalışamaz, bu
+  yüzden böyle değerleri başka bir iş parçacığında yazdırmak `(panic ...)` gibi ele alınan bir panic'tir
+  (`(compile T::print-object)` ya da ana görevden yazdırın).
 - **Veri yarışları tanımsızdır** (Go ile aynı konum). Birkaç task'in aynı değeri `Mutex<T>` / `Chan<T>`
   üzerinden geçmeden değiştirmesinin sonucu garanti edilmez.
 - **`task` bir değer döndürür.** Go'nun `go` deyiminden farklı olarak bir `Task<T>` döndürür ve

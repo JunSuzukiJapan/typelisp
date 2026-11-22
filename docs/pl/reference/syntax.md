@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ ac5a6b3adada21a0a55e0e1c4b0e1fabf4854908 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ cec1c96be6655e3c218d04c38f2fbe63a5baf936 -->
 # Referencja składni typelisp
 
 typelisp to statycznie typowany Lisp zapisywany w S-wyrażeniach. Listę funkcji wbudowanych i
@@ -2207,10 +2207,9 @@ panic w rodzaju `` `recv` cannot block: ... ``, traktowany tak samo jak `(panic 
   skończyły, w następnym obliczeniu). Na końcu obliczenia czeka się, aż każdy wątek skończy swój
   bieżący krok, więc jeśli funkcja C (`defffi`) stale blokuje wewnątrz `thread`, obliczenie się nie kończy,
   dopóki nie wróci.
-- **Drukowanie na workerach**: interpretowane metody `print-object` oraz interpretowane funkcje i metody
-  wywoływane przez `~/name/` nie mogą działać w innych wątkach, więc drukowanie takich wartości w innym
-  wątku to panic traktowany tak samo jak `(panic ...)` (`(compile T::print-object)` albo drukowanie z
-  głównego zadania).
+- **Drukowanie na workerach**: interpretowane metody `print-object` nie mogą działać w innych wątkach,
+  więc drukowanie takich wartości w innym wątku to panic traktowany tak samo jak `(panic ...)`
+  (`(compile T::print-object)` albo drukowanie z głównego zadania).
 - **Wyścigi danych są niezdefiniowane** (to samo stanowisko co w Go). Wynik zmiany tej samej wartości przez kilka zadań
   bez użycia `Mutex<T>` / `Chan<T>` nie jest gwarantowany.
 - **`task` zwraca wartość.** W przeciwieństwie do instrukcji `go` z Go zwraca `Task<T>`, a `(wait t)` pobiera

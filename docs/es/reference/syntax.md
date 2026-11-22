@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ ac5a6b3adada21a0a55e0e1c4b0e1fabf4854908 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ cec1c96be6655e3c218d04c38f2fbe63a5baf936 -->
 # Referencia de sintaxis de typelisp
 
 typelisp es un Lisp con tipado estático que se escribe en expresiones S. Para la lista de funciones y métodos
@@ -2249,10 +2249,9 @@ detiene el proceso en el acto, sino que es un panic como `` `recv` cannot block:
   restantes continúan donde lo dejaron en la siguiente evaluación). Al final de una evaluación, espera a que cada
   hilo termine su paso actual, así que si una función de C (`defffi`) sigue bloqueando dentro de un `thread`, la
   evaluación no termina hasta que retorna.
-- **Imprimir en los workers**: los métodos `print-object` interpretados, y las funciones y métodos
-  interpretados que llama `~/name/`, no pueden ejecutarse en otros hilos, así que imprimir esos valores en
-  otro hilo es un panic tratado igual que un `(panic ...)` (`(compile T::print-object)`, o imprime desde la
-  tarea principal).
+- **Imprimir en los workers**: los métodos `print-object` interpretados no pueden ejecutarse en otros
+  hilos, así que imprimir esos valores en otro hilo es un panic tratado igual que un `(panic ...)`
+  (`(compile T::print-object)`, o imprime desde la tarea principal).
 - **Las carreras de datos están indefinidas** (la misma postura que Go). El resultado de que varias tareas
   cambien el mismo valor sin pasar por `Mutex<T>` / `Chan<T>` no está garantizado.
 - **`task` devuelve un valor.** A diferencia de la sentencia `go` de Go, devuelve un `Task<T>`, y `(wait t)`

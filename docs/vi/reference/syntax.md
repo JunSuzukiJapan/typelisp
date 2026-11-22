@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ ac5a6b3adada21a0a55e0e1c4b0e1fabf4854908 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ cec1c96be6655e3c218d04c38f2fbe63a5baf936 -->
 # Tham chiếu cú pháp typelisp
 
 typelisp là một ngôn ngữ Lisp có kiểu tĩnh, được viết bằng S-expression. Về danh sách các hàm và phương thức
@@ -2150,9 +2150,9 @@ thực sự phải chờ là lỗi** (không dừng tiến trình ngay tại ch�
   các dạng cấp cao nhất, các thread khác không đẩy các task tiến lên (các task còn lại tiếp tục từ chỗ chúng dừng
   ở lần đánh giá kế tiếp). Cuối một lần đánh giá, nó chờ từng thread xong bước hiện tại của nó, nên nếu một hàm C
   (`defffi`) cứ chặn bên trong một `thread`, lần đánh giá không kết thúc cho đến khi nó trả về.
-- **In trên worker**: các phương thức `print-object` được thông dịch, và các hàm và phương thức được thông
-  dịch mà `~/name/` gọi, không thể chạy trên luồng khác, nên in những giá trị như vậy trên luồng khác là
-  một panic được xử lý như `(panic ...)` (`(compile T::print-object)`, hoặc in từ tác vụ chính).
+- **In trên worker**: các phương thức `print-object` được thông dịch không thể chạy trên luồng khác, nên in
+  những giá trị như vậy trên luồng khác là một panic được xử lý như `(panic ...)`
+  (`(compile T::print-object)`, hoặc in từ tác vụ chính).
 - **Tranh chấp dữ liệu là không xác định** (cùng vị thế như Go). Kết quả của việc nhiều task thay đổi cùng một
   giá trị mà không qua `Mutex<T>` / `Chan<T>` không được đảm bảo.
 - **`task` trả về một giá trị.** Khác câu lệnh `go` của Go, nó trả về một `Task<T>`, và `(wait t)` lấy kết quả.

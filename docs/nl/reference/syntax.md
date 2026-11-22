@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ ac5a6b3adada21a0a55e0e1c4b0e1fabf4854908 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ cec1c96be6655e3c218d04c38f2fbe63a5baf936 -->
 # typelisp-syntaxisreferentie
 
 typelisp is een statisch getypeerde Lisp, geschreven in S-expressies. Voor de lijst met ingebouwde
@@ -2300,10 +2300,9 @@ hetzelfde wordt behandeld als een `(panic ...)`).
   taken gaan bij de volgende evaluatie verder waar ze waren gebleven). Aan het eind van een evaluatie wacht
   het tot elke thread zijn huidige stap heeft voltooid, dus als een C-functie (`defffi`) binnen een
   `thread` blijft blokkeren, eindigt de evaluatie niet totdat ze terugkeert.
-- **Afdrukken op workers**: geïnterpreteerde `print-object`-methoden, en geïnterpreteerde functies en
-  methoden die `~/name/` aanroept, kunnen niet op andere threads draaien; zulke waarden op een andere thread
-  afdrukken is dus een panic die als een `(panic ...)` wordt behandeld (`(compile T::print-object)`, of druk
-  af vanuit de hoofdtaak).
+- **Afdrukken op workers**: geïnterpreteerde `print-object`-methoden kunnen niet op andere threads
+  draaien; zulke waarden op een andere thread afdrukken is dus een panic die als een `(panic ...)` wordt
+  behandeld (`(compile T::print-object)`, of druk af vanuit de hoofdtaak).
 - **Data races zijn ongedefinieerd** (dezelfde positie als Go). Het resultaat van meerdere taken die
   dezelfde waarde wijzigen zonder via `Mutex<T>` / `Chan<T>` te gaan is niet gegarandeerd.
 - **`task` geeft een waarde terug.** Anders dan het `go`-statement van Go geeft het een `Task<T>` terug, en
