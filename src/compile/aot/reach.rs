@@ -163,6 +163,12 @@ impl TypeReach {
         Ok(TypeReach { tables, reached: Default::default(), seen: Default::default(), types: Default::default() })
     }
 
+    /// Whether the walk has reached the function `name`, defined in the
+    /// module or only declared (a shim).
+    pub fn reaches(&self, module: &Module<'static>, name: &str) -> bool {
+        module.get_function(name).is_some_and(|f| self.reached.contains(&f.as_value_ref()))
+    }
+
     /// Walks from `from`, adding what it reaches to what the walk has.
     pub fn walk(&mut self, module: &Module<'static>, from: FunctionValue<'static>) -> Result<(), String> {
         let mut queue = VecDeque::new();

@@ -533,3 +533,93 @@ fn every_type_the_runtime_writes_out_is_one_it_is_known_to_build() {
         missing.join("\n  ")
     );
 }
+
+/// The places in the runtime that make a value of a type an executable
+/// registers only when it reaches a builtin making one
+/// (`src/compile/aot/made.rs`): each type's constant, and the functions that
+/// make such a value for more than one builtin. The builtins in `made.rs`
+/// were read off these places; one more, or one fewer, means a builtin may
+/// make the value that the table does not list, and an executable calling it
+/// would fail to print the value. The interpreter (`typelisp-front`) is left
+/// out: an executable has it only when it calls `eval`, and then registers
+/// every type.
+#[test]
+fn the_places_that_make_a_tracked_type_are_the_ones_made_rs_was_read_off() {
+    let names = [
+        "TypeId::FILE_ERROR",
+        "TypeId::NET_ERROR",
+        "TypeId::READ_ERROR",
+        "TypeId::PARSE_FLOAT_ERROR",
+        "TypeId::PARSE_INT_ERROR",
+        "TypeId::UNIVERSAL_TIME",
+        "TypeId::INTERNAL_TIME",
+        "TypeId::HEAP_INFO",
+        "universal_time_value(",
+        "internal_time_value(",
+        "heap_info(",
+        "read_builtin_with(",
+        "read_datum_at_builtin_with(",
+    ];
+    let expected: &[(&str, &str, usize)] = &[
+        ("crates/typelisp-read/src/shim.rs", "TypeId::READ_ERROR", 2),
+        ("crates/typelisp-read/src/shim.rs", "read_builtin_with(", 2),
+        ("crates/typelisp-read/src/shim.rs", "read_datum_at_builtin_with(", 2),
+        ("crates/typelisp-rt/src/net_builtin.rs", "TypeId::NET_ERROR", 1),
+        ("crates/typelisp-rt/src/stream_builtin.rs", "TypeId::FILE_ERROR", 1),
+        ("crates/typelisp-rt/src/stream_builtin.rs", "universal_time_value(", 1),
+        ("crates/typelisp-rt/src/sys_builtin.rs", "TypeId::FILE_ERROR", 3),
+        ("crates/typelisp-rt/src/sys_builtin.rs", "TypeId::HEAP_INFO", 1),
+        ("crates/typelisp-rt/src/sys_builtin.rs", "TypeId::INTERNAL_TIME", 1),
+        ("crates/typelisp-rt/src/sys_builtin.rs", "TypeId::PARSE_FLOAT_ERROR", 1),
+        ("crates/typelisp-rt/src/sys_builtin.rs", "TypeId::UNIVERSAL_TIME", 1),
+        ("crates/typelisp-rt/src/sys_builtin.rs", "heap_info(", 2),
+        ("crates/typelisp-rt/src/sys_builtin.rs", "internal_time_value(", 3),
+        ("crates/typelisp-rt/src/sys_builtin.rs", "universal_time_value(", 2),
+    ];
+    let mut files = Vec::new();
+    for entry in std::fs::read_dir(repo_root().join("crates")).expect("reading crates/") {
+        let dir = entry.expect("a crate's directory").path();
+        if dir.ends_with("typelisp-front") {
+            continue;
+        }
+        collect(&dir.join("src"), &mut files);
+    }
+    let mut found: Vec<(String, &str, usize)> = Vec::new();
+    for file in &files {
+        let relative = file.strip_prefix(repo_root()).expect("a file under the repository").to_string_lossy().replace('\\', "/");
+        if relative == "crates/typelisp-mem/src/value.rs" {
+            continue;
+        }
+        let text = std::fs::read_to_string(file).expect("reading a source file");
+        for name in names {
+            // A whole name: `TypeId::FILE_ERROR` is not `TypeId::FILE_ERROR_X`,
+            // and `heap_info(` is not `eval_heap_info(`.
+            let count = text
+                .lines()
+                .filter(|line| !line.trim_start().starts_with("//"))
+                .map(|line| {
+                    line.match_indices(name)
+                        .filter(|(at, _)| {
+                            let before = line[..*at].chars().next_back();
+                            let after = line[at + name.len()..].chars().next();
+                            !before.is_some_and(|c| c.is_alphanumeric() || c == '_')
+                                && !after.is_some_and(|c| name.ends_with(|n: char| n.is_alphanumeric() || n == '_') && (c.is_alphanumeric() || c == '_'))
+                        })
+                        .count()
+                })
+                .sum::<usize>();
+            if count > 0 {
+                found.push((relative.clone(), name, count));
+            }
+        }
+    }
+    found.sort();
+    let mut expected: Vec<(String, &str, usize)> = expected.iter().map(|(f, n, c)| (f.to_string(), *n, *c)).collect();
+    expected.sort();
+    assert_eq!(
+        found, expected,
+        "the places that make a FileError, NetError, ReadError, ParseFloatError, ParseIntError, universal-time, \
+         internal-time or heap-info changed: bring the builtins in src/compile/aot/made.rs up to date with them, \
+         then this list"
+    );
+}

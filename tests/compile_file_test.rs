@@ -64,19 +64,29 @@ fn a_call_directive_dispatches_in_a_compiled_executable() {
 /// executable. An executable registers the `print-object` of a type only when
 /// its code can make a value of it (`compile::aot::live_types`), and
 /// these are made by prelude functions the program calls (`complex`,
-/// `pathname`, `decode-universal-time`) or by the runtime (`FileError`).
+/// `pathname`, `decode-universal-time`) or by builtins of the runtime
+/// (`FileError`, `ParseFloatError`, `ReadError`), which count only when the
+/// executable reaches them (`compile::aot::made`).
 #[test]
 fn the_preludes_types_print_with_their_print_object_in_an_executable() {
     let program = r#"(use std::time::decode-universal-time)
            (use std::time::encode-universal-time)
            (use std::fs::open-input)
            (use std::path::parse-namestring)
+           (use std::num::parse-float)
+           (use std::reader::read)
            (defun main () ()
              (println "~a" (complex 1.0 2.0))
              (println "~a" (parse-namestring "a/b.txt"))
              (println "~a" (decode-universal-time (encode-universal-time 0 0 0 1 1 2000 0) 0))
              (match (open-input "/nonexistent-dir/no-such-file")
                ((Ok _) (println "opened"))
+               ((Err e) (println "~s" e)))
+             (match (parse-float "x")
+               ((Ok f) (println "~a" f))
+               ((Err e) (println "~s" e)))
+             (match (read "(1 2")
+               ((Ok _) (println "read"))
                ((Err e) (println "~s" e))))"#;
     let dir = tmp_dir();
     let interpreted_path = dir.join("prelude_print_objects_interp.typl");

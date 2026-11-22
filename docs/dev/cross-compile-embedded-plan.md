@@ -47,10 +47,11 @@ wasm32-unknown-unknown では、strip しても 2,042,594 バイトあった。
 - 0d: 0b、0c、0e の後に測り直し、残った大きなものを同じ方法で調べる。調べ方は、`-Wl,-why_live,<記号>` で `main` からの参照の鎖を、`-Wl,-why_load` でアーカイブのどのオブジェクトがなぜ読み込まれたかを出す（PATH に `cc` のラッパーを置いて渡す）。
   - 済: 印字器の登録（変種の名前、フィールドの型と名前）も、値が作られうる型の定義の分だけにした（`aot.rs` の `Live::has_definition`）。登録の関数は 27,808 → 8,352 バイト。
   - 済: 基本型の `print-object` は登録しない。実行ファイルの印字器が登録を引くのは構造体と enum の値だけで、基本型の値はどちらでもない。
-  - 測定（release のランタイム、hello）: `__text` 970,336 → 845,680。
+  - 測定（release のランタイム、hello）: `__text` 970,336 → 845,680（ここまでの 2 つ）。
   - 外せないもの: std のバックトレース（gimli、addr2line、rustc_demangle、約 75KB）。std のメモリ確保の失敗とパニックの処理から届く。std を作り直さない限り外せない。組み込み（段階 1 で `no_std`）では入らない。
   - 見送り: stream の組み込みは全て `stream_builtin` の名前による振り分けを通るので、shim を 1 つ使うと全ての操作が残る（約 12KB）。組み込みでは段階 1 でファイルとネットワークが外れる。
-  - 次: `BUILTIN_TYPES` のうちランタイムが値を作る型（エラー型、時刻、`heap-info`）を常に生きているとしている。どの shim がどの型を作りうるかの表を作り、届く shim から決める。
+  - 済: ランタイムが一部の組み込みでだけ値を作る型（ファイル・ソケット・読み取り・`parse-float` のエラー、`ParseIntError`、時刻の 2 つ、`heap-info`）は、作る組み込みの shim に届くときだけ生きているとする（`aot/made.rs`）。作る組み込みの表は、言語サーバー（rust-analyzer）で型の定数を参照する関数と、その呼び出し元を shim まで引いて作り、マクロが書く呼び出し（`stream_shim!` の短い形）は手で補った。stream、socket、system の組み込みが作る値は、組み込みごとの結果の型の表の行に必ず書かれている（行の無い組み込みは止まる）ので、その表から読む。作る箇所が増減すると `type_identity_guard_test` が落ちる。
+  - 測定（release のランタイム、hello）: `__text` 845,680 → 817,280。hello が登録する `print-object` は `standard-stream` の 1 つだけになった。
 ### 書式の展開（段階 0e）
 
 release のランタイムでの測定（上と同じ hello）: `__text` 1,040,368 バイトのうち、書式エンジン（`typelisp_print`）が 176KB、そこから届く bignum が 50KB。`println "hello"` は `rt_println` から解釈器全体（`interp_seq` → `interp_dir` → 全ての指示子の描画）に届く。指示子を 1 つも使わない文字列でも同じ。

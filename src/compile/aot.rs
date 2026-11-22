@@ -70,6 +70,7 @@ use crate::CompileTarget;
 use crate::{Checker, Heap, Interp, Path, Reader, TopLevelForm, Value};
 use typelisp_mem::{wk, ConcreteNames};
 mod archive;
+mod made;
 mod native;
 mod reach;
 mod wasm;
@@ -1170,7 +1171,7 @@ impl Live {
             return true;
         }
         let definition = typelisp_front::type_key::type_key_id(path, Vec::new());
-        if typelisp_mem::runtime_builds(definition) {
+        if !made::tracked(definition) && typelisp_mem::runtime_builds(definition) {
             return true;
         }
         match typelisp_mem::type_shape(definition) {
@@ -1184,7 +1185,9 @@ impl Live {
 /// code, which reads its type out of a type table to hand it to the
 /// runtime, or by the runtime itself ([`typelisp_mem::runtime_builds`]). So
 /// a type is live when the code the executable can run reads it, or one it
-/// is an argument of, or when the runtime builds it. What can run is what
+/// is an argument of, or when the runtime builds it: for the few types the
+/// runtime makes only in some builtins ([`made`]), when the executable
+/// reaches one of those. What can run is what
 /// `main` reaches, and what each live type's `print-object` does in turn;
 /// the printer's own registration (still without a body here) is not
 /// walked, since naming a type there makes no value of it.
@@ -1202,21 +1205,41 @@ fn live_types(
     let mut live = vec![false; print_objects.len()];
     loop {
         let read = with_arguments(&reach.types);
-        let mut grew = false;
-        for (i, (ty, symbol)) in print_objects.iter().enumerate() {
-            if live[i] || !(typelisp_mem::runtime_builds(*ty) || read.contains(ty)) {
-                continue;
+        let runtime_makes = |ty: typelisp_mem::TypeId| -> Result<bool, String> {
+            if made::tracked(ty) {
+                made::made(ty, |shim| reach.reaches(module, shim))
+            } else {
+                Ok(typelisp_mem::runtime_builds(ty))
             }
+        };
+        let mut newly = Vec::new();
+        for (i, (ty, _)) in print_objects.iter().enumerate() {
+            if !live[i] && (read.contains(ty) || runtime_makes(*ty)?) {
+                newly.push(i);
+            }
+        }
+        let grew = !newly.is_empty();
+        for i in newly {
+            let symbol = &print_objects[i].1;
             live[i] = true;
-            grew = true;
             let method = module.get_function(symbol).ok_or_else(|| {
                 format!("compile-file: `print-object` implementation `{}` was not compiled into this file", symbol)
             })?;
             reach.walk(module, method)?;
         }
         if !grew {
+            // The definitions the code reads, and the tracked ones a reached
+            // builtin makes.
+            let mut definitions = std::collections::HashSet::new();
+            for (module_path, name) in made::TRACKED {
+                let ty = typelisp_mem::intern_spec(&typelisp_mem::TypeSpec::Named(*module_path, name, &[]));
+                if made::made(ty, |shim| reach.reaches(module, shim))? {
+                    definitions.insert(ty);
+                }
+            }
             let definitions = read
                 .into_iter()
+                .chain(definitions)
                 .filter_map(|ty| match typelisp_mem::type_shape(ty) {
                     typelisp_mem::TypeShape::Named(ns, sym, _) => Some((ns, sym)),
                     _ => None,
