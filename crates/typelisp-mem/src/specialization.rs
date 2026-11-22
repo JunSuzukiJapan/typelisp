@@ -8,8 +8,9 @@
 //! from a generic and its type arguments to the specialization's symbol
 //! ([`specialization`]), and back ([`specialized`]).
 
-use std::collections::HashMap;
-use std::sync::{Mutex, OnceLock};
+use crate::prelude::*;
+use crate::collections::HashMap;
+use crate::sync::{Mutex, OnceLock};
 
 use crate::symbols::{unlisted, NsId, SymRef};
 use crate::TypeId;
@@ -47,9 +48,9 @@ struct Table {
     of: HashMap<SymRef, (Generic, Vec<TypeId>)>,
 }
 
-fn table() -> std::sync::MutexGuard<'static, Table> {
+fn table() -> crate::sync::MutexGuard<'static, Table> {
     static TABLE: OnceLock<Mutex<Table>> = OnceLock::new();
-    TABLE.get_or_init(Default::default).lock().unwrap_or_else(|e| e.into_inner())
+    TABLE.get_or_init(Default::default).lock()
 }
 
 /// The specialization of `generic` at `args`: the same symbol every time it

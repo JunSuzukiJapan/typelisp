@@ -1,7 +1,8 @@
 //! Cons-cell allocation and access.
 
-use std::ptr;
-use std::sync::atomic::Ordering;
+use crate::prelude::*;
+use core::ptr;
+use core::sync::atomic::Ordering;
 use crate::Error;
 use crate::value::{ConsRef, LocId, Value};
 use super::{HEADROOM_DIVISOR, Heap};
@@ -19,12 +20,12 @@ impl Heap {
     /// the point: it is what still turns a runaway leak into a loud error
     /// rather than letting the process be OOM-killed.
     pub fn set_growth_limit(&mut self, max_cells: usize) {
-        self.shared.arena.lock().unwrap().growth_limit = max_cells;
+        self.shared.arena.lock().growth_limit = max_cells;
     }
 
     /// The current growth ceiling in cells (`0` when the arena is fixed).
     pub fn growth_limit(&self) -> usize {
-        self.shared.arena.lock().unwrap().growth_limit
+        self.shared.arena.lock().growth_limit
     }
 
     /// Collect before *every* cons allocation. Enormously slow — this is a
@@ -57,7 +58,7 @@ impl Heap {
     /// reentrant). [`Heap::cons`]'s doc comment explains why *its* locking is
     /// split into several short critical sections instead of one like this.
     fn grow(&mut self) -> bool {
-        let mut arena = self.shared.arena.lock().unwrap();
+        let mut arena = self.shared.arena.lock();
         if arena.growth_limit <= arena.cap {
             return false;
         }
@@ -116,7 +117,7 @@ impl Heap {
             // whenever the collection failed to restore a working margin, not
             // only when it freed nothing at all.
             let (free_count, cap) = {
-                let arena = self.shared.arena.lock().unwrap();
+                let arena = self.shared.arena.lock();
                 (arena.free_count, arena.cap)
             };
             if free_count.saturating_mul(HEADROOM_DIVISOR) < cap {
@@ -126,7 +127,7 @@ impl Heap {
             // and growth is not permitted. A collection that freed something
             // is worth another try even if other threads took those cells
             // first — they cannot keep doing so without garbage running out.
-            if reclaimed == 0 && self.shared.arena.lock().unwrap().free.is_null() && !self.grow() {
+            if reclaimed == 0 && self.shared.arena.lock().free.is_null() && !self.grow() {
                 return Err(Error::HeapExhausted);
             }
         }
@@ -135,7 +136,7 @@ impl Heap {
     /// Take a cell off the free list and fill it, or `None` if the list is
     /// empty — see [`Heap::cons`].
     fn pop_free(&mut self, car: Value, cdr: Value) -> Option<Value> {
-        let mut arena = self.shared.arena.lock().unwrap();
+        let mut arena = self.shared.arena.lock();
         let p = arena.free;
         if p.is_null() {
             return None;

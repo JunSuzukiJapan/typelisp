@@ -20,8 +20,9 @@
 //! the same reason `Str` isn't stored inline. The public surface is entirely
 //! safe.
 
-use std::collections::HashMap;
-use std::fmt;
+use crate::prelude::*;
+use crate::collections::HashMap;
+use core::fmt;
 
 use crate::symbols::{StdModule, SymRef};
 use num_bigint::BigInt;
@@ -85,7 +86,7 @@ impl Cell {
         Cell {
             car: Value::Empty,
             cdr: Value::Empty,
-            next_free: std::ptr::null_mut(),
+            next_free: core::ptr::null_mut(),
             mark: false,
             car_loc: LocId::NONE,
             self_loc: LocId::NONE,
@@ -605,10 +606,10 @@ pub(crate) enum StructPayload {
 /// Shared rather than owned outright only because a [`BoxedObj`] is `Clone`;
 /// nothing copies a native box.
 #[derive(Clone)]
-pub(crate) struct Native(pub(crate) std::sync::Arc<parking_lot::Mutex<Box<dyn std::any::Any + Send>>>);
+pub(crate) struct Native(pub(crate) alloc::sync::Arc<crate::sync::Mutex<Box<dyn core::any::Any + Send>>>);
 
-impl std::fmt::Debug for Native {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl core::fmt::Debug for Native {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.write_str("Native(..)")
     }
 }
@@ -670,10 +671,10 @@ mod tests {
     /// atom can ever have. See [`Cell`]'s doc comment.
     #[test]
     fn a_cell_is_seven_words() {
-        assert_eq!(std::mem::size_of::<Value>(), 16, "a tagged value is two words");
-        assert_eq!(std::mem::size_of::<LocId>(), 4);
+        assert_eq!(core::mem::size_of::<Value>(), 16, "a tagged value is two words");
+        assert_eq!(core::mem::size_of::<LocId>(), 4);
         assert_eq!(
-            std::mem::size_of::<Cell>(),
+            core::mem::size_of::<Cell>(),
             56,
             "car(16) + cdr(16) + next_free(8) + mark(1, padded) + two LocIds(8)"
         );

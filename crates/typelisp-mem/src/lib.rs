@@ -9,6 +9,11 @@
 //! unchanged (`src/mem.rs`/`src/errors.rs` are now thin `pub use` shims), so
 //! no call site elsewhere in that crate had to change.
 
+#![cfg_attr(not(feature = "std"), no_std)]
+
+extern crate alloc;
+
+pub mod collections;
 pub mod errors;
 pub mod heap;
 pub mod host;
@@ -19,6 +24,7 @@ pub mod option;
 pub mod specialization;
 pub mod stack;
 pub mod symbols;
+pub mod sync;
 pub mod tagged;
 pub mod tuple;
 pub mod type_form;
@@ -61,4 +67,16 @@ pub fn normalize_int(v: i64, width: u32, signed: bool) -> i64 {
     } else {
         (((v as u64) << sh) >> sh) as i64
     }
+}
+
+/// What std's prelude gives a crate and `core`'s does not: the crate's files
+/// bring it in with `use crate::prelude::*`, so they read the same with std
+/// and without it.
+pub mod prelude {
+    pub use alloc::borrow::ToOwned;
+    pub use alloc::boxed::Box;
+    pub use alloc::format;
+    pub use alloc::string::{String, ToString};
+    pub use alloc::vec;
+    pub use alloc::vec::Vec;
 }

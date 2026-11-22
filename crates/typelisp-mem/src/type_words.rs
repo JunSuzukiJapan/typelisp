@@ -19,7 +19,8 @@
 //! string := address length                       UTF-8 bytes
 //! ```
 
-use std::collections::HashMap;
+use crate::prelude::*;
+use crate::collections::HashMap;
 
 use crate::symbols::{child_ns, intern_in, ns_name, ns_parent, NsId, SymRef};
 use crate::{TypeId, TypeShape};
@@ -233,7 +234,7 @@ impl Reader<'_> {
     unsafe fn string(&mut self) -> &str {
         let address = self.next() as usize as *const u8;
         let length = self.next() as usize;
-        std::str::from_utf8(std::slice::from_raw_parts(address, length)).expect("a type list's strings are UTF-8")
+        core::str::from_utf8(core::slice::from_raw_parts(address, length)).expect("a type list's strings are UTF-8")
     }
 
     unsafe fn ns(&mut self) -> NsId {

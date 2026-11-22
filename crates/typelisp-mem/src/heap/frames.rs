@@ -1,6 +1,7 @@
 //! Compiled frames: the per-task arena their words live in, and the heap's
 //! operations on them.
 
+use crate::prelude::*;
 use crate::symbols::SymRef;
 use crate::value::{BoxId, BoxedObj, TypeId, Value};
 use super::Heap;

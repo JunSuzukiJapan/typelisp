@@ -76,12 +76,22 @@ release のランタイムでの測定（上と同じ hello）: `__text` 1,040,3
 
 ### 段階 1: ランタイムを `no_std` + `alloc` で動かす
 
-`thumbv7em-none-eabihf` には std が無い（wasm32-unknown-unknown には中身の無い std があった）。`typelisp-abi`、`typelisp-mem`、`typelisp-rt`、`typelisp-print`、`typelisp-read`、`typelisp-front` が対象になる。
+`thumbv7em-none-eabihf` には std が無い（wasm32-unknown-unknown には中身の無い std があった）。対象は `typelisp-abi`、`typelisp-mem`、`typelisp-print`、`typelisp-read`、`typelisp-rt` の 5 つ。`typelisp-front`（チェッカーとインタプリタ）は対象にしない。実行ファイルが `typelisp-front` の中で呼ぶのは `eval` の shim（`rt_eval*`、`rt_macroexpand*`、`rt_run_program_interp*`）だけで、組み込みでは `eval` をコンパイル時に断る。組み込みのランタイムの静的ライブラリは、`typelisp-rt` までを束ねる新しいクレートが作る。
 
 - feature `std`（既定で有効）を設け、std が要るもの（OS スレッド、ネットワーク、ファイル、環境変数、プロセス）はその下に置く。
 - `thread_local!` は、単一コアの組み込みでは大域の 1 つにする。置き換える口は 1 か所に作り、各所はそこを通す。
-- `std::collections::HashMap` は `hashbrown`（依存に既にある）に、`std::io` の出力は `typelisp_mem::host` に寄せる。
+- ロック: parking_lot の型は `lock_api` の型の別名なので、使う側（`read_recursive`、`MappedRwLockReadGuard` など）はそのままに、ロックの本体だけを std では parking_lot、組み込みでは原子操作の自前のものにする。口は `typelisp_mem::sync` の 1 か所。
+- `std::collections::HashMap` は、std では今のまま、組み込みでは `hashbrown`（新しい依存）にする。型の別名を `typelisp_mem` の 1 か所に置く。`std::io` の出力は `typelisp_mem::host` に寄せる。
+- `stacker`（深い入れ子でスタックを伸ばす）は std の下に置く。組み込みでは伸ばさずにそのまま呼ぶ。
 - 組み込みで使えない shim を使うプログラムは、wasm と同じくコンパイル時にエラーにする（`aot/reach.rs`）。wasm32-unknown-unknown の拒否の表に近いが、C FFI は使える（ベンダーの HAL を呼ぶため）。
+
+進め方（下のクレートから。各段で `cargo check --target thumbv7em-none-eabihf --no-default-features` が通り、std の既定の構成で全体テストが通ること）:
+
+1. `typelisp-mem`: `sync`（ロックと一度だけの初期化）、`thread_local!` の口、`core`/`alloc` への書き換え、`host` の組み込み版の口。
+2. `typelisp-abi`。
+3. `typelisp-print`、`typelisp-read`。
+4. `typelisp-rt`: ネットワーク、ファイル、環境変数、プロセス、OS スレッドを std の下へ。
+5. 組み込みのランタイムのクレートと、使えない shim の拒否の表。
 
 ### 段階 2: ターゲットの追加とリンク
 

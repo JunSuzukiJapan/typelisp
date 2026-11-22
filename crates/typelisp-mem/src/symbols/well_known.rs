@@ -819,7 +819,7 @@ well_known_symbols! {
      ([`HOMED_VOCABULARY`]), so a call's path names the function by the
      vocabulary symbol and its dispatch compares that. `intern`, an older
      member, is the one spelled like one, and `equal`/`equalp` are the
-     methods' names above, taken into `std::cmp`."
+     methods' names above, taken into `core::cmp`."
     F_COMPILE_FILE => "compile-file"
     F_DUMP => "dump"
     F_DRIBBLE_START => "dribble-start"

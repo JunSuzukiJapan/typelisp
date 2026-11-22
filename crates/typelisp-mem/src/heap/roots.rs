@@ -1,5 +1,6 @@
 //! GC roots: the root stacks, session roots and the in-flight throw.
 
+use crate::prelude::*;
 use crate::value::Value;
 use super::{Heap, RootStack, RootStackId};
 
@@ -128,7 +129,7 @@ impl Heap {
     /// a single stack could only be truncated in the order it was pushed, and
     /// tasks do not finish in that order.
     pub fn new_root_stack(&mut self) -> RootStackId {
-        let mut root_stacks = self.shared.root_stacks.lock().unwrap();
+        let mut root_stacks = self.shared.root_stacks.lock();
         // Reuse a slot a finished task freed, so spawning many short-lived
         // tasks does not grow this vector without bound.
         if let Some(i) = root_stacks.iter().position(|s| s.is_none()) {
@@ -153,7 +154,7 @@ impl Heap {
     /// pointing into a different stack afterwards. In the evaluator that means
     /// a task-step boundary and nothing finer.
     pub fn switch_to_root_stack(&mut self, id: RootStackId) {
-        let mut root_stacks = self.shared.root_stacks.lock().unwrap();
+        let mut root_stacks = self.shared.root_stacks.lock();
         let Some(stack) = root_stacks.get_mut(id.0).and_then(|s| s.as_mut()) else {
             panic!("switch_to_root_stack: {:?} is not a live stack", id);
         };
@@ -174,7 +175,7 @@ impl Heap {
         if self.gc_stress() {
             self.assert_not_freed("push_root_on", v);
         }
-        let mut root_stacks = self.shared.root_stacks.lock().unwrap();
+        let mut root_stacks = self.shared.root_stacks.lock();
         let Some(stack) = root_stacks.get_mut(id.0).and_then(|s| s.as_mut()) else {
             panic!("push_root_on: {:?} is not a live stack", id);
         };
@@ -184,7 +185,7 @@ impl Heap {
     /// Empties the root stack `id`, which must not be the running one.
     pub fn clear_root_stack(&mut self, id: RootStackId) {
         assert_ne!(id.0, self.current_stack, "clear_root_stack: that stack is running");
-        let mut root_stacks = self.shared.root_stacks.lock().unwrap();
+        let mut root_stacks = self.shared.root_stacks.lock();
         let Some(stack) = root_stacks.get_mut(id.0).and_then(|s| s.as_mut()) else {
             panic!("clear_root_stack: {:?} is not a live stack", id);
         };
@@ -198,7 +199,7 @@ impl Heap {
     /// stop being reachable at exactly this point.
     pub fn drop_root_stack(&mut self, id: RootStackId) {
         assert_ne!(id.0, self.current_stack, "drop_root_stack: that stack is running");
-        let stack = self.shared.root_stacks.lock().unwrap()[id.0].take();
+        let stack = self.shared.root_stacks.lock()[id.0].take();
         debug_assert!(
             stack.map(|s| s.roots.is_empty() && s.frames.open.is_empty()).unwrap_or(true),
             "drop_root_stack: {:?} still holds roots",
@@ -222,13 +223,13 @@ impl Heap {
     /// (never `build-free`'d) — see `compiler.rs`'s `compile-construct-box`
     /// doc comment.
     pub fn push_permanent_root(&mut self, v: Value) {
-        self.shared.permanent_roots.lock().unwrap().push(Some(v));
+        self.shared.permanent_roots.lock().push(Some(v));
     }
 
     /// Number of registered permanent roots — see
     /// [`push_permanent_root`](Self::push_permanent_root).
     pub fn permanent_root_count(&self) -> usize {
-        self.shared.permanent_roots.lock().unwrap().len()
+        self.shared.permanent_roots.lock().len()
     }
 
     /// Read permanent root `idx`'s current value (a global variable's
@@ -237,13 +238,13 @@ impl Heap {
     /// ([`Self::gc`](Heap::gc)'s root walk), so an entry can be overwritten
     /// in place ([`Self::set_permanent_root`]) with no change to that logic.
     pub fn permanent_root(&self, idx: usize) -> Value {
-        self.shared.permanent_roots.lock().unwrap()[idx].expect("permanent_root: slot was never populated")
+        self.shared.permanent_roots.lock()[idx].expect("permanent_root: slot was never populated")
     }
 
     /// Overwrite permanent root `idx`'s value in place — `rt_global_set`'s
     /// storage half. See [`Self::permanent_root`].
     pub fn set_permanent_root(&mut self, idx: usize, v: Value) {
-        self.shared.permanent_roots.lock().unwrap()[idx] = Some(v);
+        self.shared.permanent_roots.lock()[idx] = Some(v);
     }
 
     // ---- session roots ----------------------------------------------------

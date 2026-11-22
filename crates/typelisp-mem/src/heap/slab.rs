@@ -1,5 +1,6 @@
 //! `Slab`, the chunked vector the heap's slot tables are built on.
 
+use crate::prelude::*;
 /// Entries per [`Slab`] chunk — a power of two so the chunk/offset split is a
 /// shift and a mask rather than a division.
 const SLAB_CHUNK_SHIFT: u32 = 10;
@@ -67,14 +68,14 @@ impl<T> Slab<T> {
     }
 }
 
-impl<T> std::ops::Index<usize> for Slab<T> {
+impl<T> core::ops::Index<usize> for Slab<T> {
     type Output = Option<T>;
     fn index(&self, i: usize) -> &Option<T> {
         &self.chunks[i >> SLAB_CHUNK_SHIFT][i & SLAB_CHUNK_MASK]
     }
 }
 
-impl<T> std::ops::IndexMut<usize> for Slab<T> {
+impl<T> core::ops::IndexMut<usize> for Slab<T> {
     fn index_mut(&mut self, i: usize) -> &mut Option<T> {
         &mut self.chunks[i >> SLAB_CHUNK_SHIFT][i & SLAB_CHUNK_MASK]
     }

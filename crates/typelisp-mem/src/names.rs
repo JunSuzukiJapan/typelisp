@@ -11,7 +11,8 @@
 //! reader ending a symbol at the first two and reading `<..>` as type
 //! arguments.
 
-use std::fmt::Display;
+use crate::prelude::*;
+use core::fmt::Display;
 
 /// Something with a type key: a type the front end knows (its `Type`
 /// implements this), or a key already spelled.

@@ -19,6 +19,7 @@
 //! type off the IR through [`type_key_of_form`], so they cannot spell the same
 //! type two ways.
 
+use crate::prelude::*;
 use crate::names::ConcreteNames;
 use crate::symbols::{ns_names, wk, NsId, SymRef};
 use crate::{Heap, TypeId, TypeShape, Value};

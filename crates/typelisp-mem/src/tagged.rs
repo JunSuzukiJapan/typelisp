@@ -50,6 +50,7 @@
 //! is also how raw C words travel through the *interpreter*, and those must
 //! never reach a tagged word.
 
+use crate::prelude::*;
 use crate::value::{BoxId, PathId, StrId, Value};
 use crate::{ConsRef, SymRef};
 
@@ -131,7 +132,7 @@ pub fn fixnum_fits(n: i64) -> bool {
 /// one.
 fn corrupt(msg: &str) -> ! {
     crate::host::eprintln(format_args!("typelisp runtime error: {}", msg));
-    std::process::abort();
+    crate::host::abort()
 }
 
 /// Encodes a `Value` into the tagged `i64` representation compiled code

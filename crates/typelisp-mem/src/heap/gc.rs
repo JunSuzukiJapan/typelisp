@@ -1,9 +1,11 @@
 //! Collection, and stopping the threads that share a heap for it.
 
-use std::ptr;
-use std::cell::UnsafeCell;
-use std::sync::{Arc, Condvar, Mutex};
-use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
+use core::ptr;
+use core::cell::UnsafeCell;
+use alloc::sync::Arc;
+use crate::prelude::*;
+use crate::sync::{Condvar, Mutex, ThreadKey};
+use core::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use crate::value::{BoxedObj, Cell, StructPayload, Value};
 use super::{FrameArena, FrameRaw, Heap};
 
@@ -24,7 +26,7 @@ const NATIVE: u8 = 2;
 /// waiting afterwards. A thread that never stops is a thread that blocked
 /// without [`Heap::enter_native`], and the only useful thing to do about
 /// that is say which one it was.
-const WATCHDOG: std::time::Duration = std::time::Duration::from_secs(5);
+const WATCHDOG: core::time::Duration = core::time::Duration::from_secs(5);
 
 /// One view's entry in [`ThreadRegistry`]: what a collector running on a
 /// *different* view has to know about it.
@@ -36,7 +38,7 @@ pub(super) struct ViewSlot {
     /// on its own thread: they cannot be in the middle of anything while
     /// this thread is collecting (the tests that attach a second view on
     /// the same thread depend on that).
-    thread: std::thread::ThreadId,
+    thread: ThreadKey,
     /// For the watchdog's message.
     name: String,
     /// The view's session roots — see [`Heap::push_session_root`]. Here
@@ -74,16 +76,16 @@ impl ThreadRegistry {
     /// collection in progress first — a view that appeared running in the
     /// middle of one would be a thread the collector never stopped.
     pub(super) fn register(&self) -> Arc<ViewSlot> {
-        let current = std::thread::current();
+        let (thread, name) = crate::sync::current_thread();
         let slot = Arc::new(ViewSlot {
             state: AtomicU8::new(RUNNING),
-            thread: current.id(),
-            name: current.name().map(str::to_string).unwrap_or_else(|| format!("{:?}", current.id())),
+            thread,
+            name,
             session_roots: UnsafeCell::new(Vec::new()),
         });
-        let mut views = self.views.lock().unwrap();
+        let mut views = self.views.lock();
         while self.gc_requested.load(Ordering::SeqCst) {
-            views = self.changed.wait(views).unwrap();
+            self.changed.wait(&mut views);
         }
         views.push(Arc::clone(&slot));
         slot
@@ -92,7 +94,7 @@ impl ThreadRegistry {
     /// Removes `slot`, and tells a collector waiting for it to stop that it
     /// no longer has to.
     pub(super) fn unregister(&self, slot: &Arc<ViewSlot>) {
-        let mut views = self.views.lock().unwrap();
+        let mut views = self.views.lock();
         views.retain(|v| !Arc::ptr_eq(v, slot));
         self.changed.notify_all();
     }
@@ -215,11 +217,11 @@ impl Heap {
     /// Wait at a safepoint until the collection in progress ends.
     fn park(&self) {
         let threads = &self.shared.threads;
-        let mut views = threads.views.lock().unwrap();
+        let mut views = threads.views.lock();
         self.slot.state.store(AT_SAFEPOINT, Ordering::SeqCst);
         threads.changed.notify_all();
         while threads.gc_requested.load(Ordering::SeqCst) {
-            views = threads.changed.wait(views).unwrap();
+            threads.changed.wait(&mut views);
         }
         self.slot.state.store(RUNNING, Ordering::SeqCst);
     }
@@ -246,7 +248,7 @@ impl Heap {
         // lock orders this notification after its check, so it cannot be
         // lost between the check and the wait.
         if threads.gc_requested.load(Ordering::SeqCst) {
-            let _views = threads.views.lock().unwrap();
+            let _views = threads.views.lock();
             threads.changed.notify_all();
         }
     }
@@ -326,9 +328,9 @@ impl Heap {
     /// reclaim count below zero. Panics naming the root set and index — the
     /// fact the underflow itself never reveals.
     fn audit_roots_against_free_list(&self, session_roots: &[Value]) {
-        use std::collections::HashSet;
+        use crate::collections::HashSet;
         let mut freed: HashSet<usize> = HashSet::new();
-        let mut p = self.shared.arena.lock().unwrap().free;
+        let mut p = self.shared.arena.lock().free;
         while !p.is_null() {
             freed.insert(p as usize);
             p = unsafe { (*p).next_free };
@@ -340,7 +342,7 @@ impl Heap {
                 }
             }
         };
-        for (s, stack) in self.shared.root_stacks.lock().unwrap().iter().enumerate() {
+        for (s, stack) in self.shared.root_stacks.lock().iter().enumerate() {
             let Some(stack) = stack else { continue };
             let what = if s == self.current_stack { "roots".to_string() } else { format!("roots[task {}]", s) };
             for (i, &v) in stack.roots.iter().enumerate() {
@@ -350,7 +352,7 @@ impl Heap {
                 check(&format!("{}.in_flight_throw", what), 0, v);
             }
         }
-        for (i, v) in self.shared.permanent_roots.lock().unwrap().iter().enumerate() {
+        for (i, v) in self.shared.permanent_roots.lock().iter().enumerate() {
             if let Some(v) = v {
                 check("permanent_roots", i, *v);
             }
@@ -358,7 +360,7 @@ impl Heap {
         for (i, &v) in session_roots.iter().enumerate() {
             check("session_roots", i, v);
         }
-        for w in self.shared.cell_registry.lock().unwrap().iter() {
+        for w in self.shared.cell_registry.lock().iter() {
             if let Some(id) = w.upgrade() {
                 if let Some(BoxedObj::Cell(v)) = &self.shared.boxes.read_recursive().slots[id.0 as usize] {
                     check("cell_registry", id.0 as usize, *v);
@@ -403,16 +405,15 @@ impl Heap {
         while threads.gc_requested.compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst).is_err() {
             self.park();
         }
-        let mut views = threads.views.lock().unwrap();
-        let me = std::thread::current().id();
+        let mut views = threads.views.lock();
+        let me = crate::sync::current_thread().0;
         loop {
             let running: Vec<&Arc<ViewSlot>> =
                 views.iter().filter(|v| v.thread != me && v.state.load(Ordering::SeqCst) == RUNNING).collect();
             if running.is_empty() {
                 break;
             }
-            let (guard, waited) = threads.changed.wait_timeout(views, WATCHDOG).unwrap();
-            views = guard;
+            let waited = threads.changed.wait_for(&mut views, WATCHDOG);
             if waited.timed_out() && cfg!(debug_assertions) {
                 let names: Vec<&str> = views
                     .iter()
@@ -466,7 +467,7 @@ impl Heap {
         // resume into the frames these belong to. Each stack's own
         // `in_flight_throw` rides along here too — see `RootStack`'s doc
         // comment for why it is not the separate root set it used to be.
-        for roots in self.shared.root_stacks.lock().unwrap().iter().flatten() {
+        for roots in self.shared.root_stacks.lock().iter().flatten() {
             for &v in &roots.roots {
                 stack.push(v);
             }
@@ -476,7 +477,7 @@ impl Heap {
             Self::trace_frames(&roots.frames, &mut stack);
         }
         {
-            let permanent_roots = self.shared.permanent_roots.lock().unwrap();
+            let permanent_roots = self.shared.permanent_roots.lock();
             for i in 0..permanent_roots.len() {
                 if let Some(v) = permanent_roots[i] {
                     stack.push(v);
@@ -488,7 +489,7 @@ impl Heap {
         // is a root of its own — see `alloc_cell`. Dead entries (the last
         // handle dropped) are pruned here; their cells become collectible
         // like any other unreachable box.
-        let mut cell_registry = self.shared.cell_registry.lock().unwrap();
+        let mut cell_registry = self.shared.cell_registry.lock();
         cell_registry.retain(|w| w.upgrade().is_some());
         for w in cell_registry.iter() {
             if let Some(id) = w.upgrade() {
@@ -532,7 +533,7 @@ impl Heap {
         // Locked for this section only — the mark phase above never touches
         // the arena (it dereferences `*mut Cell`s directly, not through
         // `chunks`), so there is nothing to hold the lock across.
-        let mut arena = self.shared.arena.lock().unwrap();
+        let mut arena = self.shared.arena.lock();
         let old_free = arena.free_count;
         let mut new_free: *mut Cell = ptr::null_mut();
         let mut new_free_count = 0usize;

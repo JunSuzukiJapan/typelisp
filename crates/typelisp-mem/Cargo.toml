@@ -12,16 +12,28 @@ categories = ["compilers"]
 [lib]
 name = "typelisp_mem"
 
+[features]
+default = ["std"]
+# Everything that needs an operating system: threads, the clock, the process,
+# standard output, growing the stack. Without it the crate is `no_std` +
+# `alloc`, for a microcontroller (`docs/dev/cross-compile-embedded-plan.md`).
+std = ["dep:parking_lot", "dep:stacker", "num-bigint/std", "num-rational/std", "num-traits/std"]
+
 [dependencies]
-num-bigint = "0.4"
-num-rational = "0.4"
-num-traits = "0.2"
+num-bigint = { version = "0.4", default-features = false }
+num-rational = { version = "0.4", default-features = false, features = ["num-bigint"] }
+num-traits = { version = "0.2", default-features = false, features = ["libm"] }
+# The locks' API (`sync`): parking_lot's types are `lock_api`'s over its own
+# raw locks, and without std the raw locks are `sync`'s own.
+lock_api = "0.4"
 # Mapped read-guards (`RwLockReadGuard::map`) — `std::sync::RwLock` has no
 # stable way to return a reference into a lock while keeping it held, which
 # `Heap::type_key_name`/`path_segments`/etc. need once their storage moves
 # into `HeapShared` (`docs/dev/os-threads-design.md` §3).
-parking_lot = "0.12"
+parking_lot = { version = "0.12", optional = true }
 # `grow_stack` (`stack.rs`): the reader, the checker and the compiler's passes
 # recurse once per level of nesting, and a program can nest deeper than any
 # fixed thread stack holds.
-stacker = "0.1"
+stacker = { version = "0.1", optional = true }
+# The hash tables (`collections`), with std and without.
+hashbrown = { version = "0.15", default-features = false, features = ["default-hasher"] }

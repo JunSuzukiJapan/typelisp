@@ -250,7 +250,7 @@ fn pub_definition(inner: &[(Value, Option<Loc>)]) -> Result<&[(Value, Option<Loc
 /// their last segment.
 pub(super) fn publish_name_view(reg: &Registry, ns: typelisp_mem::NsId) {
     let is_type = |p: &Path| matches!(reg.types.get(p), Some(TypeEntry::Type(_) | TypeEntry::Trait(_)));
-    let mut imports = std::collections::HashMap::new();
+    let mut imports = typelisp_mem::collections::HashMap::new();
     let mut taken = std::collections::HashSet::new();
     for ((at, bare), target) in reg.imports.iter() {
         if *at == ns && is_type(target) {

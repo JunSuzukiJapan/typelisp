@@ -1,6 +1,7 @@
 //! Hash-table payloads.
 
-use std::collections::HashMap;
+use crate::prelude::*;
+use crate::collections::HashMap;
 use crate::value::{BoxId, BoxedObj, StructPayload, TypeId, Value};
 use super::Heap;
 
@@ -24,8 +25,8 @@ impl Heap {
 
     /// The bucket at `hash`, or `&[]` when there is none. Every read below
     /// goes through here.
-    fn bucket(&self, id: BoxId, hash: i64) -> parking_lot::MappedRwLockReadGuard<'_, [(Value, Value)]> {
-        parking_lot::RwLockReadGuard::map(self.shared.boxes.read_recursive(), |b| match &b.slots[id.0 as usize] {
+    fn bucket(&self, id: BoxId, hash: i64) -> crate::sync::MappedRwLockReadGuard<'_, [(Value, Value)]> {
+        crate::sync::RwLockReadGuard::map(self.shared.boxes.read_recursive(), |b| match &b.slots[id.0 as usize] {
             Some(BoxedObj::Struct { payload: StructPayload::Map(map, _), .. }) => {
                 map.get(&hash).map(Vec::as_slice).unwrap_or(&[])
             }

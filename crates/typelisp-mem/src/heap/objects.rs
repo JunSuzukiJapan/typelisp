@@ -1,5 +1,6 @@
 //! Symbols, paths, strings and the boxed objects: allocation and access.
 
+use crate::prelude::*;
 use crate::symbols::{self, SymRef};
 use crate::value::{BoxId, BoxedObj, FloatBox, NarrowInt, PathId, StrId, StructPayload, TypeId, Value};
 use super::{Heap, NAMES_HELD, NamesGuard};
@@ -75,12 +76,12 @@ impl Heap {
     /// The symbol segments of an interned path.
     ///
     /// Returns a mapped read guard rather than `&[SymRef]`: the table lives
-    /// behind `shared.interning`'s lock, and `parking_lot::RwLockReadGuard`
+    /// behind `shared.interning`'s lock, and `crate::sync::RwLockReadGuard`
     /// is what lets this narrow "the whole table, read-locked" down to "this
     /// one entry" while keeping the lock held for exactly the guard's
     /// lifetime (see `HeapShared`'s doc comment).
-    pub fn path_segments(&self, id: PathId) -> parking_lot::MappedRwLockReadGuard<'_, [SymRef]> {
-        parking_lot::RwLockReadGuard::map(self.shared.interning.read_recursive(), |i| i.paths[id.0 as usize].as_slice())
+    pub fn path_segments(&self, id: PathId) -> crate::sync::MappedRwLockReadGuard<'_, [SymRef]> {
+        crate::sync::RwLockReadGuard::map(self.shared.interning.read_recursive(), |i| i.paths[id.0 as usize].as_slice())
     }
 
     // ---- strings ----------------------------------------------------------
@@ -93,8 +94,8 @@ impl Heap {
 
     /// The contents of a stored string. See `path_segments`'s doc comment
     /// for why this returns a mapped guard rather than `&str`.
-    pub fn string(&self, id: StrId) -> parking_lot::MappedRwLockReadGuard<'_, str> {
-        parking_lot::RwLockReadGuard::map(self.shared.strings.read_recursive(), |s| {
+    pub fn string(&self, id: StrId) -> crate::sync::MappedRwLockReadGuard<'_, str> {
+        crate::sync::RwLockReadGuard::map(self.shared.strings.read_recursive(), |s| {
             s.store.slots[id.0 as usize].as_deref().expect("dangling StrId")
         })
     }
@@ -298,8 +299,8 @@ impl Heap {
     /// [`f64_value`](Self::f64_value).
     /// See `path_segments`'s doc comment for why this returns a mapped guard
     /// rather than `&num_bigint::BigInt`.
-    pub fn bignum_value(&self, id: BoxId) -> parking_lot::MappedRwLockReadGuard<'_, num_bigint::BigInt> {
-        parking_lot::RwLockReadGuard::map(self.shared.boxes.read_recursive(), |b| match &b.slots[id.0 as usize] {
+    pub fn bignum_value(&self, id: BoxId) -> crate::sync::MappedRwLockReadGuard<'_, num_bigint::BigInt> {
+        crate::sync::RwLockReadGuard::map(self.shared.boxes.read_recursive(), |b| match &b.slots[id.0 as usize] {
             Some(BoxedObj::Bignum(n)) => n,
             _ => panic!("BoxId does not hold a Bignum"),
         })
@@ -324,8 +325,8 @@ impl Heap {
     /// `BoxedObj::Ratio` — same convention as [`bignum_value`](Self::bignum_value).
     /// See `path_segments`'s doc comment for why this returns a mapped guard
     /// rather than `&num_rational::BigRational`.
-    pub fn ratio_value(&self, id: BoxId) -> parking_lot::MappedRwLockReadGuard<'_, num_rational::BigRational> {
-        parking_lot::RwLockReadGuard::map(self.shared.boxes.read_recursive(), |b| match &b.slots[id.0 as usize] {
+    pub fn ratio_value(&self, id: BoxId) -> crate::sync::MappedRwLockReadGuard<'_, num_rational::BigRational> {
+        crate::sync::RwLockReadGuard::map(self.shared.boxes.read_recursive(), |b| match &b.slots[id.0 as usize] {
             Some(BoxedObj::Ratio(r)) => r,
             _ => panic!("BoxId does not hold a Ratio"),
         })
@@ -580,13 +581,13 @@ impl Heap {
     /// `Arc`, not `Rc`: the handle must stay a valid liveness proof no
     /// matter which thread ends up holding it or running `gc()` — see
     /// `shared.cell_registry`'s doc comment.
-    pub fn alloc_cell(&mut self, v: Value) -> std::sync::Arc<BoxId> {
+    pub fn alloc_cell(&mut self, v: Value) -> alloc::sync::Arc<BoxId> {
         let id = match self.alloc_boxed(BoxedObj::Cell(v)) {
             Value::Boxed(id) => id,
             _ => unreachable!("alloc_boxed always returns Value::Boxed"),
         };
-        let rc = std::sync::Arc::new(id);
-        self.shared.cell_registry.lock().unwrap().push(std::sync::Arc::downgrade(&rc));
+        let rc = alloc::sync::Arc::new(id);
+        self.shared.cell_registry.lock().push(alloc::sync::Arc::downgrade(&rc));
         rc
     }
 

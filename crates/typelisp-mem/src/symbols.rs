@@ -58,8 +58,9 @@
 //! all. The tagged compiled-code representation carries the address directly
 //! (`typelisp-abi`'s `encode`), exactly as it already does for `Cons`.
 
-use std::collections::HashMap;
-use std::sync::{Mutex, MutexGuard, OnceLock};
+use crate::prelude::*;
+use crate::collections::HashMap;
+use crate::sync::{Mutex, MutexGuard, OnceLock};
 
 mod well_known;
 mod vocabulary;
@@ -112,22 +113,22 @@ impl PartialEq for SymRef {
 
 impl Eq for SymRef {}
 
-impl std::hash::Hash for SymRef {
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+impl core::hash::Hash for SymRef {
+    fn hash<H: core::hash::Hasher>(&self, state: &mut H) {
         self.0.hash(state);
     }
 }
 
-impl std::fmt::Debug for SymRef {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl core::fmt::Debug for SymRef {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         write!(f, "SymRef({})", self.name())
     }
 }
 
 /// How the symbol is written ([`SymRef::spelling`]) — what a message naming
 /// it shows.
-impl std::fmt::Display for SymRef {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl core::fmt::Display for SymRef {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.write_str(self.spelling())
     }
 }
@@ -544,7 +545,7 @@ impl SymTable {
 
     /// Whether `ns` is `std` or a module inside it.
     fn within_std(&self, ns: NsId) -> bool {
-        std::iter::successors(Some(ns), |m| self.nodes[m.0 as usize].parent).any(|m| m == NsId::STD)
+        core::iter::successors(Some(ns), |m| self.nodes[m.0 as usize].parent).any(|m| m == NsId::STD)
     }
 
     fn path(&self, ns: NsId) -> Vec<String> {
@@ -578,7 +579,6 @@ fn table() -> MutexGuard<'static, SymTable> {
     SYMBOLS
         .get_or_init(|| Mutex::new(SymTable::new()))
         .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
 /// Intern `name` in module `ns`.
