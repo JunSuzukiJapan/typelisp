@@ -3,9 +3,9 @@
 //! `(format dest control arg...)` builds the string the literal `control`
 //! says; with `dest` `true` it is written to stdout too. `(print control
 //! arg...)` and `(println control arg...)` write to stdout, `println` with a
-//! newline after. The directives are run by the engine
-//! (`Interp::run_format`): the call lowers to the internal builtin, handed the
-//! arguments as one `Sexpr` list, each encoded by its own type.
+//! newline after. The form is expanded into a sequence of calls, each
+//! writing one directive's output ([`super::format_expand`]); a `~/name/`
+//! directive is the call `(name arg colon at)` checked where it stands.
 //!
 //! The control string has to be a literal, because its directives say which
 //! arguments each one takes and of what type. That is checked once the form
@@ -15,7 +15,6 @@ use crate::typeck::sexpr_value::{option_of_sexpr, sexpr_ty};
 use crate::typeck::registry::TraitBound;
 use crate::types::{Path, Type};
 use crate::{wk, Error, Heap, Loc, Value};
-use crate::CompileTarget;
 use typelisp_print::format::{call_sites, ArgKind, ArgType, CallArg, CallSite};
 
 use super::expr::{check_expr, Cx};
@@ -218,49 +217,18 @@ fn resolve_calls(cx: &Cx, heap: &mut Heap, locals: &Locals, what: &str, text: &s
                 what, site.name, site.name
             )));
         }
-        // One directive calls one definition, whichever argument it is
-        // handed.
-        let mut found: Option<((CompileTarget, Vec<Type>), &Type)> = None;
         for arg in &site.args {
             let CallArg::Arg(i) = *arg else { unreachable!("elements were refused above") };
             let checked = call_target(cx, heap, locals, what, site, &types[i])?;
-            let target = called(cx, &checked);
-            match &found {
-                None => found = Some((target, &types[i])),
-                Some((first, first_ty)) if *first != target => {
-                    return Err(Error::TypeError(format!(
-                        "{}: ~/{}/ can be handed a `{}` or a `{}` here, which call different definitions \
-                         (`{}` and `{}`) — a directive calls one",
-                        what,
-                        site.name,
-                        first_ty,
-                        types[i],
-                        first.0.written_name(),
-                        target.0.written_name()
-                    )));
-                }
-                Some(_) => {}
-            }
             calls.insert((start, i), checked);
         }
     }
     Ok(calls)
 }
 
-/// The definition a checked `~/name/` call calls, with its type arguments.
-fn called(cx: &Cx, checked: &Typed) -> (CompileTarget, Vec<Type>) {
-    match &checked.node {
-        Node::Call { path, targs, .. } => (CompileTarget::Fn(*path), targs.iter().map(|t| cx.resolve(t)).collect()),
-        Node::MethodCall { owner, method, targs, .. } => (CompileTarget::Method(*owner, *method), targs.iter().map(|t| cx.resolve(t)).collect()),
-        _ => unreachable!("call_target answers a call"),
-    }
-}
-
 /// What `(name arg colon at)` calls here, `arg` being of the type `ty`:
 /// checked as that very call, so the name means what it means anywhere
-/// else. It has to be a function or a method written in typelisp that takes
-/// `arg` as it is: the engine hands the value over and nothing else.
-/// The definition, and its type arguments when it is generic.
+/// else.
 fn call_target(cx: &Cx, heap: &mut Heap, locals: &Locals, what: &str, site: &CallSite, ty: &Type) -> Result<Typed, Error> {
     let arg = call_arg();
     let shown = format!("~/{}/", site.name);
@@ -283,20 +251,6 @@ fn call_target(cx: &Cx, heap: &mut Heap, locals: &Locals, what: &str, site: &Cal
         };
         Error::TypeError(format!("{}: {} calls what {} would: {}", what, shown, as_call, inner))
     })?;
-    let not_a_definition = || {
-        Error::TypeError(format!(
-            "{}: {} must call a function or a method written in typelisp that takes the argument as it is, and {} does not",
-            what, shown, as_call
-        ))
-    };
-    let (first, builtin) = match &checked.node {
-        Node::Call { path, args, .. } => (args.first(), cx.reg.fn_def(path).is_some_and(|d| d.builtin)),
-        Node::MethodCall { owner, method, args, .. } => (args.first(), cx.reg.method(owner, *method).is_some_and(|d| d.sig.builtin)),
-        _ => return Err(not_a_definition()),
-    };
-    if builtin || !first.is_some_and(|a| matches!(a.node, Node::Local { name } if name == arg)) {
-        return Err(not_a_definition());
-    }
     Ok(checked)
 }
 
