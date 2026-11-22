@@ -176,6 +176,13 @@ fn aot_print_object(heap: &mut Heap, v: Value, escape: bool) -> Result<Option<St
     let Some(addr) = crate::shared::print_shared().print_object.read().get(&ty).copied() else {
         return Ok(None);
     };
+    if addr == 0 {
+        return Err(format!(
+            "internal error: a `{}` was printed, and the executable was built without its `print-object` because it \
+             found no code that makes one",
+            &*typelisp_mem::type_name(ty)
+        ));
+    }
     // SAFETY: `addr` came from `rt_print_object_method`, whose only caller is
     // the startup sequence `build_main_wrapper` generates, and the address it
     // passes is a `ptrtoint` of a function the same file compiled under the
@@ -313,7 +320,8 @@ pub unsafe extern "C" fn rt_print_field_name(args: *const i64, argc: u32) -> i64
 }
 
 /// Registers one type's compiled `print-object`: `args` is `[type,
-/// fn_addr]`.
+/// fn_addr]`. An address of 0 says the executable has none for the type
+/// because it can make no value of it, so printing one is an internal error.
 ///
 /// # Safety
 ///

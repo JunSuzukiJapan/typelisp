@@ -35,7 +35,10 @@ typl -c SOURCE [-o OUTPUT] --target thumbv7em-none-eabihf [--heap-cells N | --no
 wasm32-unknown-unknown では、strip しても 2,042,594 バイトあった。
 
 - 0a（済）: ネイティブのリンクに `-Wl,-dead_strip`（Linux は `-Wl,--gc-sections`）を渡す。これが無いと、アーカイブのオブジェクトがまるごと入っていた。
-- 0b: `print-object` の登録。生成する `main` が、ファイルと prelude にある全ての `print-object` を `rt_print_object_method` で登録している。このため、使わない型の `print-object` もその先も残る。たとえば `file-stream` の `print-object` から `rt_stream_describe`、`decoded-time` の `print-object` から `rt_float_to_int` と bignum が付いてくる。その型の値が作られうるときだけ登録する。値を作るのは生成コードだけではない。Rust の shim が作って返す値（エラーの型など）もあるので、「作られうる」の判定はその両方を見る。
+- 0b（済）: `print-object` の登録。生成する `main` が、ファイルと prelude にある全ての `print-object` を `rt_print_object_method` で登録していたため、使わない型の `print-object` もその先も残っていた（`file-stream` から `rt_stream_describe`、`decoded-time` から bignum）。今は、その型の値が作られうるときだけ登録する（`aot.rs` の `live_print_objects`）。
+  - 値を作るのは、型表から型を読んでランタイムへ渡すコンパイル済みコードか、ランタイム自身（`typelisp_mem::runtime_builds`: 基本型、`BUILTIN_TYPES`、`RUNTIME_BUILT`）。`main` から届く関数が読む型（`aot/reach.rs` の `TypeReach`）とその型引数、ランタイムが作る型を生きているとし、生きている型の `print-object` から届くものも同じように数える。印字器の登録の関数は数えない。`eval` を呼ぶプログラムは全てを登録する。
+  - 落とした型は関数の番地 0 で登録し、その値を印字すると内部エラーになる。`RUNTIME_BUILT` の漏れは `type_identity_guard_test` がソースの `TypeSpec` から見つける。
+  - 測定（release のランタイム、hello）: `__text` 1,062,832 → 1,017,296。hello では 18 個を落とした。残る大きなものは、印字器の登録の関数そのもの（27,808 バイト、登録ごとに呼び出しを並べている）、std の backtrace（gimli、addr2line、rustc_demangle）、rustls と ring（0c）、基本型の `print-object` から届く bignum と `Renderer`。
 - 0c: ランタイムの共有状態（`RtShared`）のデストラクタ。ストリームの表を通って TLS サーバの drop まで届き、rustls を残している。共有状態の破棄が、使われたものだけに届く形にする。
 - 0e: 書式をコンパイル時に展開する（2026-11-22 ユーザー決定、下の「書式の展開」）。
 - 0d: 0b、0c、0e の後に測り直し、残った大きなもの（書式エンジン、std の panic と backtrace の処理など）を同じ方法で調べる。調べ方は、`-Wl,-why_live,<記号>` で `main` からの参照の鎖を出す。

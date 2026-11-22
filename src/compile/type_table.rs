@@ -203,3 +203,87 @@ pub fn write_bitcode(module: &Module<'static>) -> Result<Vec<u8>, String> {
     // copy.
     Ok(module.write_bitcode_to_memory().as_slice().to_vec())
 }
+
+/// The type the global `name` stands for, when it is one [`load`] declared
+/// and no settling has replaced yet.
+pub fn unsettled_type(name: &str) -> Option<TypeId> {
+    name.strip_prefix(UNSETTLED)?.parse::<u32>().ok().and_then(TypeId::from_index)
+}
+
+/// Whether `name` is the function an exported module interns its types with
+/// ([`init_functions`]).
+pub fn is_init_function(name: &str) -> bool {
+    name.starts_with(INIT)
+}
+
+/// Each table [`settle_for_export`] gave the modules `module` was made from,
+/// with the type at each of its places: the shapes its init function hands
+/// `rt_types_define`, interned in this process the way the executable's
+/// startup interns them.
+pub fn exported_tables(module: &Module<'static>) -> Result<Vec<(GlobalValue<'static>, Vec<TypeId>)>, String> {
+    use inkwell::llvm_sys::core::{
+        LLVMConstIntGetSExtValue, LLVMGetAggregateElement, LLVMGetArrayLength2, LLVMGetAsString, LLVMGetConstOpcode,
+        LLVMGetInitializer, LLVMGetOperand, LLVMIsAConstantExpr, LLVMIsAConstantInt, LLVMIsAGlobalVariable, LLVMTypeOf,
+    };
+    use inkwell::llvm_sys::LLVMOpcode;
+    use inkwell::values::{AsValueRef, InstructionOpcode};
+
+    // The global a `ptrtoint` constant takes the address of.
+    let address_of = |v: inkwell::llvm_sys::prelude::LLVMValueRef| unsafe {
+        if LLVMIsAConstantExpr(v).is_null() || LLVMGetConstOpcode(v) != LLVMOpcode::LLVMPtrToInt {
+            return None;
+        }
+        let g = LLVMGetOperand(v, 0);
+        (!LLVMIsAGlobalVariable(g).is_null()).then_some(g)
+    };
+    let mut tables = Vec::new();
+    for init in module.get_functions().filter(|f| f.count_basic_blocks() > 0) {
+        let name = init.get_name().to_string_lossy().into_owned();
+        if !is_init_function(&name) {
+            continue;
+        }
+        // What `settle_for_export` stores into `rt_types_define`'s arguments:
+        // the shapes' address, their length in words and the table's address.
+        let mut stored = Vec::new();
+        for block in init.get_basic_blocks() {
+            let mut instr = block.get_first_instruction();
+            while let Some(i) = instr {
+                if i.get_opcode() == InstructionOpcode::Store {
+                    stored.push(unsafe { LLVMGetOperand(i.as_value_ref(), 0) });
+                }
+                instr = i.get_next_instruction();
+            }
+        }
+        let [shapes, _, table] = stored[..] else {
+            return Err(format!("internal error: `{}` stores {} words, not `rt_types_define`'s 3", name, stored.len()));
+        };
+        let (Some(shapes), Some(table)) = (address_of(shapes), address_of(table)) else {
+            return Err(format!("internal error: `{}` does not hand `rt_types_define` two globals' addresses", name));
+        };
+        let shapes = unsafe { LLVMGetInitializer(shapes) };
+        let len = unsafe { LLVMGetArrayLength2(LLVMTypeOf(shapes)) };
+        let mut words = Vec::with_capacity(len as usize);
+        for k in 0..len {
+            let w = unsafe { LLVMGetAggregateElement(shapes, k as u32) };
+            if unsafe { !LLVMIsAConstantInt(w).is_null() } {
+                words.push(unsafe { LLVMConstIntGetSExtValue(w) });
+            } else if let Some(string) = address_of(w) {
+                // The string's bytes where the module holds them, which live
+                // as long as the module: `define` reads them, and the length
+                // is the next word, as in the executable.
+                let mut n = 0;
+                let bytes = unsafe { LLVMGetAsString(LLVMGetInitializer(string), &mut n) };
+                words.push(bytes as usize as i64);
+            } else {
+                return Err(format!("internal error: word {} of `{}`'s shapes is neither a number nor a string's address", k, name));
+            }
+        }
+        // SAFETY: each string's address is the module's own constant, alive
+        // for this call, and `settle_for_export` wrote the list.
+        let types = unsafe { typelisp_mem::type_words::define(&words) };
+        // SAFETY: `table` is a global variable of this module.
+        let table = unsafe { GlobalValue::new(table) };
+        tables.push((table, types));
+    }
+    Ok(tables)
+}

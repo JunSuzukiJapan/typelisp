@@ -203,6 +203,26 @@ pub const BUILTIN_TYPES: &[(StdModule, &str, &[TypeId])] = &[
     (StdModule::INTERNAL, "format-out", &[]),
 ];
 
+/// The definitions besides [`BUILTIN_TYPES`]' whose values the runtime
+/// builds itself, from a [`crate::TypeSpec`]: what a shim makes with no
+/// compiled code naming the type. With those and the primitives, what
+/// [`runtime_builds`] answers for. `tests/type_identity_guard_test.rs` holds
+/// every `TypeSpec` the runtime writes to one of the three.
+pub const RUNTIME_BUILT: &[(StdModule, &str)] = &[(StdModule::EVAL, "EvalError"), (StdModule::IO, "string-input-stream")];
+
+/// Whether the runtime can make a value of `ty` itself: a primitive, or a
+/// type defined by a row of [`BUILTIN_TYPES`] or of [`RUNTIME_BUILT`],
+/// whatever its type arguments. A value of any other type is made by
+/// compiled code, which reads the type out of its module's type table to
+/// hand it over.
+pub fn runtime_builds(ty: TypeId) -> bool {
+    let crate::TypeShape::Named(ns, sym, _) = crate::type_shape(ty) else { return false };
+    let defines = |(module, name): (StdModule, &str)| module.ns() == ns && sym.name() == name;
+    ns == StdModule::PRIMITIVE.ns()
+        || BUILTIN_TYPES.iter().any(|(module, name, _)| defines((*module, name)))
+        || RUNTIME_BUILT.iter().any(|(module, name)| defines((*module, name)))
+}
+
 impl TypeId {
     pub const OPTION: TypeId = TypeId(0);
     pub const RESULT: TypeId = TypeId(1);

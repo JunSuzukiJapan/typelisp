@@ -592,7 +592,8 @@ pub fn compile_file_with(source_path: &str, output_path: &str, options: &BuildOp
     }
 
     // Which types have a compiled `print-object`, for the printer's AOT
-    // startup registration: this file's, and the prelude's own (`complex`,
+    // startup registration to choose from (`live_print_objects` keeps those
+    // the executable can make a value of): this file's, and the prelude's own (`complex`,
     // `pathname`, the streams, the error types, ...), which no item of this
     // file names — they are chosen by the printer at run time, never called.
     // Their bodies are in the module already, the prelude bitcode having been
@@ -873,89 +874,18 @@ fn build_main_wrapper(
     // `(defun main () i32 42)`: 3,530,224 bytes with no printer symbol in it
     // at all when this guard does not trip, 3,877,648 and 124 of them when it
     // does.
-    if module_calls_any(module, &PRINT_SHIMS) {
-        let i64_ty = ctx.i64_type();
-        // A `(pointer, length)` pair per string, from a module-level constant
-        // — no heap involved, so this can run before `rt_heap_init`.
-        let literal = |builder: &inkwell::builder::Builder<'static>, text: &str| -> Result<(inkwell::values::IntValue<'static>, inkwell::values::IntValue<'static>), String> {
-            let g = builder
-                .build_global_string_ptr(text, "print_reg_str")
-                .map_err(|e| format!("failed to build a printer-registration string: {}", e))?;
-            Ok((
-                g.as_pointer_value().const_to_int(i64_ty),
-                i64_ty.const_int(text.len() as u64, false),
-            ))
-        };
-        let call = |builder: &inkwell::builder::Builder<'static>, name: &str, words: &[inkwell::values::IntValue<'static>]| -> Result<(), String> {
-            let f = module
-                .get_function(name)
-                .ok_or_else(|| format!("internal error: {} not declared in module", name))?;
-            let args_ptr = builder
-                .build_alloca(i64_ty.array_type(words.len() as u32), "print_reg_args")
-                .map_err(|e| format!("failed to alloca printer-registration args: {}", e))?;
-            for (i, w) in words.iter().enumerate() {
-                let p = unsafe {
-                    builder
-                        .build_gep(i64_ty, args_ptr, &[i64_ty.const_int(i as u64, false)], "print_reg_arg_ptr")
-                        .map_err(|e| format!("failed to build printer-registration gep: {}", e))?
-                };
-                builder.build_store(p, *w).map_err(|e| format!("failed to store printer-registration arg: {}", e))?;
-            }
-            builder
-                .build_call(f, &[args_ptr.into(), ctx.i32_type().const_int(words.len() as u32 as u64, false).into()], "print_reg_result")
-                .map_err(|e| format!("failed to build {} call: {}", name, e))?;
-            Ok(())
-        };
-        // The definitions and the field types, read out of the module's type
-        // table (`compile::type_table`): a type's id is this process's number,
-        // so the executable carries the shapes and its startup interns them.
-        let ty = |ty: crate::TypeId| crate::compile::type_table::load(&builder, module, ty);
-        let definition = |path: &Path| ty(typelisp_front::type_key::type_key_id(path, Vec::new()));
-        for (path, variant, name) in enum_variants {
-            let (name_ptr, name_len) = literal(&builder, name)?;
-            call(&builder, "rt_print_enum_variant", &[definition(path)?, i64_ty.const_int(*variant as u64, false), name_ptr, name_len])?;
-        }
-        for (path, variant, index, template) in field_templates {
-            call(
-                &builder,
-                "rt_print_field_template",
-                &[definition(path)?, i64_ty.const_int(*variant as u64, true), i64_ty.const_int(*index as u64, true), ty(*template)?],
-            )?;
-        }
-        for (path, index, name) in field_names {
-            let (name_ptr, name_len) = literal(&builder, name)?;
-            call(&builder, "rt_print_field_name", &[definition(path)?, i64_ty.const_int(*index as u64, true), name_ptr, name_len])?;
-        }
-        for (receiver, symbol) in print_objects {
-            let target = module.get_function(symbol).ok_or_else(|| {
-                format!("compile-file: `print-object` implementation `{}` was not compiled into this file", symbol)
-            })?;
-            let fn_ptr = classic_door(ctx, module, target)?;
-            call(&builder, "rt_print_object_method", &[ty(*receiver)?, fn_ptr])?;
-        }
-        for (name, id) in printer_globals {
-            let (name_ptr, name_len) = literal(&builder, name)?;
-            call(&builder, "rt_print_global", &[name_ptr, name_len, i64_ty.const_int(*id as u64, false)])?;
-        }
-        // Type names are written for the module the program was checked in,
-        // as the interpreter writes them — the view the checker left behind.
-        let view = typelisp_print::shared::name_view();
-        let words = |name: &str, words: &[typelisp_mem::type_words::Word]| {
-            let (global, len) = crate::compile::type_table::constant_words(module, name, words);
-            (global.as_pointer_value().const_to_int(i64_ty), i64_ty.const_int(len as u64, false))
-        };
-        let (module_ptr, module_len) = words("print_name_module", &typelisp_mem::type_words::ns_words(view.module()));
-        call(&builder, "rt_print_name_module", &[module_ptr, module_len])?;
-        // In the order of the names, so the executable is the same each time.
-        let mut imports: Vec<(&(typelisp_mem::NsId, typelisp_mem::symbols::SymRef), &&'static str)> = view.imports().iter().collect();
-        imports.sort_by_key(|(_, name)| **name);
-        for (i, ((ns, sym), name)) in imports.into_iter().enumerate() {
-            let (def_ptr, def_len) =
-                words(&format!("print_name_import${}", i), &typelisp_mem::type_words::definition_words(*ns, *sym));
-            let (name_ptr, name_len) = literal(&builder, name)?;
-            call(&builder, "rt_print_name_import", &[def_ptr, def_len, name_ptr, name_len])?;
-        }
-    }
+    //
+    // In a function of its own, which `main` calls here and which is given
+    // its body once `main` is complete: which `print-object`s it registers
+    // depends on what the rest of the executable can make
+    // ([`live_print_objects`]).
+    let print_register = if module_calls_any(module, &PRINT_SHIMS) {
+        let register = module.add_function("typelisp_print_register", ctx.void_type().fn_type(&[], false), None);
+        builder.build_call(register, &[], "").map_err(|e| format!("failed to build the printer registration call: {}", e))?;
+        Some(register)
+    } else {
+        None
+    };
     // The environment `eval` needs, as one immutable blob. Registration only —
     // the shim just remembers the pointer — so this belongs with the other
     // pre-heap stores. Emitted, like the printer's block above, only when the
@@ -1198,6 +1128,11 @@ fn build_main_wrapper(
         .map_err(|e| format!("failed to truncate exit code: {}", e))?;
     builder.build_return(Some(&exit_code)).map_err(|e| format!("failed to build entry-point return: {}", e))?;
 
+    if let Some(register) = print_register {
+        let live = live_print_objects(module, main_fn, print_objects, eval_env.is_some())?;
+        emit_print_registration(ctx, module, register, enum_variants, field_templates, field_names, print_objects, &live, printer_globals)?;
+    }
+
     // The types the executable's code reads, the prelude's included: interned
     // first of all, since everything after reads them out of the tables.
     crate::compile::type_table::settle_for_export(module)?;
@@ -1207,6 +1142,183 @@ fn build_main_wrapper(
         let f = module.get_function(&init).expect("an init function the module defines");
         builder.build_call(f, &[], "").map_err(|e| format!("failed to build the call to `{}`: {}", init, e))?;
     }
+    Ok(())
+}
+
+/// Which of `print_objects` the executable registers: those of the types
+/// a value of can exist. A value is made by compiled code, which reads its
+/// type out of a type table to hand it to the runtime, or by the runtime
+/// itself ([`typelisp_mem::runtime_builds`]). So a type is live when the
+/// code the executable can run reads it, or one it is an argument of, or
+/// when the runtime builds it. What can run is what `main` reaches, and
+/// what each live type's `print-object` does in turn; the printer's own
+/// registration (still without a body here) is not walked, since naming a
+/// type there makes no value of it. A program that calls `eval` can make a
+/// value of any type, so it registers every one.
+fn live_print_objects(
+    module: &Module<'static>,
+    main_fn: inkwell::values::FunctionValue<'static>,
+    print_objects: &[(typelisp_mem::TypeId, String)],
+    calls_eval: bool,
+) -> Result<Vec<bool>, String> {
+    if calls_eval {
+        return Ok(vec![true; print_objects.len()]);
+    }
+    let mut reach = reach::TypeReach::new(module)?;
+    reach.walk(module, main_fn)?;
+    let mut live = vec![false; print_objects.len()];
+    loop {
+        let read = with_arguments(&reach.types);
+        let mut grew = false;
+        for (i, (ty, symbol)) in print_objects.iter().enumerate() {
+            if live[i] || !(typelisp_mem::runtime_builds(*ty) || read.contains(ty)) {
+                continue;
+            }
+            live[i] = true;
+            grew = true;
+            let method = module.get_function(symbol).ok_or_else(|| {
+                format!("compile-file: `print-object` implementation `{}` was not compiled into this file", symbol)
+            })?;
+            reach.walk(module, method)?;
+        }
+        if !grew {
+            return Ok(live);
+        }
+    }
+}
+
+/// `types` and every type each is made of: a value of one can hold values
+/// of those.
+fn with_arguments(types: &std::collections::HashSet<typelisp_mem::TypeId>) -> std::collections::HashSet<typelisp_mem::TypeId> {
+    use typelisp_mem::TypeShape;
+    let mut all = std::collections::HashSet::new();
+    let mut pending: Vec<typelisp_mem::TypeId> = types.iter().copied().collect();
+    while let Some(ty) = pending.pop() {
+        if !all.insert(ty) {
+            continue;
+        }
+        match typelisp_mem::type_shape(ty) {
+            TypeShape::Named(_, _, args) | TypeShape::Dyn(_, _, args) => pending.extend(args),
+            TypeShape::Fn(params, rest, ret) => {
+                pending.extend(params);
+                pending.extend(rest);
+                pending.push(ret);
+            }
+            TypeShape::Ptr(pointee) => pending.push(pointee),
+            TypeShape::CStruct(..) | TypeShape::Unit | TypeShape::Never | TypeShape::Param(_) => {}
+        }
+    }
+    all
+}
+
+/// The body of `register`, which the generated `main` calls before the heap
+/// exists: the printer's program facts (`typelisp_print::aot`), an enum's
+/// variant names, the fields' types and names, each type's `print-object`
+/// (`live` saying which have one, [`live_print_objects`]) and the printer
+/// control variables, none of which a standalone executable can look up the
+/// way the interpreter does.
+fn emit_print_registration(
+    ctx: &'static Context,
+    module: &Module<'static>,
+    register: inkwell::values::FunctionValue<'static>,
+    enum_variants: &[(Path, usize, String)],
+    field_templates: &[(Path, i64, i64, crate::TypeId)],
+    field_names: &[(Path, i64, String)],
+    print_objects: &[(typelisp_mem::TypeId, String)],
+    live: &[bool],
+    printer_globals: &[(&str, usize)],
+) -> Result<(), String> {
+    let builder = ctx.create_builder();
+    builder.position_at_end(ctx.append_basic_block(register, "entry"));
+    let i64_ty = ctx.i64_type();
+    // A `(pointer, length)` pair per string, from a module-level constant
+    // — no heap involved, so this can run before `rt_heap_init`.
+    let literal = |builder: &inkwell::builder::Builder<'static>, text: &str| -> Result<(inkwell::values::IntValue<'static>, inkwell::values::IntValue<'static>), String> {
+        let g = builder
+            .build_global_string_ptr(text, "print_reg_str")
+            .map_err(|e| format!("failed to build a printer-registration string: {}", e))?;
+        Ok((
+            g.as_pointer_value().const_to_int(i64_ty),
+            i64_ty.const_int(text.len() as u64, false),
+        ))
+    };
+    let call = |builder: &inkwell::builder::Builder<'static>, name: &str, words: &[inkwell::values::IntValue<'static>]| -> Result<(), String> {
+        let f = module
+            .get_function(name)
+            .ok_or_else(|| format!("internal error: {} not declared in module", name))?;
+        let args_ptr = builder
+            .build_alloca(i64_ty.array_type(words.len() as u32), "print_reg_args")
+            .map_err(|e| format!("failed to alloca printer-registration args: {}", e))?;
+        for (i, w) in words.iter().enumerate() {
+            let p = unsafe {
+                builder
+                    .build_gep(i64_ty, args_ptr, &[i64_ty.const_int(i as u64, false)], "print_reg_arg_ptr")
+                    .map_err(|e| format!("failed to build printer-registration gep: {}", e))?
+            };
+            builder.build_store(p, *w).map_err(|e| format!("failed to store printer-registration arg: {}", e))?;
+        }
+        builder
+            .build_call(f, &[args_ptr.into(), ctx.i32_type().const_int(words.len() as u32 as u64, false).into()], "print_reg_result")
+            .map_err(|e| format!("failed to build {} call: {}", name, e))?;
+        Ok(())
+    };
+    // The definitions and the field types, read out of the module's type
+    // table (`compile::type_table`): a type's id is this process's number,
+    // so the executable carries the shapes and its startup interns them.
+    let ty = |ty: crate::TypeId| crate::compile::type_table::load(&builder, module, ty);
+    let definition = |path: &Path| ty(typelisp_front::type_key::type_key_id(path, Vec::new()));
+    for (path, variant, name) in enum_variants {
+        let (name_ptr, name_len) = literal(&builder, name)?;
+        call(&builder, "rt_print_enum_variant", &[definition(path)?, i64_ty.const_int(*variant as u64, false), name_ptr, name_len])?;
+    }
+    for (path, variant, index, template) in field_templates {
+        call(
+            &builder,
+            "rt_print_field_template",
+            &[definition(path)?, i64_ty.const_int(*variant as u64, true), i64_ty.const_int(*index as u64, true), ty(*template)?],
+        )?;
+    }
+    for (path, index, name) in field_names {
+        let (name_ptr, name_len) = literal(&builder, name)?;
+        call(&builder, "rt_print_field_name", &[definition(path)?, i64_ty.const_int(*index as u64, true), name_ptr, name_len])?;
+    }
+    for ((receiver, symbol), live) in print_objects.iter().zip(live) {
+        // A type no value of can exist is registered with no method, so
+        // that printing one after all is a loud error rather than the
+        // default rendering.
+        let fn_ptr = if *live {
+            let target = module.get_function(symbol).ok_or_else(|| {
+                format!("compile-file: `print-object` implementation `{}` was not compiled into this file", symbol)
+            })?;
+            classic_door(ctx, module, target)?
+        } else {
+            i64_ty.const_zero()
+        };
+        call(&builder, "rt_print_object_method", &[ty(*receiver)?, fn_ptr])?;
+    }
+    for (name, id) in printer_globals {
+        let (name_ptr, name_len) = literal(&builder, name)?;
+        call(&builder, "rt_print_global", &[name_ptr, name_len, i64_ty.const_int(*id as u64, false)])?;
+    }
+    // Type names are written for the module the program was checked in,
+    // as the interpreter writes them — the view the checker left behind.
+    let view = typelisp_print::shared::name_view();
+    let words = |name: &str, words: &[typelisp_mem::type_words::Word]| {
+        let (global, len) = crate::compile::type_table::constant_words(module, name, words);
+        (global.as_pointer_value().const_to_int(i64_ty), i64_ty.const_int(len as u64, false))
+    };
+    let (module_ptr, module_len) = words("print_name_module", &typelisp_mem::type_words::ns_words(view.module()));
+    call(&builder, "rt_print_name_module", &[module_ptr, module_len])?;
+    // In the order of the names, so the executable is the same each time.
+    let mut imports: Vec<(&(typelisp_mem::NsId, typelisp_mem::symbols::SymRef), &&'static str)> = view.imports().iter().collect();
+    imports.sort_by_key(|(_, name)| **name);
+    for (i, ((ns, sym), name)) in imports.into_iter().enumerate() {
+        let (def_ptr, def_len) =
+            words(&format!("print_name_import${}", i), &typelisp_mem::type_words::definition_words(*ns, *sym));
+        let (name_ptr, name_len) = literal(&builder, name)?;
+        call(&builder, "rt_print_name_import", &[def_ptr, def_len, name_ptr, name_len])?;
+    }
+    builder.build_return(None).map_err(|e| format!("failed to build the printer registration's return: {}", e))?;
     Ok(())
 }
 

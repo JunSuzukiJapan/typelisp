@@ -40,12 +40,8 @@ fn compile_and_capture(name: &str, source: &str) -> (i32, String) {
     (code, String::from_utf8_lossy(&out.stderr).into_owned())
 }
 
-/// `~/name/` in a standalone executable.
-///
-/// An AOT program has no table of definitions to fetch one from by name, so
-/// `compile_file` emits one `rt_format_call_method` registration per
-/// definition the checker resolved a directive to
-/// (`Checker::format_call_targets`), beside the `print-object` ones. Exit
+/// `~/name/` in a standalone executable: the directive is a call of the
+/// definition the checker resolved it to, compiled with its caller. Exit
 /// code 0 means the directive produced exactly what the interpreter produces
 /// for the same program.
 #[test]
@@ -62,6 +58,43 @@ fn a_call_directive_dispatches_in_a_compiled_executable() {
         ),
         0
     );
+}
+
+/// The prelude's types print with their own `print-object` in an
+/// executable. An executable registers the `print-object` of a type only when
+/// its code can make a value of it (`compile::aot::live_print_objects`), and
+/// these are made by prelude functions the program calls (`complex`,
+/// `pathname`, `decode-universal-time`) or by the runtime (`FileError`).
+#[test]
+fn the_preludes_types_print_with_their_print_object_in_an_executable() {
+    let program = r#"(use std::time::decode-universal-time)
+           (use std::time::encode-universal-time)
+           (use std::fs::open-input)
+           (use std::path::parse-namestring)
+           (defun main () ()
+             (println "~a" (complex 1.0 2.0))
+             (println "~a" (parse-namestring "a/b.txt"))
+             (println "~a" (decode-universal-time (encode-universal-time 0 0 0 1 1 2000 0) 0))
+             (match (open-input "/nonexistent-dir/no-such-file")
+               ((Ok _) (println "opened"))
+               ((Err e) (println "~s" e))))"#;
+    let dir = tmp_dir();
+    let interpreted_path = dir.join("prelude_print_objects_interp.typl");
+    std::fs::write(&interpreted_path, format!("{}\n(main)", program)).expect("failed to write test source file");
+    let interpreted = Command::new(env!("CARGO_BIN_EXE_typl")).arg(&interpreted_path).output().expect("failed to run typl");
+    let expected = String::from_utf8_lossy(&interpreted.stdout).into_owned();
+    assert!(
+        expected.starts_with("#C(1.0 2.0)\na/b.txt\n#<decoded-time 2000-01-01 00:00:00 +00:00 Sat>\n#<fileerror "),
+        "{}{}",
+        expected,
+        String::from_utf8_lossy(&interpreted.stderr)
+    );
+    let src_path = dir.join("prelude_print_objects.typl");
+    let out_path = dir.join("prelude_print_objects");
+    std::fs::write(&src_path, program).expect("failed to write test source file");
+    typelisp::compile::aot::compile_file(src_path.to_str().unwrap(), out_path.to_str().unwrap()).expect("compile_file failed");
+    let compiled = Command::new(&out_path).output().expect("failed to run the compiled executable");
+    assert_eq!(String::from_utf8_lossy(&compiled.stdout), expected, "{}", String::from_utf8_lossy(&compiled.stderr));
 }
 
 /// An `impl` for each instantiation of a generic type: the executable

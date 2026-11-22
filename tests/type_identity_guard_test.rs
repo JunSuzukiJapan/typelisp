@@ -483,3 +483,51 @@ fn the_scan_covers_the_files_the_invariant_lives_in() {
         assert!(files.contains(&expected.to_string()), "scan missed {}", expected);
     }
 }
+
+/// Every type the runtime writes as a `TypeSpec` is one `typelisp_mem::
+/// runtime_builds` answers for: a primitive, or a definition a row of
+/// `BUILTIN_TYPES` or `RUNTIME_BUILT` names. An executable leaves out the
+/// `print-object` of a type it finds no code making a value of
+/// (`compile::aot::live_print_objects`), and code that makes one at run time
+/// from a `TypeSpec` is invisible to that search, so a definition missing
+/// here would print as an internal error.
+#[test]
+fn every_type_the_runtime_writes_out_is_one_it_is_known_to_build() {
+    let rows = std::fs::read_to_string(repo_root().join("crates/typelisp-mem/src/value.rs")).expect("reading value.rs");
+    let mut files = Vec::new();
+    collect(&repo_root().join("src"), &mut files);
+    let crates = std::fs::read_dir(repo_root().join("crates")).expect("reading crates/");
+    for entry in crates {
+        collect(&entry.expect("a crate's directory").path().join("src"), &mut files);
+    }
+    assert!(files.len() > 50, "the scan found only {} files — is the walk broken?", files.len());
+    let mut missing = Vec::new();
+    for file in &files {
+        let text = std::fs::read_to_string(file).expect("reading a source file");
+        // `Named(StdModule::X, "name"`, its parts possibly on lines of their
+        // own.
+        let mut rest = text.as_str();
+        while let Some(at) = rest.find("Named(") {
+            rest = &rest[at + "Named(".len()..];
+            let spec = rest.trim_start();
+            let Some(module) = spec.strip_prefix("StdModule::") else { continue };
+            let module: String = module.chars().take_while(|c| c.is_ascii_uppercase() || *c == '_').collect();
+            let after = spec["StdModule::".len() + module.len()..].trim_start();
+            let Some(after) = after.strip_prefix(',') else { continue };
+            let Some(name) = after.trim_start().strip_prefix('"').and_then(|s| s.split('"').next()) else { continue };
+            if module == "PRIMITIVE" {
+                continue;
+            }
+            let row = format!("(StdModule::{}, \"{}\"", module, name);
+            if !rows.contains(&row) {
+                missing.push(format!("{}: StdModule::{} `{}`", file.display(), module, name));
+            }
+        }
+    }
+    assert!(
+        missing.is_empty(),
+        "the runtime writes these types without `BUILTIN_TYPES` or `RUNTIME_BUILT` (crates/typelisp-mem/src/value.rs) \
+         naming them — add each definition to `RUNTIME_BUILT`:\n  {}",
+        missing.join("\n  ")
+    );
+}
