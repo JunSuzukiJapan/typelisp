@@ -39,7 +39,10 @@ wasm32-unknown-unknown では、strip しても 2,042,594 バイトあった。
   - 値を作るのは、型表から型を読んでランタイムへ渡すコンパイル済みコードか、ランタイム自身（`typelisp_mem::runtime_builds`: 基本型、`BUILTIN_TYPES`、`RUNTIME_BUILT`）。`main` から届く関数が読む型（`aot/reach.rs` の `TypeReach`）とその型引数、ランタイムが作る型を生きているとし、生きている型の `print-object` から届くものも同じように数える。印字器の登録の関数は数えない。`eval` を呼ぶプログラムは全てを登録する。
   - 落とした型は関数の番地 0 で登録し、その値を印字すると内部エラーになる。`RUNTIME_BUILT` の漏れは `type_identity_guard_test` がソースの `TypeSpec` から見つける。
   - 測定（release のランタイム、hello）: `__text` 1,062,832 → 1,017,296。hello では 18 個を落とした。残る大きなものは、印字器の登録の関数そのもの（27,808 バイト、登録ごとに呼び出しを並べている）、std の backtrace（gimli、addr2line、rustc_demangle）、rustls と ring（0c）、基本型の `print-object` から届く bignum と `Renderer`。
-- 0c: ランタイムの共有状態（`RtShared`）のデストラクタ。ストリームの表を通って TLS サーバの drop まで届き、rustls を残している。共有状態の破棄が、使われたものだけに届く形にする。
+- 0c（済）: ランタイムの共有状態（`RtShared`）のデストラクタ。スレッドローカルの破棄からストリームの表の drop を通って、TLS の接続とサーバの設定の drop まで届き、rustls を残していた。ストリームの `close` も rustls のメソッドを直に呼んでいた。
+  - TLS の接続（`net::TlsConn`）とリスナーの設定（`net::TlsServer`）を、型を名指さない箱に入れた。drop と close は箱の vtable を通るので、rustls を参照するのは接続を作る所（`tls-connect`、`tls-listen`、`accept`）だけになる。
+  - 測定（release のランタイム、hello）: `__text` 1,017,296 → 970,336。rustls の記号は 180 → 0。
+  - ring のアセンブリ（約 102KB）は残る。アーカイブはコード生成単位ごとに読み込まれ、読み込んだオブジェクトの参照も解決されるので、死んだコードからの参照で ring のオブジェクトも読み込まれる。Rust のオブジェクトは関数ごとに落とせるが、ring のアセンブリのオブジェクトは macOS の ld64 では分けられず（`dont-dead-strip`）、まるごと残る。Linux の `--gc-sections` はセクション単位で届くかを見るので落ちる見込み（未確認）。組み込みのターゲットには net が無いので関係しない。
 - 0e: 書式をコンパイル時に展開する（2026-11-22 ユーザー決定、下の「書式の展開」）。
 - 0d: 0b、0c、0e の後に測り直し、残った大きなもの（書式エンジン、std の panic と backtrace の処理など）を同じ方法で調べる。調べ方は、`-Wl,-why_live,<記号>` で `main` からの参照の鎖を出す。
 

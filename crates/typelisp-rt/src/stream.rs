@@ -137,7 +137,7 @@ pub(crate) enum Backend {
     #[cfg(not(target_family = "wasm"))]
     Tcp {
         sock: Sock,
-        tls: Option<Box<rustls::Connection>>,
+        tls: Option<crate::net::TlsConn>,
         rbuf: VecDeque<u8>,
         wbuf: VecDeque<u8>,
         failed: Option<String>,
@@ -494,8 +494,7 @@ impl StreamTable {
         // from a cut connection.
         #[cfg(not(target_family = "wasm"))]
         if let Backend::Tcp { sock, tls: Some(conn), .. } = &mut s.backend {
-            conn.send_close_notify();
-            let _ = conn.write_tls(sock);
+            conn.close(sock);
         }
         // The socket file is the listener's address: gone with the listener.
         #[cfg(not(target_family = "wasm"))]

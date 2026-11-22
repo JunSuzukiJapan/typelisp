@@ -73,7 +73,7 @@ const FILL_CHUNK: usize = 16 * 1024;
 /// backend keeps (`unread-char`'s pushback, `fresh-line`'s last character).
 struct TcpParts<'a> {
     sock: &'a mut Sock,
-    tls: &'a mut Option<Box<rustls::Connection>>,
+    tls: &'a mut Option<TlsConn>,
     rbuf: &'a mut VecDeque<u8>,
     wbuf: &'a mut VecDeque<u8>,
     failed: &'a mut Option<String>,
@@ -82,7 +82,7 @@ struct TcpParts<'a> {
 }
 
 /// A fresh entry for a connected socket, before anything has crossed it.
-fn tcp_entry(sock: Sock, tls: Option<Box<rustls::Connection>>) -> Backend {
+fn tcp_entry(sock: Sock, tls: Option<TlsConn>) -> Backend {
     Backend::Tcp { sock, tls, rbuf: VecDeque::new(), wbuf: VecDeque::new(), failed: None }
 }
 
@@ -284,7 +284,7 @@ impl StreamTable {
         rustls::server::ParsedCertificate::try_from(end_entity)
             .and_then(|cert| rustls::client::verify_server_name(&cert, &server_name))
             .map_err(|e| format!("tls-add-certificate: {} is not for {}: {}", cert_file, name, e))?;
-        server.add_certificate(dns.as_ref().to_ascii_lowercase(), ck).map_err(|e| format!("tls-add-certificate: {}", e))
+        server.state().add_certificate(dns.as_ref().to_ascii_lowercase(), ck).map_err(|e| format!("tls-add-certificate: {}", e))
     }
 
     fn listen_with(&mut self, host: &str, port: i64, tls: Option<TlsServer>, who: &str) -> StreamResult<Handle> {
@@ -314,9 +314,9 @@ impl StreamTable {
         sock.set_nonblocking(true).map_err(|e| format!("accept: {}", e))?;
         let conn = match tls {
             None => None,
-            Some(TlsServer { config, .. }) => {
-                let server = rustls::ServerConnection::new(Arc::clone(config)).map_err(|e| format!("accept: tls: {}", e))?;
-                Some(Box::new(rustls::Connection::Server(server)))
+            Some(server) => {
+                let server = rustls::ServerConnection::new(Arc::clone(&server.state().config)).map_err(|e| format!("accept: tls: {}", e))?;
+                Some(TlsConn::new(rustls::Connection::Server(server)))
             }
         };
         Ok(Some(self.insert(StreamObj::new(tcp_entry(sock, conn), true, true))))
@@ -343,6 +343,7 @@ impl StreamTable {
                 Err(e) => Ok(Some(peer_failed(failed, format!("read: {}", e)))),
             };
         };
+        let conn = conn.get();
         // TLS: anything the connection wants to send first (a handshake
         // message, an alert) goes out, best effort — a handshake's writes
         // are small and fit the socket buffer, so this does not wait for
@@ -403,7 +404,7 @@ impl StreamTable {
         let Some(conn) = tls else {
             return Err("tls-connect: not a TLS connection".to_string());
         };
-        tls_handshake_step(conn, sock).map_err(|e| format!("tls-connect: {}", e))
+        tls_handshake_step(conn.get(), sock).map_err(|e| format!("tls-connect: {}", e))
     }
 
     /// Puts a TLS client connection on a connected socket, for `server_name`
@@ -438,7 +439,7 @@ impl StreamTable {
         let name = rustls::pki_types::ServerName::try_from(server_name.to_string())
             .map_err(|_| format!("tls-connect: {} is not a valid server name", server_name))?;
         let conn = rustls::ClientConnection::new(config, name).map_err(|e| format!("tls-connect: {}", e))?;
-        *tls = Some(Box::new(rustls::Connection::Client(conn)));
+        *tls = Some(TlsConn::new(rustls::Connection::Client(conn)));
         Ok(())
     }
 
@@ -453,7 +454,7 @@ impl StreamTable {
         let Some(conn) = tls else {
             return Ok(None);
         };
-        match conn.peer_certificates().and_then(|chain| chain.first()) {
+        match conn.get().peer_certificates().and_then(|chain| chain.first()) {
             None => Ok(None),
             Some(cert) => crate::x509::subject(cert.as_ref()).map(Some).map_err(|e| format!("peer-subject: {}", e)),
         }
@@ -466,7 +467,7 @@ impl StreamTable {
     /// the client sent no name (it connected by address).
     pub fn net_server_name(&mut self, h: Handle) -> StreamResult<Option<String>> {
         let TcpParts { tls, .. } = self.tcp(h, "requested-server-name")?;
-        Ok(match tls.as_deref() {
+        Ok(match tls.as_ref().map(TlsConn::peek) {
             Some(rustls::Connection::Server(server)) => server.server_name().map(str::to_string),
             _ => None,
         })
@@ -600,6 +601,7 @@ impl StreamTable {
             return Ok(None);
         }
         if let Some(conn) = tls {
+            let conn = conn.get();
             if conn.is_handshaking() {
                 match tls_handshake_step(conn, sock) {
                     Ok(None) => {}
@@ -660,6 +662,7 @@ impl StreamTable {
             return Ok(());
         }
         if let Some(conn) = tls {
+            let conn = conn.get();
             // TLS has its own end-of-stream message, and the peer needs it to
             // tell a finished request from a truncated one.
             conn.send_close_notify();
