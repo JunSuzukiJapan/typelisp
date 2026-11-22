@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/format.md @ 59f6f286d9081f10d4e2d72836362c3efc3e42af -->
+<!-- translated-from: docs/ja/reference/functions/format.md @ 9657f5a39527be80deea76fe60ecc58ab1752689 -->
 # Dyrektywy formatu
 
 Dyrektywy zapisywane w łańcuchach sterujących `print`/`println`/`format`. Obejmują niemal wszystkie
@@ -109,13 +109,14 @@ miejscu i wypisuje łańcuch zwrócony przez wywołanie. Zużywa jeden argument.
 - Rozstrzyganie nazwy jest takie samo jak przy wywołaniu (zob. [Referencja składni 3.10](../syntax.md#310-module--use--przestrzenie-nazw)). Jeśli
   typ argumentu ma metodę `name`, wywoływana jest ona; w przeciwnym razie widoczna funkcja `name`. Funkcję z
   modułu można wskazać ścieżką (`~/m::shout/`).
-- Wywołać można funkcję lub metodę napisaną w typelisp, która przyjmuje argument, `colon` i `at` bez zmian
-  i zwraca `string`. Funkcji wbudowanych wywołać nie można.
+- Wywoływana jest funkcja lub metoda, która przyjmuje argument, `colon` i `at` i zwraca `string`.
+  Wywołać można także wbudowane.
 - **To, co zostanie wywołane, ustala się podczas sprawdzania.** Sprawdzający znajduje każdy argument, który
   może dotrzeć do tego `~/name/`, uwzględniając przeskoki `~*` i `~[`, i rozstrzyga nazwę dla typu każdego
-  z nich. Jeśli któregoś nie da się rozstrzygnąć, jest to błąd czasu sprawdzania; błędem jest też sytuacja,
-  w której możliwe argumenty wywołałyby dwie różne definicje. W czasie wykonania nie szuka się żadnych nazw,
-  więc w plikach wykonywalnych AOT działa to tak samo.
+  z nich. Jeśli któregoś nie da się rozstrzygnąć, jest to błąd czasu sprawdzania. Możliwe argumenty mogą
+  zależnie od typu wywoływać różne definicje; w czasie wykonania wywoływana jest ta dla typu argumentu,
+  który faktycznie dotarł. W czasie wykonania nie szuka się żadnych nazw, więc w plikach wykonywalnych AOT
+  działa to tak samo.
 - **Nie można go użyć wewnątrz `~{`, `~:{`, `~:@{` ani `~<...~:>`** (błąd czasu sprawdzania). Typ elementów
   argumentu-listy to `Sexpr`, który nie pozwala ustalić, co wywołać. `~@{` przechodzi przez pozostałe
   argumenty wywołania, których typy są znane, więc tam można go użyć.

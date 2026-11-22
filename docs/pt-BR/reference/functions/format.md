@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/format.md @ 59f6f286d9081f10d4e2d72836362c3efc3e42af -->
+<!-- translated-from: docs/ja/reference/functions/format.md @ 9657f5a39527be80deea76fe60ecc58ab1752689 -->
 # Diretivas de formato
 
 As diretivas escritas nas strings de controle de `print`/`println`/`format`. Elas cobrem quase todas as
@@ -109,13 +109,13 @@ diretiva tem `:` e `@`.
 - A resolução do nome é a mesma de uma chamada ([Referência de sintaxe 3.10](../syntax.md#310-module--use--namespaces)). Se o tipo do
   argumento tem um método `name`, ele é chamado; senão, a função visível `name`. Uma função de um módulo
   pode ser nomeada pelo seu caminho (`~/m::shout/`).
-- O que pode ser chamado é uma função ou um método escrito em typelisp que recebe o argumento, `colon` e
-  `at` como estão e devolve uma `string`. Funções embutidas não podem ser chamadas.
+- O que é chamado é uma função ou um método que recebe o argumento, `colon` e `at` e devolve uma
+  `string`. Os embutidos também podem ser chamados.
 - **O que chamar é decidido na verificação.** O verificador encontra todos os argumentos que podem chegar
   a esse `~/name/`, levando em conta os movimentos de `~*` e `~[`, e resolve o nome com o tipo de cada um.
-  Se algum não puder ser resolvido, é um erro na verificação, e também é erro o caso em que os argumentos
-  que podem chegar chamariam duas definições diferentes. Nenhum nome é procurado em tempo de execução,
-  então funciona igual nos executáveis AOT.
+  Se algum não puder ser resolvido, é um erro na verificação. Os argumentos que podem chegar podem chamar
+  definições diferentes conforme o tipo; em tempo de execução, chama-se a do tipo do argumento que de fato
+  chegou. Nenhum nome é procurado em tempo de execução, então funciona igual nos executáveis AOT.
 - **Não pode ser usado dentro de `~{`, `~:{`, `~:@{` ou `~<...~:>`** (erro na verificação). O tipo dos
   elementos de um argumento lista é `Sexpr`, que não decide o que chamar. `~@{` percorre os argumentos
   restantes da chamada, cujos tipos são conhecidos, então ali pode ser usado.

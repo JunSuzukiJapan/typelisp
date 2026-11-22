@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/format.md @ 59f6f286d9081f10d4e2d72836362c3efc3e42af -->
+<!-- translated-from: docs/ja/reference/functions/format.md @ 9657f5a39527be80deea76fe60ecc58ab1752689 -->
 # Formatdirektiven
 
 Die Direktiven, die man in die Steuerzeichenketten von `print`/`println`/`format` schreibt. Sie decken nahezu
@@ -110,13 +110,14 @@ Die folgenden Direktiven von CL werden nicht unterstützt (sie sind Fehler bei d
 - Die Namensauflösung ist dieselbe wie bei einem Aufruf ([Syntaxreferenz 3.10](../syntax.md#310-module--use--namensräume)). Hat der Typ des
   Arguments eine Methode `name`, wird sie aufgerufen, sonst die sichtbare Funktion `name`. Eine Funktion
   in einem Modul kann über ihren Pfad benannt werden (`~/m::shout/`).
-- Aufrufen lässt sich eine in typelisp geschriebene Funktion oder Methode, die das Argument, `colon` und
-  `at` unverändert nimmt und einen `string` zurückgibt. Eingebaute Funktionen lassen sich nicht aufrufen.
+- Aufgerufen wird eine Funktion oder Methode, die das Argument, `colon` und `at` nimmt und einen
+  `string` zurückgibt. Auch eingebaute lassen sich aufrufen.
 - **Was aufgerufen wird, steht zur Prüfzeit fest.** Der Prüfer ermittelt, auch unter Berücksichtigung der
   Sprünge durch `~*` und `~[`, jedes Argument, das dieses `~/name/` erreichen kann, und löst den Namen
-  für dessen Typ auf. Lässt sich einer davon nicht auflösen, ist das ein Fehler zur Prüfzeit, ebenso wenn
-  die erreichbaren Argumente zwei verschiedene Definitionen aufrufen würden. Zur Laufzeit wird kein Name
-  gesucht, daher funktioniert es in AOT-Programmen genauso.
+  für dessen Typ auf. Lässt sich einer davon nicht auflösen, ist das ein Fehler zur Prüfzeit. Die
+  erreichbaren Argumente dürfen je nach Typ verschiedene Definitionen aufrufen; zur Laufzeit wird die für
+  den Typ des tatsächlich erreichten Arguments aufgerufen. Zur Laufzeit wird kein Name gesucht, daher
+  funktioniert es in AOT-Programmen genauso.
 - **In `~{`, `~:{`, `~:@{` und `~<...~:>` ist es nicht erlaubt** (Fehler zur Prüfzeit). Der Typ der
   Elemente eines Listenarguments ist `Sexpr`, der nicht festlegen kann, was aufgerufen wird. `~@{` geht
   die restlichen Argumente des Aufrufs durch, deren Typen bekannt sind, und ist dort daher erlaubt.

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/format.md @ 59f6f286d9081f10d4e2d72836362c3efc3e42af -->
+<!-- translated-from: docs/ja/reference/functions/format.md @ 9657f5a39527be80deea76fe60ecc58ab1752689 -->
 # Directives de format
 
 Les directives qu'on écrit dans les chaînes de contrôle de `print`/`println`/`format`. Elles couvrent presque toutes
@@ -109,12 +109,13 @@ si la directive porte `:` et `@`.
 - La résolution du nom est la même que pour un appel ([Référence de la syntaxe 3.10](../syntax.md#310-module--use--espaces-de-noms)). Si le type
   de l'argument a une méthode `name`, c'est elle qui est appelée ; sinon, la fonction visible `name`. Une
   fonction d'un module peut être désignée par son chemin (`~/m::shout/`).
-- Ce qui peut être appelé est une fonction ou une méthode écrite en typelisp qui reçoit l'argument,
-  `colon` et `at` tels quels et renvoie une `string`. Les fonctions intégrées ne peuvent pas être appelées.
+- Ce qui est appelé est une fonction ou une méthode qui reçoit l'argument, `colon` et `at` et renvoie
+  une `string`. Les fonctions et méthodes intégrées peuvent aussi être appelées.
 - **Ce qui est appelé est fixé à la vérification.** Le vérificateur trouve chaque argument qui peut
   atteindre ce `~/name/`, en tenant compte des déplacements par `~*` et `~[`, et résout le nom pour le
-  type de chacun. Si l'un d'eux ne peut pas être résolu, c'est une erreur à la vérification, de même si les
-  arguments qui peuvent l'atteindre appelleraient deux définitions différentes. Aucun nom n'est cherché à
+  type de chacun. Si l'un d'eux ne peut pas être résolu, c'est une erreur à la vérification. Les arguments
+  qui peuvent l'atteindre peuvent appeler des définitions différentes selon leur type ; à l'exécution,
+  c'est celle du type de l'argument effectivement atteint qui est appelée. Aucun nom n'est cherché à
   l'exécution, donc cela fonctionne de la même façon dans les exécutables AOT.
 - **Il ne peut pas être utilisé dans `~{`, `~:{`, `~:@{` ni `~<...~:>`** (erreur à la vérification). Le
   type des éléments d'un argument liste est `Sexpr`, qui ne peut pas déterminer ce qu'il faut appeler.
