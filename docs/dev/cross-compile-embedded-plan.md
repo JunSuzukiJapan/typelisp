@@ -35,17 +35,22 @@ typl -c SOURCE [-o OUTPUT] --target thumbv7em-none-eabihf [--heap-cells N | --no
 wasm32-unknown-unknown では、strip しても 2,042,594 バイトあった。
 
 - 0a（済）: ネイティブのリンクに `-Wl,-dead_strip`（Linux は `-Wl,--gc-sections`）を渡す。これが無いと、アーカイブのオブジェクトがまるごと入っていた。
-- 0b（済）: `print-object` の登録。生成する `main` が、ファイルと prelude にある全ての `print-object` を `rt_print_object_method` で登録していたため、使わない型の `print-object` もその先も残っていた（`file-stream` から `rt_stream_describe`、`decoded-time` から bignum）。今は、その型の値が作られうるときだけ登録する（`aot.rs` の `live_print_objects`）。
-  - 値を作るのは、型表から型を読んでランタイムへ渡すコンパイル済みコードか、ランタイム自身（`typelisp_mem::runtime_builds`: 基本型、`BUILTIN_TYPES`、`RUNTIME_BUILT`）。`main` から届く関数が読む型（`aot/reach.rs` の `TypeReach`）とその型引数、ランタイムが作る型を生きているとし、生きている型の `print-object` から届くものも同じように数える。印字器の登録の関数は数えない。`eval` を呼ぶプログラムは全てを登録する。
-  - 落とした型は関数の番地 0 で登録し、その値を印字すると内部エラーになる。`RUNTIME_BUILT` の漏れは `type_identity_guard_test` がソースの `TypeSpec` から見つける。
+- 0b（済）: `print-object` の登録。生成する `main` が、ファイルと prelude にある全ての `print-object` を `rt_print_object_method` で登録していたため、使わない型の `print-object` もその先も残っていた（`file-stream` から `rt_stream_describe`、`decoded-time` から bignum）。今は、その型の値が作られうるときだけ登録する（`aot.rs` の `live_types`）。
+  - 値を作るのは、型表から型を読んでランタイムへ渡すコンパイル済みコードか、ランタイム自身（`typelisp_mem::runtime_builds`: 基本型と `BUILTIN_TYPES`）。`main` から届く関数が読む型（`aot/reach.rs` の `TypeReach`）とその型引数、ランタイムが作る型を生きているとし、生きている型の `print-object` から届くものも同じように数える。印字器の登録の関数は数えない。`eval` を呼ぶプログラムは全てを登録する。
+  - 落とした型は関数の番地 0 で登録し、その値を印字すると内部エラーになる。ランタイムの `TypeSpec` に出る定義は、`BUILTIN_TYPES` か `NAMED_NOT_BUILT`（名前は出るが実行ファイルのランタイムは値を作らない、理由付き）のどちらかに載っていることを `type_identity_guard_test` が確かめる。
   - 測定（release のランタイム、hello）: `__text` 1,062,832 → 1,017,296。hello では 18 個を落とした。残る大きなものは、印字器の登録の関数そのもの（27,808 バイト、登録ごとに呼び出しを並べている）、std の backtrace（gimli、addr2line、rustc_demangle）、rustls と ring（0c）、基本型の `print-object` から届く bignum と `Renderer`。
 - 0c（済）: ランタイムの共有状態（`RtShared`）のデストラクタ。スレッドローカルの破棄からストリームの表の drop を通って、TLS の接続とサーバの設定の drop まで届き、rustls を残していた。ストリームの `close` も rustls のメソッドを直に呼んでいた。
   - TLS の接続（`net::TlsConn`）とリスナーの設定（`net::TlsServer`）を、型を名指さない箱に入れた。drop と close は箱の vtable を通るので、rustls を参照するのは接続を作る所（`tls-connect`、`tls-listen`、`accept`）だけになる。
   - 測定（release のランタイム、hello）: `__text` 1,017,296 → 970,336。rustls の記号は 180 → 0。
   - ring のアセンブリ（約 102KB）は残る。アーカイブはコード生成単位ごとに読み込まれ、読み込んだオブジェクトの参照も解決されるので、死んだコードからの参照で ring のオブジェクトも読み込まれる。Rust のオブジェクトは関数ごとに落とせるが、ring のアセンブリのオブジェクトは macOS の ld64 では分けられず（`dont-dead-strip`）、まるごと残る。Linux の `--gc-sections` はセクション単位で届くかを見るので落ちる見込み（未確認）。組み込みのターゲットには net が無いので関係しない。
 - 0e: 書式をコンパイル時に展開する（2026-11-22 ユーザー決定、下の「書式の展開」）。
-- 0d: 0b、0c、0e の後に測り直し、残った大きなもの（書式エンジン、std の panic と backtrace の処理など）を同じ方法で調べる。調べ方は、`-Wl,-why_live,<記号>` で `main` からの参照の鎖を出す。
-
+- 0d: 0b、0c、0e の後に測り直し、残った大きなものを同じ方法で調べる。調べ方は、`-Wl,-why_live,<記号>` で `main` からの参照の鎖を、`-Wl,-why_load` でアーカイブのどのオブジェクトがなぜ読み込まれたかを出す（PATH に `cc` のラッパーを置いて渡す）。
+  - 済: 印字器の登録（変種の名前、フィールドの型と名前）も、値が作られうる型の定義の分だけにした（`aot.rs` の `Live::has_definition`）。登録の関数は 27,808 → 8,352 バイト。
+  - 済: 基本型の `print-object` は登録しない。実行ファイルの印字器が登録を引くのは構造体と enum の値だけで、基本型の値はどちらでもない。
+  - 測定（release のランタイム、hello）: `__text` 970,336 → 845,680。
+  - 外せないもの: std のバックトレース（gimli、addr2line、rustc_demangle、約 75KB）。std のメモリ確保の失敗とパニックの処理から届く。std を作り直さない限り外せない。組み込み（段階 1 で `no_std`）では入らない。
+  - 見送り: stream の組み込みは全て `stream_builtin` の名前による振り分けを通るので、shim を 1 つ使うと全ての操作が残る（約 12KB）。組み込みでは段階 1 でファイルとネットワークが外れる。
+  - 次: `BUILTIN_TYPES` のうちランタイムが値を作る型（エラー型、時刻、`heap-info`）を常に生きているとしている。どの shim がどの型を作りうるかの表を作り、届く shim から決める。
 ### 書式の展開（段階 0e）
 
 release のランタイムでの測定（上と同じ hello）: `__text` 1,040,368 バイトのうち、書式エンジン（`typelisp_print`）が 176KB、そこから届く bignum が 50KB。`println "hello"` は `rt_println` から解釈器全体（`interp_seq` → `interp_dir` → 全ての指示子の描画）に届く。指示子を 1 つも使わない文字列でも同じ。

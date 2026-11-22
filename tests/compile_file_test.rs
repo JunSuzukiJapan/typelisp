@@ -62,7 +62,7 @@ fn a_call_directive_dispatches_in_a_compiled_executable() {
 
 /// The prelude's types print with their own `print-object` in an
 /// executable. An executable registers the `print-object` of a type only when
-/// its code can make a value of it (`compile::aot::live_print_objects`), and
+/// its code can make a value of it (`compile::aot::live_types`), and
 /// these are made by prelude functions the program calls (`complex`,
 /// `pathname`, `decode-universal-time`) or by the runtime (`FileError`).
 #[test]

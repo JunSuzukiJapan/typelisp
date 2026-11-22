@@ -592,7 +592,7 @@ pub fn compile_file_with(source_path: &str, output_path: &str, options: &BuildOp
     }
 
     // Which types have a compiled `print-object`, for the printer's AOT
-    // startup registration to choose from (`live_print_objects` keeps those
+    // startup registration to choose from (`live_types` keeps those
     // the executable can make a value of): this file's, and the prelude's own (`complex`,
     // `pathname`, the streams, the error types, ...), which no item of this
     // file names — they are chosen by the printer at run time, never called.
@@ -604,10 +604,15 @@ pub fn compile_file_with(source_path: &str, output_path: &str, options: &BuildOp
     // module has a body for: `compile-file` compiles every top-level body in
     // the file, so an `impl print-object` in it is here whether or not
     // anything calls it.
+    //
+    // A primitive's is left out: the executable's printer asks the
+    // registration about a struct's or an enum's value only
+    // (`typelisp_print::aot`), and no primitive's value is either.
     let mut print_objects: Vec<(typelisp_mem::TypeId, String)> = Vec::new();
     for item in items.iter().chain(&prelude.items) {
         if let Some(ty) = print_object_receiver(item) {
-            if !print_objects.iter().any(|(t, _)| *t == ty) {
+            let primitive = matches!(typelisp_mem::type_shape(ty), typelisp_mem::TypeShape::Named(ns, ..) if ns == typelisp_mem::StdModule::PRIMITIVE.ns());
+            if !primitive && !print_objects.iter().any(|(t, _)| *t == ty) {
                 print_objects.push((ty, target_symbol_name(item)));
             }
         }
@@ -878,7 +883,7 @@ fn build_main_wrapper(
     // In a function of its own, which `main` calls here and which is given
     // its body once `main` is complete: which `print-object`s it registers
     // depends on what the rest of the executable can make
-    // ([`live_print_objects`]).
+    // ([`live_types`]).
     let print_register = if module_calls_any(module, &PRINT_SHIMS) {
         let register = module.add_function("typelisp_print_register", ctx.void_type().fn_type(&[], false), None);
         builder.build_call(register, &[], "").map_err(|e| format!("failed to build the printer registration call: {}", e))?;
@@ -1129,7 +1134,7 @@ fn build_main_wrapper(
     builder.build_return(Some(&exit_code)).map_err(|e| format!("failed to build entry-point return: {}", e))?;
 
     if let Some(register) = print_register {
-        let live = live_print_objects(module, main_fn, print_objects, eval_env.is_some())?;
+        let live = live_types(module, main_fn, print_objects, eval_env.is_some())?;
         emit_print_registration(ctx, module, register, enum_variants, field_templates, field_names, print_objects, &live, printer_globals)?;
     }
 
@@ -1145,24 +1150,52 @@ fn build_main_wrapper(
     Ok(())
 }
 
-/// Which of `print_objects` the executable registers: those of the types
-/// a value of can exist. A value is made by compiled code, which reads its
-/// type out of a type table to hand it to the runtime, or by the runtime
-/// itself ([`typelisp_mem::runtime_builds`]). So a type is live when the
-/// code the executable can run reads it, or one it is an argument of, or
-/// when the runtime builds it. What can run is what `main` reaches, and
-/// what each live type's `print-object` does in turn; the printer's own
-/// registration (still without a body here) is not walked, since naming a
-/// type there makes no value of it. A program that calls `eval` can make a
-/// value of any type, so it registers every one.
-fn live_print_objects(
+/// What the executable can make a value of, which decides what the
+/// printer's registration holds ([`emit_print_registration`]).
+struct Live {
+    /// A program that calls `eval` can make a value of any type.
+    every: bool,
+    /// Whether each of `print_objects` is registered.
+    print_objects: Vec<bool>,
+    /// The definitions of the types the executable's code reads.
+    definitions: std::collections::HashSet<(typelisp_mem::NsId, typelisp_mem::SymRef)>,
+}
+
+impl Live {
+    /// Whether a value of a type the definition at `path` makes can exist,
+    /// so that the printer needs what the registration says about it: its
+    /// variants' names, its fields' types and names.
+    fn has_definition(&self, path: &Path) -> bool {
+        if self.every {
+            return true;
+        }
+        let definition = typelisp_front::type_key::type_key_id(path, Vec::new());
+        if typelisp_mem::runtime_builds(definition) {
+            return true;
+        }
+        match typelisp_mem::type_shape(definition) {
+            typelisp_mem::TypeShape::Named(ns, sym, _) => self.definitions.contains(&(ns, sym)),
+            _ => false,
+        }
+    }
+}
+
+/// What the executable can make a value of. A value is made by compiled
+/// code, which reads its type out of a type table to hand it to the
+/// runtime, or by the runtime itself ([`typelisp_mem::runtime_builds`]). So
+/// a type is live when the code the executable can run reads it, or one it
+/// is an argument of, or when the runtime builds it. What can run is what
+/// `main` reaches, and what each live type's `print-object` does in turn;
+/// the printer's own registration (still without a body here) is not
+/// walked, since naming a type there makes no value of it.
+fn live_types(
     module: &Module<'static>,
     main_fn: inkwell::values::FunctionValue<'static>,
     print_objects: &[(typelisp_mem::TypeId, String)],
     calls_eval: bool,
-) -> Result<Vec<bool>, String> {
+) -> Result<Live, String> {
     if calls_eval {
-        return Ok(vec![true; print_objects.len()]);
+        return Ok(Live { every: true, print_objects: vec![true; print_objects.len()], definitions: Default::default() });
     }
     let mut reach = reach::TypeReach::new(module)?;
     reach.walk(module, main_fn)?;
@@ -1182,7 +1215,14 @@ fn live_print_objects(
             reach.walk(module, method)?;
         }
         if !grew {
-            return Ok(live);
+            let definitions = read
+                .into_iter()
+                .filter_map(|ty| match typelisp_mem::type_shape(ty) {
+                    typelisp_mem::TypeShape::Named(ns, sym, _) => Some((ns, sym)),
+                    _ => None,
+                })
+                .collect();
+            return Ok(Live { every: false, print_objects: live, definitions });
         }
     }
 }
@@ -1214,9 +1254,9 @@ fn with_arguments(types: &std::collections::HashSet<typelisp_mem::TypeId>) -> st
 /// The body of `register`, which the generated `main` calls before the heap
 /// exists: the printer's program facts (`typelisp_print::aot`), an enum's
 /// variant names, the fields' types and names, each type's `print-object`
-/// (`live` saying which have one, [`live_print_objects`]) and the printer
-/// control variables, none of which a standalone executable can look up the
-/// way the interpreter does.
+/// and the printer control variables, none of which a standalone executable
+/// can look up the way the interpreter does. Only for what `live` says a
+/// value of can exist ([`live_types`]): the rest is never printed.
 fn emit_print_registration(
     ctx: &'static Context,
     module: &Module<'static>,
@@ -1225,7 +1265,7 @@ fn emit_print_registration(
     field_templates: &[(Path, i64, i64, crate::TypeId)],
     field_names: &[(Path, i64, String)],
     print_objects: &[(typelisp_mem::TypeId, String)],
-    live: &[bool],
+    live: &Live,
     printer_globals: &[(&str, usize)],
 ) -> Result<(), String> {
     let builder = ctx.create_builder();
@@ -1267,22 +1307,22 @@ fn emit_print_registration(
     // so the executable carries the shapes and its startup interns them.
     let ty = |ty: crate::TypeId| crate::compile::type_table::load(&builder, module, ty);
     let definition = |path: &Path| ty(typelisp_front::type_key::type_key_id(path, Vec::new()));
-    for (path, variant, name) in enum_variants {
+    for (path, variant, name) in enum_variants.iter().filter(|(path, ..)| live.has_definition(path)) {
         let (name_ptr, name_len) = literal(&builder, name)?;
         call(&builder, "rt_print_enum_variant", &[definition(path)?, i64_ty.const_int(*variant as u64, false), name_ptr, name_len])?;
     }
-    for (path, variant, index, template) in field_templates {
+    for (path, variant, index, template) in field_templates.iter().filter(|(path, ..)| live.has_definition(path)) {
         call(
             &builder,
             "rt_print_field_template",
             &[definition(path)?, i64_ty.const_int(*variant as u64, true), i64_ty.const_int(*index as u64, true), ty(*template)?],
         )?;
     }
-    for (path, index, name) in field_names {
+    for (path, index, name) in field_names.iter().filter(|(path, ..)| live.has_definition(path)) {
         let (name_ptr, name_len) = literal(&builder, name)?;
         call(&builder, "rt_print_field_name", &[definition(path)?, i64_ty.const_int(*index as u64, true), name_ptr, name_len])?;
     }
-    for ((receiver, symbol), live) in print_objects.iter().zip(live) {
+    for ((receiver, symbol), live) in print_objects.iter().zip(&live.print_objects) {
         // A type no value of can exist is registered with no method, so
         // that printing one after all is a loud error rather than the
         // default rendering.

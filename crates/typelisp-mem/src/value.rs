@@ -203,24 +203,25 @@ pub const BUILTIN_TYPES: &[(StdModule, &str, &[TypeId])] = &[
     (StdModule::INTERNAL, "format-out", &[]),
 ];
 
-/// The definitions besides [`BUILTIN_TYPES`]' whose values the runtime
-/// builds itself, from a [`crate::TypeSpec`]: what a shim makes with no
-/// compiled code naming the type. With those and the primitives, what
-/// [`runtime_builds`] answers for. `tests/type_identity_guard_test.rs` holds
-/// every `TypeSpec` the runtime writes to one of the three.
-pub const RUNTIME_BUILT: &[(StdModule, &str)] = &[(StdModule::EVAL, "EvalError"), (StdModule::IO, "string-input-stream")];
+/// The definitions a [`crate::TypeSpec`] of the runtime names besides
+/// [`BUILTIN_TYPES`]', none of which an executable's runtime makes a value
+/// of: `string-input-stream` is only the parameter of a reader macro's
+/// function type (the prelude makes the stream it is handed), and
+/// `EvalError` is made by the interpreter alone, which an executable has
+/// only when it calls `eval` — and then it registers every type.
+/// `tests/type_identity_guard_test.rs` holds every `TypeSpec` the runtime
+/// writes to a primitive, a row of `BUILTIN_TYPES` or one of these, so that
+/// a new type the runtime makes is not missed by [`runtime_builds`].
+pub const NAMED_NOT_BUILT: &[(StdModule, &str)] = &[(StdModule::EVAL, "EvalError"), (StdModule::IO, "string-input-stream")];
 
-/// Whether the runtime can make a value of `ty` itself: a primitive, or a
-/// type defined by a row of [`BUILTIN_TYPES`] or of [`RUNTIME_BUILT`],
-/// whatever its type arguments. A value of any other type is made by
-/// compiled code, which reads the type out of its module's type table to
-/// hand it over.
+/// Whether an executable's runtime can make a value of `ty` itself, with
+/// no compiled code naming the type: a primitive, or a type defined by a
+/// row of [`BUILTIN_TYPES`], whatever its type arguments. A value of any
+/// other type is made by compiled code, which reads the type out of its
+/// module's type table to hand it over.
 pub fn runtime_builds(ty: TypeId) -> bool {
     let crate::TypeShape::Named(ns, sym, _) = crate::type_shape(ty) else { return false };
-    let defines = |(module, name): (StdModule, &str)| module.ns() == ns && sym.name() == name;
-    ns == StdModule::PRIMITIVE.ns()
-        || BUILTIN_TYPES.iter().any(|(module, name, _)| defines((*module, name)))
-        || RUNTIME_BUILT.iter().any(|(module, name)| defines((*module, name)))
+    ns == StdModule::PRIMITIVE.ns() || BUILTIN_TYPES.iter().any(|(module, name, _)| module.ns() == ns && sym.name() == *name)
 }
 
 impl TypeId {

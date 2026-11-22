@@ -484,13 +484,14 @@ fn the_scan_covers_the_files_the_invariant_lives_in() {
     }
 }
 
-/// Every type the runtime writes as a `TypeSpec` is one `typelisp_mem::
-/// runtime_builds` answers for: a primitive, or a definition a row of
-/// `BUILTIN_TYPES` or `RUNTIME_BUILT` names. An executable leaves out the
-/// `print-object` of a type it finds no code making a value of
-/// (`compile::aot::live_print_objects`), and code that makes one at run time
-/// from a `TypeSpec` is invisible to that search, so a definition missing
-/// here would print as an internal error.
+/// Every type the runtime writes as a `TypeSpec` is a primitive, a
+/// definition a row of `BUILTIN_TYPES` names (which `typelisp_mem::
+/// runtime_builds` answers for), or one `NAMED_NOT_BUILT` says the
+/// runtime makes no value of. An executable leaves out the `print-object`
+/// of a type it finds no code making a value of (`compile::aot::live_types`),
+/// and code that makes one at run time from a `TypeSpec` is invisible to
+/// that search, so a definition missing here would print as an internal
+/// error.
 #[test]
 fn every_type_the_runtime_writes_out_is_one_it_is_known_to_build() {
     let rows = std::fs::read_to_string(repo_root().join("crates/typelisp-mem/src/value.rs")).expect("reading value.rs");
@@ -526,8 +527,9 @@ fn every_type_the_runtime_writes_out_is_one_it_is_known_to_build() {
     }
     assert!(
         missing.is_empty(),
-        "the runtime writes these types without `BUILTIN_TYPES` or `RUNTIME_BUILT` (crates/typelisp-mem/src/value.rs) \
-         naming them — add each definition to `RUNTIME_BUILT`:\n  {}",
+        "the runtime writes these types without `BUILTIN_TYPES` or `NAMED_NOT_BUILT` (crates/typelisp-mem/src/value.rs) \
+         naming them — a definition the runtime makes values of goes in `BUILTIN_TYPES`, one it only names in \
+         `NAMED_NOT_BUILT` with the reason:\n  {}",
         missing.join("\n  ")
     );
 }
