@@ -14,6 +14,8 @@
 //! string whose cursor is decided at run time) take no buffer: the list and
 //! the cursor are the expansion's own locals, so the collector sees them.
 
+use num_traits::float::FloatCore;
+use typelisp_mem::prelude::*;
 use typelisp_mem::{Heap, TypeId, Value};
 
 use super::{
@@ -295,7 +297,7 @@ pub struct FixedParams {
 }
 
 fn fixed_text(f: f64, p: &FixedParams) -> Result<String, String> {
-    let scaled = f * 10f64.powi(p.k as i32);
+    let scaled = f * FloatCore::powi(10f64, p.k as i32);
     let mut s = if p.d >= 0 { format!("{:.*}", p.d as usize, scaled) } else { trim_f64(scaled) };
     if p.at && !s.starts_with('-') {
         s.insert(0, '+');
@@ -303,7 +305,7 @@ fn fixed_text(f: f64, p: &FixedParams) -> Result<String, String> {
     if p.w >= 0 {
         let w = p.w as usize;
         if s.chars().count() > w && p.overflow >= 0 {
-            s = std::iter::repeat_n(padchar(p.overflow)?, w).collect();
+            s = core::iter::repeat_n(padchar(p.overflow)?, w).collect();
         }
         s = left_pad(&s, w, padchar(p.padchar)?);
     }

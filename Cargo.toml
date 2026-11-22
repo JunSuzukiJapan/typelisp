@@ -43,8 +43,8 @@ repository = "https://github.com/JunSuzukiJapan/typelisp"
 typelisp-abi = { path = "crates/typelisp-abi", version = "0.3.7", default-features = false }
 typelisp-front = { path = "crates/typelisp-front", version = "0.3.7" }
 typelisp-mem = { path = "crates/typelisp-mem", version = "0.3.7", default-features = false }
-typelisp-print = { path = "crates/typelisp-print", version = "0.3.7" }
-typelisp-read = { path = "crates/typelisp-read", version = "0.3.7" }
+typelisp-print = { path = "crates/typelisp-print", version = "0.3.7", default-features = false }
+typelisp-read = { path = "crates/typelisp-read", version = "0.3.7", default-features = false }
 typelisp-rt = { path = "crates/typelisp-rt", version = "0.3.7" }
 
 [dependencies]
@@ -58,8 +58,8 @@ inkwell = { version = "0.9", features = ["llvm22-1"] }
 typelisp-abi = { workspace = true, features = ["std"] }
 typelisp-front.workspace = true
 typelisp-mem = { workspace = true, features = ["std"] }
-typelisp-print.workspace = true
-typelisp-read.workspace = true
+typelisp-print = { workspace = true, features = ["std"] }
+typelisp-read = { workspace = true, features = ["std"] }
 typelisp-rt.workspace = true
 lsp-server = "0.8"
 lsp-types = "0.97"

@@ -14,7 +14,8 @@
 //! the arrangement `typelisp_print::runtime::PrintHooks` already has, and
 //! for the same two reasons.
 
-use std::cell::Cell;
+use typelisp_mem::prelude::*;
+use core::cell::Cell;
 
 use typelisp_mem::{Heap, Value};
 
@@ -30,7 +31,7 @@ pub struct ReadHooks {
     pub call_reader_macro: fn(&mut Heap, Value, char, &str) -> Result<(Value, usize), String>,
 }
 
-thread_local! {
+typelisp_mem::thread_local! {
     static HOOKS: Cell<Option<ReadHooks>> = const { Cell::new(None) };
 }
 

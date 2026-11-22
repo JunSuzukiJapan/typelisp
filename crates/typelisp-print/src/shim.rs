@@ -33,6 +33,7 @@
 //! returns, and the compiled code that called it leaves for the `catch`/
 //! `unwind-protect` region that should see them.
 
+use typelisp_mem::prelude::*;
 use typelisp_abi::{active_heap, encode, fatal, raise, tagged_arg, Raised};
 use typelisp_mem::symbols::well_known_symbol;
 use typelisp_mem::{wk, Value};

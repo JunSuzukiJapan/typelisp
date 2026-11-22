@@ -34,7 +34,10 @@
 //! nothing can check it), `~@[` (it tests for nil, which this language does
 //! not have) and the empty-bodied `~{~}`.
 
-use std::collections::{BTreeSet, HashMap};
+use num_traits::float::FloatCore;
+use typelisp_mem::prelude::*;
+use alloc::collections::BTreeSet;
+use typelisp_mem::collections::HashMap;
 
 use typelisp_mem::{FloatBox, Heap, Value};
 
@@ -446,7 +449,7 @@ fn parse_seq(chars: &[char], pos: &mut usize, stops: &[char]) -> Result<(Vec<Nod
         }
         // Flush accumulated literal text before the directive.
         if !text.is_empty() {
-            nodes.push(Node::Text(std::mem::take(&mut text)));
+            nodes.push(Node::Text(core::mem::take(&mut text)));
         }
         *pos += 1; // consume '~'
         let mut head = parse_head(chars, pos)?;
@@ -822,7 +825,7 @@ enum PVal {
 struct Sim {
     /// What each `~/name/` met, by where its name starts in the control
     /// string.
-    calls: std::cell::RefCell<std::collections::BTreeMap<usize, BTreeSet<CallArg>>>,
+    calls: core::cell::RefCell<alloc::collections::BTreeMap<usize, BTreeSet<CallArg>>>,
 }
 
 impl Sim {
@@ -1261,7 +1264,7 @@ fn left_pad(s: &str, width: usize, padchar: char) -> String {
     if len >= width {
         return s.to_string();
     }
-    let mut out: String = std::iter::repeat_n(padchar, width - len).collect();
+    let mut out: String = core::iter::repeat_n(padchar, width - len).collect();
     out.push_str(s);
     out
 }
@@ -1270,14 +1273,14 @@ fn left_pad(s: &str, width: usize, padchar: char) -> String {
 /// field is grown to `mincol` in `colinc` steps. `at` right-justifies (pad on
 /// the left) instead of the default left-justify.
 fn pad(s: &str, mincol: usize, colinc: usize, minpad: usize, padchar: char, at: bool) -> String {
-    let base: String = std::iter::repeat_n(padchar, minpad).collect();
+    let base: String = core::iter::repeat_n(padchar, minpad).collect();
     let mut content_len = s.chars().count() + minpad;
     let mut extra = 0;
     while content_len < mincol {
         extra += colinc;
         content_len += colinc;
     }
-    let fill: String = std::iter::repeat_n(padchar, extra).collect();
+    let fill: String = core::iter::repeat_n(padchar, extra).collect();
     if at {
         format!("{}{}{}", fill, base, s)
     } else {
@@ -1323,7 +1326,7 @@ fn justify(
     let extra = pad_total % gaps;
     let gap_str = |i: usize| -> String {
         let n = base + if i < extra { 1 } else { 0 };
-        std::iter::repeat_n(padchar, n).collect()
+        core::iter::repeat_n(padchar, n).collect()
     };
     let mut out = Out::new();
     let mut gap_idx = 0;
@@ -1437,7 +1440,7 @@ fn int_to_radix(n: i64, radix: u32) -> String {
     let r = radix as u128;
     while m > 0 {
         let d = (m % r) as u32;
-        digits.push(std::char::from_digit(d, radix).unwrap());
+        digits.push(core::char::from_digit(d, radix).unwrap());
         m /= r;
     }
     if negative {
@@ -1489,7 +1492,7 @@ fn float_text(f: f64, fixed: String, exponent: String) -> String {
 }
 
 fn trim_f64(f: f64) -> String {
-    if f == f.trunc() && f.is_finite() {
+    if f == FloatCore::trunc(f) && f.is_finite() {
         format!("{:.1}", f)
     } else {
         f.to_string()
@@ -1509,7 +1512,7 @@ fn trim_f64(f: f64) -> String {
 /// would print a genuine `f64` that happens to be binary32-representable
 /// with too few digits, and that one no longer reads back.
 fn trim_f32(f: f32) -> String {
-    if f == f.trunc() && f.is_finite() {
+    if f == FloatCore::trunc(f) && f.is_finite() {
         format!("{:.1}", f)
     } else {
         f.to_string()

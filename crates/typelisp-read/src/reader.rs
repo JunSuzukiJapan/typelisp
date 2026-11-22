@@ -17,8 +17,9 @@
 //! quote `'`, quasiquote `` ` ``, unquote `,`, unquote-splicing `,@`, and
 //! comments (`;` line, `#| ... |#` nested block).
 
-use std::collections::HashSet;
-use std::sync::Arc;
+use typelisp_mem::prelude::*;
+use typelisp_mem::collections::HashSet;
+use alloc::sync::Arc;
 
 use num_bigint::BigInt;
 use num_rational::BigRational;
@@ -42,6 +43,13 @@ use typelisp_mem::{spec, symbols, wk, Error, Heap, Loc, NsId, StdModule, SymRef,
 #[derive(Clone, Debug, Default)]
 pub struct Features(HashSet<SymRef>);
 
+/// `std::env::consts::ARCH` for the targets built without std.
+#[cfg(all(not(feature = "std"), target_arch = "arm"))]
+const NO_STD_ARCH: &str = "arm";
+
+#[cfg(all(not(feature = "std"), not(target_arch = "arm")))]
+compile_error!("the reader's `#+`/`#-` features do not name this architecture yet");
+
 impl Features {
     /// The default set: `:typelisp`, the host architecture, and the host OS
     /// — following the CL convention of keyword-named implementation/
@@ -50,16 +58,23 @@ impl Features {
         let mut set = HashSet::new();
         let mut add = |name: &str| set.insert(symbols::intern_keyword(name));
         add("typelisp");
-        add(std::env::consts::ARCH);
-        match std::env::consts::OS {
-            "macos" => {
-                add("darwin");
-                add("macos");
-            }
-            other => {
-                add(other);
+        #[cfg(feature = "std")]
+        {
+            add(std::env::consts::ARCH);
+            match std::env::consts::OS {
+                "macos" => {
+                    add("darwin");
+                    add("macos");
+                }
+                other => {
+                    add(other);
+                }
             }
         }
+        // Without std there is no operating system to name, and the
+        // architecture is the target's, spelled as std spells it.
+        #[cfg(not(feature = "std"))]
+        add(NO_STD_ARCH);
         if cfg!(unix) {
             add("unix");
         }

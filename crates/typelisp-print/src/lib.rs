@@ -23,6 +23,12 @@
 //! [`PrintEnv`], which the interpreter implements directly and an AOT-linked
 //! executable implements from tables its startup code registers.
 
+#![cfg_attr(not(feature = "std"), no_std)]
+
+extern crate alloc;
+
+use typelisp_mem::prelude::*;
+
 use typelisp_mem::{Heap, TypeId, Value};
 
 pub mod aot;

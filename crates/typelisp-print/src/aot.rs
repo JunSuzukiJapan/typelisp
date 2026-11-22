@@ -22,7 +22,8 @@
 //! executable, which is why `build_main_wrapper` emits them only when the
 //! module actually calls a printing shim.
 
-use std::cell::RefCell;
+use typelisp_mem::prelude::*;
+use core::cell::RefCell;
 
 use typelisp_abi::{decode, encode, fatal};
 use typelisp_mem::{Heap, TypeId, Value};
@@ -39,7 +40,7 @@ use crate::stored_type;
 // `shared::PrintShared`'s too, for the same reason: a worker thread
 // dispatches through the tables main's startup sequence filled.
 
-thread_local! {
+typelisp_mem::thread_local! {
     /// The values whose own `print-object` is running right now, innermost
     /// last — the re-entry guard, so `(impl print-object point (… (format
     /// false "~a" self)))` degrades to the built-in `#<point 1 2>` rather
@@ -72,13 +73,13 @@ const AOT_HOOKS: PrintHooks = PrintHooks {
 /// ([`typelisp_mem::TypeShape::named_definition`]).
 pub type Definition = (typelisp_mem::NsId, typelisp_mem::SymRef);
 /// `(definition, variant) -> name`: what [`rt_print_enum_variant`] fills.
-pub type VariantNames = std::collections::HashMap<(Definition, usize), String>;
+pub type VariantNames = typelisp_mem::collections::HashMap<(Definition, usize), String>;
 /// `(definition, variant or NO_VARIANT, index or EVERY_FIELD) -> the field's
 /// declared type, its definition's parameters as `TypeShape::Param`s`: what
 /// [`rt_print_field_template`] fills.
-pub type FieldTemplates = std::collections::HashMap<(Definition, i64, i64), TypeId>;
+pub type FieldTemplates = typelisp_mem::collections::HashMap<(Definition, i64, i64), TypeId>;
 /// `(definition, index) -> field name`: what [`rt_print_field_name`] fills.
-pub type FieldNames = std::collections::HashMap<(Definition, i64), String>;
+pub type FieldNames = typelisp_mem::collections::HashMap<(Definition, i64), String>;
 
 /// The definition `ty` instantiates. Every box's type is a named one.
 fn definition_of(ty: TypeId) -> Result<Definition, String> {
@@ -187,7 +188,7 @@ fn aot_print_object(heap: &mut Heap, v: Value, escape: bool) -> Result<Option<St
     // the startup sequence `build_main_wrapper` generates, and the address it
     // passes is a `ptrtoint` of a function the same file compiled under the
     // shared compiled-function ABI.
-    let f: unsafe extern "C-unwind" fn(*const i64, u32) -> i64 = unsafe { std::mem::transmute(addr) };
+    let f: unsafe extern "C-unwind" fn(*const i64, u32) -> i64 = unsafe { core::mem::transmute(addr) };
     let args = [encode(v), i64::from(escape)];
     PRINTING.with(|p| p.borrow_mut().push(v));
     let result = unsafe { f(args.as_ptr(), 2) };
@@ -217,7 +218,7 @@ fn aot_print_object(heap: &mut Heap, v: Value, escape: bool) -> Result<Option<St
 unsafe fn static_str(args: *const i64, i: usize, who: &str) -> &'static str {
     let ptr = *args.add(i) as usize as *const u8;
     let len = *args.add(i + 1) as usize;
-    match std::str::from_utf8(std::slice::from_raw_parts(ptr, len)) {
+    match core::str::from_utf8(core::slice::from_raw_parts(ptr, len)) {
         Ok(s) => s,
         Err(_) => fatal(&format!("{}: argument {} is not valid UTF-8", who, i)),
     }
@@ -371,7 +372,7 @@ pub unsafe extern "C" fn rt_print_name_module(args: *const i64, argc: u32) -> i6
     if argc < 2 {
         fatal("rt_print_name_module: expected 2 arguments");
     }
-    let words = std::slice::from_raw_parts(*args as usize as *const i64, *args.add(1) as usize);
+    let words = core::slice::from_raw_parts(*args as usize as *const i64, *args.add(1) as usize);
     let module = typelisp_mem::type_words::read_ns(words);
     let view = crate::shared::name_view();
     crate::shared::set_name_view(typelisp_mem::NameView::new(module, view.imports().clone()));
@@ -392,7 +393,7 @@ pub unsafe extern "C" fn rt_print_name_import(args: *const i64, argc: u32) -> i6
     if argc < 4 {
         fatal("rt_print_name_import: expected 4 arguments");
     }
-    let words = std::slice::from_raw_parts(*args as usize as *const i64, *args.add(1) as usize);
+    let words = core::slice::from_raw_parts(*args as usize as *const i64, *args.add(1) as usize);
     let definition = typelisp_mem::type_words::read_definition(words);
     let name = static_str(args, 2, "rt_print_name_import");
     let view = crate::shared::name_view();

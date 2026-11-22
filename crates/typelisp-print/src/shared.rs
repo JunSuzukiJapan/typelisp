@@ -12,11 +12,12 @@
 //! `print-object` is running on this thread right now, not runtime-entity
 //! data, so it never moves at all.
 
-use std::cell::RefCell;
-use std::collections::HashMap;
-use std::sync::Arc;
+use typelisp_mem::prelude::*;
+use core::cell::RefCell;
+use typelisp_mem::collections::HashMap;
+use alloc::sync::Arc;
 
-use parking_lot::RwLock;
+use typelisp_mem::sync::RwLock;
 
 /// Everything `aot.rs` registers at startup — see the module doc comment
 /// for what stays behind and why.
@@ -68,7 +69,7 @@ pub fn set_name_view(view: typelisp_mem::NameView) {
     }
 }
 
-thread_local! {
+typelisp_mem::thread_local! {
     /// This thread's `PrintShared` handle — `None` until [`print_shared`]
     /// first creates one.
     static PRINT_SHARED: RefCell<Option<Arc<PrintShared>>> = const { RefCell::new(None) };

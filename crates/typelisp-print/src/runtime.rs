@@ -19,7 +19,8 @@
 //! Thread-local for the same reason `typelisp_rt::set_active_heap` is: one
 //! program per thread, many per process under `cargo test`.
 
-use std::cell::RefCell;
+use typelisp_mem::prelude::*;
+use core::cell::RefCell;
 
 use typelisp_mem::{wk, BoxId, Heap, SymRef, TypeId, Value};
 use crate::format::{self, PrintVars, RenderCtx};
@@ -156,7 +157,7 @@ pub fn read_opts(heap: &Heap, global: &dyn Fn(&str) -> Result<Value, String>) ->
     })
 }
 
-thread_local! {
+typelisp_mem::thread_local! {
     static HOOKS: RefCell<PrintHooks> = const { RefCell::new(BARE_HOOKS) };
     static SESSION: RefCell<Option<PrettySession>> = const { RefCell::new(None) };
 }
@@ -214,7 +215,7 @@ impl PrintEnv for RtPrintEnv {
 /// block is recognised — closing it is what lays the buffer out and writes it.
 struct PrettySession {
     out: Out,
-    lists: Vec<std::sync::Arc<BoxId>>,
+    lists: Vec<alloc::sync::Arc<BoxId>>,
     opts: Opts,
 }
 
@@ -363,7 +364,7 @@ pub fn record_op(op: Op) {
 }
 
 /// The innermost open block's `pprint-pop` cursor cell, if any.
-fn innermost_list() -> Option<std::sync::Arc<BoxId>> {
+fn innermost_list() -> Option<alloc::sync::Arc<BoxId>> {
     SESSION.with(|cell| cell.borrow().as_ref().and_then(|s| s.lists.last().cloned()))
 }
 
@@ -397,6 +398,7 @@ pub fn list_exhausted(heap: &Heap) -> bool {
 fn write_stdout(heap: &mut Heap, text: &str) -> Result<(), String> {
     // One of the three doors a session's output leaves by; see
     // `typelisp_abi::dribble`'s module docs for the other two.
+    #[cfg(feature = "std")]
     typelisp_abi::dribble::note(text);
     heap.native(|| typelisp_mem::host::write_stdout(text.as_bytes()).and_then(|()| typelisp_mem::host::flush_stdout()))
     .map_err(|e| format!("print: {}", e))

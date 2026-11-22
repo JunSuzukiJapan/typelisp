@@ -4,6 +4,7 @@
 //! gives: `typelisp-rt` cannot depend on this crate without every program
 //! linking the reader. The same arrangement `typelisp_print::shim` has.
 
+use typelisp_mem::prelude::*;
 use typelisp_abi::{active_heap, encode, fatal, tagged_arg};
 use typelisp_mem::{spec, Heap, StdModule, TypeId, TypeSpec, Value};
 
