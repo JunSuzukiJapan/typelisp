@@ -1,15 +1,12 @@
-//! The Common Lisp `format` directive engine (CLHS §22.3), shared by the
-//! `format`/`print`/`println` special forms (`typelisp::check::checker`) via
-//! `Interp::run_format`. A control string is parsed once into a [`Node`] tree
-//! (so block directives — `~[…~]`, `~{…~}`, `~<…~>`, `~(…~)` — and their
-//! clause separators nest properly) and then interpreted against the argument
-//! list.
+//! The Common Lisp `format` directives (CLHS §22.3): the control string's
+//! parser, the checks run over the argument types before the program runs
+//! ([`call_sites`]), and the renderers the directives write with.
 //!
-//! Arguments arrive as a `Sexpr` list whose elements the checker wrapped into
-//! their `Sexpr` encodings (`typeck::quote`), so every element is
-//! a [`Value`] rendered by [`render_value`]. The list is materialized into a
-//! `Vec<Value>` up front so the argument-jumping directives (`~*`, `~:*`,
-//! `~@*`, `~:P`) can move the cursor freely.
+//! A control string is always a literal, so nothing here reads one when the
+//! program runs: the checker parses it ([`parse`]) into a [`Node`] tree (so
+//! block directives — `~[…~]`, `~{…~}`, `~<…~>`, `~(…~)` — and their clause
+//! separators nest properly) and expands the call into calls of the pieces in
+//! [`ops`], one per directive (`typeck::format_expand`).
 //!
 //! ## Coverage
 //!
@@ -21,50 +18,30 @@
 //! directive gives meaning to.
 //!
 //! The pretty-printer directives (and the `*print-pretty*` path of
-//! `~A`/`~S`/`~W`) record [`Op`]s on the output buffer rather than emitting
-//! text directly; [`crate::pprint`] turns the finished buffer into laid
-//! out text. With `*print-pretty*` false nothing records an op and the buffer
-//! is returned exactly as before.
+//! `~A`/`~S`/`~W`) record [`pprint::Op`]s on the output buffer rather than
+//! emitting text directly; [`crate::pprint`] turns the finished buffer into
+//! laid out text. With `*print-pretty*` false nothing records an op.
 //!
 //! ## Strictness
 //!
-//! Nothing is coerced, clamped or ignored. A parameter or modifier a directive
-//! does not take, or a value outside its range, is an error when the control
-//! string is parsed ([`Head::validate`]); an argument of the wrong type, or a
-//! cursor move outside the arguments, is an error when it is met. CL's lenient
-//! rules — `~D` printing a non-integer as `~A`, `~:[` taking any value as a
-//! boolean — are not followed. Refused outright: `~?` (its control string
-//! arrives at run time, where nothing can check it), `~@[` (it tests for nil,
-//! which this language does not have) and the empty-bodied `~{~}`.
-//!
-//! [`call_sites`] runs the same rules over the argument *types* before the
-//! program runs, which is where the checker reports them.
+//! A parameter or modifier a directive does not take, or a value outside its
+//! range, is an error when the control string is parsed ([`Head::validate`]);
+//! an argument of the wrong type, or a cursor move outside the arguments, is
+//! an error when the checker can see it ([`call_sites`]) and otherwise when
+//! it is met. `~:[` takes only a `bool`. A `Sexpr` argument of `~D` that is
+//! not an integer is printed as `~A` would print it, in decimal (CL).
+//! Refused outright: `~?` (its control string arrives at run time, where
+//! nothing can check it), `~@[` (it tests for nil, which this language does
+//! not have) and the empty-bodied `~{~}`.
 
 use std::collections::{BTreeSet, HashMap};
 
 use typelisp_mem::{FloatBox, Heap, Value};
 
-use crate::pprint::{self, IndentKind, NewlineKind, Op, Opts, Out, Style, TabKind};
+use crate::pprint::{self, Opts, Out};
 use crate::PrintEnv;
 
-/// Entry point: interpret `control` against the `Sexpr` argument list `args`,
-/// returning the buffer it produced (text plus any pretty-printer ops — see
-/// [`finish`], which turns one into text). Errors (bad directive, too few
-/// arguments, …) are `String`s the caller turns into a recoverable
-/// `EvalError::Panic`.
-pub fn build(
-    heap: &mut Heap,
-    ctx: RenderCtx<'_>,
-    control: &str,
-    args: &[Value],
-    opts: &Opts,
-) -> Result<Out, String> {
-    let nodes = parse(control)?;
-    let mut st = State { heap, ctx, args: args.to_vec(), pos: 0, opts: *opts };
-    let mut out = Out::new();
-    st.interp_seq(&nodes, &mut out)?;
-    Ok(out)
-}
+pub mod ops;
 
 /// What the value renderers need besides the heap.
 ///
@@ -165,11 +142,6 @@ pub fn finish(out: Out, opts: &Opts) -> String {
     }
 }
 
-/// The elements of a proper `Sexpr` list. `what` names the list in the error
-/// for anything else — an atom, or a list whose last cdr is not the empty list.
-fn list_to_vec(heap: &Heap, v: Value, what: &str) -> Result<Vec<Value>, String> {
-    heap.list_to_vec(v).map_err(|_| format!("format: {} is not a proper list", what))
-}
 
 // ===========================================================================
 // Parsing
@@ -179,7 +151,7 @@ fn list_to_vec(heap: &Heap, v: Value, what: &str) -> Result<Vec<Value>, String> 
 /// slot (`~,3D`'s first parameter); `Arg`/`Count` are the `v`/`#` parameters
 /// resolved from the argument list at interpretation time.
 #[derive(Clone, Debug)]
-enum Param {
+pub enum Param {
     Int(i64),
     Char(char),
     Arg,
@@ -191,16 +163,16 @@ enum Param {
 /// modifiers, plus what each parameter slot accepts — filled in by
 /// [`Head::validate`] once the directive is known.
 #[derive(Clone, Debug, Default)]
-struct Head {
-    params: Vec<Param>,
-    colon: bool,
-    at: bool,
-    kinds: &'static [ParamKind],
+pub struct Head {
+    pub params: Vec<Param>,
+    pub colon: bool,
+    pub at: bool,
+    pub kinds: &'static [ParamKind],
 }
 
 /// What one prefix-parameter slot of a directive accepts.
 #[derive(Clone, Copy, Debug, PartialEq)]
-enum ParamKind {
+pub enum ParamKind {
     /// An integer `>= 0`.
     NonNeg,
     /// An integer `>= 1`.
@@ -219,7 +191,7 @@ enum ParamKind {
 impl ParamKind {
     /// Whether an integer value (a literal, or one read through `v`/`#`)
     /// fits this slot.
-    fn check_int(self, n: i64) -> Result<(), String> {
+    pub fn check_int(self, n: i64) -> Result<(), String> {
         match self {
             ParamKind::NonNeg if n < 0 => Err(format!("{} is negative; this parameter must be 0 or more", n)),
             ParamKind::Pos if n < 1 => Err(format!("{} is less than 1; this parameter must be 1 or more", n)),
@@ -332,7 +304,7 @@ impl Head {
 }
 
 #[derive(Debug)]
-enum Node {
+pub enum Node {
     Text(String),
     /// A non-block directive, e.g. `~A`, `~5,'0D`, `~%`.
     Dir { head: Head, ch: char },
@@ -367,7 +339,7 @@ struct Stop {
     head: Head,
 }
 
-fn parse(control: &str) -> Result<Vec<Node>, String> {
+pub fn parse(control: &str) -> Result<Vec<Node>, String> {
     let chars: Vec<char> = control.chars().collect();
     let mut pos = 0;
     let (nodes, stop) = parse_seq(&chars, &mut pos, &[])?;
@@ -378,7 +350,7 @@ fn parse(control: &str) -> Result<Vec<Node>, String> {
 }
 
 /// Every `~/name/` directive's node in `nodes`, in source order.
-fn call_nodes(nodes: &[Node]) -> Vec<&Node> {
+pub fn call_nodes(nodes: &[Node]) -> Vec<&Node> {
     fn walk<'a>(nodes: &'a [Node], out: &mut Vec<&'a Node>) {
         for n in nodes {
             match n {
@@ -462,39 +434,6 @@ pub fn call_sites(control: &str, args: &[ArgType]) -> Result<Vec<CallSite>, Stri
         .collect())
 }
 
-/// `control` with the name of each `~/name/` directive, in source order,
-/// replaced by `names`.
-pub fn rename_calls(control: &str, names: &[String]) -> Result<String, String> {
-    let nodes = parse(control)?;
-    let spans: Vec<(usize, usize)> = call_nodes(&nodes)
-        .into_iter()
-        .map(|n| match n {
-            Node::Call { span, .. } => *span,
-            _ => unreachable!("call_nodes returns `~/name/` nodes only"),
-        })
-        .collect();
-    if spans.len() != names.len() {
-        return Err(format!(
-            "format: {} names for the {} `~/name/` directives of {:?}",
-            names.len(),
-            spans.len(),
-            control
-        ));
-    }
-    let chars: Vec<char> = control.chars().collect();
-    let mut out = String::new();
-    let mut from = 0;
-    for ((start, end), name) in spans.iter().zip(names) {
-        out.extend(&chars[from..*start]);
-        out.push_str(name);
-        from = *end;
-    }
-    out.extend(&chars[from..]);
-    Ok(out)
-}
-
-/// Parses a run of nodes until end-of-string or a directive whose char is in
-/// `stops` (a block closer or `;`), which it returns as the [`Stop`].
 fn parse_seq(chars: &[char], pos: &mut usize, stops: &[char]) -> Result<(Vec<Node>, Option<Stop>), String> {
     let mut nodes = Vec::new();
     let mut text = String::new();
@@ -696,7 +635,7 @@ fn parse_just(chars: &[char], pos: &mut usize, mut head: Head) -> Result<Node, S
 /// be literal (they are re-emitted at the start of every line of a per-line
 /// block, and their width is what the block indents past), so a directive
 /// inside one is an error rather than something to interpret per use.
-fn literal_segment(nodes: &[Node]) -> Result<String, String> {
+pub fn literal_segment(nodes: &[Node]) -> Result<String, String> {
     let mut s = String::new();
     for n in nodes {
         match n {
@@ -1256,764 +1195,6 @@ fn normal_set(curs: Curs) -> Exits {
     Exits { normal: curs, escaped: Curs::new() }
 }
 
-// ===========================================================================
-// Interpretation
-// ===========================================================================
-
-/// The outcome of interpreting a node sequence: whether a `~^` fired.
-enum Flow {
-    Normal,
-    Escape,
-}
-
-struct State<'a> {
-    heap: &'a mut Heap,
-    ctx: RenderCtx<'a>,
-    args: Vec<Value>,
-    pos: usize,
-    /// The `*print-pretty*`/`*print-right-margin*`/`*print-miser-width*`
-    /// snapshot this operation runs under. Only `pretty` is consulted here
-    /// (it gates whether a directive records an [`Op`] or falls back to its
-    /// non-pretty behavior); the margins are used by the layout pass.
-    opts: Opts,
-}
-
-impl State<'_> {
-    fn remaining(&self) -> usize {
-        self.args.len() - self.pos
-    }
-
-    fn next_arg(&mut self) -> Result<Value, String> {
-        let v = *self
-            .args
-            .get(self.pos)
-            .ok_or("format: ran out of arguments for the control string")?;
-        self.pos += 1;
-        Ok(v)
-    }
-
-    fn peek_arg(&self) -> Option<Value> {
-        self.args.get(self.pos).copied()
-    }
-
-    /// Resolves a directive's prefix parameters to concrete integers, filling
-    /// omitted/`Default` slots with `defaults` (positionally) and reading the
-    /// `v`/`#` parameters from the argument stream / remaining count. A
-    /// character parameter yields its code point.
-    ///
-    /// Literal parameters were checked against the directive when the control
-    /// string was parsed ([`Head::validate`]); what `v` and `#` supply is
-    /// checked here, against the same slot kinds.
-    fn resolve_params(&mut self, head: &Head, defaults: &[Option<i64>]) -> Result<Vec<Option<i64>>, String> {
-        let mut out = Vec::new();
-        for (i, (p, kind)) in head.params.iter().zip(head.kinds).enumerate() {
-            let bad = |why: String| format!("format: parameter {}: {}", i + 1, why);
-            let v = match p {
-                Param::Int(n) => Some(*n),
-                Param::Char(c) => Some(*c as i64),
-                Param::Count => {
-                    let n = self.remaining() as i64;
-                    kind.check_int(n).map_err(bad)?;
-                    Some(n)
-                }
-                Param::Arg => {
-                    let arg = self.next_arg()?;
-                    match (kind, arg) {
-                        (ParamKind::Char, Value::Char(c)) => Some(c as i64),
-                        (ParamKind::Char, _) => return Err(bad("its `v` argument must be a character".to_string())),
-                        (k, _) => {
-                            let n = int_of(self.heap, arg).ok_or_else(|| bad("its `v` argument must be an integer".to_string()))?;
-                            k.check_int(n).map_err(bad)?;
-                            Some(n)
-                        }
-                    }
-                }
-                Param::Default => defaults.get(i).copied().flatten(),
-            };
-            out.push(v);
-        }
-        // Pad with defaults for parameters the user omitted entirely.
-        for d in defaults.iter().skip(head.params.len()) {
-            out.push(*d);
-        }
-        Ok(out)
-    }
-
-    /// A directive's character parameter (a padding character) at `idx`, or
-    /// `default` when it was omitted.
-    fn char_param(vals: &[Option<i64>], idx: usize, default: char) -> char {
-        match vals.get(idx).copied().flatten() {
-            Some(n) => char::from_u32(n as u32).expect("a character slot holds a checked character"),
-            None => default,
-        }
-    }
-
-    fn int_param(vals: &[Option<i64>], idx: usize, default: i64) -> i64 {
-        vals.get(idx).copied().flatten().unwrap_or(default)
-    }
-
-    fn interp_seq(&mut self, nodes: &[Node], out: &mut Out) -> Result<Flow, String> {
-        for node in nodes {
-            match node {
-                Node::Text(t) => out.push_str(t),
-                Node::Escape { head } => {
-                    if self.escape_fires(head)? {
-                        return Ok(Flow::Escape);
-                    }
-                }
-                Node::Case { head, body } => {
-                    let mut inner = Out::new();
-                    let flow = self.interp_seq(body, &mut inner)?;
-                    apply_case(&mut inner, head.colon, head.at);
-                    out.append(inner);
-                    if matches!(flow, Flow::Escape) {
-                        return Ok(Flow::Escape);
-                    }
-                }
-                Node::Block { head, segments, sep_at } => {
-                    self.interp_block(head, segments, sep_at, out)?;
-                }
-                Node::Cond { head, clauses, default } => {
-                    if matches!(self.interp_cond(head, clauses, *default, out)?, Flow::Escape) {
-                        return Ok(Flow::Escape);
-                    }
-                }
-                Node::Iter { head, body, close_colon } => {
-                    self.interp_iter(head, body, *close_colon, out)?;
-                }
-                Node::Just { head, segments } => {
-                    self.interp_just(head, segments, out)?;
-                }
-                Node::Dir { head, ch } => {
-                    self.interp_dir(head, *ch, out)?;
-                }
-                Node::Call { head, name, .. } => {
-                    let v = self.next_arg()?;
-                    let text = self.ctx.env.format_call(self.heap, name, v, head.colon, head.at)?;
-                    out.push_str(&text);
-                }
-            }
-        }
-        Ok(Flow::Normal)
-    }
-
-    /// `~^` fires when its guard says the block is exhausted. With no
-    /// parameters that means "no arguments remain"; `~n^` fires when `n` is
-    /// zero; `~n,m^` when `n == m`; `~n,m,o^` when `n <= m <= o`.
-    fn escape_fires(&mut self, head: &Head) -> Result<bool, String> {
-        let vals = self.resolve_params(head, &[])?;
-        let present: Vec<i64> = vals.iter().filter_map(|v| *v).collect();
-        Ok(match present.len() {
-            0 => self.remaining() == 0,
-            1 => present[0] == 0,
-            2 => present[0] == present[1],
-            _ => present[0] <= present[1] && present[1] <= present[2],
-        })
-    }
-
-    fn interp_cond(
-        &mut self,
-        head: &Head,
-        clauses: &[Vec<Node>],
-        default: Option<usize>,
-        out: &mut Out,
-    ) -> Result<Flow, String> {
-        if head.colon {
-            // `~:[false~;true~]`: choose by a boolean argument.
-            let Value::Bool(b) = self.next_arg()? else {
-                return Err("format: ~:[ requires a bool argument".to_string());
-            };
-            let idx = if b { 1 } else { 0 };
-            if let Some(clause) = clauses.get(idx) {
-                return self.interp_seq(clause, out);
-            }
-            return Ok(Flow::Normal);
-        }
-        // Plain `~[`: an integer selects the clause by index — the prefix
-        // parameter when there is one (`~1[`, `~v[`, `~#[`), otherwise the
-        // next argument.
-        let sel = if head.params.is_empty() {
-            let arg = self.next_arg()?;
-            match int_of(self.heap, arg) {
-                Some(n) => Some(n),
-                // An integer too large for a word selects no clause.
-                None if matches!(arg, Value::Boxed(id) if self.heap.is_bignum(id)) => None,
-                None => return Err("format: ~[ requires an integer argument".to_string()),
-            }
-        } else {
-            self.resolve_params(head, &[])?[0]
-        };
-        let chosen = sel.filter(|&n| n >= 0 && (n as usize) < clauses.len() && Some(n as usize) != default);
-        if let Some(clause) = chosen.map(|n| n as usize).or(default).and_then(|i| clauses.get(i)) {
-            return self.interp_seq(clause, out);
-        }
-        Ok(Flow::Normal)
-    }
-
-    fn interp_iter(
-        &mut self,
-        head: &Head,
-        body: &[Node],
-        close_colon: bool,
-        out: &mut Out,
-    ) -> Result<(), String> {
-        let vals = self.resolve_params(head, &[])?;
-        let max = Self::int_param(&vals, 0, -1); // -1 = unbounded
-
-        let run_body = |st: &mut State, sublist: Vec<Value>, out: &mut Out| -> Result<Flow, String> {
-            let saved = std::mem::replace(&mut st.args, sublist);
-            let saved_pos = std::mem::replace(&mut st.pos, 0);
-            let flow = st.interp_seq(body, out);
-            st.args = saved;
-            st.pos = saved_pos;
-            flow
-        };
-
-        match (head.colon, head.at) {
-            // `~{`: one list argument; iterate its elements.
-            (false, false) => {
-                let list = self.next_arg()?;
-                let elems = list_to_vec(self.heap, list, "~{'s argument")?;
-                self.iterate_flat(&elems, body, max, close_colon, out)?;
-            }
-            // `~@{`: iterate over the remaining arguments in place.
-            (false, true) => {
-                let elems: Vec<Value> = self.args[self.pos..].to_vec();
-                let consumed = self.iterate_flat(&elems, body, max, close_colon, out)?;
-                self.pos += consumed;
-            }
-            // `~:{`: one list of sublists; each iteration binds one sublist.
-            (true, false) => {
-                let list = self.next_arg()?;
-                let sublists = list_to_vec(self.heap, list, "~:{'s argument")?;
-                let mut count = 0;
-                for sub in &sublists {
-                    if max >= 0 && count >= max {
-                        break;
-                    }
-                    let elems = list_to_vec(self.heap, *sub, "an element of ~:{'s argument")?;
-                    if matches!(run_body(self, elems, out)?, Flow::Escape) {
-                        break;
-                    }
-                    count += 1;
-                }
-                if sublists.is_empty() && close_colon {
-                    let _ = run_body(self, Vec::new(), out)?;
-                }
-            }
-            // `~:@{`: remaining arguments, each a sublist.
-            (true, true) => {
-                let sublists: Vec<Value> = self.args[self.pos..].to_vec();
-                self.pos = self.args.len();
-                let mut count = 0;
-                for sub in &sublists {
-                    if max >= 0 && count >= max {
-                        break;
-                    }
-                    let elems = list_to_vec(self.heap, *sub, "an argument of ~:@{")?;
-                    if matches!(run_body(self, elems, out)?, Flow::Escape) {
-                        break;
-                    }
-                    count += 1;
-                }
-                if sublists.is_empty() && close_colon {
-                    let _ = run_body(self, Vec::new(), out)?;
-                }
-            }
-        }
-        Ok(())
-    }
-
-    /// Runs `body` once per element of `elems` (as the fresh argument list),
-    /// honoring `max` and the `~:}` "at least once" flag. Returns how many
-    /// elements were consumed (for `~@{`'s in-place advance).
-    fn iterate_flat(
-        &mut self,
-        elems: &[Value],
-        body: &[Node],
-        max: i64,
-        close_colon: bool,
-        out: &mut Out,
-    ) -> Result<usize, String> {
-        if elems.is_empty() && close_colon {
-            let saved = std::mem::take(&mut self.args);
-            let saved_pos = std::mem::replace(&mut self.pos, 0);
-            let r = self.interp_seq(body, out);
-            self.args = saved;
-            self.pos = saved_pos;
-            r?;
-            return Ok(0);
-        }
-        let saved = std::mem::take(&mut self.args);
-        let saved_pos = self.pos;
-        self.args = elems.to_vec();
-        self.pos = 0;
-        let mut iterations = 0;
-        while self.pos < self.args.len() {
-            if max >= 0 && iterations >= max {
-                break;
-            }
-            let before = self.pos;
-            let flow = self.interp_seq(body, out)?;
-            iterations += 1;
-            if matches!(flow, Flow::Escape) {
-                break;
-            }
-            // A pass that consumed nothing would repeat forever.
-            if self.pos == before && max < 0 {
-                return Err("format: an iteration of ~{ consumed no argument, so it would never end".to_string());
-            }
-        }
-        let consumed = self.pos;
-        self.args = saved;
-        self.pos = saved_pos;
-        Ok(consumed)
-    }
-
-    fn interp_just(&mut self, head: &Head, segments: &[Vec<Node>], out: &mut Out) -> Result<(), String> {
-        let vals = self.resolve_params(head, &[Some(0), Some(1), Some(0)])?;
-        let mincol = Self::int_param(&vals, 0, 0) as usize;
-        let colinc = Self::int_param(&vals, 1, 1) as usize;
-        let minpad = Self::int_param(&vals, 2, 0) as usize;
-        let padchar = Self::char_param(&vals, 3, ' ');
-
-        // Interpret each segment (they share the argument cursor). A `~^` in a
-        // segment stops processing the remaining segments.
-        let mut pieces: Vec<Out> = Vec::new();
-        for seg in segments {
-            let mut s = Out::new();
-            let flow = self.interp_seq(seg, &mut s)?;
-            pieces.push(s);
-            if matches!(flow, Flow::Escape) {
-                break;
-            }
-        }
-        out.append(justify(pieces, mincol, colinc, minpad, padchar, head.colon, head.at));
-        Ok(())
-    }
-
-    /// `~<…~;…~:>` — a logical block, not a justification (see [`Node::Block`]).
-    ///
-    /// The first segment, if the directive has more than one, is the block's
-    /// prefix and the last is its suffix; both must be literal text (CL
-    /// requires this too, since they are re-emitted at line starts). A prefix
-    /// terminated by `~@;` rather than `~;` is a *per-line* prefix. `~:<`
-    /// defaults the prefix/suffix to `(`/`)`, `~<` to empty. `~@<` runs the
-    /// body against the remaining arguments in place; otherwise the block
-    /// consumes one list argument that supplies them.
-    ///
-    /// With `*print-pretty*` false the block still runs — its prefix, body and
-    /// suffix are emitted — but records no ops, so nothing can break.
-    fn interp_block(
-        &mut self,
-        head: &Head,
-        segments: &[Vec<Node>],
-        sep_at: &[bool],
-        out: &mut Out,
-    ) -> Result<(), String> {
-        let (default_prefix, default_suffix) = if head.colon { ("(", ")") } else { ("", "") };
-        let (prefix, body, suffix, per_line) = match segments.len() {
-            0 | 1 => (default_prefix.to_string(), segments.first(), default_suffix.to_string(), false),
-            2 => (literal_segment(&segments[0])?, segments.get(1), default_suffix.to_string(), sep_at.first() == Some(&true)),
-            _ => (
-                literal_segment(&segments[0])?,
-                segments.get(1),
-                literal_segment(&segments[segments.len() - 1])?,
-                sep_at.first() == Some(&true),
-            ),
-        };
-        if self.opts.pretty {
-            out.op(Op::BlockStart { prefix: prefix.clone(), per_line, suffix: suffix.clone() });
-        } else {
-            out.push_str(&prefix);
-        }
-        if let Some(body) = body {
-            if head.at {
-                // `~@<`: the body consumes the remaining arguments in place.
-                self.interp_seq(body, out)?;
-            } else {
-                let list = self.next_arg()?;
-                let sublist = list_to_vec(self.heap, list, "a logical block's argument")?;
-                let saved = std::mem::replace(&mut self.args, sublist);
-                let saved_pos = std::mem::replace(&mut self.pos, 0);
-                let r = self.interp_seq(body, out);
-                self.args = saved;
-                self.pos = saved_pos;
-                r?;
-            }
-        }
-        if self.opts.pretty {
-            out.op(Op::BlockEnd);
-        } else {
-            out.push_str(&suffix);
-        }
-        Ok(())
-    }
-
-    fn interp_dir(&mut self, head: &Head, ch: char, out: &mut Out) -> Result<(), String> {
-        match ch {
-            'a' | 's' | 'w' => {
-                let standard = ch != 'a';
-                let vals = self.resolve_params(head, &[Some(0), Some(1), Some(0)])?;
-                let mincol = Self::int_param(&vals, 0, 0) as usize;
-                let colinc = Self::int_param(&vals, 1, 1) as usize;
-                let minpad = Self::int_param(&vals, 2, 0) as usize;
-                let padchar = Self::char_param(&vals, 3, ' ');
-                let arg = self.next_arg()?;
-                // CL's `~A`/`~S`/`~W` all consult `*print-pretty*`. Padding
-                // parameters and pretty layout can't both hold (padding fixes
-                // a width the layout is free to change), so an explicitly
-                // padded directive keeps the flat rendering.
-                if self.opts.pretty && head.params.is_empty() {
-                    pprint::render(self.heap, self.ctx, arg, standard, Style::Default, out)?;
-                } else {
-                    let mut s = String::new();
-                    render_value(self.heap, self.ctx, arg, standard, &mut s)?;
-                    out.push_str(&pad(&s, mincol, colinc, minpad, padchar, head.at));
-                }
-            }
-            'd' | 'b' | 'o' | 'x' => {
-                let radix = match ch {
-                    'b' => 2,
-                    'o' => 8,
-                    'x' => 16,
-                    _ => 10,
-                };
-                self.emit_integer(head, Some(radix), out)?;
-            }
-            'r' => self.emit_r(head, out)?,
-            'c' => {
-                let arg = self.next_arg()?;
-                let Value::Char(c) = arg else {
-                    return Err("format: ~c requires a character argument".to_string());
-                };
-                out.push_str(&format_char(c, head.colon, head.at));
-            }
-            'p' => {
-                if head.colon {
-                    // Back up to reuse the previous argument.
-                    if self.pos == 0 {
-                        return Err("format: ~:p reuses the previous argument, and there is none".to_string());
-                    }
-                    self.pos -= 1;
-                }
-                let arg = self.next_arg()?;
-                let n = match arg {
-                    _ if int_of(self.heap, arg).is_some() => int_of(self.heap, arg).expect("just tested"),
-                    // Every bignum is far from 1.
-                    Value::Boxed(id) if self.heap.is_bignum(id) => 2,
-                    _ => return Err("format: ~p requires an integer argument".to_string()),
-                };
-                out.push_str(if head.at {
-                    if n == 1 { "y" } else { "ies" }
-                } else if n == 1 {
-                    ""
-                } else {
-                    "s"
-                });
-            }
-            'f' => self.emit_f(head, out)?,
-            'e' => self.emit_e(head, out)?,
-            'g' => self.emit_g(head, out)?,
-            '$' => self.emit_dollars(head, out)?,
-            '%' => {
-                let vals = self.resolve_params(head, &[Some(1)])?;
-                for _ in 0..Self::int_param(&vals, 0, 1) {
-                    out.push('\n');
-                }
-            }
-            '&' => {
-                let vals = self.resolve_params(head, &[Some(1)])?;
-                let n = Self::int_param(&vals, 0, 1);
-                if n > 0 {
-                    // Fresh-line: the first newline only if not already at BOL.
-                    if !out.is_empty() && !out.ends_with('\n') {
-                        out.push('\n');
-                    }
-                    for _ in 1..n {
-                        out.push('\n');
-                    }
-                }
-            }
-            '|' => {
-                let vals = self.resolve_params(head, &[Some(1)])?;
-                for _ in 0..Self::int_param(&vals, 0, 1) {
-                    out.push('\u{000c}');
-                }
-            }
-            '~' => {
-                let vals = self.resolve_params(head, &[Some(1)])?;
-                for _ in 0..Self::int_param(&vals, 0, 1) {
-                    out.push('~');
-                }
-            }
-            't' => self.emit_tab(head, out)?,
-            '*' => {
-                let vals = self.resolve_params(head, &[])?;
-                let target = if head.at {
-                    // Absolute goto (default index 0).
-                    Self::int_param(&vals, 0, 0)
-                } else if head.colon {
-                    // Back up n (default 1).
-                    self.pos as i64 - Self::int_param(&vals, 0, 1)
-                } else {
-                    // Skip n forward (default 1).
-                    self.pos as i64 + Self::int_param(&vals, 0, 1)
-                };
-                if target < 0 || target as usize > self.args.len() {
-                    return Err(format!(
-                        "format: ~* moves to argument {}, outside the {} there are",
-                        target,
-                        self.args.len()
-                    ));
-                }
-                self.pos = target as usize;
-            }
-            // `~_` — a conditional newline (CL's `pprint-newline`). Plain is
-            // `:linear`, `~:_` is `:fill`, `~@_` is `:miser`, `~:@_` is
-            // `:mandatory`. Like every pretty directive it is a no-op when
-            // `*print-pretty*` is false, exactly as CL's is.
-            '_' => {
-                if self.opts.pretty {
-                    out.op(Op::Newline(match (head.colon, head.at) {
-                        (false, false) => NewlineKind::Linear,
-                        (true, false) => NewlineKind::Fill,
-                        (false, true) => NewlineKind::Miser,
-                        (true, true) => NewlineKind::Mandatory,
-                    }));
-                }
-            }
-            // `~nI` — `pprint-indent`: set the enclosing logical block's
-            // indentation to `n` past the block's own column (`~n:I`: past the
-            // current output column).
-            'i' => {
-                let vals = self.resolve_params(head, &[Some(0)])?;
-                let n = Self::int_param(&vals, 0, 0);
-                if self.opts.pretty {
-                    out.op(Op::Indent(if head.colon { IndentKind::Current } else { IndentKind::Block }, n));
-                }
-            }
-            other => {
-                return Err(format!("format: unknown directive ~{}", other));
-            }
-        }
-        Ok(())
-    }
-
-    /// `~D ~B ~O ~X`, and `~R` with a radix. `radix` is the directive's own,
-    /// or `None` for `~R`, which reads it from its first parameter; the
-    /// mincol, padchar, commachar and interval parameters follow.
-    fn emit_integer(&mut self, head: &Head, radix: Option<u32>, out: &mut Out) -> Result<(), String> {
-        let at = usize::from(radix.is_none());
-        let defaults: &[Option<i64>] = if radix.is_none() {
-            &[None, Some(0), None, None, Some(3)]
-        } else {
-            &[Some(0), None, None, Some(3)]
-        };
-        let vals = self.resolve_params(head, defaults)?;
-        let radix = match radix {
-            Some(r) => r,
-            None => vals[0].expect("~r reaches here only with its radix parameter") as u32,
-        };
-        let mincol = Self::int_param(&vals, at, 0) as usize;
-        let padchar = Self::char_param(&vals, at + 1, ' ');
-        let commachar = Self::char_param(&vals, at + 2, ',');
-        let comma_interval = Self::int_param(&vals, at + 3, 3) as usize;
-        let arg = self.next_arg()?;
-        let Some(digits) = self.integer_in_radix(arg, radix) else {
-            // CL: a non-integer argument is printed as `~a` would print it,
-            // in decimal base, padded to `mincol` the same way.
-            let mut ctx = self.ctx;
-            ctx.print_vars.base = 10;
-            ctx.print_vars.radix = false;
-            let mut s = String::new();
-            render_value(self.heap, ctx, arg, false, &mut s)?;
-            out.push_str(&pad(&s, mincol, 1, 0, padchar, true));
-            return Ok(());
-        };
-        let body = decorate_integer(&digits, head.colon, head.at, commachar, comma_interval);
-        out.push_str(&pad(&body, mincol, 1, 0, padchar, true));
-        Ok(())
-    }
-
-    /// Formats an integer `Value` in `radix` as an unsigned digit string plus a
-    /// leading `-` for negatives (the sign/commas are added by the caller).
-    /// Returns `None` for a non-integer argument.
-    fn integer_in_radix(&self, v: Value, radix: u32) -> Option<String> {
-        match v {
-            _ if int_of(self.heap, v).is_some() => {
-                Some(int_to_radix(int_of(self.heap, v).expect("just tested"), radix))
-            }
-            Value::Boxed(id) if self.heap.is_bignum(id) => {
-                let big = self.heap.bignum_value(id);
-                Some(big.to_str_radix(radix))
-            }
-            _ => None,
-        }
-    }
-
-    fn emit_r(&mut self, head: &Head, out: &mut Out) -> Result<(), String> {
-        // `~nR` (a radix parameter present) behaves like `~D` in that radix.
-        // A parse-time check made sure the first parameter, when there is
-        // any, is the radix.
-        if !head.params.is_empty() {
-            return self.emit_integer(head, None, out);
-        }
-        // No radix parameter: English/Roman spellings.
-        let arg = self.next_arg()?;
-        let n = match int_of(self.heap, arg) {
-            Some(n) => n,
-            None if matches!(arg, Value::Boxed(id) if self.heap.is_bignum(id)) => {
-                return Err("format: ~r cannot spell an integer this large in words".to_string())
-            }
-            None => return Err("format: ~r requires an integer argument".to_string()),
-        };
-        let text = match (head.colon, head.at) {
-            (false, false) => english_cardinal(n),
-            (true, false) => english_ordinal(n),
-            (false, true) => roman(n, false)?,
-            (true, true) => roman(n, true)?,
-        };
-        out.push_str(&text);
-        Ok(())
-    }
-
-    fn emit_f(&mut self, head: &Head, out: &mut Out) -> Result<(), String> {
-        let vals = self.resolve_params(head, &[None, None, Some(0), None, Some(' ' as i64)])?;
-        let w = Self::int_param(&vals, 0, -1);
-        let d = Self::int_param(&vals, 1, -1);
-        let k = Self::int_param(&vals, 2, 0);
-        let overflow = vals[3].map(|_| Self::char_param(&vals, 3, ' '));
-        let padchar = Self::char_param(&vals, 4, ' ');
-        let f = self.next_float()?;
-        let scaled = f * 10f64.powi(k as i32);
-        let mut s = if d >= 0 { format!("{:.*}", d as usize, scaled) } else { trim_f64(scaled) };
-        if head.at && !s.starts_with('-') {
-            s.insert(0, '+');
-        }
-        if w >= 0 {
-            let w = w as usize;
-            if s.chars().count() > w {
-                if let Some(oc) = overflow {
-                    s = std::iter::repeat_n(oc, w).collect();
-                }
-            }
-            s = left_pad(&s, w, padchar);
-        }
-        out.push_str(&s);
-        Ok(())
-    }
-
-    fn emit_e(&mut self, head: &Head, out: &mut Out) -> Result<(), String> {
-        // `~w,d,e,k,overflow,padchar,exptcharE`. A pragmatic scientific form.
-        let vals = self.resolve_params(head, &[None, None, None, Some(1), None, Some(' ' as i64), None])?;
-        let w = Self::int_param(&vals, 0, -1);
-        let d = Self::int_param(&vals, 1, 6);
-        let exptchar = Self::char_param(&vals, 6, 'e');
-        let padchar = Self::char_param(&vals, 5, ' ');
-        let f = self.next_float()?;
-        let mut s = format!("{:.*e}", d as usize, f);
-        // Rust prints `1.5e2`; CL uses an explicit sign on the exponent.
-        if let Some(idx) = s.find('e') {
-            let (mant, exp) = s.split_at(idx);
-            let exp = &exp[1..];
-            let (sign, mag) = if let Some(m) = exp.strip_prefix('-') { ("-", m) } else { ("+", exp) };
-            s = format!("{}{}{}{}", mant, exptchar, sign, mag);
-        }
-        if head.at && !s.starts_with('-') {
-            s.insert(0, '+');
-        }
-        if w >= 0 {
-            s = left_pad(&s, w as usize, padchar);
-        }
-        out.push_str(&s);
-        Ok(())
-    }
-
-    fn emit_g(&mut self, head: &Head, out: &mut Out) -> Result<(), String> {
-        // General: use fixed notation for moderate magnitudes, else scientific.
-        let peeked = self.peek_arg();
-        let use_e = matches!(peeked, Some(v) if float_of(self.heap, v).map(|f| {
-            let a = f.abs();
-            a != 0.0 && !(1e-3..1e7).contains(&a)
-        }).unwrap_or(false));
-        if use_e {
-            self.emit_e(head, out)
-        } else {
-            self.emit_f(head, out)
-        }
-    }
-
-    fn emit_dollars(&mut self, head: &Head, out: &mut Out) -> Result<(), String> {
-        let vals = self.resolve_params(head, &[Some(2), Some(1), Some(0), Some(' ' as i64)])?;
-        let d = Self::int_param(&vals, 0, 2) as usize;
-        let n = Self::int_param(&vals, 1, 1) as usize;
-        let w = Self::int_param(&vals, 2, 0) as usize;
-        let padchar = Self::char_param(&vals, 3, ' ');
-        let f = self.next_float()?;
-        let neg = f < 0.0;
-        let body = format!("{:.*}", d, f.abs());
-        // Ensure at least `n` digits before the decimal point.
-        let (int_part, frac_part) = match body.split_once('.') {
-            Some((i, fr)) => (i.to_string(), format!(".{}", fr)),
-            None => (body.clone(), String::new()),
-        };
-        let int_part = if int_part.len() < n { left_pad(&int_part, n, '0') } else { int_part };
-        let mut s = format!("{}{}", int_part, frac_part);
-        let sign = if neg { "-" } else if head.at { "+" } else { "" };
-        if head.colon {
-            // Sign before the padding.
-            let padded = left_pad(&s, w.saturating_sub(sign.len()), padchar);
-            out.push_str(sign);
-            out.push_str(&padded);
-        } else {
-            s = format!("{}{}", sign, s);
-            out.push_str(&left_pad(&s, w, padchar));
-        }
-        Ok(())
-    }
-
-    fn emit_tab(&mut self, head: &Head, out: &mut Out) -> Result<(), String> {
-        let vals = self.resolve_params(head, &[Some(1), Some(1)])?;
-        let col = Self::int_param(&vals, 0, 1);
-        let inc = Self::int_param(&vals, 1, 1);
-        // Under the pretty printer the column a tab lands on isn't known until
-        // the layout pass has chosen the line breaks, so record the tab
-        // instead of padding here. `~:T`/`~:@T` measure from the enclosing
-        // logical block's own column rather than the start of the line.
-        if self.opts.pretty {
-            out.op(Op::Tab {
-                kind: match (head.colon, head.at) {
-                    (false, false) => TabKind::Line,
-                    (false, true) => TabKind::LineRelative,
-                    (true, false) => TabKind::Section,
-                    (true, true) => TabKind::SectionRelative,
-                },
-                colnum: col,
-                colinc: inc,
-            });
-            return Ok(());
-        }
-        // `~:T` is `pprint-tab :section`, which does nothing when
-        // `*print-pretty*` is false (CLHS `pprint-tab`).
-        if head.colon {
-            return Ok(());
-        }
-        let cur = current_column(&out.text);
-        let target = pprint::tab_target(cur, 0, col, inc, head.at);
-        for _ in cur..target {
-            out.push(' ');
-        }
-        Ok(())
-    }
-
-
-    fn next_float(&mut self) -> Result<f64, String> {
-        let v = self.next_arg()?;
-        float_of(self.heap, v).ok_or_else(|| "format: this directive requires a numeric argument".to_string())
-    }
-}
-
 /// The integer value of `v` for the integer directives: a bare `Value::Int`
 /// (which is the `i32` case and nothing else) or a boxed narrow integer,
 /// whose stored word already *is* the number its type names. `None` for
@@ -2486,6 +1667,63 @@ pub(crate) fn render_value(
     Renderer::new(heap, ctx, v).render(heap, ctx, v, standard, 0, out)
 }
 
+/// Writes `v` to `out` when it is a number, as `~a`/`prin1` print one (a
+/// number prints the same escaped or not). False, with nothing written, for
+/// anything else.
+///
+/// Its own function, apart from [`Renderer`], so that a program printing only
+/// numbers and strings links none of the renderer for other values.
+pub(crate) fn render_number(heap: &Heap, ctx: RenderCtx<'_>, v: Value, out: &mut String) -> Result<bool, String> {
+    match v {
+        Value::Int(n) => {
+            out.push_str(&Renderer::integer_text(ctx, || n.to_string(), |r| int_to_radix(n, r))?);
+        }
+        Value::Boxed(id) if heap.is_bignum(id) => {
+            let n = heap.bignum_value(id).clone();
+            out.push_str(&Renderer::integer_text(ctx, || n.to_string(), |r| n.to_str_radix(r))?);
+        }
+        Value::Boxed(id) if heap.is_ratio(id) => {
+            // A `ratio` whose denominator is 1 is an integer to CL's
+            // printer (`(+ 1/3 2/3)` prints `1`). Otherwise both parts
+            // go in `*print-base*`; under `*print-radix*` a decimal ratio
+            // takes `#10r`, since the trailing `.` is integer-only syntax.
+            let r = heap.ratio_value(id).clone();
+            let (n, d) = (r.numer(), r.denom());
+            let text = if num_traits::One::is_one(d) {
+                Renderer::integer_text(ctx, || n.to_string(), |b| n.to_str_radix(b))?
+            } else {
+                let base = ctx.print_vars.base;
+                let body = format!("{}/{}", n.to_str_radix(base), d.to_str_radix(base));
+                match (ctx.print_vars.radix, base) {
+                    (false, _) => body,
+                    (true, 2) => format!("#b{}", body),
+                    (true, 8) => format!("#o{}", body),
+                    (true, 16) => format!("#x{}", body),
+                    (true, b) => format!("#{}r{}", b, body),
+                }
+            };
+            out.push_str(&text);
+        }
+        // A narrow integer prints as the number it is — the same text an
+        // `i32` of that value gives, `*print-base*`/`*print-radix*`
+        // included. The box exists so the *type* survives into a `Sexpr`,
+        // not to make the number print differently.
+        Value::Boxed(id) if heap.narrow_box(id).is_some() => {
+            let n = heap.narrow_box(id).expect("just tested").value;
+            out.push_str(&Renderer::integer_text(ctx, || n.to_string(), |r| int_to_radix(n, r))?);
+        }
+        // Positively a float box, as in `float_of`: a fall-through on any
+        // other box would turn every unhandled box kind into a float.
+        Value::Boxed(id) if heap.float_box(id).is_some() => match heap.float_box(id) {
+            Some(FloatBox::F32(f)) => out.push_str(&float_text(f64::from(f), trim_f32(f), format!("{:e}", f))),
+            Some(FloatBox::F64(f)) => out.push_str(&float_text(f, trim_f64(f), format!("{:e}", f))),
+            None => unreachable!("guarded by float_box above"),
+        },
+        _ => return Ok(false),
+    }
+    Ok(true)
+}
+
 /// Per-node state for the `*print-circle*` passes: [`scan_shared`] records
 /// `Once` on first sight and `Repeated` on the second, then `render_value`
 /// drops the `Once`s. `Labeled` is assigned by [`Renderer::render`] when a
@@ -2879,12 +2117,12 @@ impl Renderer {
         // object, so it turns escaping on whatever the caller asked for —
         // `~a` on a string under it still prints the quotes.
         let standard = standard || ctx.print_vars.readably;
+        if render_number(heap, ctx, v, out)? {
+            return Ok(());
+        }
         match v {
+            Value::Int(_) => unreachable!("render_number wrote it above"),
             Value::Empty => out.push_str("()"),
-            Value::Int(n) => {
-                let text = Self::integer_text(ctx, || n.to_string(), |r| int_to_radix(n, r))?;
-                out.push_str(&text);
-            }
             Value::Bool(b) => out.push_str(&b.to_string()),
             Value::Char(c) => {
                 if standard {
@@ -2907,33 +2145,6 @@ impl Renderer {
                     .map(|s| Self::symbol_text(*s, standard))
                     .collect();
                 out.push_str(&segs.join("::"));
-            }
-            Value::Boxed(id) if heap.is_bignum(id) => {
-                let n = heap.bignum_value(id).clone();
-                let text = Self::integer_text(ctx, || n.to_string(), |r| n.to_str_radix(r))?;
-                out.push_str(&text);
-            }
-            Value::Boxed(id) if heap.is_ratio(id) => {
-                // A `ratio` whose denominator is 1 is an integer to CL's
-                // printer (`(+ 1/3 2/3)` prints `1`). Otherwise both parts
-                // go in `*print-base*`; under `*print-radix*` a decimal ratio
-                // takes `#10r`, since the trailing `.` is integer-only syntax.
-                let r = heap.ratio_value(id).clone();
-                let (n, d) = (r.numer(), r.denom());
-                let text = if num_traits::One::is_one(d) {
-                    Self::integer_text(ctx, || n.to_string(), |b| n.to_str_radix(b))?
-                } else {
-                    let base = ctx.print_vars.base;
-                    let body = format!("{}/{}", n.to_str_radix(base), d.to_str_radix(base));
-                    match (ctx.print_vars.radix, base) {
-                        (false, _) => body,
-                        (true, 2) => format!("#b{}", body),
-                        (true, 8) => format!("#o{}", body),
-                        (true, 16) => format!("#x{}", body),
-                        (true, b) => format!("#{}r{}", b, body),
-                    }
-                };
-                out.push_str(&text);
             }
             Value::Boxed(id) if heap.is_struct(id) => {
                 let ty = crate::stored_type(heap, id).expect("a struct box has a type");
@@ -3087,20 +2298,6 @@ impl Renderer {
             // Positively a float box for the same reason `float_of` is: the
             // bare `Value::Boxed(id)` fall-through this replaces turned every
             // unhandled box kind into an accessor panic.
-            // A narrow integer prints as the number it is — the same text an
-            // `i32` of that value gives, `*print-base*`/`*print-radix*`
-            // included. The box exists so the *type* survives into a `Sexpr`,
-            // not to make the number print differently.
-            Value::Boxed(id) if heap.narrow_box(id).is_some() => {
-                let n = heap.narrow_box(id).expect("just tested").value;
-                let text = Self::integer_text(ctx, || n.to_string(), |r| int_to_radix(n, r))?;
-                out.push_str(&text);
-            }
-            Value::Boxed(id) if heap.float_box(id).is_some() => match heap.float_box(id) {
-                Some(FloatBox::F32(f)) => out.push_str(&float_text(f64::from(f), trim_f32(f), format!("{:e}", f))),
-                Some(FloatBox::F64(f)) => out.push_str(&float_text(f, trim_f64(f), format!("{:e}", f))),
-                None => unreachable!("guarded by float_box above"),
-            },
             // A `BoxedObj::Cell` — a binding slot, never a value handed to the
             // printer. Reaching here is an interpreter bug, reported rather
             // than mis-rendered as a float.

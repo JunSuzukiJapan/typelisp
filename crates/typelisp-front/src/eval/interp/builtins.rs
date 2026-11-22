@@ -28,6 +28,10 @@ impl Interp {
         // `pprint-logical-block` lands in the same buffer whichever side of
         // the compile boundary each half was on.
         self.install_print_hooks();
+        // The pieces an expanded `format` is made of.
+        if let Some(r) = typelisp_print::format::ops::interpret(heap, name.well_known(), args) {
+            return Some(r.map_err(EvalError::Panic));
+        }
         if let Some(r) = typelisp_print::runtime::print_builtin(heap, name, args) {
             use typelisp_print::runtime::PrintError;
             return Some(r.map_err(|e| match e {

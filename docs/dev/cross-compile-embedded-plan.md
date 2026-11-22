@@ -37,7 +37,30 @@ wasm32-unknown-unknown では、strip しても 2,042,594 バイトあった。
 - 0a（済）: ネイティブのリンクに `-Wl,-dead_strip`（Linux は `-Wl,--gc-sections`）を渡す。これが無いと、アーカイブのオブジェクトがまるごと入っていた。
 - 0b: `print-object` の登録。生成する `main` が、ファイルと prelude にある全ての `print-object` を `rt_print_object_method` で登録している。このため、使わない型の `print-object` もその先も残る。たとえば `file-stream` の `print-object` から `rt_stream_describe`、`decoded-time` の `print-object` から `rt_float_to_int` と bignum が付いてくる。その型の値が作られうるときだけ登録する。値を作るのは生成コードだけではない。Rust の shim が作って返す値（エラーの型など）もあるので、「作られうる」の判定はその両方を見る。
 - 0c: ランタイムの共有状態（`RtShared`）のデストラクタ。ストリームの表を通って TLS サーバの drop まで届き、rustls を残している。共有状態の破棄が、使われたものだけに届く形にする。
-- 0d: 0b と 0c の後に測り直し、残った大きなもの（書式エンジン、std の panic と backtrace の処理など）を同じ方法で調べる。調べ方は、`-Wl,-why_live,<記号>` で `main` からの参照の鎖を出す。
+- 0e: 書式をコンパイル時に展開する（2026-11-22 ユーザー決定、下の「書式の展開」）。
+- 0d: 0b、0c、0e の後に測り直し、残った大きなもの（書式エンジン、std の panic と backtrace の処理など）を同じ方法で調べる。調べ方は、`-Wl,-why_live,<記号>` で `main` からの参照の鎖を出す。
+
+### 書式の展開（段階 0e）
+
+release のランタイムでの測定（上と同じ hello）: `__text` 1,040,368 バイトのうち、書式エンジン（`typelisp_print`）が 176KB、そこから届く bignum が 50KB。`println "hello"` は `rt_println` から解釈器全体（`interp_seq` → `interp_dir` → 全ての指示子の描画）に届く。指示子を 1 つも使わない文字列でも同じ。
+
+今の形: チェッカーは制御文字列を検査し（`typelisp_print::format::call_sites`）、引数を 1 個ずつ `Sexpr` に包んで `F_FORMAT_RT`/`F_PRINT_RT`/`F_PRINTLN_RT` を呼ぶ。実行時にエンジンが文字列を解析し（`parse`）、解釈する（`State::interp_seq`）。
+
+変える形: 制御文字列は必ずリテラルなので、lowering で「出力に書き足す」小さな組み込み関数の呼び出しの列に変える。実行時に制御文字列を解析・解釈するコードは無くなる。
+
+- **置き場所は lowering。** ジェネリックな本体は特殊化ごとに lowering されるので、そこでは引数の型が具体的に決まっている。インタプリタ、JIT、AOT は lowering の結果を実行するので、実装は 1 つのまま。
+- **引数の型で描画を選ぶ。** `~a` の引数が `string` なら文字列をそのまま書く関数、`int` なら整数の描画、それ以外の型なら値の描画（`print-object` の呼び分けを含む）。引数を `Sexpr` に包まない。
+- **`~/name/` は呼び先の直接呼び出しになる。** 名前から定義を引く表（`rt_format_call_method`）は要らなくなる。
+- **引数のカーソル。** 位置が 1 つに決まる場所（ほとんど）は、展開時に引数を名指しする。`~[` の節ごとに消費の数が違う場合のように、取りうる位置が複数あるときは、整数の局所変数をカーソルにし、取りうる位置ごとの `case` に展開する。位置の集合は既存の `Sim` が求めている。リストの要素（`~{…~}`、`~<…~:>`）は `Sexpr` のリストをたどるループになる。
+- **出力のバッファ**（`pprint::Out`、文字列と pretty printer の命令）は GC ヒープの箱にする。書式の途中で throw や panic があってもバッファが漏れない（スタックで持つと、抜けた書式の分と入れ子の書式の分を見分けられない）。
+- 結果の出し方（文字列を返す、stdout に書く、開いている logical block に合流する）は今の `emit` と同じ。
+
+進め方:
+
+1. 実行時の部品: バッファの箱と、指示子ごとの書き足し関数（`typelisp-print`）。
+2. 展開器: 制御文字列と引数の型から、呼び出しの列を作る（`typelisp-print` に置き、型の分類は `ArgKind`）。
+3. lowering から展開器を呼ぶ。`F_FORMAT_RT`/`F_PRINT_RT`/`F_PRINTLN_RT` とエンジンの解釈器（`State`）を消す。
+4. 島と prelude の再生成、全体テスト、大きさの測定。
 
 ### 段階 1: ランタイムを `no_std` + `alloc` で動かす
 

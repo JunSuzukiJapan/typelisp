@@ -178,6 +178,8 @@ impl Heap {
                     stack.push(Value::Boxed(f));
                 }
             }
+            // Rust data only (see `Native`).
+            BoxedObj::Struct { payload: StructPayload::Native(_), .. } => {}
             // A live binding cell keeps whatever it currently holds live.
             BoxedObj::Cell(v) => stack.push(*v),
             // A live compiled closure keeps its captured slots live. Every

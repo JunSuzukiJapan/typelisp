@@ -79,6 +79,7 @@ pub(crate) mod every_type;
 pub(crate) mod editor;
 pub(crate) mod exhaustive;
 pub(crate) mod format;
+pub(crate) mod format_expand;
 pub(crate) mod expr;
 pub(crate) mod generic;
 pub(crate) mod impl_block;

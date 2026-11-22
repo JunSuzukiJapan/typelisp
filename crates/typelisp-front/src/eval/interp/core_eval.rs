@@ -966,13 +966,7 @@ impl Interp {
             return Ok(format!("(Some {})", self.render_readably(heap, v, None)?));
         }
         self.install_print_hooks();
-        // Rooted: the format run allocates.
-        heap.push_root(v);
-        let text = typelisp_print::runtime::current_opts(heap).and_then(|opts| {
-            typelisp_print::runtime::build_format(heap, "~s", &[v]).map(|out| typelisp_print::format::finish(out, &opts))
-        });
-        heap.pop_root();
-        text
+        typelisp_print::format::ops::render(heap, v, true)
     }
 
     /// [`Self::render_readably`] for a trace line, which reports the value it

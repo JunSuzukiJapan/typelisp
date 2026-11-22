@@ -1,11 +1,11 @@
-# ABI バージョン 0.3.66
+# ABI バージョン 0.3.67
 
 `scripts/regen-abi-version.sh` が生成した文書。手で編集しない。
 
-コンパイラが生成するコードが、ABI バージョン 0.3.66 のランタイムライブラリについて仮定していることの一覧。
+コンパイラが生成するコードが、ABI バージョン 0.3.67 のランタイムライブラリについて仮定していることの一覧。
 ここに書かれていない前提(シムが引数をどう扱うか、生成コードがヒープを直接読む箇所など)は含まない。
 
-内容ハッシュ (FNV-1a 64): `167b265f331f54c3`
+内容ハッシュ (FNV-1a 64): `45b8b61e3b20bb9b`
 
 ## 呼び出し規約 (typelisp_abi)
 
@@ -779,6 +779,45 @@
 | 656 | `sxhash-equalp` |
 | 657 | `&environment` |
 | 658 | `define-symbol-macro` |
+| 659 | `format-out` |
+| 660 | ` fmt-open` |
+| 661 | ` fmt-text` |
+| 662 | ` fmt-fresh-line` |
+| 663 | ` fmt-a` |
+| 664 | ` fmt-string` |
+| 665 | ` fmt-number` |
+| 666 | ` fmt-value` |
+| 667 | ` fmt-d` |
+| 668 | ` fmt-integer` |
+| 669 | ` fmt-integer-any` |
+| 670 | ` fmt-words` |
+| 671 | ` fmt-plural` |
+| 672 | ` fmt-char` |
+| 673 | ` fmt-fixed` |
+| 674 | ` fmt-exponent` |
+| 675 | ` fmt-general` |
+| 676 | ` fmt-dollars` |
+| 677 | ` fmt-tab` |
+| 678 | ` fmt-newline` |
+| 679 | ` fmt-indent` |
+| 680 | ` fmt-case-open` |
+| 681 | ` fmt-case-close` |
+| 682 | ` fmt-just-open` |
+| 683 | ` fmt-just-segment` |
+| 684 | ` fmt-just-close` |
+| 685 | ` fmt-block-open` |
+| 686 | ` fmt-block-close` |
+| 687 | ` fmt-result` |
+| 688 | ` fmt-emit` |
+| 689 | ` fmt-first` |
+| 690 | ` fmt-rest` |
+| 691 | ` fmt-empty` |
+| 692 | ` fmt-length` |
+| 693 | ` fmt-goto` |
+| 694 | ` fmt-as-list` |
+| 695 | ` fmt-param` |
+| 696 | ` fmt-select` |
+| 697 | ` fmt-bool` |
 
 ## 組み込み型 (typelisp_mem::BUILTIN_TYPES)
 
@@ -803,6 +842,7 @@
 | 16 | `std::option::Option<std::sexpr::Sexpr>` |
 | 17 | `std::vec::Vector<std::option::Option<std::sexpr::Sexpr>>` |
 | 18 | `std::array::Array<std::option::Option<std::sexpr::Sexpr>>` |
+| 19 | `std::%internal::format-out` |
 
 ## 実行時が組み立てる値の型 (typelisp_rt)
 
@@ -1071,8 +1111,42 @@
 | `rt_file_truename` | `i64 (ptr, i32)` |
 | `rt_float_to_int` | `i64 (ptr, i32)` |
 | `rt_float_to_ratio` | `i64 (ptr, i32)` |
-| `rt_format` | `i64 (ptr, i32)` |
-| `rt_format_call_method` | `i64 (ptr, i32)` |
+| `rt_fmt_as_list` | `i64 (ptr, i32)` |
+| `rt_fmt_block_close` | `i64 (ptr, i32)` |
+| `rt_fmt_block_open` | `i64 (ptr, i32)` |
+| `rt_fmt_bool` | `i64 (ptr, i32)` |
+| `rt_fmt_case_close` | `i64 (ptr, i32)` |
+| `rt_fmt_case_open` | `i64 (ptr, i32)` |
+| `rt_fmt_char` | `i64 (ptr, i32)` |
+| `rt_fmt_dollars` | `i64 (ptr, i32)` |
+| `rt_fmt_emit` | `i64 (ptr, i32)` |
+| `rt_fmt_empty` | `i64 (ptr, i32)` |
+| `rt_fmt_exponent` | `i64 (ptr, i32)` |
+| `rt_fmt_first` | `i64 (ptr, i32)` |
+| `rt_fmt_fixed` | `i64 (ptr, i32)` |
+| `rt_fmt_fresh_line` | `i64 (ptr, i32)` |
+| `rt_fmt_general` | `i64 (ptr, i32)` |
+| `rt_fmt_goto` | `i64 (ptr, i32)` |
+| `rt_fmt_indent` | `i64 (ptr, i32)` |
+| `rt_fmt_integer` | `i64 (ptr, i32)` |
+| `rt_fmt_integer_any` | `i64 (ptr, i32)` |
+| `rt_fmt_just_close` | `i64 (ptr, i32)` |
+| `rt_fmt_just_open` | `i64 (ptr, i32)` |
+| `rt_fmt_just_segment` | `i64 (ptr, i32)` |
+| `rt_fmt_length` | `i64 (ptr, i32)` |
+| `rt_fmt_newline` | `i64 (ptr, i32)` |
+| `rt_fmt_number` | `i64 (ptr, i32)` |
+| `rt_fmt_open` | `i64 (ptr, i32)` |
+| `rt_fmt_param` | `i64 (ptr, i32)` |
+| `rt_fmt_plural` | `i64 (ptr, i32)` |
+| `rt_fmt_rest` | `i64 (ptr, i32)` |
+| `rt_fmt_result` | `i64 (ptr, i32)` |
+| `rt_fmt_select` | `i64 (ptr, i32)` |
+| `rt_fmt_string` | `i64 (ptr, i32)` |
+| `rt_fmt_tab` | `i64 (ptr, i32)` |
+| `rt_fmt_text` | `i64 (ptr, i32)` |
+| `rt_fmt_value` | `i64 (ptr, i32)` |
+| `rt_fmt_words` | `i64 (ptr, i32)` |
 | `rt_frame_apply` | `i64 (ptr, i32)` |
 | `rt_frame_call` | `i64 (ptr, i32)` |
 | `rt_frame_call_env` | `i64 (ptr, i32)` |
@@ -1204,7 +1278,6 @@
 | `rt_pprint_newline` | `i64 (ptr, i32)` |
 | `rt_pprint_pop` | `i64 (ptr, i32)` |
 | `rt_pprint_tab` | `i64 (ptr, i32)` |
-| `rt_print` | `i64 (ptr, i32)` |
 | `rt_print_enum_variant` | `i64 (ptr, i32)` |
 | `rt_print_field_name` | `i64 (ptr, i32)` |
 | `rt_print_field_template` | `i64 (ptr, i32)` |
@@ -1212,7 +1285,6 @@
 | `rt_print_name_import` | `i64 (ptr, i32)` |
 | `rt_print_name_module` | `i64 (ptr, i32)` |
 | `rt_print_object_method` | `i64 (ptr, i32)` |
-| `rt_println` | `i64 (ptr, i32)` |
 | `rt_push_permanent_sexpr_root` | `i64 (ptr, i32)` |
 | `rt_push_sexpr_root` | `i64 (ptr, i32)` |
 | `rt_random_state_copy` | `i64 (ptr, i32)` |

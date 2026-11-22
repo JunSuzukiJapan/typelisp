@@ -200,6 +200,7 @@ pub const BUILTIN_TYPES: &[(StdModule, &str, &[TypeId])] = &[
     (StdModule::OPTION, "Option", &[TypeId::SEXPR]),
     (StdModule::VEC, "Vector", &[TypeId::OPTION_SEXPR]),
     (StdModule::ARRAY, "Array", &[TypeId::OPTION_SEXPR]),
+    (StdModule::INTERNAL, "format-out", &[]),
 ];
 
 impl TypeId {
@@ -230,6 +231,10 @@ impl TypeId {
     pub const SEXPR_VECTOR: TypeId = TypeId(17);
     /// The box a `Sexpr`'s `array` variant is: what `#nA(..)` reads as.
     pub const SEXPR_ARRAY: TypeId = TypeId(18);
+    /// The buffer an expanded `format`/`print`/`println` writes into
+    /// (`typelisp_print::format::ops`): a native box, which the collector
+    /// frees with whatever was written to it.
+    pub const FORMAT_OUT: TypeId = TypeId(19);
 
     pub fn as_u32(&self) -> u32 {
         self.0
@@ -556,6 +561,10 @@ pub(crate) enum BoxedObj {
 /// standalone language value.
 #[derive(Clone, Debug)]
 pub(crate) enum StructPayload {
+    /// Rust data of a subsystem above this crate, which this layer only
+    /// stores: nothing in it is a heap value, so the mark phase traces
+    /// nothing. See [`Native`].
+    Native(Native),
     Fields(Vec<Value>),
     /// The buckets, then the table's hash function and test function: the
     /// two function values it was made with (`:test`), which the prelude's
@@ -563,6 +572,24 @@ pub(crate) enum StructPayload {
     Map(HashMap<i64, Vec<(Value, Value)>>, [Value; 2]),
     Frame(HashMap<String, Value>),
     Frames(Vec<BoxId>),
+}
+
+/// The data behind a [`StructPayload::Native`] box: owned by the box and
+/// dropped when the collector frees it. The box is what makes it the
+/// collector's to free: a value reachable from nowhere is garbage whether or
+/// not the code that made it ran to its end (a `throw` out of the middle of
+/// a `format` leaves its output buffer behind, and nothing else could tell
+/// that buffer from one still being written).
+///
+/// Shared rather than owned outright only because a [`BoxedObj`] is `Clone`;
+/// nothing copies a native box.
+#[derive(Clone)]
+pub(crate) struct Native(pub(crate) std::sync::Arc<parking_lot::Mutex<Box<dyn std::any::Any + Send>>>);
+
+impl std::fmt::Debug for Native {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("Native(..)")
+    }
 }
 
 /// A Lisp value — the runtime encoding of `Sexpr`.

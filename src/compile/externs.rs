@@ -130,19 +130,54 @@ pub(crate) fn rt_builtin_symbol(name: SymRef) -> Option<&'static str> {
         // running its body, which is the interpreter.
         wk::F_MACROEXPAND_1 => "rt_macroexpand_1",
         wk::F_MACROEXPAND => "rt_macroexpand",
-        // The printing family. `format`/`print`/`println`/`pprint` and
-        // `pprint-logical-block` are special forms; the names here are what
-        // the checker lowered them to (`typeck::format`/
-        // `check_print_like`/`check_pprint`/`check_pprint_logical_block`).
-        // The last four are ordinary builtins (`registry`'s root `fns`).
-        // All eleven run `typelisp_print::runtime::print_builtin`, the same
-        // implementation `Interp::eval_builtin` runs.
-        wk::F_FORMAT_RT => "rt_format",
-        wk::F_PRINT_RT => "rt_print",
-        wk::F_PRINTLN_RT => "rt_println",
+        // The printing family. `pprint` and `pprint-logical-block` are
+        // special forms; the names here are what the checker lowered them to
+        // (`check_pprint`/`check_pprint_logical_block`). The last five are
+        // ordinary builtins (`registry`'s root `fns`). All of them run
+        // `typelisp_print::runtime::print_builtin`, the same implementation
+        // `Interp::eval_builtin` runs. `format`/`print`/`println` are
+        // expanded into the `rt_fmt_*` pieces below.
         wk::F_PPRINT_RT => "rt_pprint",
         wk::F_PPRINT_BLOCK_START_RT => "rt_pprint_block_start",
         wk::F_PPRINT_BLOCK_END_RT => "rt_pprint_block_end",
+        // The pieces an expanded `format` is made of
+        // (`typeck::format_expand::PIECES`), one shim each.
+        wk::F_FMT_OPEN => "rt_fmt_open",
+        wk::F_FMT_TEXT => "rt_fmt_text",
+        wk::F_FMT_FRESH_LINE => "rt_fmt_fresh_line",
+        wk::F_FMT_STRING => "rt_fmt_string",
+        wk::F_FMT_NUMBER => "rt_fmt_number",
+        wk::F_FMT_VALUE => "rt_fmt_value",
+        wk::F_FMT_INTEGER => "rt_fmt_integer",
+        wk::F_FMT_INTEGER_ANY => "rt_fmt_integer_any",
+        wk::F_FMT_WORDS => "rt_fmt_words",
+        wk::F_FMT_PLURAL => "rt_fmt_plural",
+        wk::F_FMT_CHAR => "rt_fmt_char",
+        wk::F_FMT_FIXED => "rt_fmt_fixed",
+        wk::F_FMT_EXPONENT => "rt_fmt_exponent",
+        wk::F_FMT_GENERAL => "rt_fmt_general",
+        wk::F_FMT_DOLLARS => "rt_fmt_dollars",
+        wk::F_FMT_TAB => "rt_fmt_tab",
+        wk::F_FMT_NEWLINE => "rt_fmt_newline",
+        wk::F_FMT_INDENT => "rt_fmt_indent",
+        wk::F_FMT_CASE_OPEN => "rt_fmt_case_open",
+        wk::F_FMT_CASE_CLOSE => "rt_fmt_case_close",
+        wk::F_FMT_JUST_OPEN => "rt_fmt_just_open",
+        wk::F_FMT_JUST_SEGMENT => "rt_fmt_just_segment",
+        wk::F_FMT_JUST_CLOSE => "rt_fmt_just_close",
+        wk::F_FMT_BLOCK_OPEN => "rt_fmt_block_open",
+        wk::F_FMT_BLOCK_CLOSE => "rt_fmt_block_close",
+        wk::F_FMT_RESULT => "rt_fmt_result",
+        wk::F_FMT_EMIT => "rt_fmt_emit",
+        wk::F_FMT_FIRST => "rt_fmt_first",
+        wk::F_FMT_REST => "rt_fmt_rest",
+        wk::F_FMT_EMPTY => "rt_fmt_empty",
+        wk::F_FMT_LENGTH => "rt_fmt_length",
+        wk::F_FMT_GOTO => "rt_fmt_goto",
+        wk::F_FMT_AS_LIST => "rt_fmt_as_list",
+        wk::F_FMT_PARAM => "rt_fmt_param",
+        wk::F_FMT_SELECT => "rt_fmt_select",
+        wk::F_FMT_BOOL => "rt_fmt_bool",
         wk::F_PPRINT_NEWLINE => "rt_pprint_newline",
         wk::F_PPRINT_INDENT => "rt_pprint_indent",
         wk::F_PPRINT_TAB => "rt_pprint_tab",
@@ -684,7 +719,7 @@ pub(crate) fn native_lowered_primitive_methods(ty: u32) -> &'static [u32] {
 /// reference-counted `ClosureBox`, plus the shared binding cells
 /// (`BoxedObj::Cell`) captured names live in so compiled and interpreted
 /// `setf` mutate the very same object.
-pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 346] {
+pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 378] {
     use typelisp_rt::c_mem::{
         rt_c_alloc, rt_c_arena_close, rt_c_arena_open, rt_c_index, rt_c_load, rt_c_offset, rt_c_ptr_check, rt_c_store,
     };
@@ -697,11 +732,14 @@ pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 346] {
     // `typelisp-rt` — see `typelisp_print::shim`'s module doc comment for why
     // the linker requires that.
     use typelisp_print::shim::{
-        rt_format, rt_pprint, rt_pprint_block_end, rt_pprint_block_start, rt_pprint_indent,
-        rt_pprint_list_exhausted, rt_pprint_newline, rt_pprint_pop, rt_pprint_tab, rt_print, rt_println,
+        rt_pprint, rt_pprint_block_end, rt_pprint_block_start, rt_pprint_indent,
+        rt_pprint_list_exhausted, rt_pprint_newline, rt_pprint_pop, rt_pprint_tab,
+    };
+    use typelisp_print::shim::{
+        rt_fmt_open, rt_fmt_text, rt_fmt_fresh_line, rt_fmt_string, rt_fmt_number, rt_fmt_value, rt_fmt_integer, rt_fmt_integer_any, rt_fmt_words, rt_fmt_plural, rt_fmt_char, rt_fmt_fixed, rt_fmt_exponent, rt_fmt_general, rt_fmt_dollars, rt_fmt_tab, rt_fmt_newline, rt_fmt_indent, rt_fmt_case_open, rt_fmt_case_close, rt_fmt_just_open, rt_fmt_just_segment, rt_fmt_just_close, rt_fmt_block_open, rt_fmt_block_close, rt_fmt_result, rt_fmt_emit, rt_fmt_first, rt_fmt_rest, rt_fmt_empty, rt_fmt_length, rt_fmt_goto, rt_fmt_as_list, rt_fmt_param, rt_fmt_select, rt_fmt_bool,
     };
     use typelisp_print::aot::{
-        rt_format_call_method, rt_print_enum_variant, rt_print_field_name, rt_print_field_template, rt_print_global,
+        rt_print_enum_variant, rt_print_field_name, rt_print_field_template, rt_print_global,
         rt_print_name_import, rt_print_name_module, rt_print_object_method,
     };
     use typelisp_front::shim::{rt_eval, rt_eval_init, rt_eval_state, rt_macroexpand, rt_macroexpand_1};
@@ -840,9 +878,6 @@ pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 346] {
         // `println`/`pprint` and `pprint-logical-block` are special forms, so
         // what reaches here are the `*-rt` names the checker lowered them to;
         // the four `pprint-*` operators are ordinary builtins.
-        ("rt_format", rt_format as *const () as usize),
-        ("rt_print", rt_print as *const () as usize),
-        ("rt_println", rt_println as *const () as usize),
         ("rt_pprint", rt_pprint as *const () as usize),
         ("rt_pprint_block_start", rt_pprint_block_start as *const () as usize),
         ("rt_pprint_block_end", rt_pprint_block_end as *const () as usize),
@@ -851,6 +886,42 @@ pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 346] {
         ("rt_pprint_tab", rt_pprint_tab as *const () as usize),
         ("rt_pprint_pop", rt_pprint_pop as *const () as usize),
         ("rt_pprint_list_exhausted", rt_pprint_list_exhausted as *const () as usize),
+        ("rt_fmt_open", rt_fmt_open as *const () as usize),
+        ("rt_fmt_text", rt_fmt_text as *const () as usize),
+        ("rt_fmt_fresh_line", rt_fmt_fresh_line as *const () as usize),
+        ("rt_fmt_string", rt_fmt_string as *const () as usize),
+        ("rt_fmt_number", rt_fmt_number as *const () as usize),
+        ("rt_fmt_value", rt_fmt_value as *const () as usize),
+        ("rt_fmt_integer", rt_fmt_integer as *const () as usize),
+        ("rt_fmt_integer_any", rt_fmt_integer_any as *const () as usize),
+        ("rt_fmt_words", rt_fmt_words as *const () as usize),
+        ("rt_fmt_plural", rt_fmt_plural as *const () as usize),
+        ("rt_fmt_char", rt_fmt_char as *const () as usize),
+        ("rt_fmt_fixed", rt_fmt_fixed as *const () as usize),
+        ("rt_fmt_exponent", rt_fmt_exponent as *const () as usize),
+        ("rt_fmt_general", rt_fmt_general as *const () as usize),
+        ("rt_fmt_dollars", rt_fmt_dollars as *const () as usize),
+        ("rt_fmt_tab", rt_fmt_tab as *const () as usize),
+        ("rt_fmt_newline", rt_fmt_newline as *const () as usize),
+        ("rt_fmt_indent", rt_fmt_indent as *const () as usize),
+        ("rt_fmt_case_open", rt_fmt_case_open as *const () as usize),
+        ("rt_fmt_case_close", rt_fmt_case_close as *const () as usize),
+        ("rt_fmt_just_open", rt_fmt_just_open as *const () as usize),
+        ("rt_fmt_just_segment", rt_fmt_just_segment as *const () as usize),
+        ("rt_fmt_just_close", rt_fmt_just_close as *const () as usize),
+        ("rt_fmt_block_open", rt_fmt_block_open as *const () as usize),
+        ("rt_fmt_block_close", rt_fmt_block_close as *const () as usize),
+        ("rt_fmt_result", rt_fmt_result as *const () as usize),
+        ("rt_fmt_emit", rt_fmt_emit as *const () as usize),
+        ("rt_fmt_first", rt_fmt_first as *const () as usize),
+        ("rt_fmt_rest", rt_fmt_rest as *const () as usize),
+        ("rt_fmt_empty", rt_fmt_empty as *const () as usize),
+        ("rt_fmt_length", rt_fmt_length as *const () as usize),
+        ("rt_fmt_goto", rt_fmt_goto as *const () as usize),
+        ("rt_fmt_as_list", rt_fmt_as_list as *const () as usize),
+        ("rt_fmt_param", rt_fmt_param as *const () as usize),
+        ("rt_fmt_select", rt_fmt_select as *const () as usize),
+        ("rt_fmt_bool", rt_fmt_bool as *const () as usize),
         // The printer's AOT startup registration (`typelisp_print::aot`):
         // an enum's variant names and each type's `print-object`, which a
         // standalone executable cannot look up the way the interpreter does.
@@ -861,12 +932,6 @@ pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 346] {
         ("rt_print_field_template", rt_print_field_template as *const () as usize),
         ("rt_print_field_name", rt_print_field_name as *const () as usize),
         ("rt_print_object_method", rt_print_object_method as *const () as usize),
-        // The `~/name/` directive's own table: one entry per definition the
-        // checker resolved a directive in this program to
-        // (`Checker::format_call_targets`). AOT-only for the same reason as
-        // the two above — the interpreter fetches the definition from its own
-        // tables when the directive runs.
-        ("rt_format_call_method", rt_format_call_method as *const () as usize),
         // Each printer control variable's compiled global id, so the
         // executable's printer reads the value the program `setf`'d. AOT-only:
         // the interpreter reads its own globals.

@@ -612,27 +612,6 @@ pub fn compile_file_with(source_path: &str, output_path: &str, options: &BuildOp
         }
     }
 
-    // What the `~/name/` directives in this file resolved to
-    // (`Checker::format_call_targets`). The interpreter fetches the
-    // definition from its own tables when the directive runs, but a
-    // standalone executable has none, so each becomes a startup registration
-    // below, exactly as `print-object` does.
-    let format_calls: Vec<(String, String, typelisp_print::aot::ArgWord)> = chk
-        .format_call_targets()
-        .into_iter()
-        .map(|(target, arg)| {
-            let symbol = items
-                .iter()
-                .find(|item| **item == target)
-                .map(target_symbol_name)
-                .ok_or_else(|| format!(
-                    "compile-file: a `~/name/` directive calls `{}`, which was not compiled into this file",
-                    target.link_name()
-                ))?;
-            Ok((target.link_name(), symbol, arg))
-        })
-        .collect::<Result<_, String>>()?;
-
     // Each global's path with the slot id `collect_aot_item` promoted it to,
     // for the `eval` environment's startup binding. Read back rather than
     // assumed to be the loop index: the ids are whatever
@@ -718,7 +697,6 @@ pub fn compile_file_with(source_path: &str, output_path: &str, options: &BuildOp
             &interp.field_template_descriptors(),
             &interp.field_name_descriptors(),
             &print_objects,
-            &format_calls,
             &printer_globals,
             &callback_entries,
             eval_env.as_deref().map(|bytes| (bytes, eval_ns, crate::release::is_release())),
@@ -835,7 +813,6 @@ fn build_main_wrapper(
     field_templates: &[(Path, i64, i64, crate::TypeId)],
     field_names: &[(Path, i64, String)],
     print_objects: &[(typelisp_mem::TypeId, String)],
-    format_calls: &[(String, String, typelisp_print::aot::ArgWord)],
     printer_globals: &[(&str, usize)],
     callback_entries: &[(typelisp_front::ffi_callback::CallbackSig, inkwell::values::FunctionValue<'static>)],
     eval_env: Option<(&[u8], typelisp_mem::NsId, bool)>,
@@ -955,14 +932,6 @@ fn build_main_wrapper(
             })?;
             let fn_ptr = classic_door(ctx, module, target)?;
             call(&builder, "rt_print_object_method", &[ty(*receiver)?, fn_ptr])?;
-        }
-        for (name, symbol, arg) in format_calls {
-            let target = module.get_function(symbol).ok_or_else(|| {
-                format!("compile-file: a `~/name/` directive calls `{}`, which was not compiled into this file", name)
-            })?;
-            let (name_ptr, name_len) = literal(&builder, name)?;
-            let fn_ptr = classic_door(ctx, module, target)?;
-            call(&builder, "rt_format_call_method", &[name_ptr, name_len, fn_ptr, i64_ty.const_int(arg.code() as u64, true)])?;
         }
         for (name, id) in printer_globals {
             let (name_ptr, name_len) = literal(&builder, name)?;
@@ -1304,10 +1273,11 @@ fn call_shim(
 
 /// The names of the printing shims (`typelisp_print::shim`), which is what
 /// "this program prints" means at the IR level.
-const PRINT_SHIMS: [&str; 11] = [
-    "rt_format",
-    "rt_print",
-    "rt_println",
+const PRINT_SHIMS: [&str; 10] = [
+    // The two pieces of an expanded `format` that write any value: the
+    // others write a number, a string or text, and need neither table.
+    "rt_fmt_value",
+    "rt_fmt_integer_any",
     "rt_pprint",
     "rt_pprint_block_start",
     "rt_pprint_block_end",
@@ -1544,7 +1514,7 @@ mod tests {
         builder.build_call(exit, &[code.into()], "").unwrap();
         builder.build_unreachable().unwrap();
 
-        build_main_wrapper(ctx, &module, "tl_main", &[], &[], &[], &[], &[], &[], &[], &[], &[], &[], None, false, super::HeapInit { cells: typelisp_rt::DEFAULT_AOT_HEAP_CAPACITY, fixed: false, max_memory: None }).expect("build_main_wrapper failed");
+        build_main_wrapper(ctx, &module, "tl_main", &[], &[], &[], &[], &[], &[], &[], &[], &[], None, false, super::HeapInit { cells: typelisp_rt::DEFAULT_AOT_HEAP_CAPACITY, fixed: false, max_memory: None }).expect("build_main_wrapper failed");
         module.verify().expect("module failed verification");
 
         let out_path = tmp_path("rt_ping_test");
@@ -1583,7 +1553,7 @@ mod tests {
         };
         builder.build_return(Some(&result)).unwrap();
 
-        build_main_wrapper(ctx, &module, "tl_main", &[], &[], &[], &[], &[], &[], &[], &[], &[], &[], None, false, super::HeapInit { cells: typelisp_rt::DEFAULT_AOT_HEAP_CAPACITY, fixed: false, max_memory: None }).expect("build_main_wrapper failed");
+        build_main_wrapper(ctx, &module, "tl_main", &[], &[], &[], &[], &[], &[], &[], &[], &[], None, false, super::HeapInit { cells: typelisp_rt::DEFAULT_AOT_HEAP_CAPACITY, fixed: false, max_memory: None }).expect("build_main_wrapper failed");
         module.verify().expect("module failed verification");
 
         let out_path = tmp_path("rt_heap_init_test");

@@ -277,6 +277,7 @@ impl StdModule {
     pub const FS: StdModule = StdModule(&["fs"]);
     pub const NET: StdModule = StdModule(&["net"]);
     pub const PRIMITIVE: StdModule = StdModule(&["primitive"]);
+    pub const INTERNAL: StdModule = StdModule(&["%internal"]);
 
     /// The module, found one segment at a time from `std`.
     pub fn ns(self) -> NsId {

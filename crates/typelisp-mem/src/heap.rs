@@ -72,6 +72,7 @@ mod roots;
 mod objects;
 mod hashtable;
 mod scope;
+mod native;
 mod cons;
 
 pub use frames::*;

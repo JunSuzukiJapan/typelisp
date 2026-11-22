@@ -271,6 +271,9 @@ impl Repr {
             Type::Named(p, args) if path_is_builtin(p, typelisp_mem::wk::HASHTABLE) && args.len() == 2 => {
                 Repr::HashTable(Box::new(Repr::of_by(&args[0], kind_of)), Box::new(Repr::of_by(&args[1], kind_of)))
             }
+            // An expanded `format`'s buffer: a box like a struct's, which
+            // nothing but the printer's pieces opens.
+            Type::Named(p, _) if path_is_builtin(p, typelisp_mem::wk::FORMAT_OUT) => Repr::Struct,
             Type::Named(p, _) if kind_of(p) == Some(AdtKind::Struct) => Repr::Struct,
             // Not the lookup alone: `Option`/`Result` and the concrete error
             // types are recognized structurally, so they classify correctly
@@ -625,24 +628,6 @@ impl Repr {
             // code yet", which is now true of everything that produces it.
             Class::NotRepresentable => k::NOT_REPRESENTABLE,
         }) as i64
-    }
-
-    /// How a value of this representation crosses into a compiled
-    /// definition a `~/name/` directive calls in an executable.
-    pub fn arg_word(&self) -> typelisp_print::aot::ArgWord {
-        use typelisp_print::aot::ArgWord;
-        if matches!(self, Repr::F32) {
-            return ArgWord::F32;
-        }
-        match self.class() {
-            Class::Int => ArgWord::Narrow,
-            Class::Float => ArgWord::F64,
-            Class::Char => ArgWord::Char,
-            Class::Bool => ArgWord::Bool,
-            Class::Tagged { .. } => ArgWord::Tagged,
-            Class::Unit => ArgWord::Unit,
-            Class::RawWord | Class::NotRepresentable => unreachable!("a `~/name/` directive calls a definition of a type a value has, never {:?}", self),
-        }
     }
 }
 

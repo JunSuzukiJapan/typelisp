@@ -4,7 +4,7 @@
 //! [`super::toplevel`].
 
 use std::cell::{Cell, RefCell};
-use std::collections::BTreeMap;
+
 
 use typelisp_mem::{NsId, SymRef};
 
@@ -12,7 +12,7 @@ use crate::check::semantic::TypeUse;
 use crate::check::{CompletionCandidate, DefLocs, Defined, Docs, Imported};
 use crate::dump::{CheckerDelta, RegistrySignature};
 use crate::types::{Path, Type};
-use crate::{CompileTarget, Error, Heap, Loc, Value};
+use crate::{Error, Heap, Loc, Value};
 
 use super::attribute::{TestCase, TestForms, Tests};
 use super::expr::Notes;
@@ -112,8 +112,6 @@ pub struct Checker {
     /// Every C callback entry the checked code asks for, in the order first
     /// asked.
     callbacks: Vec<crate::ffi_callback::CallbackSig>,
-    /// Every definition a `~/name/` directive calls.
-    format_calls: BTreeMap<CompileTarget, typelisp_print::aot::ArgWord>,
     /// What a `#[test]` definition is checked into, and the tests found.
     tests: Tests,
     /// What checking has written down beside the trees.
@@ -152,7 +150,6 @@ impl Checker {
             expr_ty: None,
             warnings: RefCell::default(),
             callbacks: Vec::new(),
-            format_calls: BTreeMap::new(),
             tests: Tests::default(),
             notes: Notes::default(),
             ns: NsId::ROOT,
@@ -205,7 +202,6 @@ impl Checker {
         heap.truncate_roots(roots_base);
         match result {
             Ok((form, ty, reached)) => {
-                self.format_calls.extend(reached.format_calls);
                 for sig in reached.callbacks {
                     if !self.callbacks.contains(&sig) {
                         self.callbacks.push(sig);
@@ -342,14 +338,6 @@ impl Checker {
     /// callback and registers it at startup.
     pub fn ffi_callbacks(&self) -> Vec<crate::ffi_callback::CallbackSig> {
         self.callbacks.clone()
-    }
-
-    /// Every definition a `~/name/` directive checked so far calls, with how
-    /// its argument crosses into it. Read by `compile::aot::compile_file`,
-    /// which turns each into a startup registration so the directive works
-    /// in a standalone executable.
-    pub fn format_call_targets(&self) -> Vec<(CompileTarget, typelisp_print::aot::ArgWord)> {
-        self.format_calls.iter().map(|(t, a)| (t.clone(), *a)).collect()
     }
 
     /// Reports every `defsignature` in this unit that never got a definition.

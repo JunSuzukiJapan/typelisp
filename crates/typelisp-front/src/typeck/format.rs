@@ -20,7 +20,8 @@ use typelisp_print::format::{call_sites, ArgKind, ArgType, CallArg, CallSite};
 
 use super::expr::{check_expr, Cx};
 use super::locals::Locals;
-use super::tree::{FormatSite, Node, Typed};
+use super::tree::{Node, Typed};
+use super::format_expand::{expand, Dest};
 
 /// A control string to check against its arguments' types once they are
 /// settled.
@@ -43,11 +44,13 @@ pub(crate) fn check_format(cx: &Cx, heap: &mut Heap, locals: &Locals, args: &[(V
     if cx.resolve(&dest.ty) != Type::Bool {
         return to_stream(cx, heap, locals, dest, &args[1..], loc);
     }
-    let (control, items) = check_control(cx, heap, locals, "format", (*control, control_loc.clone()), items, loc.clone())?;
-    let path = Path::internal_builtin(wk::F_FORMAT_RT);
-    let mut call_args = vec![dest, control];
-    call_args.extend(items);
-    Ok(Typed { node: Node::Call { path, targs: Vec::new(), args: call_args }, ty: Type::Str, loc })
+    let (text, items, calls) = check_control(cx, heap, locals, "format", (*control, control_loc.clone()), items, loc.clone())?;
+    // The destination is evaluated before the arguments, as it is written
+    // first.
+    let tmp = cx.temp();
+    let write = Typed { node: Node::Local { name: tmp }, ty: Type::Bool, loc: None };
+    let built = expand(cx, heap, locals, Dest::Text { write }, &text, items, calls, loc.clone())?;
+    Ok(Typed { node: Node::Let { binds: vec![(tmp, dest)], body: vec![built] }, ty: Type::Str, loc })
 }
 
 /// `(format stream control arg...)`, `dest` the stream checked: the string
@@ -89,15 +92,12 @@ fn to_stream(cx: &Cx, heap: &mut Heap, locals: &Locals, dest: Typed, rest: &[(Va
 /// `(print control arg...)` or `(println control arg...)`, `head` saying
 /// which — `args` without the head.
 pub(crate) fn check_print(cx: &Cx, heap: &mut Heap, locals: &Locals, head: u32, args: &[(Value, Option<Loc>)], loc: Option<Loc>) -> Result<Typed, Error> {
-    let (what, builtin) = if head == wk::PRINTLN { ("println", wk::F_PRINTLN_RT) } else { ("print", wk::F_PRINT_RT) };
+    let (what, dest) = if head == wk::PRINTLN { ("println", Dest::Println) } else { ("print", Dest::Print) };
     let [(control, control_loc), items @ ..] = args else {
         return Err(Error::TypeError(format!("{}: expected at least a control string", what)));
     };
-    let (control, items) = check_control(cx, heap, locals, what, (*control, control_loc.clone()), items, loc.clone())?;
-    let path = Path::internal_builtin(builtin);
-    let mut call_args = vec![control];
-    call_args.extend(items);
-    Ok(Typed { node: Node::Call { path, targs: Vec::new(), args: call_args }, ty: Type::Unit, loc })
+    let (text, items, calls) = check_control(cx, heap, locals, what, (*control, control_loc.clone()), items, loc.clone())?;
+    expand(cx, heap, locals, dest, &text, items, calls, loc)
 }
 
 /// `(eprint control arg...)` or `(eprintln control arg...)`, `head` saying
@@ -146,7 +146,8 @@ fn control_text(heap: &Heap, what: &str, control: Value) -> Result<String, Error
 }
 
 /// The literal control string `control` and the arguments `items` it is
-/// given, checked: the string, and the arguments as one `Sexpr` list.
+/// given, checked: the string, the arguments, and the call each `~/name/`
+/// makes for each argument it can be handed ([`resolve_calls`]).
 fn check_control(
     cx: &Cx,
     heap: &mut Heap,
@@ -155,7 +156,7 @@ fn check_control(
     (control, control_loc): (Value, Option<Loc>),
     items: &[(Value, Option<Loc>)],
     loc: Option<Loc>,
-) -> Result<(Typed, Vec<Typed>), Error> {
+) -> Result<(String, Vec<Typed>, Calls), Error> {
     let text = control_text(heap, what, control)?;
     let mut checked = Vec::with_capacity(items.len());
     for (i, (item, item_loc)) in items.iter().enumerate() {
@@ -164,30 +165,31 @@ fn check_control(
         checked.push(item);
     }
     let unknown: Vec<ArgType> = items.iter().map(|_| ArgType { kind: ArgKind::Unknown, shown: String::new() }).collect();
-    let control = if call_sites(&text, &unknown).map_err(Error::TypeError)?.is_empty() {
-        check_expr(cx, heap, locals, control, Some(&Type::Str), control_loc)?
+    let _ = (control, control_loc);
+    let calls = if call_sites(&text, &unknown).map_err(Error::TypeError)?.is_empty() {
+        Calls::new()
     } else {
-        resolve_calls(cx, heap, locals, what, &text, &checked, control_loc)?
+        resolve_calls(cx, heap, locals, what, &text, &checked)?
     };
-    cx.check_directives_later(Directives { control: text, args: checked.iter().map(|t| t.ty.clone()).collect(), loc });
-    // Each argument a `Sexpr` of its own, not a list of them: building a
-    // list would take a cons cell per argument, and printing needs none.
-    let items = checked
-        .into_iter()
-        .map(|item| {
-            let loc = item.loc.clone();
-            Typed { node: Node::AsSexpr { value: Box::new(item) }, ty: sexpr_ty(), loc }
-        })
-        .collect();
-    Ok((control, items))
+    cx.check_directives_later(Directives { control: text.clone(), args: checked.iter().map(|t| t.ty.clone()).collect(), loc });
+    Ok((text, checked, calls))
 }
 
-/// The control string `text`, which has `~/name/` directives, with each name
-/// replaced by what it calls given the arguments `items` it can be handed
-/// ([`call_target`]): the engine fetches that definition rather than look a
-/// name up. The arguments' types are needed here, so a number literal no
-/// type has decided is its default.
-fn resolve_calls(cx: &Cx, heap: &mut Heap, locals: &Locals, what: &str, text: &str, items: &[Typed], loc: Option<Loc>) -> Result<Typed, Error> {
+/// The checked call of each `~/name/` directive, by where its name starts in
+/// the control string and the argument it is handed. The argument is the
+/// local [`call_arg`] in each.
+pub(crate) type Calls = std::collections::HashMap<(usize, usize), Typed>;
+
+/// The local a `~/name/` directive's checked call is handed its argument in.
+/// A name no source can bind: `'` ends a symbol.
+pub(crate) fn call_arg() -> typelisp_mem::SymRef {
+    typelisp_mem::symbols::intern("format''arg")
+}
+
+/// The call each `~/name/` directive of `text` makes for each argument it
+/// can be handed ([`call_target`]). The arguments' types are needed here, so
+/// a number literal no type has decided is its default.
+fn resolve_calls(cx: &Cx, heap: &mut Heap, locals: &Locals, what: &str, text: &str, items: &[Typed]) -> Result<Calls, Error> {
     let mut types = Vec::with_capacity(items.len());
     for (i, item) in items.iter().enumerate() {
         cx.decide_all(&item.ty);
@@ -199,8 +201,16 @@ fn resolve_calls(cx: &Cx, heap: &mut Heap, locals: &Locals, what: &str, text: &s
     }
     let args: Vec<ArgType> = types.iter().map(|ty| ArgType { kind: arg_kind(ty), shown: ty.to_string() }).collect();
     let sites = call_sites(text, &args).map_err(Error::TypeError)?;
-    let mut calls = Vec::with_capacity(sites.len());
-    for site in &sites {
+    let parsed = typelisp_print::format::parse(text).map_err(Error::TypeError)?;
+    let starts: Vec<usize> = typelisp_print::format::call_nodes(&parsed)
+        .into_iter()
+        .map(|n| match n {
+            typelisp_print::format::Node::Call { span, .. } => span.0,
+            _ => unreachable!("call_nodes returns ~/name/ directives"),
+        })
+        .collect();
+    let mut calls = Calls::new();
+    for (site, start) in sites.iter().zip(starts) {
         if site.args.contains(&CallArg::Element) {
             return Err(Error::TypeError(format!(
                 "{}: ~/{}/ can be handed an element of a list argument, whose type is only `Sexpr` — \
@@ -208,10 +218,13 @@ fn resolve_calls(cx: &Cx, heap: &mut Heap, locals: &Locals, what: &str, text: &s
                 what, site.name, site.name
             )));
         }
+        // One directive calls one definition, whichever argument it is
+        // handed.
         let mut found: Option<((CompileTarget, Vec<Type>), &Type)> = None;
         for arg in &site.args {
             let CallArg::Arg(i) = *arg else { unreachable!("elements were refused above") };
-            let target = call_target(cx, heap, locals, what, site, &types[i])?;
+            let checked = call_target(cx, heap, locals, what, site, &types[i])?;
+            let target = called(cx, &checked);
             match &found {
                 None => found = Some((target, &types[i])),
                 Some((first, first_ty)) if *first != target => {
@@ -228,14 +241,19 @@ fn resolve_calls(cx: &Cx, heap: &mut Heap, locals: &Locals, what: &str, text: &s
                 }
                 Some(_) => {}
             }
+            calls.insert((start, i), checked);
         }
-        calls.push(match found {
-            Some(((target, targs), _)) => FormatSite::Call { target, targs },
-            // No path through the control string reaches it.
-            None => FormatSite::Name(site.name.clone()),
-        });
     }
-    Ok(Typed { node: Node::FormatCalls { text: text.to_string(), sites: calls }, ty: Type::Str, loc })
+    Ok(calls)
+}
+
+/// The definition a checked `~/name/` call calls, with its type arguments.
+fn called(cx: &Cx, checked: &Typed) -> (CompileTarget, Vec<Type>) {
+    match &checked.node {
+        Node::Call { path, targs, .. } => (CompileTarget::Fn(*path), targs.iter().map(|t| cx.resolve(t)).collect()),
+        Node::MethodCall { owner, method, targs, .. } => (CompileTarget::Method(*owner, *method), targs.iter().map(|t| cx.resolve(t)).collect()),
+        _ => unreachable!("call_target answers a call"),
+    }
 }
 
 /// What `(name arg colon at)` calls here, `arg` being of the type `ty`:
@@ -243,9 +261,8 @@ fn resolve_calls(cx: &Cx, heap: &mut Heap, locals: &Locals, what: &str, text: &s
 /// else. It has to be a function or a method written in typelisp that takes
 /// `arg` as it is: the engine hands the value over and nothing else.
 /// The definition, and its type arguments when it is generic.
-fn call_target(cx: &Cx, heap: &mut Heap, locals: &Locals, what: &str, site: &CallSite, ty: &Type) -> Result<(CompileTarget, Vec<Type>), Error> {
-    // A name no source can bind: `'` ends a symbol.
-    let arg = typelisp_mem::symbols::intern("format''arg");
+fn call_target(cx: &Cx, heap: &mut Heap, locals: &Locals, what: &str, site: &CallSite, ty: &Type) -> Result<Typed, Error> {
+    let arg = call_arg();
     let shown = format!("~/{}/", site.name);
     let as_call = format!("({} arg colon at) with arg a `{}`", site.name, ty);
     let head = if site.name.contains("::") {
@@ -272,28 +289,15 @@ fn call_target(cx: &Cx, heap: &mut Heap, locals: &Locals, what: &str, site: &Cal
             what, shown, as_call
         ))
     };
-    let (target, first, targs) = match &checked.node {
-        Node::Call { path, targs, args } => {
-            if cx.reg.fn_def(path).is_some_and(|d| d.builtin) {
-                return Err(not_a_definition());
-            }
-            (CompileTarget::Fn(*path), args.first(), targs)
-        }
-        Node::MethodCall { owner, method, targs, args, .. } => {
-            if cx.reg.method(owner, *method).is_some_and(|d| d.sig.builtin) {
-                return Err(not_a_definition());
-            }
-            (CompileTarget::Method(*owner, *method), args.first(), targs)
-        }
+    let (first, builtin) = match &checked.node {
+        Node::Call { path, args, .. } => (args.first(), cx.reg.fn_def(path).is_some_and(|d| d.builtin)),
+        Node::MethodCall { owner, method, args, .. } => (args.first(), cx.reg.method(owner, *method).is_some_and(|d| d.sig.builtin)),
         _ => return Err(not_a_definition()),
     };
-    if !first.is_some_and(|a| matches!(a.node, Node::Local { name } if name == arg)) {
+    if builtin || !first.is_some_and(|a| matches!(a.node, Node::Local { name } if name == arg)) {
         return Err(not_a_definition());
     }
-    // A generic one is the specialization at these, made when the form is
-    // lowered.
-    targs.iter().for_each(|t| cx.decide_all(t));
-    Ok((target, targs.iter().map(|t| cx.resolve(t)).collect()))
+    Ok(checked)
 }
 
 /// `items` as one `Sexpr` list, each held as a `Sexpr` by its own type.

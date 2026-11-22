@@ -44,9 +44,6 @@ pub struct PrintHooks {
     pub field_name: fn(TypeId, usize) -> Result<Option<String>, String>,
     /// `(heap, value, escape) -> rendering`. See [`PrintEnv::print_object`].
     pub print_object: fn(&mut Heap, Value, bool) -> Result<Option<String>, String>,
-    /// `(heap, resolved name, value, colon, at) -> rendering`, for
-    /// `~/name/`. See [`PrintEnv::format_call`].
-    pub format_call: fn(&mut Heap, &str, Value, bool, bool) -> Result<String, String>,
     /// The layout control variables ([`read_opts`]), read fresh per printing
     /// operation — they are ordinary globals a program may have `setf`'d
     /// since the last one. An error is a value the printer cannot use.
@@ -68,7 +65,6 @@ pub const BARE_HOOKS: PrintHooks = PrintHooks {
     field_is_niched_option: |ty, _, _| Err(no_program_for(ty)),
     field_name: |ty, _| Err(no_program_for(ty)),
     print_object: |_, _, _| Err(NO_PROGRAM_FOR_METHODS.to_string()),
-    format_call: |_, name, _, _, _| Err(format!("format: ~/{}/ needs a program that defines it, and none is installed", name)),
     opts: |_| Err(NO_PROGRAM.to_string()),
     print_vars: |_| Err(NO_PROGRAM.to_string()),
 };
@@ -180,8 +176,15 @@ pub fn print_hooks() -> PrintHooks {
 
 /// The [`PrintEnv`] every printing operation here runs under: the installed
 /// hooks, behind the trait [`typelisp_print`] asks its questions through.
-struct RtPrintEnv {
+pub(crate) struct RtPrintEnv {
     hooks: PrintHooks,
+}
+
+impl RtPrintEnv {
+    /// The environment this thread's printing runs under right now.
+    pub(crate) fn current() -> RtPrintEnv {
+        RtPrintEnv { hooks: print_hooks() }
+    }
 }
 
 impl PrintEnv for RtPrintEnv {
@@ -201,9 +204,6 @@ impl PrintEnv for RtPrintEnv {
         (self.hooks.print_object)(heap, v, escape)
     }
 
-    fn format_call(&self, heap: &mut Heap, name: &str, v: Value, colon: bool, at: bool) -> Result<String, String> {
-        (self.hooks.format_call)(heap, name, v, colon, at)
-    }
 }
 
 /// An in-progress pretty-printing session: what CL would call "the output
@@ -234,23 +234,6 @@ pub fn current_opts(heap: &Heap) -> Result<Opts, String> {
 /// The "what to print" control variables, as of right now.
 pub fn current_print_vars(heap: &Heap) -> Result<PrintVars, String> {
     (print_hooks().print_vars)(heap)
-}
-
-/// Builds `control`'s output without committing it — the shared half of
-/// `format`/`print`/`println`.
-///
-/// Kept separate from [`emit`] because a buffer that still carries
-/// pretty-printer ops must be merged into an open session *un*-laid-out:
-/// laying it out early would freeze line breaks chosen against the wrong
-/// starting column and without the enclosing block's indentation.
-///
-/// `args` are the directive arguments, each already a `Sexpr`. The caller
-/// keeps them reachable: the run allocates (a `print-object` method can).
-pub fn build_format(heap: &mut Heap, control: &str, args: &[Value]) -> Result<Out, String> {
-    let env = RtPrintEnv { hooks: print_hooks() };
-    let opts = current_opts(heap)?;
-    let ctx = RenderCtx { env: &env, print_vars: current_print_vars(heap)? };
-    format::build(heap, ctx, control, args, &opts)
 }
 
 /// Renders one value with a ready-made layout — the `pprint`/`pprint-fill`/
@@ -491,53 +474,12 @@ fn arg_keyword(args: &[Value], i: usize, who: &str) -> Result<SymRef, PrintError
     }
 }
 
-/// Runs one printing builtin, or returns `None` when `name` is not one.
-///
-/// `name` is the *lowered* spelling the checker emits (`format-rt`,
-/// `print-rt`, …), not the surface syntax: `format`/`print`/`println`/
-/// `pprint` and `pprint-logical-block` are special forms, and what survives
-/// checking is a call to one of the names below.
-/// Runs `f` with `items` rooted, so that what it allocates cannot collect
-/// them: they arrive as a slice, which the collector does not see.
-fn rooted<T>(heap: &mut Heap, items: &[Value], f: impl FnOnce(&mut Heap, &[Value]) -> T) -> T {
-    for v in items {
-        heap.push_root(*v);
-    }
-    let out = f(heap, items);
-    for _ in items {
-        heap.pop_root();
-    }
-    out
-}
-
-/// `args` of `format-rt` are the destination, the control string and the
-/// directive arguments; of `print-rt`/`println-rt`, the control string and
-/// the directive arguments — each argument a word of its own, not a list.
+/// Runs one printing builtin, or returns `None` when `name` is not one: the
+/// pretty printer's (`pprint` and its kin, `pprint-logical-block`'s halves,
+/// and the `pprint-*` operators). `format`/`print`/`println` are expanded
+/// into the pieces of [`crate::format::ops`] instead.
 pub fn print_builtin(heap: &mut Heap, name: SymRef, args: &[Value]) -> Option<Result<Value, PrintError>> {
     let r = match name.well_known() {
-        // `format`'s `bool` destination: builds the text, and additionally
-        // writes it when the destination is `true` (CL's `t`). The string it
-        // returns is always the laid-out text; the *write* goes through
-        // `emit`, which merges into an open logical block rather than jumping
-        // the queue past that block's buffered output.
-        wk::F_FORMAT_RT => (|| {
-            let dest = arg_bool(args, 0, "format")?;
-            let control = arg_str(heap, args, 1, "format")?;
-            let out = rooted(heap, &args[2..], |heap, items| build_format(heap, &control, items)).map_err(PrintError::Raise)?;
-            let opts = current_opts(heap).map_err(PrintError::Raise)?;
-            let text = format::finish(out.clone(), &opts);
-            if dest {
-                emit(heap, out, false, &opts).map_err(PrintError::Raise)?;
-            }
-            Ok(heap.alloc_string(text))
-        })(),
-        wk::F_PRINT_RT | wk::F_PRINTLN_RT => (|| {
-            let control = arg_str(heap, args, 0, name.name())?;
-            let out = rooted(heap, &args[1..], |heap, items| build_format(heap, &control, items)).map_err(PrintError::Raise)?;
-            let opts = current_opts(heap).map_err(PrintError::Raise)?;
-            emit(heap, out, name.is(wk::F_PRINTLN_RT), &opts).map_err(PrintError::Raise)?;
-            Ok(Value::Empty)
-        })(),
         // `pprint`/`pprint-fill`/`pprint-linear`/`pprint-tabular`, which pass
         // their own name so one builtin serves all four.
         wk::F_PPRINT_RT => (|| {
@@ -640,7 +582,7 @@ mod tests {
         let mut heap = Heap::with_capacity(1 << 12);
         set_print_hooks(None);
 
-        let err = build_format(&mut heap, "~a", &[Value::Int(7)]).expect_err("no program, no printer variables");
+        let err = crate::format::ops::render(&mut heap, Value::Int(7), false).expect_err("no program, no printer variables");
         assert!(err.contains("printer control variables"), "{}", err);
     }
 
@@ -662,8 +604,7 @@ mod tests {
         }));
 
         let boxed = heap.alloc_enum(typelisp_mem::TypeId::OPTION, 0, vec![Value::Int(7)]);
-        let out = build_format(&mut heap, "~a", &[boxed]).expect("format should succeed");
-        assert_eq!(format::finish(out, &Opts::default()), "(Some 7)");
+        assert_eq!(crate::format::ops::render(&mut heap, boxed, false).expect("format should succeed"), "(Some 7)");
 
         set_print_hooks(None);
     }
@@ -677,7 +618,7 @@ mod tests {
         set_print_hooks(Some(TEST_HOOKS));
 
         let boxed = heap.alloc_enum(typelisp_mem::TypeId::OPTION, 0, vec![Value::Int(7)]);
-        let err = build_format(&mut heap, "~a", &[boxed]).expect_err("an unregistered enum");
+        let err = crate::format::ops::render(&mut heap, boxed, false).expect_err("an unregistered enum");
         assert!(err.contains("Option"), "{}", err);
 
         set_print_hooks(None);
@@ -696,9 +637,9 @@ mod tests {
 
         let pt = typelisp_mem::intern_type(typelisp_mem::TypeShape::named(typelisp_mem::NsId::ROOT, "pt", &[]));
         let boxed = heap.alloc_struct(pt, vec![Value::Int(1)]);
-        // The two arguments `~a ~s` consumes.
-        let out = build_format(&mut heap, "~a ~s", &[boxed, boxed]).expect("format should succeed");
-        assert_eq!(format::finish(out, &Opts::default()), "#<A> #<S>");
+        let a = crate::format::ops::render(&mut heap, boxed, false).expect("format should succeed");
+        let s = crate::format::ops::render(&mut heap, boxed, true).expect("format should succeed");
+        assert_eq!((a.as_str(), s.as_str()), ("#<A>", "#<S>"));
 
         set_print_hooks(None);
     }

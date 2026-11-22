@@ -70,8 +70,9 @@ impl Default for Builtins {
 /// ([`crate::ffi_callback`]): they live in `std::%internal`, in no table, so
 /// no source reaches one by its name.
 pub fn lowered_builtins() -> impl Iterator<Item = u32> {
-    [wk::F_FORMAT_RT, wk::F_PRINT_RT, wk::F_PRINTLN_RT, wk::F_PPRINT_RT, wk::F_PPRINT_BLOCK_START_RT, wk::F_PPRINT_BLOCK_END_RT]
+    [wk::F_PPRINT_RT, wk::F_PPRINT_BLOCK_START_RT, wk::F_PPRINT_BLOCK_END_RT]
         .into_iter()
+        .chain(crate::typeck::format_expand::PIECES.iter().copied())
         .chain(crate::c_struct::BUILTINS.iter().map(|(name, _)| *name))
         .chain(std::iter::once(crate::ffi_callback::ADDRESS_BUILTIN))
 }
