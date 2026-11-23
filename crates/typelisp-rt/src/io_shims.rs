@@ -1,4 +1,4 @@
-//! Compiled-code shims for the stream, readtable and socket builtins.
+//! Compiled-code shims for the stream and readtable builtins.
 
 use typelisp_mem::prelude::*;
 use typelisp_abi::{active_heap, encode, fatal, tagged_arg};
@@ -157,73 +157,3 @@ stream_shim!(rt_stream_write_string, typelisp_mem::wk::F_STREAM_WRITE_STRING, "s
 stream_shim!(rt_stream_at_line_start, typelisp_mem::wk::F_STREAM_AT_LINE_START, "stream-at-line-start", [int], tagged, via crate::stream_builtin::stream_builtin);
 stream_shim!(rt_stream_finish_output, typelisp_mem::wk::F_STREAM_FINISH_OUTPUT, "stream-finish-output", [int], tagged, via crate::stream_builtin::stream_builtin);
 stream_shim!(rt_stream_take_output_string, typelisp_mem::wk::F_STREAM_TAKE_OUTPUT_STRING, "stream-take-output-string", [int], tagged, via crate::stream_builtin::stream_builtin);
-
-// The sockets: `crate::net_builtin::net_builtin` is the implementation both
-// these and the interpreter call. `net-wait` has no shim here — it suspends,
-// and `crate::coroutine::rt_suspend_io` is its compiled form.
-#[cfg(all(feature = "std", not(target_family = "wasm")))]
-stream_shim!(rt_net_resolve_begin, typelisp_mem::wk::F_NET_RESOLVE_BEGIN, "net-resolve-begin", [str, int], tagged, via crate::net_builtin::net_builtin);
-#[cfg(all(feature = "std", not(target_family = "wasm")))]
-stream_shim!(rt_net_resolve_finish, typelisp_mem::wk::F_NET_RESOLVE_FINISH, "net-resolve-finish", [int], tagged, via crate::net_builtin::net_builtin);
-#[cfg(all(feature = "std", not(target_family = "wasm")))]
-stream_shim!(rt_net_connect_begin, typelisp_mem::wk::F_NET_CONNECT_BEGIN, "net-connect-begin", [str], tagged, via crate::net_builtin::net_builtin);
-// The `Option<string>` arguments niche (`typelisp_mem::option`): `None` is
-// the empty word and `Some` the string, so they cross as any tagged word.
-#[cfg(all(feature = "std", not(target_family = "wasm")))]
-stream_shim!(rt_net_tls_start, typelisp_mem::wk::F_NET_TLS_START, "net-tls-start", [int, str, tagged, tagged, tagged], tagged, via crate::net_builtin::net_builtin);
-#[cfg(all(feature = "std", not(target_family = "wasm")))]
-stream_shim!(rt_net_tls_listen, typelisp_mem::wk::F_NET_TLS_LISTEN, "net-tls-listen", [str, int, str, str, tagged], tagged, via crate::net_builtin::net_builtin);
-#[cfg(all(feature = "std", not(target_family = "wasm")))]
-stream_shim!(rt_net_socket_error, typelisp_mem::wk::F_NET_SOCKET_ERROR, "net-socket-error", [int], tagged, via crate::net_builtin::net_builtin);
-#[cfg(all(feature = "std", not(target_family = "wasm")))]
-stream_shim!(rt_net_peer_subject, typelisp_mem::wk::F_NET_PEER_SUBJECT, "net-peer-subject", [int], tagged, via crate::net_builtin::net_builtin);
-#[cfg(all(feature = "std", not(target_family = "wasm")))]
-stream_shim!(rt_net_server_name, typelisp_mem::wk::F_NET_SERVER_NAME, "net-server-name", [int], tagged, via crate::net_builtin::net_builtin);
-#[cfg(all(feature = "std", not(target_family = "wasm")))]
-stream_shim!(rt_net_set_nodelay, typelisp_mem::wk::F_NET_SET_NODELAY, "net-set-nodelay", [int, bool], tagged, via crate::net_builtin::net_builtin);
-#[cfg(all(feature = "std", not(target_family = "wasm")))]
-stream_shim!(rt_net_set_keepalive, typelisp_mem::wk::F_NET_SET_KEEPALIVE, "net-set-keepalive", [int, bool], tagged, via crate::net_builtin::net_builtin);
-#[cfg(all(feature = "std", not(target_family = "wasm")))]
-stream_shim!(rt_net_set_keepalive_period, typelisp_mem::wk::F_NET_SET_KEEPALIVE_PERIOD, "net-set-keepalive-period", [int, int], tagged, via crate::net_builtin::net_builtin);
-#[cfg(all(feature = "std", not(target_family = "wasm")))]
-stream_shim!(rt_net_tls_add_certificate, typelisp_mem::wk::F_NET_TLS_ADD_CERTIFICATE, "net-tls-add-certificate", [int, str, str, str], tagged, via crate::net_builtin::net_builtin);
-#[cfg(all(feature = "std", not(target_family = "wasm")))]
-stream_shim!(rt_net_tls_handshake, typelisp_mem::wk::F_NET_TLS_HANDSHAKE, "net-tls-handshake", [int], tagged, via crate::net_builtin::net_builtin);
-#[cfg(all(feature = "std", not(target_family = "wasm")))]
-stream_shim!(rt_net_udp_bind, typelisp_mem::wk::F_NET_UDP_BIND, "net-udp-bind", [str, int], tagged, via crate::net_builtin::net_builtin);
-#[cfg(all(feature = "std", not(target_family = "wasm")))]
-stream_shim!(rt_net_udp_send_to, typelisp_mem::wk::F_NET_UDP_SEND_TO, "net-udp-send-to", [int, str, tagged], tagged, via crate::net_builtin::net_builtin);
-#[cfg(all(feature = "std", not(target_family = "wasm")))]
-stream_shim!(rt_net_udp_recv, typelisp_mem::wk::F_NET_UDP_RECV, "net-udp-recv", [int], tagged, via crate::net_builtin::net_builtin);
-#[cfg(all(feature = "std", not(target_family = "wasm")))]
-stream_shim!(rt_net_udp_last_sender, typelisp_mem::wk::F_NET_UDP_LAST_SENDER, "net-udp-last-sender", [int], tagged, via crate::net_builtin::net_builtin);
-#[cfg(all(feature = "std", not(target_family = "wasm")))]
-stream_shim!(rt_net_connect_finish, typelisp_mem::wk::F_NET_CONNECT_FINISH, "net-connect-finish", [int], tagged, via crate::net_builtin::net_builtin);
-#[cfg(all(feature = "std", not(target_family = "wasm")))]
-stream_shim!(rt_net_listen, typelisp_mem::wk::F_NET_LISTEN, "net-listen", [str, int], tagged, via crate::net_builtin::net_builtin);
-#[cfg(all(feature = "std", not(target_family = "wasm")))]
-stream_shim!(rt_net_unix_connect, typelisp_mem::wk::F_NET_UNIX_CONNECT, "net-unix-connect", [str], tagged, via crate::net_builtin::net_builtin);
-#[cfg(all(feature = "std", not(target_family = "wasm")))]
-stream_shim!(rt_net_unix_listen, typelisp_mem::wk::F_NET_UNIX_LISTEN, "net-unix-listen", [str], tagged, via crate::net_builtin::net_builtin);
-#[cfg(all(feature = "std", not(target_family = "wasm")))]
-stream_shim!(rt_net_accept, typelisp_mem::wk::F_NET_ACCEPT, "net-accept", [int], tagged, via crate::net_builtin::net_builtin);
-#[cfg(all(feature = "std", not(target_family = "wasm")))]
-stream_shim!(rt_net_fill, typelisp_mem::wk::F_NET_FILL, "net-fill", [int], tagged, via crate::net_builtin::net_builtin);
-#[cfg(all(feature = "std", not(target_family = "wasm")))]
-stream_shim!(rt_net_pop_byte, typelisp_mem::wk::F_NET_POP_BYTE, "net-pop-byte", [int], tagged, via crate::net_builtin::net_builtin);
-#[cfg(all(feature = "std", not(target_family = "wasm")))]
-stream_shim!(rt_net_pop_char, typelisp_mem::wk::F_NET_POP_CHAR, "net-pop-char", [int], tagged, via crate::net_builtin::net_builtin);
-#[cfg(all(feature = "std", not(target_family = "wasm")))]
-stream_shim!(rt_net_buffered_p, typelisp_mem::wk::F_NET_BUFFERED_P, "net-buffered-p", [int], tagged, via crate::net_builtin::net_builtin);
-#[cfg(all(feature = "std", not(target_family = "wasm")))]
-stream_shim!(rt_net_push_string, typelisp_mem::wk::F_NET_PUSH_STRING, "net-push-string", [int, str], tagged, via crate::net_builtin::net_builtin);
-#[cfg(all(feature = "std", not(target_family = "wasm")))]
-stream_shim!(rt_net_push_byte, typelisp_mem::wk::F_NET_PUSH_BYTE, "net-push-byte", [int, int], tagged, via crate::net_builtin::net_builtin);
-#[cfg(all(feature = "std", not(target_family = "wasm")))]
-stream_shim!(rt_net_flush, typelisp_mem::wk::F_NET_FLUSH, "net-flush", [int], tagged, via crate::net_builtin::net_builtin);
-#[cfg(all(feature = "std", not(target_family = "wasm")))]
-stream_shim!(rt_net_shutdown_write, typelisp_mem::wk::F_NET_SHUTDOWN_WRITE, "net-shutdown-write", [int], tagged, via crate::net_builtin::net_builtin);
-#[cfg(all(feature = "std", not(target_family = "wasm")))]
-stream_shim!(rt_net_local_address, typelisp_mem::wk::F_NET_LOCAL_ADDRESS, "net-local-address", [int], tagged, via crate::net_builtin::net_builtin);
-#[cfg(all(feature = "std", not(target_family = "wasm")))]
-stream_shim!(rt_net_peer_address, typelisp_mem::wk::F_NET_PEER_ADDRESS, "net-peer-address", [int], tagged, via crate::net_builtin::net_builtin);

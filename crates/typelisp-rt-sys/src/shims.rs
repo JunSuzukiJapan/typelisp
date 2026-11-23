@@ -12,7 +12,6 @@ typelisp_rt::stream_shim!(rt_file_delete, typelisp_mem::wk::F_FILE_DELETE, "file
 typelisp_rt::stream_shim!(rt_file_rename, typelisp_mem::wk::F_FILE_RENAME, "file-rename", [str, str], tagged, via crate::fs_builtin::fs_builtin);
 typelisp_rt::stream_shim!(rt_file_truename, typelisp_mem::wk::F_FILE_TRUENAME, "file-truename", [str], tagged, via crate::fs_builtin::fs_builtin);
 typelisp_rt::stream_shim!(rt_file_modified_date, typelisp_mem::wk::F_FILE_MODIFIED_DATE, "file-modified-date", [str], tagged, via crate::fs_builtin::fs_builtin);
-typelisp_rt::stream_shim!(rt_file_owner_name, typelisp_mem::wk::F_FILE_OWNER_NAME, "file-owner-name", [str], tagged, via crate::fs_builtin::fs_builtin);
 typelisp_rt::stream_shim!(rt_file_directory_p, typelisp_mem::wk::F_FILE_DIRECTORY_P, "file-directory-p", [str], bool, via crate::fs_builtin::fs_builtin);
 typelisp_rt::stream_shim!(rt_file_list_directory, typelisp_mem::wk::F_FILE_LIST_DIRECTORY, "file-list-directory", [str], tagged, via crate::fs_builtin::fs_builtin);
 typelisp_rt::stream_shim!(rt_file_create_directories, typelisp_mem::wk::F_FILE_CREATE_DIRECTORIES, "file-create-directories", [str], tagged, via crate::fs_builtin::fs_builtin);

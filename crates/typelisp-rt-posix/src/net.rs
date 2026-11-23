@@ -59,7 +59,7 @@ use std::io::{ErrorKind, Read, Write};
 use std::net::{SocketAddr, TcpListener, ToSocketAddrs, UdpSocket};
 use std::sync::{Arc, Mutex};
 
-use crate::stream::{ExtBackend, ExtParts, Handle, StreamObj, StreamResult, StreamTable};
+use typelisp_rt::stream::{ExtBackend, ExtParts, Handle, StreamObj, StreamResult, StreamTable};
 
 mod tls;
 pub(crate) use tls::*;
@@ -352,7 +352,7 @@ impl ExtBackend for NetBackend {
         })
     }
 
-    fn wait_fd(&self) -> StreamResult<(i32, crate::sched::PollerRef)> {
+    fn wait_fd(&self) -> StreamResult<(i32, typelisp_rt::sched::PollerRef)> {
         use std::os::unix::io::AsRawFd;
         let fd = match self {
             NetBackend::Tcp { sock, .. } => sock.raw_fd(),
@@ -360,7 +360,7 @@ impl ExtBackend for NetBackend {
             NetBackend::Udp { sock, .. } => sock.as_raw_fd(),
             NetBackend::Resolver { pipe, .. } => pipe.as_raw_fd(),
         };
-        Ok((fd, crate::sched::PollerRef(&crate::os::POLLER)))
+        Ok((fd, typelisp_rt::sched::PollerRef(&crate::os::POLLER)))
     }
 }
 
@@ -1113,10 +1113,10 @@ mod tests {
         let addr = sk(t).net_local_address(l).unwrap();
         let c = sk(t).net_connect_begin(&addr).unwrap();
         let cfd = t.raw_fd(c).unwrap().0;
-        crate::os::poll_ready(&[(cfd, crate::sched::Interest::Writable)], Some(core::time::Duration::from_secs(5))).unwrap();
+        crate::os::poll_ready(&[(cfd, typelisp_rt::sched::Interest::Writable)], Some(core::time::Duration::from_secs(5))).unwrap();
         sk(t).net_connect_finish(c).unwrap();
         let lfd = t.raw_fd(l).unwrap().0;
-        crate::os::poll_ready(&[(lfd, crate::sched::Interest::Readable)], Some(core::time::Duration::from_secs(5))).unwrap();
+        crate::os::poll_ready(&[(lfd, typelisp_rt::sched::Interest::Readable)], Some(core::time::Duration::from_secs(5))).unwrap();
         let s = sk(t).net_accept(l).unwrap().expect("a connection was waiting");
         (c, s)
     }
@@ -1127,7 +1127,7 @@ mod tests {
             if let Some(n) = sk(t).net_fill(h).unwrap() {
                 return n;
             }
-            crate::os::poll_ready(&[(fd, crate::sched::Interest::Readable)], Some(core::time::Duration::from_secs(5))).unwrap();
+            crate::os::poll_ready(&[(fd, typelisp_rt::sched::Interest::Readable)], Some(core::time::Duration::from_secs(5))).unwrap();
         }
     }
 
@@ -1188,7 +1188,7 @@ mod tests {
             Err(e) => Err(e),
             Ok(c) => {
                 let fd = t.raw_fd(c).unwrap().0;
-                crate::os::poll_ready(&[(fd, crate::sched::Interest::Writable)], Some(core::time::Duration::from_secs(5))).unwrap();
+                crate::os::poll_ready(&[(fd, typelisp_rt::sched::Interest::Writable)], Some(core::time::Duration::from_secs(5))).unwrap();
                 sk(&mut t).net_connect_finish(c)
             }
         };
@@ -1207,7 +1207,7 @@ mod tests {
         let r = sk(t).net_resolve_begin(host, port)?;
         let fd = t.raw_fd(r).unwrap().0;
         loop {
-            crate::os::poll_ready(&[(fd, crate::sched::Interest::Readable)], Some(core::time::Duration::from_secs(10))).unwrap();
+            crate::os::poll_ready(&[(fd, typelisp_rt::sched::Interest::Readable)], Some(core::time::Duration::from_secs(10))).unwrap();
             if let Some(a) = sk(t).net_resolve_finish(r)? {
                 return Ok(a);
             }
@@ -1232,7 +1232,7 @@ mod tests {
         let to = sk(&mut t).net_local_address(b).unwrap();
         assert!(sk(&mut t).net_udp_send_to(a, &to, b"ping").unwrap());
         let fd = t.raw_fd(b).unwrap().0;
-        crate::os::poll_ready(&[(fd, crate::sched::Interest::Readable)], Some(core::time::Duration::from_secs(5))).unwrap();
+        crate::os::poll_ready(&[(fd, typelisp_rt::sched::Interest::Readable)], Some(core::time::Duration::from_secs(5))).unwrap();
         assert_eq!(sk(&mut t).net_udp_recv(b).unwrap(), Some(b"ping".to_vec()));
         assert_eq!(sk(&mut t).net_udp_last_sender(b).unwrap(), sk(&mut t).net_local_address(a).unwrap());
         assert_eq!(sk(&mut t).net_udp_recv(b).unwrap(), None);
@@ -1249,7 +1249,7 @@ mod tests {
         assert!(sk(&mut t).net_unix_listen(&path).is_err(), "a second bind on a live socket file succeeded");
         let c = sk(&mut t).net_unix_connect(&path).unwrap();
         let lfd = t.raw_fd(l).unwrap().0;
-        crate::os::poll_ready(&[(lfd, crate::sched::Interest::Readable)], Some(core::time::Duration::from_secs(5))).unwrap();
+        crate::os::poll_ready(&[(lfd, typelisp_rt::sched::Interest::Readable)], Some(core::time::Duration::from_secs(5))).unwrap();
         let s = sk(&mut t).net_accept(l).unwrap().expect("a connection was waiting");
         assert_eq!(sk(&mut t).net_peer_address(s).unwrap(), "(unnamed)");
         sk(&mut t).net_push_string(c, "over unix\n").unwrap();
@@ -1350,11 +1350,11 @@ mod tests {
         let addr = sk(t).net_local_address(l).unwrap();
         let c = sk(t).net_connect_begin(&addr).unwrap();
         let cfd = t.raw_fd(c).unwrap().0;
-        crate::os::poll_ready(&[(cfd, crate::sched::Interest::Writable)], Some(core::time::Duration::from_secs(5))).unwrap();
+        crate::os::poll_ready(&[(cfd, typelisp_rt::sched::Interest::Writable)], Some(core::time::Duration::from_secs(5))).unwrap();
         sk(t).net_connect_finish(c).unwrap();
         sk(t).net_tls_start(c, server_name, trust, identity.map(|i| i.0), identity.map(|i| i.1)).unwrap();
         let lfd = t.raw_fd(l).unwrap().0;
-        crate::os::poll_ready(&[(lfd, crate::sched::Interest::Readable)], Some(core::time::Duration::from_secs(5))).unwrap();
+        crate::os::poll_ready(&[(lfd, typelisp_rt::sched::Interest::Readable)], Some(core::time::Duration::from_secs(5))).unwrap();
         let s = sk(t).net_accept(l).unwrap().expect("a connection was waiting");
         let sfd = t.raw_fd(s).unwrap().0;
         let client = loop {
@@ -1362,13 +1362,13 @@ mod tests {
                 Ok(None) => break Ok(c),
                 Err(e) => break Err(e),
                 Ok(Some(i)) => {
-                    let interest = if i == 1 { crate::sched::Interest::Writable } else { crate::sched::Interest::Readable };
+                    let interest = if i == 1 { typelisp_rt::sched::Interest::Writable } else { typelisp_rt::sched::Interest::Readable };
                     crate::os::poll_ready(&[(cfd, interest)], Some(core::time::Duration::from_millis(200))).unwrap();
                 }
             }
             // The server's turn, the way its task would take it: a read
             // that finds a handshake record answers "again", not data.
-            crate::os::poll_ready(&[(sfd, crate::sched::Interest::Readable)], Some(core::time::Duration::from_millis(200))).unwrap();
+            crate::os::poll_ready(&[(sfd, typelisp_rt::sched::Interest::Readable)], Some(core::time::Duration::from_millis(200))).unwrap();
             let _ = sk(t).net_fill(s).unwrap();
         };
         (client, s)
@@ -1413,11 +1413,11 @@ mod tests {
         let addr = sk(&mut t).net_local_address(l).unwrap();
         let c = sk(&mut t).net_connect_begin(&addr).unwrap();
         let cfd = t.raw_fd(c).unwrap().0;
-        crate::os::poll_ready(&[(cfd, crate::sched::Interest::Writable)], Some(core::time::Duration::from_secs(5))).unwrap();
+        crate::os::poll_ready(&[(cfd, typelisp_rt::sched::Interest::Writable)], Some(core::time::Duration::from_secs(5))).unwrap();
         sk(&mut t).net_connect_finish(c).unwrap();
         sk(&mut t).net_tls_start(c, "localhost", Some(&pki.ca), None, None).unwrap();
         let lfd = t.raw_fd(l).unwrap().0;
-        crate::os::poll_ready(&[(lfd, crate::sched::Interest::Readable)], Some(core::time::Duration::from_secs(5))).unwrap();
+        crate::os::poll_ready(&[(lfd, typelisp_rt::sched::Interest::Readable)], Some(core::time::Duration::from_secs(5))).unwrap();
         let s = sk(&mut t).net_accept(l).unwrap().unwrap();
         let sfd = t.raw_fd(s).unwrap().0;
         sk(&mut t).net_push_string(s, "220 hello\n").unwrap();
@@ -1428,17 +1428,17 @@ mod tests {
                 None => break,
                 Some(0) => {
                     asked_readable = true;
-                    crate::os::poll_ready(&[(sfd, crate::sched::Interest::Readable)], Some(core::time::Duration::from_millis(200))).unwrap();
+                    crate::os::poll_ready(&[(sfd, typelisp_rt::sched::Interest::Readable)], Some(core::time::Duration::from_millis(200))).unwrap();
                 }
                 Some(_) => {
-                    crate::os::poll_ready(&[(sfd, crate::sched::Interest::Writable)], Some(core::time::Duration::from_millis(200))).unwrap();
+                    crate::os::poll_ready(&[(sfd, typelisp_rt::sched::Interest::Writable)], Some(core::time::Duration::from_millis(200))).unwrap();
                 }
             }
             if !client_done {
                 match sk(&mut t).net_tls_handshake(c).unwrap() {
                     None => client_done = true,
                     Some(i) => {
-                        let interest = if i == 1 { crate::sched::Interest::Writable } else { crate::sched::Interest::Readable };
+                        let interest = if i == 1 { typelisp_rt::sched::Interest::Writable } else { typelisp_rt::sched::Interest::Readable };
                         crate::os::poll_ready(&[(cfd, interest)], Some(core::time::Duration::from_millis(200))).unwrap();
                     }
                 }
@@ -1621,12 +1621,12 @@ mod tests {
                 Ok(None) => break Ok(()),
                 Err(e) => break Err(e),
                 Ok(Some(i)) => {
-                    let interest = if i == 1 { crate::sched::Interest::Writable } else { crate::sched::Interest::Readable };
+                    let interest = if i == 1 { typelisp_rt::sched::Interest::Writable } else { typelisp_rt::sched::Interest::Readable };
                     crate::os::poll_ready(&[(cfd, interest)], Some(core::time::Duration::from_millis(200))).unwrap();
                 }
             }
             // The peer echoes whatever it got.
-            crate::os::poll_ready(&[(sfd, crate::sched::Interest::Readable)], Some(core::time::Duration::from_millis(200))).unwrap();
+            crate::os::poll_ready(&[(sfd, typelisp_rt::sched::Interest::Readable)], Some(core::time::Duration::from_millis(200))).unwrap();
             if let Some(n) = sk(&mut t).net_fill(s).unwrap() {
                 if n == 0 {
                     break Err("peer closed".to_string());

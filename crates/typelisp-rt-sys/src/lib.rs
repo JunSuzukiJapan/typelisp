@@ -3,7 +3,8 @@
 //! (`docs/dev/runtime-split-plan.md`).
 //!
 //! - [`file`]: a file as a stream, in `typelisp_rt`'s stream table.
-//! - [`fs_builtin`]: `open` and the `file-*` builtins.
+//! - [`fs_builtin`]: `open` and the `file-*` builtins (a file's owner is
+//!   `typelisp-rt-posix`'s: WASI has no user database).
 //! - [`env`]: the command line, environment variables, the home directory.
 //! - [`dribble`]: the file `dribble` copies the session into.
 //!

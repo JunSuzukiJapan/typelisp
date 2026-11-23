@@ -106,14 +106,15 @@ fn every_shared_constant_is_described() {
     // constants in them that are not part of what is shared.
     // `FILE_ERROR` is how the tables' rows spell the error type, and those
     // rows are described.
-    let files: [(&str, &[&str]); 10] = [
+    let files: [(&str, &[&str]); 11] = [
         ("crates/typelisp-abi/src/lib.rs", &["ABI_VERSION", "ABI_SYMBOL"]),
         ("crates/typelisp-mem/src/tagged.rs", &[]),
         ("crates/typelisp-rt/src/c_mem.rs", &[]),
         ("crates/typelisp-rt/src/program.rs", &[]),
         ("crates/typelisp-rt/src/sys_builtin.rs", &[]),
         ("crates/typelisp-rt/src/stream_builtin.rs", &["FILE_ERROR"]),
-        ("crates/typelisp-rt/src/net_builtin.rs", &[]),
+        ("crates/typelisp-rt-posix/src/net_builtin.rs", &[]),
+        ("crates/typelisp-rt-posix/src/sys.rs", &[]),
         ("crates/typelisp-rt-sys/src/fs_builtin.rs", &[]),
         ("crates/typelisp-rt-sys/src/env.rs", &[]),
         ("crates/typelisp-rt-sys/src/dribble.rs", &[]),

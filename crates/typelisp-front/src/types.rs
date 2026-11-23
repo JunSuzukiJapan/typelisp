@@ -239,7 +239,7 @@ pub enum Type {
     /// no arithmetic: to compute with one, convert (`as i32`, `as bignum`).
     ///
     /// LP64 is assumed, which every Unix this workspace supports uses (the
-    /// `#[cfg(unix)]` split in `typelisp_rt::os` is the same assumption).
+    /// `#[cfg(unix)]` split in `typelisp_rt_posix::os` is the same assumption).
     CLong,
     CULong,
     /// A typed C pointer, `(ptr T)`: the address of a `T` laid out as C lays

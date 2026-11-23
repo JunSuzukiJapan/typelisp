@@ -22,7 +22,6 @@ use typelisp_mem::prelude::*;
 use typelisp_mem::{spec, wk, Heap, StdModule, TypeId, TypeSpec, Value};
 
 use crate::result_value::{err_in, ok_in, option_in, TypeTable};
-use crate::stream_builtin::FILE_ERROR;
 
 // The types these results are built with come from `typelisp_mem`'s
 // pre-interned table — same standing exception (and same guard test) as
@@ -36,12 +35,9 @@ const PARSE_FLOAT_ERROR: TypeSpec = TypeSpec::Named(StdModule::NUM, "ParseFloatE
 /// checker to ask), checked against the registry by the same guard test.
 pub const RESULT_TYPES: TypeTable = &[
     (wk::F_PARSE_FLOAT, TypeSpec::Named(StdModule::RESULT, "Result", &[spec::F64, PARSE_FLOAT_ERROR])),
-    (wk::F_MACHINE_INSTANCE, TypeSpec::Named(StdModule::OPTION, "Option", &[spec::STRING])),
     (wk::F_MACHINE_VERSION, TypeSpec::Named(StdModule::OPTION, "Option", &[spec::STRING])),
-    (wk::F_SOFTWARE_VERSION, TypeSpec::Named(StdModule::OPTION, "Option", &[spec::STRING])),
     (wk::F_TIMEZONE_OFFSET_SECONDS, TypeSpec::Named(StdModule::OPTION, "Option", &[spec::INT])),
     (wk::F_TIMEZONE_DAYLIGHT_P, TypeSpec::Named(StdModule::OPTION, "Option", &[spec::BOOL])),
-    (wk::F_ED_OPEN, TypeSpec::Named(StdModule::RESULT, "Result", &[spec::UNIT, FILE_ERROR])),
 ];
 
 /// `Ok(v)` under `name`'s row ([`crate::result_value`]).
@@ -184,41 +180,11 @@ pub fn thread_available_parallelism() -> Result<i64, String> {
 
 // ---- What only the operating system knows -----------------------------
 //
-// The ones `std` has no equivalent of: a call into [`crate::os`], or into
-// `typelisp_mem::host` for what every target answers. Every one may honestly
-// answer `None`; CL says so for `machine-instance`, `machine-version` and
-// `software-version` in as many words ("or nil if no such ... can be
-// determined").
-
-/// `(get-internal-run-time)` (CLHS 25.1): CPU time this process has used,
-/// user plus system, in the same microseconds `get-internal-real-time`
-/// counts.
-///
-/// The pair is the point: real time says how long you waited, run time says
-/// how long the CPU worked, and a program that is mostly blocked on I/O
-/// shows a large difference. Substituting one for the other — which is what
-/// this returned before there was a `getrusage` to call — is a lie precisely
-/// when the number is interesting.
-#[cfg(feature = "std")]
-pub fn get_internal_run_time() -> i64 {
-    match crate::os::run_time_micros() {
-        Some(us) => us,
-        // Unreachable: `getrusage(RUSAGE_SELF, &valid)` has no failure mode.
-        // Reported rather than papered over, because a zero here would read
-        // as "this program used no CPU".
-        None => fatal("get-internal-run-time: getrusage(RUSAGE_SELF) failed"),
-    }
-}
-
-/// `(machine-instance)` (CLHS 25.1): the host's name, or `None`.
-///
-/// Only with std: without an operating system there is no host to name, and
-/// a compiled program that calls this is refused before it is built.
-#[cfg(feature = "std")]
-pub fn machine_instance(heap: &mut Heap) -> Value {
-    let v = crate::os::host_name().map(|s| heap.alloc_string(s));
-    option_value(heap, wk::F_MACHINE_INSTANCE, v)
-}
+// What every target answers through `typelisp_mem::host`; the questions
+// only a POSIX system can answer (`machine-instance`, `software-version`,
+// `get-internal-run-time`) are `typelisp-rt-posix`'s. Every one may honestly
+// answer `None`; CL says so for `machine-version` in as many words ("or nil
+// if no such ... can be determined").
 
 /// `(machine-version)` (CLHS 25.1): the hardware this is *running* on
 /// (`Apple M1`, `Intel(R) Xeon(R) …`), or `None` where nothing can say.
@@ -228,17 +194,6 @@ pub fn machine_instance(heap: &mut Heap) -> Value {
 pub fn machine_version(heap: &mut Heap) -> Value {
     let v = typelisp_mem::host::machine_version().map(|s| heap.alloc_string(s));
     option_value(heap, wk::F_MACHINE_VERSION, v)
-}
-
-/// `(software-version)` (CLHS 25.1): the OS release string (`uname -r`,
-/// e.g. `24.6.0`), or `None`. Its companion `software-type` is a
-/// compile-time constant and needs no call.
-///
-/// Only with std, for the reason `machine_instance` gives.
-#[cfg(feature = "std")]
-pub fn software_version(heap: &mut Heap) -> Value {
-    let v = crate::os::os_release().map(|s| heap.alloc_string(s));
-    option_value(heap, wk::F_SOFTWARE_VERSION, v)
 }
 
 /// The seconds a universal time is west of Greenwich in the *local* zone —
@@ -311,59 +266,6 @@ pub fn heap_info(heap: &mut Heap) -> Value {
             Value::Bool(growable),
         ],
     )
-}
-
-/// `(ed-open path line)`: run the user's editor on `path`, positioned at
-/// `line` — the runtime half of the `ed` special form, which did the *name*
-/// resolution at check time and reduced to this call.
-///
-/// `$VISUAL` first, then `$EDITOR`: that is the order every Unix tool uses,
-/// and it is the one the two variables were invented to express (`VISUAL` for
-/// a full-screen editor, `EDITOR` for whatever works on a teletype). Neither
-/// set is an `Err`, not a guess at `vi` — inventing an editor is how `ed`
-/// ends up launching something the user cannot exit.
-///
-/// The variable's value is split on whitespace so `EDITOR="code -w"` and
-/// `EDITOR="emacsclient -nw"` work; the first word is the program and the
-/// rest are leading arguments. This is the same treatment `git` gives it
-/// short of running a shell, and running a shell would make the value a
-/// command injection surface for no benefit.
-///
-/// `+N` is the line argument, understood by vi, emacs, nano, ed, joe and
-/// `code --goto`'s fallback. It is omitted for line 0, which is what the
-/// `ed`-with-a-path and `ed`-with-nothing forms produce.
-///
-/// Waits for the editor to exit (CL's `ed` returns when editing is done), and
-/// reports a non-zero exit rather than swallowing it.
-#[cfg(feature = "std")]
-pub fn ed_open(heap: &mut Heap, path: &str, line: i64) -> Value {
-    let err = |heap: &mut Heap, msg: String| result_err(heap, wk::F_ED_OPEN, TypeId::FILE_ERROR, msg);
-    let spec = match std::env::var("VISUAL").ok().filter(|s| !s.trim().is_empty()) {
-        Some(v) => v,
-        None => match std::env::var("EDITOR").ok().filter(|s| !s.trim().is_empty()) {
-            Some(v) => v,
-            None => return err(heap, "ed: neither $VISUAL nor $EDITOR is set".to_string()),
-        },
-    };
-    let mut words = spec.split_whitespace();
-    let program = match words.next() {
-        Some(p) => p,
-        None => return err(heap, "ed: the editor variable is empty".to_string()),
-    };
-    let mut cmd = std::process::Command::new(program);
-    cmd.args(words);
-    if !path.is_empty() {
-        if line > 0 {
-            cmd.arg(format!("+{}", line));
-        }
-        cmd.arg(path);
-    }
-    // Native for as long as the editor runs.
-    match heap.native(|| cmd.status()) {
-        Ok(st) if st.success() => result_ok(heap, wk::F_ED_OPEN, Value::Empty),
-        Ok(st) => err(heap, format!("ed: {} exited with {}", program, st)),
-        Err(e) => err(heap, format!("ed: cannot run {}: {}", program, e)),
-    }
 }
 
 /// Whether standard input is a terminal.
@@ -501,31 +403,7 @@ pub unsafe extern "C" fn rt_software_type(_args: *const i64, _argc: u32) -> i64 
     encode(software_type(active_heap()))
 }
 
-/// `(get-internal-run-time)` for compiled code — a tagged `internal-time`
-/// struct, like [`rt_get_internal_real_time`].
-///
-/// # Safety
-///
-/// `args`/`argc` are unused (the builtin is nullary). A `Heap` must be
-/// registered on this thread.
-#[cfg(feature = "std")]
-#[no_mangle]
-pub unsafe extern "C" fn rt_get_internal_run_time(_args: *const i64, _argc: u32) -> i64 {
-    let v = internal_time_value(active_heap(), get_internal_run_time());
-    encode(v)
-}
 
-/// `(machine-instance)` for compiled code.
-///
-/// # Safety
-///
-/// `args`/`argc` are unused (the builtin is nullary). A `Heap` must be
-/// registered on this thread.
-#[cfg(feature = "std")]
-#[no_mangle]
-pub unsafe extern "C" fn rt_machine_instance(_args: *const i64, _argc: u32) -> i64 {
-    encode(machine_instance(active_heap()))
-}
 
 /// `(machine-version)` for compiled code.
 ///
@@ -538,17 +416,6 @@ pub unsafe extern "C" fn rt_machine_version(_args: *const i64, _argc: u32) -> i6
     encode(machine_version(active_heap()))
 }
 
-/// `(software-version)` for compiled code.
-///
-/// # Safety
-///
-/// `args`/`argc` are unused (the builtin is nullary). A `Heap` must be
-/// registered on this thread.
-#[cfg(feature = "std")]
-#[no_mangle]
-pub unsafe extern "C" fn rt_software_version(_args: *const i64, _argc: u32) -> i64 {
-    encode(software_version(active_heap()))
-}
 
 /// `(timezone-offset-seconds day second)` for compiled code. Both arguments
 /// are `i32`s, so both arrive as bare machine words.
@@ -615,26 +482,6 @@ pub unsafe extern "C-unwind" fn rt_thread_available_parallelism(_args: *const i6
     }
 }
 
-/// `(ed-open path line)` for compiled code: `args[0]` is a tagged `string`,
-/// `args[1]` a raw `i32` line number.
-///
-/// # Safety
-///
-/// `argc` must be `>= 2` and `args` must point to 2 valid `i64`s, the first
-/// encoding a `Value::Str`; a `Heap` must be registered on this thread.
-#[cfg(feature = "std")]
-#[no_mangle]
-pub unsafe extern "C" fn rt_ed_open(args: *const i64, argc: u32) -> i64 {
-    if argc < 2 {
-        fatal("rt_ed_open: expected 2 arguments");
-    }
-    let path = match decode(*args) {
-        Value::Str(id) => active_heap().string(id).to_string(),
-        other => fatal(&format!("ed-open: argument is not a string, got {:?}", other)),
-    };
-    let line = *args.add(1);
-    encode(ed_open(active_heap(), &path, line))
-}
 
 /// `(exit code)` for compiled code: terminates the process through the OS
 /// and never returns, which is why its typelisp return type is `!`.

@@ -428,12 +428,14 @@ pub struct BuiltinTypeTable {
 /// what is checked against the registry (`type_identity_guard_test`), what
 /// says which types the runtime makes (`aot::made`), and what the ABI
 /// describes (`abi_signature`).
-pub const BUILTIN_TYPE_TABLES: [BuiltinTypeTable; 9] = [
+pub const BUILTIN_TYPE_TABLES: [BuiltinTypeTable; 11] = [
     BuiltinTypeTable { name: "typelisp_rt::sys_builtin::RESULT_TYPES", row: BuiltinTypeRow::Result, rows: typelisp_rt::sys_builtin::RESULT_TYPES },
     BuiltinTypeTable { name: "typelisp_rt::stream_builtin::RESULT_TYPES", row: BuiltinTypeRow::Result, rows: typelisp_rt::stream_builtin::RESULT_TYPES },
     BuiltinTypeTable { name: "typelisp_rt::stream_builtin::INNER_TYPES", row: BuiltinTypeRow::Inner, rows: typelisp_rt::stream_builtin::INNER_TYPES },
-    BuiltinTypeTable { name: "typelisp_rt::net_builtin::RESULT_TYPES", row: BuiltinTypeRow::Result, rows: typelisp_rt::net_builtin::RESULT_TYPES },
-    BuiltinTypeTable { name: "typelisp_rt::net_builtin::INNER_TYPES", row: BuiltinTypeRow::Inner, rows: typelisp_rt::net_builtin::INNER_TYPES },
+    BuiltinTypeTable { name: "typelisp_rt_posix::net_builtin::RESULT_TYPES", row: BuiltinTypeRow::Result, rows: typelisp_rt_posix::net_builtin::RESULT_TYPES },
+    BuiltinTypeTable { name: "typelisp_rt_posix::net_builtin::INNER_TYPES", row: BuiltinTypeRow::Inner, rows: typelisp_rt_posix::net_builtin::INNER_TYPES },
+    BuiltinTypeTable { name: "typelisp_rt_posix::sys::RESULT_TYPES", row: BuiltinTypeRow::Result, rows: typelisp_rt_posix::sys::RESULT_TYPES },
+    BuiltinTypeTable { name: "typelisp_rt_posix::sys::INNER_TYPES", row: BuiltinTypeRow::Inner, rows: typelisp_rt_posix::sys::INNER_TYPES },
     BuiltinTypeTable { name: "typelisp_rt_sys::fs_builtin::RESULT_TYPES", row: BuiltinTypeRow::Result, rows: typelisp_rt_sys::fs_builtin::RESULT_TYPES },
     BuiltinTypeTable { name: "typelisp_rt_sys::fs_builtin::INNER_TYPES", row: BuiltinTypeRow::Inner, rows: typelisp_rt_sys::fs_builtin::INNER_TYPES },
     BuiltinTypeTable { name: "typelisp_rt_sys::env::RESULT_TYPES", row: BuiltinTypeRow::Result, rows: typelisp_rt_sys::env::RESULT_TYPES },
@@ -452,7 +454,7 @@ pub const BUILTIN_TYPE_TABLES: [BuiltinTypeTable; 9] = [
 /// process. The local time zone is not here: a call that passes a zone is
 /// the same function as one that asks for the local one, so refusing the
 /// shim would refuse both; the runtime answers that the local zone is unknown
-/// instead (`typelisp_rt::os::timezone_at`).
+/// instead (`typelisp_mem::host::timezone_at`).
 pub(crate) const WASM_UNAVAILABLE_SHIMS: [(&str, &str); 8] = [
     ("rt_suspend_io", "waiting on a socket"),
     ("rt_suspend_io_for", "waiting on a socket"),
@@ -779,21 +781,33 @@ pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 378] {
     use typelisp_rt::coroutine::{
         rt_loop_safepoint, rt_suspend_chan_cap, rt_suspend_chan_close, rt_suspend_chan_len,
         rt_suspend_chan_new, rt_suspend_chan_recv, rt_suspend_chan_select, rt_suspend_chan_send,
-        rt_suspend_task, rt_suspend_io, rt_suspend_io_for, rt_suspend_main, rt_suspend_sleep, rt_suspend_thread,
+        rt_suspend_task, rt_suspend_main, rt_suspend_sleep,
         rt_suspend_wait, rt_suspend_yield,
+    };
+    use typelisp_rt_posix::{
+        rt_ed_open, rt_file_owner_name, rt_get_internal_run_time, rt_machine_instance, rt_software_version,
+        rt_suspend_io, rt_suspend_io_for, rt_suspend_thread,
+        rt_net_accept, rt_net_buffered_p, rt_net_connect_begin, rt_net_connect_finish, rt_net_fill, rt_net_flush,
+        rt_net_listen, rt_net_local_address, rt_net_peer_address, rt_net_pop_byte, rt_net_pop_char,
+        rt_net_push_byte, rt_net_push_string, rt_net_shutdown_write,
+        rt_net_resolve_begin, rt_net_resolve_finish, rt_net_tls_handshake, rt_net_tls_start,
+        rt_net_tls_listen, rt_net_socket_error, rt_net_peer_subject, rt_net_server_name, rt_net_set_nodelay,
+        rt_net_set_keepalive, rt_net_set_keepalive_period, rt_net_tls_add_certificate,
+        rt_net_udp_bind, rt_net_udp_last_sender, rt_net_udp_recv, rt_net_udp_send_to,
+        rt_net_unix_connect, rt_net_unix_listen,
     };
     use typelisp_rt_sys::{
         rt_command_line_args, rt_dribble_start, rt_dribble_stop, rt_getenv, rt_home_directory,
         rt_file_create_directories, rt_file_delete, rt_file_directory_p, rt_file_exists_p,
-        rt_file_list_directory, rt_file_modified_date, rt_file_owner_name, rt_file_rename,
+        rt_file_list_directory, rt_file_modified_date, rt_file_rename,
         rt_file_truename, rt_stream_open_file,
     };
     use typelisp_rt::sys_builtin::{
-        rt_ed_open, rt_exit,
-        rt_get_internal_real_time, rt_get_internal_run_time,
+        rt_exit,
+        rt_get_internal_real_time,
         rt_get_universal_time, rt_heap_info, rt_lisp_implementation_version,
-        rt_machine_instance, rt_machine_type, rt_machine_version, rt_parse_float,
-        rt_software_type, rt_software_version, rt_thread_available_parallelism, rt_thread_current_id,
+        rt_machine_type, rt_machine_version, rt_parse_float,
+        rt_software_type, rt_thread_available_parallelism, rt_thread_current_id,
         rt_timezone_daylight_p, rt_timezone_offset_seconds,
     };
     use typelisp_rt::rational::{
@@ -809,14 +823,6 @@ pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 378] {
     use typelisp_rt::{
         rt_atom, rt_bignum_new,
         rt_make_random_state_fresh, rt_random_state_copy, rt_random_state_next, rt_seed_random_state,
-        rt_net_accept, rt_net_buffered_p, rt_net_connect_begin, rt_net_connect_finish, rt_net_fill, rt_net_flush,
-        rt_net_listen, rt_net_local_address, rt_net_peer_address, rt_net_pop_byte, rt_net_pop_char,
-        rt_net_push_byte, rt_net_push_string, rt_net_shutdown_write,
-        rt_net_resolve_begin, rt_net_resolve_finish, rt_net_tls_handshake, rt_net_tls_start,
-        rt_net_tls_listen, rt_net_socket_error, rt_net_peer_subject, rt_net_server_name, rt_net_set_nodelay,
-        rt_net_set_keepalive, rt_net_set_keepalive_period, rt_net_tls_add_certificate,
-        rt_net_udp_bind, rt_net_udp_last_sender, rt_net_udp_recv, rt_net_udp_send_to,
-        rt_net_unix_connect, rt_net_unix_listen,
         rt_stream_at_line_start, rt_stream_close,
         rt_stream_finish_output, rt_stream_input_p, rt_stream_listen, rt_stream_open_p, rt_stream_describe,
         rt_stream_output_p, rt_stream_position, rt_stream_read_byte, rt_stream_read_char, rt_stream_stderr, rt_stream_stdin, rt_stream_stdout,

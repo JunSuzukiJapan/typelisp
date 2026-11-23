@@ -3,7 +3,7 @@
 
 use crate::{wk, Heap, Path, SymRef, TypeId, Value};
 use crate::eval::value::EvalError;
-use super::{backend, bool_eq, char_compare, char_eq, char_eqp, char_lt, char_to_int, eval_float_builtin, eval_get_internal_real_time, eval_get_internal_run_time, eval_get_universal_time, eval_int_builtin, eval_integer_builtin, eval_llvm_builtin_method, eval_make_random_state_fresh, eval_parse_float, eval_random_state_copy, eval_random_state_next, eval_ratio_builtin, eval_rational_builtin, eval_seed_random_state, expect_char, expect_int, expect_str, expect_struct_box, float_expt, float_to_int, float_to_ratio, float_to_width, float_unary, hashtable_bucket_count, hashtable_bucket_delete, hashtable_bucket_key, hashtable_bucket_put, hashtable_bucket_value, hashtable_clear, hashtable_count, hashtable_entries, hashtable_keys, hashtable_values, int_integer_length, int_logcount, int_lognot, int_pair, int_to_char, int_to_float, int_to_ratio, int_to_width, integer_conversion, integer_to_width, integer_unary, ratio_denominator, ratio_numerator, ratio_to_float, ratio_to_int, rational_unary, rt_f64, rt_i64, rt_str, scope_clone_frames_heap, scope_get_heap, scope_pop_frame_heap, scope_push_frame_heap, scope_set_heap, sexpr_eq, sexpr_eql, sexpr_equal, sexpr_equalp, str_rt, string_append, string_compare, string_content_eq, string_content_eqp, string_identity_eq, string_length, string_lt, string_ref, string_substring, try_float_to_f32, try_int_to_char, try_int_to_width, vector_get, vector_len, vector_pop, vector_push, vector_set, width_cast_target, width_to_int, Interp};
+use super::{backend, bool_eq, char_compare, char_eq, char_eqp, char_lt, char_to_int, eval_float_builtin, eval_get_internal_real_time, eval_get_universal_time, eval_int_builtin, eval_integer_builtin, eval_llvm_builtin_method, eval_make_random_state_fresh, eval_parse_float, eval_random_state_copy, eval_random_state_next, eval_ratio_builtin, eval_rational_builtin, eval_seed_random_state, expect_char, expect_int, expect_str, expect_struct_box, float_expt, float_to_int, float_to_ratio, float_to_width, float_unary, hashtable_bucket_count, hashtable_bucket_delete, hashtable_bucket_key, hashtable_bucket_put, hashtable_bucket_value, hashtable_clear, hashtable_count, hashtable_entries, hashtable_keys, hashtable_values, int_integer_length, int_logcount, int_lognot, int_pair, int_to_char, int_to_float, int_to_ratio, int_to_width, integer_conversion, integer_to_width, integer_unary, ratio_denominator, ratio_numerator, ratio_to_float, ratio_to_int, rational_unary, rt_f64, rt_i64, rt_str, scope_clone_frames_heap, scope_get_heap, scope_pop_frame_heap, scope_push_frame_heap, scope_set_heap, sexpr_eq, sexpr_eql, sexpr_equal, sexpr_equalp, str_rt, string_append, string_compare, string_content_eq, string_content_eqp, string_identity_eq, string_length, string_lt, string_ref, string_substring, try_float_to_f32, try_int_to_char, try_int_to_width, vector_get, vector_len, vector_pop, vector_push, vector_set, width_cast_target, width_to_int, Interp};
 
 impl Interp {
     /// Evaluate a built-in operator. Returns `None` if `name` is not a
@@ -42,6 +42,19 @@ impl Interp {
                 // An argument the checker cannot have produced.
                 PrintError::Shape(msg) => EvalError::Internal(msg),
             }));
+        }
+        // A builtin only a POSIX system answers (`typelisp-rt-posix`). A
+        // compiled program that names one is refused when it is compiled for
+        // WebAssembly; only an `eval`'d form gets to the refusal here.
+        macro_rules! posix {
+            ($e:expr) => {{
+                #[cfg(not(target_family = "wasm"))]
+                let answer: Result<Value, EvalError> = $e;
+                #[cfg(target_family = "wasm")]
+                let answer: Result<Value, EvalError> =
+                    Err(EvalError::Panic(format!("{}: WebAssembly cannot answer this", name.name())));
+                answer
+            }};
         }
         match name.well_known() {
             // `(compile-file "source.typl" "output")`: AOT-compiles an
@@ -85,7 +98,14 @@ impl Interp {
                         .map_err(EvalError::Panic),
                 )
             }
-            wk::F_FILE_CREATE_DIRECTORIES | wk::F_FILE_DELETE | wk::F_FILE_DIRECTORY_P | wk::F_FILE_EXISTS_P | wk::F_FILE_LIST_DIRECTORY | wk::F_FILE_MODIFIED_DATE | wk::F_FILE_OWNER_NAME | wk::F_FILE_RENAME | wk::F_FILE_TRUENAME | wk::F_STREAM_OPEN_FILE => {
+            wk::F_FILE_OWNER_NAME => Some(posix!(match &args[0] {
+                Value::Str(id) => {
+                    let path = heap.string(*id).to_string();
+                    Ok(typelisp_rt_posix::sys::file_owner_name(heap, &path))
+                }
+                other => Err(EvalError::Internal(format!("file-owner-name: argument is not a string, got {:?}", other))),
+            })),
+            wk::F_FILE_CREATE_DIRECTORIES | wk::F_FILE_DELETE | wk::F_FILE_DIRECTORY_P | wk::F_FILE_EXISTS_P | wk::F_FILE_LIST_DIRECTORY | wk::F_FILE_MODIFIED_DATE | wk::F_FILE_RENAME | wk::F_FILE_TRUENAME | wk::F_STREAM_OPEN_FILE => {
                 Some(match typelisp_rt_sys::fs_builtin::fs_builtin(heap, name, args)? {
                     Ok(v) => Ok(v),
                     Err(e) => Err(EvalError::Internal(e)),
@@ -98,7 +118,7 @@ impl Interp {
             // intercepts it, as it does `sleep`, because it stops the task.
             wk::F_NET_ACCEPT | wk::F_NET_BUFFERED_P | wk::F_NET_CONNECT_BEGIN | wk::F_NET_CONNECT_FINISH | wk::F_NET_FILL | wk::F_NET_FLUSH | wk::F_NET_LISTEN | wk::F_NET_LOCAL_ADDRESS | wk::F_NET_PEER_ADDRESS | wk::F_NET_PEER_SUBJECT | wk::F_NET_POP_BYTE | wk::F_NET_POP_CHAR | wk::F_NET_PUSH_BYTE | wk::F_NET_PUSH_STRING | wk::F_NET_RESOLVE_BEGIN | wk::F_NET_RESOLVE_FINISH | wk::F_NET_SERVER_NAME | wk::F_NET_SET_KEEPALIVE | wk::F_NET_SET_KEEPALIVE_PERIOD | wk::F_NET_SET_NODELAY | wk::F_NET_SHUTDOWN_WRITE | wk::F_NET_SOCKET_ERROR | wk::F_NET_TLS_ADD_CERTIFICATE | wk::F_NET_TLS_HANDSHAKE | wk::F_NET_TLS_LISTEN | wk::F_NET_TLS_START | wk::F_NET_UDP_BIND | wk::F_NET_UDP_LAST_SENDER | wk::F_NET_UDP_RECV | wk::F_NET_UDP_SEND_TO | wk::F_NET_UNIX_CONNECT | wk::F_NET_UNIX_LISTEN | wk::F_NET_WAIT | wk::F_NET_WAIT_FOR => {
                 #[cfg(not(target_family = "wasm"))]
-                return Some(match typelisp_rt::net_builtin::net_builtin(heap, name, args)? {
+                return Some(match typelisp_rt_posix::net_builtin::net_builtin(heap, name, args)? {
                     Ok(v) => Ok(v),
                     Err(e) => Err(EvalError::Internal(e)),
                 });
@@ -122,12 +142,13 @@ impl Interp {
             wk::F_RANDOM_STATE_NEXT => Some(eval_random_state_next(heap, args)),
             wk::F_GET_UNIVERSAL_TIME => Some(eval_get_universal_time(heap, args)),
             wk::F_GET_INTERNAL_REAL_TIME => Some(eval_get_internal_real_time(heap, args)),
-            wk::F_GET_INTERNAL_RUN_TIME => Some(eval_get_internal_run_time(heap, args)),
+            wk::F_GET_INTERNAL_RUN_TIME => Some(posix!({
+                let used = typelisp_rt_posix::sys::get_internal_run_time();
+                Ok(typelisp_rt::sys_builtin::internal_time_value(heap, used))
+            })),
             // The environment and the running implementation. Each is one
-            // call into `typelisp_rt::sys_builtin`, the same implementation
-            // the compiled shims wrap — the `file-*` half of Phase 9c needs
-            // no arm here at all, since the `starts_with("file-")` guard
-            // above already routes it to `eval_stream_builtin`.
+            // call into the runtime's implementation, the same one the
+            // compiled shims wrap.
             wk::F_COMMAND_LINE_ARGS => Some(Ok(typelisp_rt_sys::env::command_line_args(heap))),
             wk::F_GETENV => Some(match &args[0] {
                 Value::Str(id) => {
@@ -149,14 +170,14 @@ impl Interp {
                 other => Err(EvalError::Panic(format!("dribble: argument is not a string, got {:?}", other))),
             }),
             wk::F_DRIBBLE_STOP => Some(Ok(typelisp_rt_sys::dribble::dribble_stop(heap))),
-            wk::F_ED_OPEN => Some(match (&args[0], &args[1]) {
+            wk::F_ED_OPEN => Some(posix!(match (&args[0], &args[1]) {
                 (Value::Str(id), Value::Int(line)) => {
                     let path = heap.string(*id).to_string();
                     let line = *line;
-                    Ok(typelisp_rt::sys_builtin::ed_open(heap, &path, line))
+                    Ok(typelisp_rt_posix::sys::ed_open(heap, &path, line))
                 }
                 other => Err(EvalError::Panic(format!("ed: arguments are not a string and a line, got {:?}", other))),
-            }),
+            })),
             wk::F_SLEEP => Some(match rt_f64(heap, &args[0]) {
                 Ok(secs) => typelisp_rt::sys_builtin::sleep(heap, secs).map(|()| Value::Empty).map_err(EvalError::Panic),
                 Err(e) => Err(e),
@@ -165,12 +186,10 @@ impl Interp {
             wk::F_MACHINE_TYPE => Some(Ok(typelisp_rt::sys_builtin::machine_type(heap))),
             wk::F_SOFTWARE_TYPE => Some(Ok(typelisp_rt::sys_builtin::software_type(heap))),
             // The three that have to ask the host, and the two that ask it
-            // what the local time zone was at a given instant. `file-author`
-            // needs no arm for the same reason the rest of the `file-*`
-            // family does not — the prefix guard above routed it already.
-            wk::F_MACHINE_INSTANCE => Some(Ok(typelisp_rt::sys_builtin::machine_instance(heap))),
+            // what the local time zone was at a given instant.
+            wk::F_MACHINE_INSTANCE => Some(posix!(Ok(typelisp_rt_posix::sys::machine_instance(heap)))),
             wk::F_MACHINE_VERSION => Some(Ok(typelisp_rt::sys_builtin::machine_version(heap))),
-            wk::F_SOFTWARE_VERSION => Some(Ok(typelisp_rt::sys_builtin::software_version(heap))),
+            wk::F_SOFTWARE_VERSION => Some(posix!(Ok(typelisp_rt_posix::sys::software_version(heap)))),
             wk::F_TIMEZONE_OFFSET_SECONDS => Some(match int_pair(args, "timezone-offset-seconds") {
                 Ok((day, sec)) => Ok(typelisp_rt::sys_builtin::timezone_offset_seconds(heap, day, sec)),
                 Err(e) => Err(e),

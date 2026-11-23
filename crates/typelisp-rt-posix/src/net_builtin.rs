@@ -1,4 +1,4 @@
-//! The `net-*` builtins as *values*: [`crate::stream_builtin`]'s shape, over
+//! The `net-*` builtins as *values*: [`typelisp_rt::stream_builtin`]'s shape, over
 //! [`crate::net`].
 //!
 //! One implementation for both sides of the compile boundary, for the reason
@@ -12,7 +12,7 @@
 //! with a value: it puts the task down, and only the scheduler can do that.
 //! Interpreted it is intercepted before the builtins are reached
 //! (`Interp::finish_call`, next to `sleep`); compiled it lowers to
-//! `rt_suspend_io` (`crate::coroutine`), whose `rt_suspend_` prefix is what
+//! `rt_suspend_io` (this crate's shims), whose `rt_suspend_` prefix is what
 //! makes the bridge emit a `(suspend ...)` node instead of a call. Its
 //! signature still lives in the registry with the others, since the checker
 //! needs it.
@@ -21,9 +21,9 @@ use typelisp_mem::prelude::*;
 use typelisp_mem::{spec, wk, Heap, StdModule, SymRef, TypeId, TypeSpec, Value};
 
 use crate::net::Sockets;
-use crate::stream::with_streams;
-use crate::result_value::{err_in, ok_in, option_in, TypeTable};
-use crate::stream_builtin::{int, text, ArgError};
+use typelisp_rt::stream::with_streams;
+use typelisp_rt::result_value::{err_in, ok_in, option_in, TypeTable};
+use typelisp_rt::stream_builtin::{int, text, ArgError};
 
 const NET_ERROR: TypeSpec = TypeSpec::Named(StdModule::NET, "NetError", &[]);
 
@@ -137,7 +137,7 @@ fn bytes(heap: &Heap, args: &[Value], i: usize, who: &str) -> Result<Result<Vec<
 
 /// Every `net-*` builtin that answers with a value, or `None` if `name`
 /// isn't one. The `Ok`/`Err` of the return is about the arguments' shape,
-/// exactly as in [`crate::stream_builtin::stream_builtin`].
+/// exactly as in [`typelisp_rt::stream_builtin::stream_builtin`].
 pub fn net_builtin(heap: &mut Heap, sym: SymRef, args: &[Value]) -> Option<Result<Value, ArgError>> {
     let name = sym.name();
     macro_rules! wrap {

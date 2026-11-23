@@ -1,10 +1,11 @@
 //! Starting the OS threads a scheduler steps tasks from: the operating
-//! system's half of [`SchedShared::install_threads`].
+//! system's half of [`SchedShared::install_threads`], and the program entries
+//! of an executable whose tasks run on them.
 
 use typelisp_mem::prelude::*;
 use typelisp_mem::Heap;
 
-use super::{drive_pinned, drive_worker, Joiner, SchedShared, Spawner, TaskBody, TaskId, ThreadStarter, Threads};
+use typelisp_rt::sched::{drive_pinned, drive_worker, CompiledTask, Joiner, SchedShared, Spawner, TaskBody, TaskId, ThreadStarter, Threads, Waker};
 
 /// A `std` thread, waited for by [`Joiner::join`].
 struct StdJoiner(std::thread::JoinHandle<()>);
@@ -73,7 +74,7 @@ where
     fn thread_starter(self: &alloc::sync::Arc<Self>, keep: bool) -> ThreadStarter {
         let kit = alloc::sync::Arc::clone(self);
         alloc::sync::Arc::new(move |own: TaskId| {
-            let t = kit.spawn(format!("typelisp-thread-{}", own.0), move |shared, heap, cx| {
+            let t = kit.spawn(format!("typelisp-thread-{}", own), move |shared, heap, cx| {
                 drive_pinned(shared, heap, cx, own)
             })?;
             if keep {
@@ -87,7 +88,7 @@ where
 
 /// How a thread waiting on the scheduler's sockets is woken: a pipe of its
 /// own.
-fn waker() -> Result<alloc::sync::Arc<dyn super::Waker>, String> {
+fn waker() -> Result<alloc::sync::Arc<dyn Waker>, String> {
     let pipe = crate::os::SelfPipe::new().map_err(|e| format!("the scheduler's wake-up pipe could not be made: {}", e))?;
     Ok(alloc::sync::Arc::new(pipe))
 }
@@ -130,7 +131,7 @@ where
 }
 
 /// Gives `shared` a crew of `n` workers: threads that exist only while a
-/// [`super::drive_main`] runs, started once a ready task is one they may
+/// [`typelisp_rt::sched::drive_main`] runs, started once a ready task is one they may
 /// take, and stopped and joined when the drive ends. `thread` starts OS
 /// threads the same way, stopped with the rest and started again by the next
 /// drive. See [`ThreadKit`] for how each is set up.
@@ -185,20 +186,20 @@ pub fn thread_count() -> Result<usize, String> {
 }
 
 /// What an executable's program entry starts its threads with
-/// ([`crate::StartThreads`]): `TYPELISP_THREADS` threads step tasks,
+/// ([`typelisp_rt::StartThreads`]): `TYPELISP_THREADS` threads step tasks,
 /// this one included ([`thread_count`]). The workers share this thread's heap
 /// (a view each), its global/vtable/stream tables and its printer's
 /// registrations.
 fn start_program_threads(
-    sched: &alloc::sync::Arc<SchedShared<super::CompiledTask>>,
+    sched: &alloc::sync::Arc<SchedShared<CompiledTask>>,
     heap: &mut Heap,
 ) -> Result<(), String> {
     let threads = thread_count()?;
-    let rt = crate::shared::rt_shared();
+    let rt = typelisp_rt::shared::rt_shared();
     let print = typelisp_print::shared::print_shared();
     let hooks = typelisp_print::runtime::print_hooks();
     let started = start_workers(sched, heap, threads - 1, &(), move || {
-        crate::shared::set_rt_shared(alloc::sync::Arc::clone(&rt));
+        typelisp_rt::shared::set_rt_shared(alloc::sync::Arc::clone(&rt));
         typelisp_print::shared::set_print_shared(alloc::sync::Arc::clone(&print));
         typelisp_print::runtime::set_print_hooks(Some(hooks));
     });
@@ -206,7 +207,7 @@ fn start_program_threads(
         // Never joined: when `main` returns the program ends, and every task
         // still running with it.
         Ok(workers) => drop(workers),
-        Err(e) => crate::fatal(&e),
+        Err(e) => typelisp_rt::fatal(&e),
     }
     Ok(())
 }
@@ -219,7 +220,7 @@ fn start_program_threads(
 /// `rt_run_program`'s.
 #[no_mangle]
 pub unsafe extern "C" fn rt_run_program_threads(args: *const i64, argc: u32) -> i64 {
-    crate::run_entry(args, argc, "rt_run_program_threads", false, Some(start_program_threads))
+    typelisp_rt::run_entry(args, argc, "rt_run_program_threads", false, Some(start_program_threads))
 }
 
 /// `rt_run_program_int` on a target with OS threads.
@@ -229,5 +230,5 @@ pub unsafe extern "C" fn rt_run_program_threads(args: *const i64, argc: u32) -> 
 /// `rt_run_program`'s.
 #[no_mangle]
 pub unsafe extern "C" fn rt_run_program_threads_int(args: *const i64, argc: u32) -> i64 {
-    crate::run_entry(args, argc, "rt_run_program_threads_int", true, Some(start_program_threads))
+    typelisp_rt::run_entry(args, argc, "rt_run_program_threads_int", true, Some(start_program_threads))
 }

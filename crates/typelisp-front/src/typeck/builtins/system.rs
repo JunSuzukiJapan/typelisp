@@ -109,7 +109,7 @@ fn streams(reg: &mut Registry, ns: NsId) {
     native("file-owner-name", vec![Type::Str], result_of(option_of(Type::Str), file_err));
 }
 
-/// The `net-*` primitives (`typelisp_rt::net_builtin`): a TCP socket as an
+/// The `net-*` primitives (`typelisp_rt_posix::net_builtin`): a TCP socket as an
 /// opaque `i32` handle in the same table the streams live in, and every
 /// operation on it in its **non-blocking** form. The prelude's `socket-stream`,
 /// `socket-byte-stream` and `socket-listener` are written on top of these, and the
@@ -127,7 +127,7 @@ fn streams(reg: &mut Registry, ns: NsId) {
 /// `net-wait` is the one entry here that answers with nothing: like `sleep`
 /// and `yield` it is registered as an ordinary builtin and intercepted by the
 /// evaluator, because only a `State` can say "stop here". Its `interest` is
-/// `0` for readable and `1` for writable — `typelisp_rt::os::Interest`.
+/// `0` for readable and `1` for writable — `typelisp_rt::sched::Interest`.
 fn net(reg: &mut Registry, ns: NsId) {
     let net_err = error_ty(wk::NET_ERROR);
     let mut native = |name: &str, params: Vec<Type>, ret: Type| function(reg, ns, name, params, ret);

@@ -41,7 +41,7 @@ hashbrown = { version = "0.15", default-features = false, features = ["default-h
 # default hasher is built from, so no new code is linked.
 foldhash = { version = "0.1", default-features = false }
 
-# The host's two answers `std` does not give (`host::os`): the local time zone
-# and, on macOS, the CPU's name.
-[target.'cfg(unix)'.dependencies]
+# What the host layer asks of the C library (`host::os`): the local time zone,
+# on macOS the CPU's name, and an exit that allocates nothing.
+[target.'cfg(any(unix, target_os = "wasi"))'.dependencies]
 libc = { version = "0.2", optional = true }

@@ -13,9 +13,8 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use typelisp_mem::{spec, Heap, StdModule, TypeSpec, Value};
-use typelisp_rt::sched::{
-    drive_main, start_workers, task_id_of, Progress, SchedError, SchedShared, TaskBody, Waiting,
-};
+use typelisp_rt::sched::{drive_main, task_id_of, Progress, SchedError, SchedShared, TaskBody, Waiting};
+use typelisp_rt_posix::threads::start_workers;
 
 #[derive(Debug, PartialEq)]
 struct ProbeError(String);

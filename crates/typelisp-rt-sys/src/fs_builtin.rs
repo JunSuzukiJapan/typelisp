@@ -3,7 +3,7 @@
 //! `typelisp_rt::stream_builtin` is for the rest of the streams.
 
 use typelisp_mem::{spec, wk, Heap, StdModule, SymRef, TypeId, TypeSpec, Value};
-use typelisp_rt::result_value::{err_in, ok_in, option_in, vector_in, TypeTable};
+use typelisp_rt::result_value::{err_in, ok_in, vector_in, TypeTable};
 use typelisp_rt::stream::with_streams;
 use typelisp_rt::stream_builtin::{int, text, ArgError, FILE_ERROR};
 
@@ -14,7 +14,6 @@ pub const RESULT_TYPES: TypeTable = &[
     (wk::F_FILE_DELETE, TypeSpec::Named(StdModule::RESULT, "Result", &[spec::UNIT, FILE_ERROR])),
     (wk::F_FILE_TRUENAME, TypeSpec::Named(StdModule::RESULT, "Result", &[spec::STRING, FILE_ERROR])),
     (wk::F_FILE_MODIFIED_DATE, TypeSpec::Named(StdModule::RESULT, "Result", &[TypeSpec::Named(StdModule::TIME, "universal-time", &[]), FILE_ERROR])),
-    (wk::F_FILE_OWNER_NAME, TypeSpec::Named(StdModule::RESULT, "Result", &[TypeSpec::Named(StdModule::OPTION, "Option", &[spec::STRING]), FILE_ERROR])),
     (wk::F_FILE_LIST_DIRECTORY, TypeSpec::Named(StdModule::RESULT, "Result", &[TypeSpec::Named(StdModule::VEC, "Vector", &[spec::STRING]), FILE_ERROR])),
     (wk::F_FILE_CREATE_DIRECTORIES, TypeSpec::Named(StdModule::RESULT, "Result", &[spec::UNIT, FILE_ERROR])),
     (wk::F_FILE_RENAME, TypeSpec::Named(StdModule::RESULT, "Result", &[spec::UNIT, FILE_ERROR])),
@@ -24,7 +23,6 @@ pub const RESULT_TYPES: TypeTable = &[
 /// payload is itself a box.
 pub const INNER_TYPES: TypeTable = &[
     (wk::F_FILE_LIST_DIRECTORY, TypeSpec::Named(StdModule::VEC, "Vector", &[spec::STRING])),
-    (wk::F_FILE_OWNER_NAME, TypeSpec::Named(StdModule::OPTION, "Option", &[spec::STRING])),
 ];
 
 fn result_ok(heap: &mut Heap, name: SymRef, v: Value) -> Value {
@@ -34,10 +32,6 @@ fn result_ok(heap: &mut Heap, name: SymRef, v: Value) -> Value {
 /// `Err(FileError(msg))`.
 fn result_err(heap: &mut Heap, name: SymRef, msg: String) -> Value {
     err_in(heap, RESULT_TYPES, name.well_known(), TypeId::FILE_ERROR, msg)
-}
-
-fn option_value(heap: &mut Heap, name: SymRef, v: Option<Value>) -> Value {
-    option_in(heap, INNER_TYPES, name.well_known(), v)
 }
 
 /// Every file builtin, or `None` if `name` isn't one.
@@ -110,21 +104,6 @@ pub fn fs_builtin(heap: &mut Heap, sym: SymRef, args: &[Value]) -> Option<Result
                     Err(e) => Ok(result_err(heap, sym, format!("file-write-date: {}: timestamp precedes the Unix epoch: {}", p, e))),
                 },
                 Err(e) => Ok(result_err(heap, sym, format!("file-write-date: {}: {}", p, e))),
-            }
-        }
-        // CL's `file-author`. Two failures that CL keeps apart stay apart: a missing file is an
-        // `Err`, an owner with no password-database entry is `Ok(None)` —
-        // which is exactly what CL means by "or nil if the author's name
-        // cannot be determined".
-        wk::F_FILE_OWNER_NAME => {
-            let p = arg!(text(heap, args, 0, name));
-            match typelisp_rt::os::file_owner(&p) {
-                Ok(who) => {
-                    let inner = who.map(|s| heap.alloc_string(s));
-                    let ov = option_value(heap, sym, inner);
-                    Ok(result_ok(heap, sym, ov))
-                }
-                Err(e) => Ok(result_err(heap, sym, format!("file-author: {}: {}", p, e))),
             }
         }
         // `false` for a plain file *and* for something that isn't there —

@@ -1,11 +1,11 @@
-# ABI バージョン 0.3.68
+# ABI バージョン 0.3.69
 
 `scripts/regen-abi-version.sh` が生成した文書。手で編集しない。
 
-コンパイラが生成するコードが、ABI バージョン 0.3.68 のランタイムライブラリについて仮定していることの一覧。
+コンパイラが生成するコードが、ABI バージョン 0.3.69 のランタイムライブラリについて仮定していることの一覧。
 ここに書かれていない前提(シムが引数をどう扱うか、生成コードがヒープを直接読む箇所など)は含まない。
 
-内容ハッシュ (FNV-1a 64): `d6e364b51ef86dab`
+内容ハッシュ (FNV-1a 64): `fcabefc1de665a89`
 
 ## 呼び出し規約 (typelisp_abi)
 
@@ -849,12 +849,9 @@
 | 表 | 関数 | 型 |
 |---|---|---|
 | typelisp_rt::sys_builtin::RESULT_TYPES | `parse-float` | `std::result::Result<std::primitive::f64,std::num::ParseFloatError>` |
-| typelisp_rt::sys_builtin::RESULT_TYPES | `machine-instance` | `std::option::Option<std::primitive::string>` |
 | typelisp_rt::sys_builtin::RESULT_TYPES | `machine-version` | `std::option::Option<std::primitive::string>` |
-| typelisp_rt::sys_builtin::RESULT_TYPES | `software-version` | `std::option::Option<std::primitive::string>` |
 | typelisp_rt::sys_builtin::RESULT_TYPES | `timezone-offset-seconds` | `std::option::Option<std::primitive::int>` |
 | typelisp_rt::sys_builtin::RESULT_TYPES | `timezone-daylight-p` | `std::option::Option<std::primitive::bool>` |
-| typelisp_rt::sys_builtin::RESULT_TYPES | `ed-open` | `std::result::Result<(),std::fs::FileError>` |
 | typelisp_rt::stream_builtin::RESULT_TYPES | `stream-close` | `std::result::Result<(),std::fs::FileError>` |
 | typelisp_rt::stream_builtin::RESULT_TYPES | `stream-input-p` | `std::result::Result<std::primitive::bool,std::fs::FileError>` |
 | typelisp_rt::stream_builtin::RESULT_TYPES | `stream-output-p` | `std::result::Result<std::primitive::bool,std::fs::FileError>` |
@@ -870,59 +867,62 @@
 | typelisp_rt::stream_builtin::RESULT_TYPES | `stream-take-output-string` | `std::result::Result<std::primitive::string,std::fs::FileError>` |
 | typelisp_rt::stream_builtin::INNER_TYPES | `stream-read-char` | `std::option::Option<std::primitive::char>` |
 | typelisp_rt::stream_builtin::INNER_TYPES | `stream-read-byte` | `std::option::Option<std::primitive::int>` |
-| typelisp_rt::net_builtin::RESULT_TYPES | `net-resolve-begin` | `std::result::Result<std::primitive::i32,std::net::NetError>` |
-| typelisp_rt::net_builtin::RESULT_TYPES | `net-resolve-finish` | `std::result::Result<std::option::Option<std::vec::Vector<std::primitive::string>>,std::net::NetError>` |
-| typelisp_rt::net_builtin::RESULT_TYPES | `net-connect-begin` | `std::result::Result<std::primitive::i32,std::net::NetError>` |
-| typelisp_rt::net_builtin::RESULT_TYPES | `net-connect-finish` | `std::result::Result<(),std::net::NetError>` |
-| typelisp_rt::net_builtin::RESULT_TYPES | `net-listen` | `std::result::Result<std::primitive::i32,std::net::NetError>` |
-| typelisp_rt::net_builtin::RESULT_TYPES | `net-tls-listen` | `std::result::Result<std::primitive::i32,std::net::NetError>` |
-| typelisp_rt::net_builtin::RESULT_TYPES | `net-unix-connect` | `std::result::Result<std::primitive::i32,std::net::NetError>` |
-| typelisp_rt::net_builtin::RESULT_TYPES | `net-unix-listen` | `std::result::Result<std::primitive::i32,std::net::NetError>` |
-| typelisp_rt::net_builtin::RESULT_TYPES | `net-accept` | `std::result::Result<std::option::Option<std::primitive::i32>,std::net::NetError>` |
-| typelisp_rt::net_builtin::RESULT_TYPES | `net-fill` | `std::result::Result<std::option::Option<std::primitive::int>,std::net::NetError>` |
-| typelisp_rt::net_builtin::RESULT_TYPES | `net-pop-byte` | `std::result::Result<std::option::Option<std::primitive::int>,std::net::NetError>` |
-| typelisp_rt::net_builtin::RESULT_TYPES | `net-pop-char` | `std::result::Result<std::option::Option<std::primitive::char>,std::net::NetError>` |
-| typelisp_rt::net_builtin::RESULT_TYPES | `net-buffered-p` | `std::result::Result<std::primitive::bool,std::net::NetError>` |
-| typelisp_rt::net_builtin::RESULT_TYPES | `net-push-string` | `std::result::Result<(),std::net::NetError>` |
-| typelisp_rt::net_builtin::RESULT_TYPES | `net-push-byte` | `std::result::Result<(),std::net::NetError>` |
-| typelisp_rt::net_builtin::RESULT_TYPES | `net-flush` | `std::result::Result<std::option::Option<std::primitive::int>,std::net::NetError>` |
-| typelisp_rt::net_builtin::RESULT_TYPES | `net-socket-error` | `std::result::Result<std::option::Option<std::primitive::string>,std::net::NetError>` |
-| typelisp_rt::net_builtin::RESULT_TYPES | `net-peer-subject` | `std::result::Result<std::option::Option<std::primitive::string>,std::net::NetError>` |
-| typelisp_rt::net_builtin::RESULT_TYPES | `net-server-name` | `std::result::Result<std::option::Option<std::primitive::string>,std::net::NetError>` |
-| typelisp_rt::net_builtin::RESULT_TYPES | `net-set-nodelay` | `std::result::Result<(),std::net::NetError>` |
-| typelisp_rt::net_builtin::RESULT_TYPES | `net-set-keepalive` | `std::result::Result<(),std::net::NetError>` |
-| typelisp_rt::net_builtin::RESULT_TYPES | `net-set-keepalive-period` | `std::result::Result<(),std::net::NetError>` |
-| typelisp_rt::net_builtin::RESULT_TYPES | `net-tls-add-certificate` | `std::result::Result<(),std::net::NetError>` |
-| typelisp_rt::net_builtin::RESULT_TYPES | `net-shutdown-write` | `std::result::Result<(),std::net::NetError>` |
-| typelisp_rt::net_builtin::RESULT_TYPES | `net-local-address` | `std::result::Result<std::primitive::string,std::net::NetError>` |
-| typelisp_rt::net_builtin::RESULT_TYPES | `net-peer-address` | `std::result::Result<std::primitive::string,std::net::NetError>` |
-| typelisp_rt::net_builtin::RESULT_TYPES | `net-tls-start` | `std::result::Result<(),std::net::NetError>` |
-| typelisp_rt::net_builtin::RESULT_TYPES | `net-tls-handshake` | `std::result::Result<std::option::Option<std::primitive::int>,std::net::NetError>` |
-| typelisp_rt::net_builtin::RESULT_TYPES | `net-udp-bind` | `std::result::Result<std::primitive::i32,std::net::NetError>` |
-| typelisp_rt::net_builtin::RESULT_TYPES | `net-udp-send-to` | `std::result::Result<std::primitive::bool,std::net::NetError>` |
-| typelisp_rt::net_builtin::RESULT_TYPES | `net-udp-recv` | `std::result::Result<std::option::Option<std::vec::Vector<std::primitive::int>>,std::net::NetError>` |
-| typelisp_rt::net_builtin::RESULT_TYPES | `net-udp-last-sender` | `std::result::Result<std::primitive::string,std::net::NetError>` |
-| typelisp_rt::net_builtin::INNER_TYPES | `net-resolve-finish` | `std::option::Option<std::vec::Vector<std::primitive::string>>` |
-| typelisp_rt::net_builtin::INNER_TYPES | `net-tls-handshake` | `std::option::Option<std::primitive::int>` |
-| typelisp_rt::net_builtin::INNER_TYPES | `net-udp-recv` | `std::option::Option<std::vec::Vector<std::primitive::int>>` |
-| typelisp_rt::net_builtin::INNER_TYPES | `net-accept` | `std::option::Option<std::primitive::i32>` |
-| typelisp_rt::net_builtin::INNER_TYPES | `net-fill` | `std::option::Option<std::primitive::int>` |
-| typelisp_rt::net_builtin::INNER_TYPES | `net-flush` | `std::option::Option<std::primitive::int>` |
-| typelisp_rt::net_builtin::INNER_TYPES | `net-socket-error` | `std::option::Option<std::primitive::string>` |
-| typelisp_rt::net_builtin::INNER_TYPES | `net-peer-subject` | `std::option::Option<std::primitive::string>` |
-| typelisp_rt::net_builtin::INNER_TYPES | `net-server-name` | `std::option::Option<std::primitive::string>` |
-| typelisp_rt::net_builtin::INNER_TYPES | `net-pop-byte` | `std::option::Option<std::primitive::int>` |
-| typelisp_rt::net_builtin::INNER_TYPES | `net-pop-char` | `std::option::Option<std::primitive::char>` |
+| typelisp_rt_posix::net_builtin::RESULT_TYPES | `net-resolve-begin` | `std::result::Result<std::primitive::i32,std::net::NetError>` |
+| typelisp_rt_posix::net_builtin::RESULT_TYPES | `net-resolve-finish` | `std::result::Result<std::option::Option<std::vec::Vector<std::primitive::string>>,std::net::NetError>` |
+| typelisp_rt_posix::net_builtin::RESULT_TYPES | `net-connect-begin` | `std::result::Result<std::primitive::i32,std::net::NetError>` |
+| typelisp_rt_posix::net_builtin::RESULT_TYPES | `net-connect-finish` | `std::result::Result<(),std::net::NetError>` |
+| typelisp_rt_posix::net_builtin::RESULT_TYPES | `net-listen` | `std::result::Result<std::primitive::i32,std::net::NetError>` |
+| typelisp_rt_posix::net_builtin::RESULT_TYPES | `net-tls-listen` | `std::result::Result<std::primitive::i32,std::net::NetError>` |
+| typelisp_rt_posix::net_builtin::RESULT_TYPES | `net-unix-connect` | `std::result::Result<std::primitive::i32,std::net::NetError>` |
+| typelisp_rt_posix::net_builtin::RESULT_TYPES | `net-unix-listen` | `std::result::Result<std::primitive::i32,std::net::NetError>` |
+| typelisp_rt_posix::net_builtin::RESULT_TYPES | `net-accept` | `std::result::Result<std::option::Option<std::primitive::i32>,std::net::NetError>` |
+| typelisp_rt_posix::net_builtin::RESULT_TYPES | `net-fill` | `std::result::Result<std::option::Option<std::primitive::int>,std::net::NetError>` |
+| typelisp_rt_posix::net_builtin::RESULT_TYPES | `net-pop-byte` | `std::result::Result<std::option::Option<std::primitive::int>,std::net::NetError>` |
+| typelisp_rt_posix::net_builtin::RESULT_TYPES | `net-pop-char` | `std::result::Result<std::option::Option<std::primitive::char>,std::net::NetError>` |
+| typelisp_rt_posix::net_builtin::RESULT_TYPES | `net-buffered-p` | `std::result::Result<std::primitive::bool,std::net::NetError>` |
+| typelisp_rt_posix::net_builtin::RESULT_TYPES | `net-push-string` | `std::result::Result<(),std::net::NetError>` |
+| typelisp_rt_posix::net_builtin::RESULT_TYPES | `net-push-byte` | `std::result::Result<(),std::net::NetError>` |
+| typelisp_rt_posix::net_builtin::RESULT_TYPES | `net-flush` | `std::result::Result<std::option::Option<std::primitive::int>,std::net::NetError>` |
+| typelisp_rt_posix::net_builtin::RESULT_TYPES | `net-socket-error` | `std::result::Result<std::option::Option<std::primitive::string>,std::net::NetError>` |
+| typelisp_rt_posix::net_builtin::RESULT_TYPES | `net-peer-subject` | `std::result::Result<std::option::Option<std::primitive::string>,std::net::NetError>` |
+| typelisp_rt_posix::net_builtin::RESULT_TYPES | `net-server-name` | `std::result::Result<std::option::Option<std::primitive::string>,std::net::NetError>` |
+| typelisp_rt_posix::net_builtin::RESULT_TYPES | `net-set-nodelay` | `std::result::Result<(),std::net::NetError>` |
+| typelisp_rt_posix::net_builtin::RESULT_TYPES | `net-set-keepalive` | `std::result::Result<(),std::net::NetError>` |
+| typelisp_rt_posix::net_builtin::RESULT_TYPES | `net-set-keepalive-period` | `std::result::Result<(),std::net::NetError>` |
+| typelisp_rt_posix::net_builtin::RESULT_TYPES | `net-tls-add-certificate` | `std::result::Result<(),std::net::NetError>` |
+| typelisp_rt_posix::net_builtin::RESULT_TYPES | `net-shutdown-write` | `std::result::Result<(),std::net::NetError>` |
+| typelisp_rt_posix::net_builtin::RESULT_TYPES | `net-local-address` | `std::result::Result<std::primitive::string,std::net::NetError>` |
+| typelisp_rt_posix::net_builtin::RESULT_TYPES | `net-peer-address` | `std::result::Result<std::primitive::string,std::net::NetError>` |
+| typelisp_rt_posix::net_builtin::RESULT_TYPES | `net-tls-start` | `std::result::Result<(),std::net::NetError>` |
+| typelisp_rt_posix::net_builtin::RESULT_TYPES | `net-tls-handshake` | `std::result::Result<std::option::Option<std::primitive::int>,std::net::NetError>` |
+| typelisp_rt_posix::net_builtin::RESULT_TYPES | `net-udp-bind` | `std::result::Result<std::primitive::i32,std::net::NetError>` |
+| typelisp_rt_posix::net_builtin::RESULT_TYPES | `net-udp-send-to` | `std::result::Result<std::primitive::bool,std::net::NetError>` |
+| typelisp_rt_posix::net_builtin::RESULT_TYPES | `net-udp-recv` | `std::result::Result<std::option::Option<std::vec::Vector<std::primitive::int>>,std::net::NetError>` |
+| typelisp_rt_posix::net_builtin::RESULT_TYPES | `net-udp-last-sender` | `std::result::Result<std::primitive::string,std::net::NetError>` |
+| typelisp_rt_posix::net_builtin::INNER_TYPES | `net-resolve-finish` | `std::option::Option<std::vec::Vector<std::primitive::string>>` |
+| typelisp_rt_posix::net_builtin::INNER_TYPES | `net-tls-handshake` | `std::option::Option<std::primitive::int>` |
+| typelisp_rt_posix::net_builtin::INNER_TYPES | `net-udp-recv` | `std::option::Option<std::vec::Vector<std::primitive::int>>` |
+| typelisp_rt_posix::net_builtin::INNER_TYPES | `net-accept` | `std::option::Option<std::primitive::i32>` |
+| typelisp_rt_posix::net_builtin::INNER_TYPES | `net-fill` | `std::option::Option<std::primitive::int>` |
+| typelisp_rt_posix::net_builtin::INNER_TYPES | `net-flush` | `std::option::Option<std::primitive::int>` |
+| typelisp_rt_posix::net_builtin::INNER_TYPES | `net-socket-error` | `std::option::Option<std::primitive::string>` |
+| typelisp_rt_posix::net_builtin::INNER_TYPES | `net-peer-subject` | `std::option::Option<std::primitive::string>` |
+| typelisp_rt_posix::net_builtin::INNER_TYPES | `net-server-name` | `std::option::Option<std::primitive::string>` |
+| typelisp_rt_posix::net_builtin::INNER_TYPES | `net-pop-byte` | `std::option::Option<std::primitive::int>` |
+| typelisp_rt_posix::net_builtin::INNER_TYPES | `net-pop-char` | `std::option::Option<std::primitive::char>` |
+| typelisp_rt_posix::sys::RESULT_TYPES | `machine-instance` | `std::option::Option<std::primitive::string>` |
+| typelisp_rt_posix::sys::RESULT_TYPES | `software-version` | `std::option::Option<std::primitive::string>` |
+| typelisp_rt_posix::sys::RESULT_TYPES | `ed-open` | `std::result::Result<(),std::fs::FileError>` |
+| typelisp_rt_posix::sys::RESULT_TYPES | `file-owner-name` | `std::result::Result<std::option::Option<std::primitive::string>,std::fs::FileError>` |
+| typelisp_rt_posix::sys::INNER_TYPES | `file-owner-name` | `std::option::Option<std::primitive::string>` |
 | typelisp_rt_sys::fs_builtin::RESULT_TYPES | `stream-open-file` | `std::result::Result<std::primitive::i32,std::fs::FileError>` |
 | typelisp_rt_sys::fs_builtin::RESULT_TYPES | `file-delete` | `std::result::Result<(),std::fs::FileError>` |
 | typelisp_rt_sys::fs_builtin::RESULT_TYPES | `file-truename` | `std::result::Result<std::primitive::string,std::fs::FileError>` |
 | typelisp_rt_sys::fs_builtin::RESULT_TYPES | `file-modified-date` | `std::result::Result<std::time::universal-time,std::fs::FileError>` |
-| typelisp_rt_sys::fs_builtin::RESULT_TYPES | `file-owner-name` | `std::result::Result<std::option::Option<std::primitive::string>,std::fs::FileError>` |
 | typelisp_rt_sys::fs_builtin::RESULT_TYPES | `file-list-directory` | `std::result::Result<std::vec::Vector<std::primitive::string>,std::fs::FileError>` |
 | typelisp_rt_sys::fs_builtin::RESULT_TYPES | `file-create-directories` | `std::result::Result<(),std::fs::FileError>` |
 | typelisp_rt_sys::fs_builtin::RESULT_TYPES | `file-rename` | `std::result::Result<(),std::fs::FileError>` |
 | typelisp_rt_sys::fs_builtin::INNER_TYPES | `file-list-directory` | `std::vec::Vector<std::primitive::string>` |
-| typelisp_rt_sys::fs_builtin::INNER_TYPES | `file-owner-name` | `std::option::Option<std::primitive::string>` |
 | typelisp_rt_sys::env::RESULT_TYPES | `command-line-args` | `std::vec::Vector<std::primitive::string>` |
 | typelisp_rt_sys::env::RESULT_TYPES | `getenv` | `std::option::Option<std::primitive::string>` |
 | typelisp_rt_sys::env::RESULT_TYPES | `home-directory` | `std::option::Option<std::primitive::string>` |

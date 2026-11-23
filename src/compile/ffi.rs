@@ -571,9 +571,9 @@ fn add_attribute(f: FunctionValue<'static>, loc: inkwell::attributes::AttributeL
 
 /// Libraries opened so far, by the name the declaration wrote.
 ///
-/// Here rather than in `typelisp_rt::os`, which is a safe wrapper over one C
+/// Here rather than in `typelisp_rt_posix::os`, which is a safe wrapper over one C
 /// call per function and has no business holding process-wide state. Never
-/// emptied: see [`typelisp_rt::os::dl_open`] for why nothing is ever closed.
+/// emptied: see [`typelisp_rt_posix::os::dl_open`] for why nothing is ever closed.
 static OPEN_LIBS: Mutex<Option<HashMap<String, usize>>> = Mutex::new(None);
 
 /// The address `decl` names, or an error saying what was looked for and where.
@@ -582,7 +582,7 @@ fn resolve(decl: &FfiDecl) -> Result<usize, String> {
         None => 0,
         Some(lib) => open_library(lib)?,
     };
-    typelisp_rt::os::dl_sym(handle, &decl.c_symbol).ok_or_else(|| match &decl.library {
+    typelisp_rt_posix::os::dl_sym(handle, &decl.c_symbol).ok_or_else(|| match &decl.library {
         Some(lib) => format!(
             "defffi: `{}` has no symbol `{}` — the library opened, so the name is what is wrong",
             lib, decl.c_symbol
@@ -604,7 +604,7 @@ fn open_library(name: &str) -> Result<usize, String> {
     }
     let candidates = library_candidates(name);
     for c in &candidates {
-        if let Some(h) = typelisp_rt::os::dl_open(c) {
+        if let Some(h) = typelisp_rt_posix::os::dl_open(c) {
             cache.insert(name.to_string(), h);
             return Ok(h);
         }

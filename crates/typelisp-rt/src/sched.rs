@@ -53,12 +53,8 @@ mod threads;
 mod compiled_wait;
 mod compiled_task;
 mod io;
-#[cfg(all(feature = "std", not(target_family = "wasm")))]
-mod os_threads;
 pub use threads::*;
 pub use io::*;
-#[cfg(all(feature = "std", not(target_family = "wasm")))]
-pub use os_threads::*;
 pub use compiled_wait::*;
 pub use compiled_task::*;
 
@@ -311,6 +307,13 @@ pub struct ChanId(usize);
 /// Names a task the scheduler is holding.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct TaskId(usize);
+
+/// The task's number, as a thread started for it is named.
+impl core::fmt::Display for TaskId {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
 
 /// One channel: a ring of buffered values and whether it is closed.
 ///

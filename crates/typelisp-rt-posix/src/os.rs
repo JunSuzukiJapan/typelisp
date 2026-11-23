@@ -217,23 +217,23 @@ pub fn dl_sym(_handle: usize, _symbol: &str) -> Option<usize> {
     unimplemented!("the FFI needs dlsym, which is POSIX")
 }
 
-use crate::sched::Interest;
+use typelisp_rt::sched::Interest;
 
 /// The scheduler's way to watch the descriptors its tasks wait on
-/// ([`crate::sched::Poller`]): [`poll_ready`].
+/// ([`typelisp_rt::sched::Poller`]): [`poll_ready`].
 pub struct OsPoller;
 
 /// The one [`OsPoller`]: what every socket backend names as the poller its
 /// waits are watched with.
 pub static POLLER: OsPoller = OsPoller;
 
-impl crate::sched::Poller for OsPoller {
+impl typelisp_rt::sched::Poller for OsPoller {
     fn poll_ready(&self, fds: &[(i32, Interest)], timeout: Option<core::time::Duration>) -> Result<Vec<(i32, bool)>, String> {
         poll_ready(fds, timeout).map_err(|e| e.to_string())
     }
 }
 
-impl crate::sched::Waker for SelfPipe {
+impl typelisp_rt::sched::Waker for SelfPipe {
     fn read_fd(&self) -> i32 {
         SelfPipe::read_fd(self)
     }
@@ -383,7 +383,7 @@ impl SelfPipe {
 
 /// One thread runs every task on WebAssembly, so there is no other thread to
 /// wake and no socket to poll: the scheduler makes one of these and never
-/// polls ([`crate::sched::SchedShared`]).
+/// polls ([`typelisp_rt::sched::SchedShared`]).
 #[cfg(target_family = "wasm")]
 impl SelfPipe {
     pub fn new() -> std::io::Result<SelfPipe> {

@@ -125,6 +125,14 @@ pub fn abort() -> ! {
     exit(134)
 }
 
+/// Writes `message` to standard error and ends the program with `code`,
+/// allocating nothing: the board's own write and exit allocate nothing on this
+/// side.
+pub fn die_without_allocating(message: &[u8], code: i32) -> ! {
+    host_write(2, message);
+    exit(code)
+}
+
 /// Waits `d`.
 pub fn sleep(d: Duration) {
     // SAFETY: a board function with no preconditions.

@@ -171,7 +171,7 @@ fn failure_error(f: TaskFailure) -> EvalError {
 
 impl Interp {
     /// Gives this interpreter's scheduler its crew of worker threads
-    /// (`sched::install_crew`), the first time it is driven — there is no
+    /// (`typelisp_rt_posix::threads::install_crew`), the first time it is driven — there is no
     /// heap to attach them to before. `TYPELISP_THREADS` threads step tasks,
     /// this one included, as in an executable.
     ///
@@ -202,7 +202,6 @@ impl Interp {
 #[cfg(not(target_family = "wasm"))]
 mod crew {
     use typelisp_mem::Heap;
-    use typelisp_rt::sched;
 
     use super::{Interp, TyplCx};
     use crate::eval::value::EvalError;
@@ -213,12 +212,12 @@ mod crew {
 
     impl Interp {
         pub(super) fn install_os_crew(&self, heap: &mut Heap) -> Result<(), EvalError> {
-            let threads = sched::thread_count().map_err(EvalError::Internal)?;
+            let threads = typelisp_rt_posix::threads::thread_count().map_err(EvalError::Internal)?;
             let rt = typelisp_rt::shared::rt_shared();
             let print = typelisp_print::shared::print_shared();
             let snapshot = std::sync::Arc::clone(&self.worker_print);
             let executable_printer = self.executable_printer.get();
-            sched::install_crew(&self.scheduler, heap, threads - 1, &WORKER_CX, move || {
+            typelisp_rt_posix::threads::install_crew(&self.scheduler, heap, threads - 1, &WORKER_CX, move || {
                 typelisp_rt::shared::set_rt_shared(std::sync::Arc::clone(&rt));
                 // Shared either way: besides the executable's tables it holds how
                 // type names are written (`PrintShared::name_view`), which the

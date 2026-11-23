@@ -55,15 +55,7 @@ pub mod mem_limit;
 pub mod c_mem;
 pub mod ffi_callback;
 pub mod integer;
-#[cfg(all(feature = "std", not(target_family = "wasm")))]
-pub mod net;
 pub mod rational;
-#[cfg(all(feature = "std", not(target_family = "wasm")))]
-pub mod net_builtin;
-#[cfg(all(feature = "std", not(target_family = "wasm")))]
-pub mod x509;
-#[cfg(feature = "std")]
-pub mod os;
 pub mod readtable;
 pub mod result_value;
 pub mod sched;

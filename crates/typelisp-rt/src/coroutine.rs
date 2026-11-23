@@ -697,22 +697,6 @@ pub unsafe extern "C" fn rt_suspend_task(args: *const i64, argc: u32) -> i64 {
     0
 }
 
-/// `(thread ...)` for compiled code: [`rt_suspend_task`]'s closure, for a task
-/// the scheduler runs on an OS thread of its own. `args[1]` is the handle's
-/// type (`Thread<int>`). The answer is the `Thread<T>` handle.
-///
-/// # Safety
-///
-/// `args` must point to `argc >= 2` valid `i64`s.
-#[no_mangle]
-pub unsafe extern "C" fn rt_suspend_thread(args: *const i64, argc: u32) -> i64 {
-    if argc < 2 {
-        typelisp_abi::fatal("rt_suspend_thread: expected the closure to start and the handle's type");
-    }
-    call_state::set_pending_suspend_2(call_state::SUSPEND_THREAD, *args, *args.add(1));
-    0
-}
-
 /// What the compile bridge puts in front of a call only the interpreter can
 /// answer — `eval`, `macroexpand`, a `read` that may meet a reader macro —
 /// so that a compiled task a worker thread is stepping moves to the
@@ -814,40 +798,6 @@ pub unsafe extern "C" fn rt_suspend_sleep(args: *const i64, argc: u32) -> i64 {
         crate::fatal("rt_suspend_sleep: expected 1 argument");
     }
     call_state::set_pending_suspend(call_state::SUSPEND_SLEEP, *args);
-    0
-}
-
-/// `(net-wait h interest)` for compiled code: `args[0]` is the stream
-/// handle, `args[1]` the interest code — both plain integers, which is how
-/// they travel. Records the wait; the activation then returns
-/// `STATUS_SUSPEND` and the scheduler parks the task on the descriptor.
-///
-/// # Safety
-///
-/// `argc` must be `>= 2` and `args` must point to at least 2 valid `i64`s.
-#[no_mangle]
-pub unsafe extern "C" fn rt_suspend_io(args: *const i64, argc: u32) -> i64 {
-    if argc < 2 {
-        crate::fatal("rt_suspend_io: expected 2 arguments");
-    }
-    call_state::set_pending_suspend_2(call_state::SUSPEND_IO, *args, *args.add(1));
-    0
-}
-
-/// `(net-wait-for h interest secs)` for compiled code: the handle and the
-/// interest packed into one word (handle above, interest in the low bit)
-/// because the seconds' bits need a whole word of their own.
-///
-/// # Safety
-///
-/// `argc` must be `>= 3` and `args` must point to at least 3 valid `i64`s.
-#[no_mangle]
-pub unsafe extern "C" fn rt_suspend_io_for(args: *const i64, argc: u32) -> i64 {
-    if argc < 3 {
-        crate::fatal("rt_suspend_io_for: expected 3 arguments");
-    }
-    let packed = (*args << 1) | (*args.add(1) & 1);
-    call_state::set_pending_suspend_2(call_state::SUSPEND_IO_FOR, packed, *args.add(2));
     0
 }
 

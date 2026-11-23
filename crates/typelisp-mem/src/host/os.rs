@@ -63,6 +63,27 @@ pub fn abort() -> ! {
     std::process::abort()
 }
 
+/// Writes `message` to standard error and ends the process with `code`,
+/// allocating nothing: what a refused allocation reports with.
+///
+/// Straight to the descriptor: `std::io::stderr()`'s lock asks for the
+/// current thread's identity, whose first use allocates. Likewise
+/// `process::exit` runs the C library's exit handlers, which may allocate;
+/// `_exit` ends the process at once.
+pub fn die_without_allocating(message: &[u8], code: i32) -> ! {
+    let mut written = 0;
+    while written < message.len() {
+        // SAFETY: writes from a live slice of the length passed.
+        let n = unsafe { libc::write(2, message[written..].as_ptr().cast(), message.len() - written) };
+        if n <= 0 {
+            break;
+        }
+        written += n as usize;
+    }
+    // SAFETY: ends the process; nothing returns.
+    unsafe { libc::_exit(code) }
+}
+
 /// Waits `d`.
 pub fn sleep(d: Duration) {
     std::thread::sleep(d)

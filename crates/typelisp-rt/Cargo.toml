@@ -27,43 +27,14 @@ num-bigint = { version = "0.4", default-features = false }
 num-rational = { version = "0.4", default-features = false, features = ["num-bigint"] }
 num-traits = { version = "0.2", default-features = false, features = ["libm"] }
 num-integer = { version = "0.1", default-features = false }
-# The one dependency that is not pure Rust: the C library's own declarations.
-# `libc` is (almost) not a library at all — it is `extern "C"` blocks plus the
-# per-platform `struct`/constant definitions — and the code behind them is the
-# system C library this process already links (`std` is built on it). What
-# changes by taking it is not the link line but *who owns the `unsafe`*: these
-# calls no longer go through a `std` wrapper. Taken for the four things `std`
-# has no equivalent of, all in `sys_builtin`/`stream_builtin`: CPU time
-# (`getrusage`), the host's name and OS release (`uname`), a file's owner
-# (`getpwuid_r`) and the local time zone (`localtime_r`).
-libc = { version = "0.2", optional = true }
-# TLS for `tls-connect`. A TLS implementation is the one thing in the network
-# layer that cannot be written in typelisp (the language has no ciphers) and
-# should not be written here either. `rustls` is sans-IO — it never touches
-# the socket, it only encrypts and decrypts buffers — which is exactly what a
-# non-blocking backend needs: the same `net-fill`/`net-flush` loops drive it,
-# and the scheduler's `poll` is still the only place a task waits. `ring` is
-# the crypto provider that builds without cmake or nasm; `webpki-roots` is
-# Mozilla's root store, bundled, so no OS keychain library is linked.
-# Not on wasm: `ring` builds C, and a wasm program has no sockets to put TLS
-# on (`net` is not compiled there either).
-[target.'cfg(not(target_family = "wasm"))'.dependencies]
-rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"], optional = true }
-webpki-roots = { version = "1", optional = true }
-
-# `std` (on by default) is what every host build has: the OS threads, the
-# network, files, the environment and the process. Without it (a
-# microcontroller) the crate is `no_std` + `alloc` and has none of them.
+# `std` (on by default) builds the crates below over an operating system's
+# `std`. Without it (a microcontroller) every one is `no_std` + `alloc`, and
+# the board provides what the host layer asks of the machine
+# (`typelisp_mem::host`). What only some targets have at all is in
+# `typelisp-rt-sys` and `typelisp-rt-posix`, not behind this feature.
 [features]
 default = ["std"]
 std = [
     "typelisp-abi/std", "typelisp-mem/std", "typelisp-print/std", "typelisp-read/std",
     "num-bigint/std", "num-rational/std", "num-traits/std", "num-integer/std",
-    "dep:libc", "dep:rustls", "dep:webpki-roots",
 ]
-
-# The tests need a certificate a TLS client will trust; `rcgen` makes one
-# in memory (a CA and a leaf for `localhost`), so no fixture file can expire
-# and no `openssl` binary is needed. Test-only: the runtime never signs.
-[dev-dependencies]
-rcgen = { version = "0.14", default-features = false, features = ["ring", "pem", "crypto"] }

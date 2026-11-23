@@ -526,7 +526,7 @@ impl Drop for JitCode {
 /// against an older SDK can be told a compatibility number in its place.
 #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
 pub fn unsupported_host_warning() -> Option<&'static str> {
-    let release = typelisp_rt::os::os_release().expect("uname reports a release");
+    let release = typelisp_rt_posix::os::os_release().expect("uname reports a release");
     let darwin: u32 = release
         .split('.')
         .next()
