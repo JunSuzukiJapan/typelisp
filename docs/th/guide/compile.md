@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ 0af7d052ede61d9b74e6590bb00955c0c9c3b9a4 -->
+<!-- translated-from: docs/ja/guide/compile.md @ 66155a938dbf56e43296ef8cfe54dfdfe3182721 -->
 # การคอมไพล์
 
 หากไม่ทำอะไรเพิ่ม โปรแกรม typelisp จะรันในอินเทอร์พรีเตอร์ นอกจากนี้ยังมีวิธีคอมไพล์เป็นโค้ดเนทีฟ
@@ -225,16 +225,19 @@ const code = await run({ write: (fd, text) => { /* เช่น แสดงบ�
 
 ### 3.8 คอมไพล์สำหรับไมโครคอนโทรลเลอร์ (Cortex-M)
 
-เมื่อใส่ `--target thumbv7em-none-eabihf` คำสั่ง `typl -c` จะสร้างไฟล์ปฏิบัติการ (ELF) สำหรับบอร์ด Cortex-M4F หรือ M7 ที่ไม่มีระบบปฏิบัติการ ถ้าไม่ใส่ `-o` ชื่อจะเป็นชื่อซอร์สที่เปลี่ยน `.typl` เป็น `.elf`
+เมื่อใส่ `--target thumbv7em-none-eabihf` คำสั่ง `typl -c` จะสร้างไฟล์ปฏิบัติการ (ELF) สำหรับบอร์ด Cortex-M4F หรือ M7 ที่ไม่มีระบบปฏิบัติการ ถ้าไม่ใส่ `-o` ชื่อจะเป็นชื่อซอร์สที่เปลี่ยน `.typl` เป็น `.elf` ถ้าใช้ `--target thumbv8m.main-none-eabihf` จะเป็นสำหรับบอร์ด Cortex-M33
 
 ```sh
 $ typl -c hello.typl --target thumbv7em-none-eabihf          # สร้าง hello.elf
 $ qemu-system-arm -M mps2-an386 -nographic \
     -semihosting-config enable=on,target=native -kernel hello.elf   # รันบน Cortex-M4 ของ QEMU
+$ typl -c hello.typl --target thumbv8m.main-none-eabihf
+$ qemu-system-arm -M mps2-an505 -nographic \
+    -semihosting-config enable=on,target=native -kernel hello.elf   # รันบน Cortex-M33 ของ QEMU
 ```
 
-- `typl` ที่ติดตั้งด้วย `install.sh` ใช้ได้ทันที ถ้าติดตั้งด้วย `cargo install` ให้รัน `rustup target add thumbv7em-none-eabihf` แล้วติดตั้งพร้อม `--features embedded` (ทั้งสองอย่างใช้ `--features wasm,embedded`) ถ้าใช้ `typl` ที่เป็นบิลด์ดีบักในรีโพสิทอรี ให้รัน `scripts/build-embedded-runtime.sh` การลิงก์ใช้ลิงเกอร์ของ toolchain ของ rustup
-- ระบุหน่วยความจำของบอร์ดด้วย `--linker-script FILE` เขียนแบบเดียวกับ `memory.x` ของ `cortex-m-rt` คือที่อยู่และขนาดของ FLASH และ RAM บรรทัดอย่าง `_typelisp_stack_size = 32K;` กำหนดว่าสแตกใช้ RAM เท่าใด (ถ้าไม่เขียนคือ 64KiB) ส่วนที่เหลือของ RAM คือฮีป ถ้าไม่ใส่ตัวเลือกนี้จะใช้การจัดวางของ `mps2-an386` ใน QEMU
+- `typl` ที่ติดตั้งด้วย `install.sh` ใช้ได้ทันที ถ้าติดตั้งด้วย `cargo install` ให้รัน `rustup target add thumbv7em-none-eabihf thumbv8m.main-none-eabihf` แล้วติดตั้งพร้อม `--features embedded` (ทั้งสองอย่างใช้ `--features wasm,embedded`) ถ้าใช้ `typl` ที่เป็นบิลด์ดีบักในรีโพสิทอรี ให้รัน `scripts/build-embedded-runtime.sh` การลิงก์ใช้ลิงเกอร์ของ toolchain ของ rustup
+- ระบุหน่วยความจำของบอร์ดด้วย `--linker-script FILE` เขียนแบบเดียวกับ `memory.x` ของ `cortex-m-rt` คือที่อยู่และขนาดของ FLASH และ RAM บรรทัดอย่าง `_typelisp_stack_size = 32K;` กำหนดว่าสแตกใช้ RAM เท่าใด (ถ้าไม่เขียนคือ 64KiB) ส่วนที่เหลือของ RAM คือฮีป ถ้าไม่ใส่ตัวเลือกนี้จะใช้การจัดวางของ `mps2-an386` (สำหรับ Cortex-M33 คือ `mps2-an505`) ใน QEMU
 
   ```
   MEMORY

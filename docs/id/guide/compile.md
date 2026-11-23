@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ 0af7d052ede61d9b74e6590bb00955c0c9c3b9a4 -->
+<!-- translated-from: docs/ja/guide/compile.md @ 66155a938dbf56e43296ef8cfe54dfdfe3182721 -->
 # Kompilasi
 
 Jika Anda tidak melakukan apa-apa lagi, program typelisp berjalan di interpreter. Selain itu ada dua
@@ -229,16 +229,19 @@ const code = await run({ write: (fd, text) => { /* misalnya tampilkan di halaman
 
 ### 3.8 Mengompilasi untuk mikrokontroler (Cortex-M)
 
-Dengan `--target thumbv7em-none-eabihf`, `typl -c` membuat berkas eksekusi (ELF) untuk papan Cortex-M4F atau M7 tanpa sistem operasi. Tanpa `-o`, namanya mengikuti sumber dengan `.typl` diganti `.elf`.
+Dengan `--target thumbv7em-none-eabihf`, `typl -c` membuat berkas eksekusi (ELF) untuk papan Cortex-M4F atau M7 tanpa sistem operasi. Tanpa `-o`, namanya mengikuti sumber dengan `.typl` diganti `.elf`. Dengan `--target thumbv8m.main-none-eabihf`, untuk papan Cortex-M33.
 
 ```sh
 $ typl -c hello.typl --target thumbv7em-none-eabihf          # membuat hello.elf
 $ qemu-system-arm -M mps2-an386 -nographic \
     -semihosting-config enable=on,target=native -kernel hello.elf   # jalankan di Cortex-M4 milik QEMU
+$ typl -c hello.typl --target thumbv8m.main-none-eabihf
+$ qemu-system-arm -M mps2-an505 -nographic \
+    -semihosting-config enable=on,target=native -kernel hello.elf   # jalankan di Cortex-M33 milik QEMU
 ```
 
-- `typl` yang dipasang dengan `install.sh` dapat langsung dipakai. Untuk memasang dengan `cargo install`, jalankan `rustup target add thumbv7em-none-eabihf`, lalu pasang dengan `--features embedded` (`--features wasm,embedded` untuk keduanya). Dengan build debug `typl` di repositori, jalankan `scripts/build-embedded-runtime.sh`. Penautan memakai linker toolchain rustup.
-- Berikan memori papan dengan `--linker-script FILE`. Ditulis seperti `memory.x` milik `cortex-m-rt`: alamat dan ukuran FLASH dan RAM. Baris seperti `_typelisp_stack_size = 32K;` menentukan berapa banyak RAM yang dipakai stack (64KiB jika tidak diberikan); sisa RAM adalah heap. Tanpa opsi ini, tata letaknya milik `mps2-an386` di QEMU.
+- `typl` yang dipasang dengan `install.sh` dapat langsung dipakai. Untuk memasang dengan `cargo install`, jalankan `rustup target add thumbv7em-none-eabihf thumbv8m.main-none-eabihf`, lalu pasang dengan `--features embedded` (`--features wasm,embedded` untuk keduanya). Dengan build debug `typl` di repositori, jalankan `scripts/build-embedded-runtime.sh`. Penautan memakai linker toolchain rustup.
+- Berikan memori papan dengan `--linker-script FILE`. Ditulis seperti `memory.x` milik `cortex-m-rt`: alamat dan ukuran FLASH dan RAM. Baris seperti `_typelisp_stack_size = 32K;` menentukan berapa banyak RAM yang dipakai stack (64KiB jika tidak diberikan); sisa RAM adalah heap. Tanpa opsi ini, tata letaknya milik `mps2-an386` (`mps2-an505` untuk Cortex-M33) di QEMU.
 
   ```
   MEMORY

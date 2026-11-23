@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ 0af7d052ede61d9b74e6590bb00955c0c9c3b9a4 -->
+<!-- translated-from: docs/ja/guide/compile.md @ 66155a938dbf56e43296ef8cfe54dfdfe3182721 -->
 # الترجمة
 
 إذا لم تفعل شيئًا آخر فإن برامج typelisp تعمل في المفسِّر (interpreter). وإضافة إلى ذلك توجد طريقتان
@@ -223,16 +223,19 @@ const code = await run({ write: (fd, text) => { /* اعرضه في الصفحة 
 
 ### 3.8 الترجمة لمتحكم دقيق (Cortex-M)
 
-مع `--target thumbv7em-none-eabihf` ينشئ `typl -c` ملفًا تنفيذيًا (ELF) للوحة Cortex-M4F أو M7 بلا نظام تشغيل. بدون `-o` يُسمّى باسم المصدر مع استبدال `.typl` بـ`.elf`.
+مع `--target thumbv7em-none-eabihf` ينشئ `typl -c` ملفًا تنفيذيًا (ELF) للوحة Cortex-M4F أو M7 بلا نظام تشغيل. بدون `-o` يُسمّى باسم المصدر مع استبدال `.typl` بـ`.elf`. ومع `--target thumbv8m.main-none-eabihf` يكون للوحة Cortex-M33.
 
 ```sh
 $ typl -c hello.typl --target thumbv7em-none-eabihf          # ينشئ hello.elf
 $ qemu-system-arm -M mps2-an386 -nographic \
     -semihosting-config enable=on,target=native -kernel hello.elf   # شغّله على Cortex-M4 في QEMU
+$ typl -c hello.typl --target thumbv8m.main-none-eabihf
+$ qemu-system-arm -M mps2-an505 -nographic \
+    -semihosting-config enable=on,target=native -kernel hello.elf   # شغّله على Cortex-M33 في QEMU
 ```
 
-- يمكن استخدام `typl` المثبّت بـ`install.sh` كما هو. للتثبيت بـ`cargo install` شغّل `rustup target add thumbv7em-none-eabihf` ثم ثبّت مع `--features embedded` (و`--features wasm,embedded` للاثنين). مع نسخة التصحيح من `typl` في المستودع شغّل `scripts/build-embedded-runtime.sh`. يستخدم الربط رابط سلسلة أدوات rustup.
-- مرّر ذاكرة اللوحة بـ`--linker-script FILE`. يُكتب الملف مثل `memory.x` في `cortex-m-rt`: عناوين FLASH وRAM وأحجامها. سطر مثل `_typelisp_stack_size = 32K;` يحدد ما يأخذه المكدس من RAM (64KiB إن لم يُذكر)؛ وبقية RAM هي الكومة. بدون الخيار يُستخدم تخطيط `mps2-an386` في QEMU.
+- يمكن استخدام `typl` المثبّت بـ`install.sh` كما هو. للتثبيت بـ`cargo install` شغّل `rustup target add thumbv7em-none-eabihf thumbv8m.main-none-eabihf` ثم ثبّت مع `--features embedded` (و`--features wasm,embedded` للاثنين). مع نسخة التصحيح من `typl` في المستودع شغّل `scripts/build-embedded-runtime.sh`. يستخدم الربط رابط سلسلة أدوات rustup.
+- مرّر ذاكرة اللوحة بـ`--linker-script FILE`. يُكتب الملف مثل `memory.x` في `cortex-m-rt`: عناوين FLASH وRAM وأحجامها. سطر مثل `_typelisp_stack_size = 32K;` يحدد ما يأخذه المكدس من RAM (64KiB إن لم يُذكر)؛ وبقية RAM هي الكومة. بدون الخيار يُستخدم تخطيط `mps2-an386` (و`mps2-an505` لـ Cortex-M33) في QEMU.
 
   ```
   MEMORY

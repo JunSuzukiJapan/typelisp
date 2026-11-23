@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ 0af7d052ede61d9b74e6590bb00955c0c9c3b9a4 -->
+<!-- translated-from: docs/ja/guide/compile.md @ 66155a938dbf56e43296ef8cfe54dfdfe3182721 -->
 # Biên dịch
 
 Nếu bạn không làm gì thêm, chương trình typelisp chạy trong trình thông dịch. Ngoài ra còn có hai
@@ -223,16 +223,19 @@ const code = await run({ write: (fd, text) => { /* ví dụ hiển thị lên tr
 
 ### 3.8 Biên dịch cho vi điều khiển (Cortex-M)
 
-Với `--target thumbv7em-none-eabihf`, `typl -c` tạo tệp thực thi (ELF) cho bo mạch Cortex-M4F hoặc M7 không có hệ điều hành. Nếu không có `-o`, tên là tên mã nguồn với `.typl` đổi thành `.elf`.
+Với `--target thumbv7em-none-eabihf`, `typl -c` tạo tệp thực thi (ELF) cho bo mạch Cortex-M4F hoặc M7 không có hệ điều hành. Nếu không có `-o`, tên là tên mã nguồn với `.typl` đổi thành `.elf`. Với `--target thumbv8m.main-none-eabihf`, là cho bo mạch Cortex-M33.
 
 ```sh
 $ typl -c hello.typl --target thumbv7em-none-eabihf          # tạo hello.elf
 $ qemu-system-arm -M mps2-an386 -nographic \
     -semihosting-config enable=on,target=native -kernel hello.elf   # chạy trên Cortex-M4 của QEMU
+$ typl -c hello.typl --target thumbv8m.main-none-eabihf
+$ qemu-system-arm -M mps2-an505 -nographic \
+    -semihosting-config enable=on,target=native -kernel hello.elf   # chạy trên Cortex-M33 của QEMU
 ```
 
-- `typl` cài bằng `install.sh` dùng được ngay. Để cài bằng `cargo install`, chạy `rustup target add thumbv7em-none-eabihf` rồi cài với `--features embedded` (`--features wasm,embedded` cho cả hai). Với bản build gỡ lỗi của `typl` trong kho mã, chạy `scripts/build-embedded-runtime.sh`. Việc liên kết dùng trình liên kết của toolchain rustup.
-- Cho biết bộ nhớ của bo mạch bằng `--linker-script FILE`. Tệp được viết như `memory.x` của `cortex-m-rt`: địa chỉ và kích thước của FLASH và RAM. Một dòng như `_typelisp_stack_size = 32K;` đặt phần RAM mà ngăn xếp dùng (mặc định 64KiB); phần RAM còn lại là heap. Không có tùy chọn này thì dùng bố trí của `mps2-an386` trong QEMU.
+- `typl` cài bằng `install.sh` dùng được ngay. Để cài bằng `cargo install`, chạy `rustup target add thumbv7em-none-eabihf thumbv8m.main-none-eabihf` rồi cài với `--features embedded` (`--features wasm,embedded` cho cả hai). Với bản build gỡ lỗi của `typl` trong kho mã, chạy `scripts/build-embedded-runtime.sh`. Việc liên kết dùng trình liên kết của toolchain rustup.
+- Cho biết bộ nhớ của bo mạch bằng `--linker-script FILE`. Tệp được viết như `memory.x` của `cortex-m-rt`: địa chỉ và kích thước của FLASH và RAM. Một dòng như `_typelisp_stack_size = 32K;` đặt phần RAM mà ngăn xếp dùng (mặc định 64KiB); phần RAM còn lại là heap. Không có tùy chọn này thì dùng bố trí của `mps2-an386` (`mps2-an505` cho Cortex-M33) trong QEMU.
 
   ```
   MEMORY

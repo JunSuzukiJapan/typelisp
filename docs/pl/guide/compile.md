@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ 0af7d052ede61d9b74e6590bb00955c0c9c3b9a4 -->
+<!-- translated-from: docs/ja/guide/compile.md @ 66155a938dbf56e43296ef8cfe54dfdfe3182721 -->
 # Kompilacja
 
 O ile nie zrobisz nic więcej, programy typelisp działają w interpreterze. Ponadto istnieją dwa
@@ -224,16 +224,19 @@ const code = await run({ write: (fd, text) => { /* na przykład pokaż na stroni
 
 ### 3.8 Kompilacja dla mikrokontrolera (Cortex-M)
 
-Z `--target thumbv7em-none-eabihf` polecenie `typl -c` tworzy plik wykonywalny (ELF) dla płytki Cortex-M4F lub M7 bez systemu operacyjnego. Bez `-o` otrzymuje nazwę źródła z `.typl` zamienionym na `.elf`.
+Z `--target thumbv7em-none-eabihf` polecenie `typl -c` tworzy plik wykonywalny (ELF) dla płytki Cortex-M4F lub M7 bez systemu operacyjnego. Bez `-o` otrzymuje nazwę źródła z `.typl` zamienionym na `.elf`. Z `--target thumbv8m.main-none-eabihf` jest dla płytki z Cortex-M33.
 
 ```sh
 $ typl -c hello.typl --target thumbv7em-none-eabihf          # tworzy hello.elf
 $ qemu-system-arm -M mps2-an386 -nographic \
     -semihosting-config enable=on,target=native -kernel hello.elf   # uruchom na Cortex-M4 w QEMU
+$ typl -c hello.typl --target thumbv8m.main-none-eabihf
+$ qemu-system-arm -M mps2-an505 -nographic \
+    -semihosting-config enable=on,target=native -kernel hello.elf   # uruchom na Cortex-M33 w QEMU
 ```
 
-- `typl` zainstalowany przez `install.sh` działa od razu. Aby zainstalować przez `cargo install`, uruchom `rustup target add thumbv7em-none-eabihf`, a potem zainstaluj z `--features embedded` (`--features wasm,embedded` dla obu). Przy kompilacji debugowej `typl` w repozytorium uruchom `scripts/build-embedded-runtime.sh`. Linkowanie używa linkera z toolchaina rustup.
-- Pamięć płytki podaj przez `--linker-script FILE`. Zapisuje się ją jak `memory.x` z `cortex-m-rt`: adresy i rozmiary FLASH i RAM. Wiersz w rodzaju `_typelisp_stack_size = 32K;` określa, ile RAM zajmuje stos (domyślnie 64KiB); reszta RAM to sterta. Bez tej opcji używany jest układ `mps2-an386` z QEMU.
+- `typl` zainstalowany przez `install.sh` działa od razu. Aby zainstalować przez `cargo install`, uruchom `rustup target add thumbv7em-none-eabihf thumbv8m.main-none-eabihf`, a potem zainstaluj z `--features embedded` (`--features wasm,embedded` dla obu). Przy kompilacji debugowej `typl` w repozytorium uruchom `scripts/build-embedded-runtime.sh`. Linkowanie używa linkera z toolchaina rustup.
+- Pamięć płytki podaj przez `--linker-script FILE`. Zapisuje się ją jak `memory.x` z `cortex-m-rt`: adresy i rozmiary FLASH i RAM. Wiersz w rodzaju `_typelisp_stack_size = 32K;` określa, ile RAM zajmuje stos (domyślnie 64KiB); reszta RAM to sterta. Bez tej opcji używany jest układ `mps2-an386` (`mps2-an505` dla Cortex-M33) z QEMU.
 
   ```
   MEMORY

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ 0af7d052ede61d9b74e6590bb00955c0c9c3b9a4 -->
+<!-- translated-from: docs/ja/guide/compile.md @ 66155a938dbf56e43296ef8cfe54dfdfe3182721 -->
 # 編譯
 
 不做任何處理的話，typelisp 程式由直譯器執行。此外還有兩種編譯為原生碼的方法，以及一種保存環境的方法。規格的詳情見
@@ -210,16 +210,19 @@ const code = await run({ write: (fd, text) => { /* 例如顯示在頁面上 */ }
 
 ### 3.8 為微控制器（Cortex-M）編譯
 
-加上 `--target thumbv7em-none-eabihf`，`typl -c` 會為沒有作業系統的 Cortex-M4F、M7 開發板產生可執行檔（ELF）。省略 `-o` 時，名稱是把原始檔的 `.typl` 換成 `.elf`。
+加上 `--target thumbv7em-none-eabihf`，`typl -c` 會為沒有作業系統的 Cortex-M4F、M7 開發板產生可執行檔（ELF）。省略 `-o` 時，名稱是把原始檔的 `.typl` 換成 `.elf`。加上 `--target thumbv8m.main-none-eabihf` 則是針對 Cortex-M33 開發板的。
 
 ```sh
 $ typl -c hello.typl --target thumbv7em-none-eabihf          # 產生 hello.elf
 $ qemu-system-arm -M mps2-an386 -nographic \
     -semihosting-config enable=on,target=native -kernel hello.elf   # 在 QEMU 的 Cortex-M4 上執行
+$ typl -c hello.typl --target thumbv8m.main-none-eabihf
+$ qemu-system-arm -M mps2-an505 -nographic \
+    -semihosting-config enable=on,target=native -kernel hello.elf   # 在 QEMU 的 Cortex-M33 上執行
 ```
 
-- 用 `install.sh` 安裝的 `typl` 可以直接使用。用 `cargo install` 安裝時，先執行 `rustup target add thumbv7em-none-eabihf`，再加上 `--features embedded` 安裝（與 wasm 兩者都要則用 `--features wasm,embedded`）。使用儲存庫的除錯建置 `typl` 時，執行 `scripts/build-embedded-runtime.sh`。連結使用 rustup 工具鏈的連結器。
-- 用 `--linker-script FILE` 給出開發板的記憶體配置。寫法與 `cortex-m-rt` 的 `memory.x` 相同，寫 FLASH 和 RAM 的位址與大小。寫 `_typelisp_stack_size = 32K;` 這樣的一行，就是 RAM 中堆疊佔用的大小（不寫則為 64KiB）。RAM 的其餘部分是堆積。省略時使用 QEMU 的 `mps2-an386` 的配置。
+- 用 `install.sh` 安裝的 `typl` 可以直接使用。用 `cargo install` 安裝時，先執行 `rustup target add thumbv7em-none-eabihf thumbv8m.main-none-eabihf`，再加上 `--features embedded` 安裝（與 wasm 兩者都要則用 `--features wasm,embedded`）。使用儲存庫的除錯建置 `typl` 時，執行 `scripts/build-embedded-runtime.sh`。連結使用 rustup 工具鏈的連結器。
+- 用 `--linker-script FILE` 給出開發板的記憶體配置。寫法與 `cortex-m-rt` 的 `memory.x` 相同，寫 FLASH 和 RAM 的位址與大小。寫 `_typelisp_stack_size = 32K;` 這樣的一行，就是 RAM 中堆疊佔用的大小（不寫則為 64KiB）。RAM 的其餘部分是堆積。省略時使用 QEMU 的 `mps2-an386`（Cortex-M33 為 `mps2-an505`） 的配置。
 
   ```
   MEMORY

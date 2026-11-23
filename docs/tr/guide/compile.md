@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ 0af7d052ede61d9b74e6590bb00955c0c9c3b9a4 -->
+<!-- translated-from: docs/ja/guide/compile.md @ 66155a938dbf56e43296ef8cfe54dfdfe3182721 -->
 # Derleme
 
 Başka bir şey yapmazsanız typelisp programları yorumlayıcıda çalışır. Buna ek olarak yerel koda
@@ -226,16 +226,19 @@ const code = await run({ write: (fd, text) => { /* örneğin sayfada göstermek 
 
 ### 3.8 Bir mikrodenetleyici (Cortex-M) için derlemek
 
-`--target thumbv7em-none-eabihf` ile `typl -c`, işletim sistemi olmayan bir Cortex-M4F veya M7 kartı için çalıştırılabilir dosya (ELF) üretir. `-o` verilmezse adı, kaynağın `.typl` uzantısı `.elf` yapılarak verilir.
+`--target thumbv7em-none-eabihf` ile `typl -c`, işletim sistemi olmayan bir Cortex-M4F veya M7 kartı için çalıştırılabilir dosya (ELF) üretir. `-o` verilmezse adı, kaynağın `.typl` uzantısı `.elf` yapılarak verilir. `--target thumbv8m.main-none-eabihf` ile Cortex-M33 kartı içindir.
 
 ```sh
 $ typl -c hello.typl --target thumbv7em-none-eabihf          # hello.elf üretir
 $ qemu-system-arm -M mps2-an386 -nographic \
     -semihosting-config enable=on,target=native -kernel hello.elf   # QEMU'nun Cortex-M4'ünde çalıştırır
+$ typl -c hello.typl --target thumbv8m.main-none-eabihf
+$ qemu-system-arm -M mps2-an505 -nographic \
+    -semihosting-config enable=on,target=native -kernel hello.elf   # QEMU'nun Cortex-M33'ünde çalıştır
 ```
 
-- `install.sh` ile kurulan `typl` olduğu gibi kullanılabilir. `cargo install` ile kurmak için önce `rustup target add thumbv7em-none-eabihf` çalıştırın, sonra `--features embedded` ile kurun (ikisi için `--features wasm,embedded`). Depodaki hata ayıklama derlemesi `typl` ile `scripts/build-embedded-runtime.sh` çalıştırın. Bağlama rustup araç zincirinin bağlayıcısını kullanır.
-- Kartın belleğini `--linker-script FILE` ile verin. Dosya `cortex-m-rt`'nin `memory.x`'i gibi yazılır: FLASH ve RAM'in adresleri ve boyutları. `_typelisp_stack_size = 32K;` gibi bir satır RAM'in ne kadarını yığının (stack) alacağını belirler (verilmezse 64KiB); RAM'in geri kalanı heap'tir. Seçenek yoksa düzen QEMU'nun `mps2-an386`'sınınkidir.
+- `install.sh` ile kurulan `typl` olduğu gibi kullanılabilir. `cargo install` ile kurmak için önce `rustup target add thumbv7em-none-eabihf thumbv8m.main-none-eabihf` çalıştırın, sonra `--features embedded` ile kurun (ikisi için `--features wasm,embedded`). Depodaki hata ayıklama derlemesi `typl` ile `scripts/build-embedded-runtime.sh` çalıştırın. Bağlama rustup araç zincirinin bağlayıcısını kullanır.
+- Kartın belleğini `--linker-script FILE` ile verin. Dosya `cortex-m-rt`'nin `memory.x`'i gibi yazılır: FLASH ve RAM'in adresleri ve boyutları. `_typelisp_stack_size = 32K;` gibi bir satır RAM'in ne kadarını yığının (stack) alacağını belirler (verilmezse 64KiB); RAM'in geri kalanı heap'tir. Seçenek yoksa düzen QEMU'nun `mps2-an386` (Cortex-M33 için `mps2-an505`)'sınınkidir.
 
   ```
   MEMORY

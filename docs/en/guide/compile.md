@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ 0af7d052ede61d9b74e6590bb00955c0c9c3b9a4 -->
+<!-- translated-from: docs/ja/guide/compile.md @ 66155a938dbf56e43296ef8cfe54dfdfe3182721 -->
 # Compiling
 
 Unless you do anything else, typelisp programs run in the interpreter. In addition there are two
@@ -233,16 +233,19 @@ const code = await run({ write: (fd, text) => { /* show it on the page, for exam
 
 ### 3.8 Compiling for a microcontroller (Cortex-M)
 
-With `--target thumbv7em-none-eabihf`, `typl -c` makes an executable (ELF) for a Cortex-M4F or M7 board without an operating system. Without `-o`, it is named after the source with `.typl` replaced by `.elf`.
+With `--target thumbv7em-none-eabihf`, `typl -c` makes an executable (ELF) for a Cortex-M4F or M7 board without an operating system. Without `-o`, it is named after the source with `.typl` replaced by `.elf`. With `--target thumbv8m.main-none-eabihf`, the executable is for a Cortex-M33 board.
 
 ```sh
 $ typl -c hello.typl --target thumbv7em-none-eabihf          # makes hello.elf
 $ qemu-system-arm -M mps2-an386 -nographic \
     -semihosting-config enable=on,target=native -kernel hello.elf   # run it on QEMU's Cortex-M4
+$ typl -c hello.typl --target thumbv8m.main-none-eabihf
+$ qemu-system-arm -M mps2-an505 -nographic \
+    -semihosting-config enable=on,target=native -kernel hello.elf   # run it on QEMU's Cortex-M33
 ```
 
-- A `typl` installed with `install.sh` can be used as it is. To install with `cargo install`, run `rustup target add thumbv7em-none-eabihf`, then install with `--features embedded` (`--features wasm,embedded` for both). With a debug build of `typl` in the repository, run `scripts/build-embedded-runtime.sh`. Linking uses the linker of the rustup toolchain.
-- Give the board's memory with `--linker-script FILE`. It is written as `cortex-m-rt`'s `memory.x` is: the addresses and sizes of FLASH and RAM. A line like `_typelisp_stack_size = 32K;` sets how much of the RAM the stack takes (64KiB if not given); the rest of the RAM is the heap. Without the option, the layout is that of QEMU's `mps2-an386`.
+- A `typl` installed with `install.sh` can be used as it is. To install with `cargo install`, run `rustup target add thumbv7em-none-eabihf thumbv8m.main-none-eabihf`, then install with `--features embedded` (`--features wasm,embedded` for both). With a debug build of `typl` in the repository, run `scripts/build-embedded-runtime.sh`. Linking uses the linker of the rustup toolchain.
+- Give the board's memory with `--linker-script FILE`. It is written as `cortex-m-rt`'s `memory.x` is: the addresses and sizes of FLASH and RAM. A line like `_typelisp_stack_size = 32K;` sets how much of the RAM the stack takes (64KiB if not given); the rest of the RAM is the heap. Without the option, the layout is that of QEMU's `mps2-an386` (`mps2-an505` for a Cortex-M33).
 
   ```
   MEMORY
