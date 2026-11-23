@@ -852,9 +852,10 @@ pub(crate) fn rt_extern_functions() -> Vec<(&'static str, usize)> {
 
 /// The shims every target has: `typelisp-rt`'s, the printer's, the reader's
 /// and `rt_llvm_call`.
-fn rt_shims() -> [(&'static str, usize); 319] {
+fn rt_shims() -> [(&'static str, usize); 321] {
     use typelisp_rt::c_mem::{
         rt_c_alloc, rt_c_arena_close, rt_c_arena_open, rt_c_index, rt_c_load, rt_c_offset, rt_c_ptr_check, rt_c_store,
+        rt_c_volatile_load, rt_c_volatile_store,
     };
     use typelisp_rt::equality::{rt_sexpr_eq, rt_sexpr_eql, rt_sexpr_equal, rt_sexpr_equalp, rt_sxhash_eq, rt_sxhash_eql, rt_sxhash_equalp};
     use typelisp_rt::ffi_callback::{
@@ -1122,6 +1123,8 @@ fn rt_shims() -> [(&'static str, usize); 319] {
         ("rt_c_offset", rt_c_offset as *const () as usize),
         ("rt_c_load", rt_c_load as *const () as usize),
         ("rt_c_store", rt_c_store as *const () as usize),
+        ("rt_c_volatile_load", rt_c_volatile_load as *const () as usize),
+        ("rt_c_volatile_store", rt_c_volatile_store as *const () as usize),
         ("rt_str_new", rt_str_new as *const () as usize),
         ("rt_str_length", rt_str_length as *const () as usize),
         ("rt_str_ref", rt_str_ref as *const () as usize),

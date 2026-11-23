@@ -227,6 +227,56 @@ pub unsafe fn store(addr: usize, kind: i64, word: i64) {
     }
 }
 
+/// The address `addr` of a `kind` register (`u8`, `u16` or `u32`), once it
+/// is one this machine has and is aligned for the width: a volatile access
+/// of a misaligned address is undefined, where a hardware register never is
+/// one.
+fn register(addr: i64, kind: i64, who: &str) -> Result<usize, String> {
+    let width = match kind {
+        KIND_U8 => 1,
+        KIND_U16 => 2,
+        KIND_U32 => 4,
+        k => fatal(&format!("{}: unknown kind {}", who, k)),
+    };
+    let at = usize::try_from(addr).map_err(|_| format!("{}: {:#x} is not an address on this machine", who, addr))?;
+    if !at.is_multiple_of(width) {
+        return Err(format!("{}: {:#x} is not aligned to {} bytes", who, addr, width));
+    }
+    Ok(at)
+}
+
+/// A volatile read of the `kind` register at `addr` (`volatile-read-u8` and
+/// the other widths): the read happens, once, where the program does it,
+/// however little the compiler can see of its use.
+///
+/// # Safety
+///
+/// `addr`, once [`register`] accepts it, must be readable — the program
+/// takes that on in the `unsafe` around the read.
+pub unsafe fn volatile_load(addr: i64, kind: i64) -> Result<i64, String> {
+    let at = register(addr, kind, "volatile-read")?;
+    Ok(match kind {
+        KIND_U8 => (at as *const u8).read_volatile() as i64,
+        KIND_U16 => (at as *const u16).read_volatile() as i64,
+        _ => (at as *const u32).read_volatile() as i64,
+    })
+}
+
+/// A volatile write of `word` to the `kind` register at `addr`.
+///
+/// # Safety
+///
+/// As [`volatile_load`], for a writable register.
+pub unsafe fn volatile_store(addr: i64, kind: i64, word: i64) -> Result<(), String> {
+    let at = register(addr, kind, "volatile-write")?;
+    match kind {
+        KIND_U8 => (at as *mut u8).write_volatile(word as u8),
+        KIND_U16 => (at as *mut u16).write_volatile(word as u16),
+        _ => (at as *mut u32).write_volatile(word as u32),
+    }
+    Ok(())
+}
+
 /// A type argument, as `TypeId::word` writes one.
 fn type_arg(word: i64, who: &str) -> TypeId {
     TypeId::from_word(word).unwrap_or_else(|| fatal(&format!("{}: expected a type, got {:#x}", who, word)))
@@ -346,4 +396,32 @@ pub unsafe extern "C" fn rt_c_store(args: *const i64, argc: u32) -> i64 {
     let a = args_of(args, argc, 4, "rt_c_store");
     store(a[0].wrapping_add(a[1]) as usize, a[2], a[3]);
     0
+}
+
+/// `(" c-volatile-load" ADDR KIND)`.
+///
+/// # Safety
+///
+/// `args` must point to two readable `i64`s naming a readable register.
+#[no_mangle]
+pub unsafe extern "C-unwind" fn rt_c_volatile_load(args: *const i64, argc: u32) -> i64 {
+    let a = args_of(args, argc, 2, "rt_c_volatile_load");
+    match volatile_load(a[0], a[1]) {
+        Ok(word) => word,
+        Err(msg) => raise(msg).into_word(),
+    }
+}
+
+/// `(" c-volatile-store" ADDR KIND WORD)`.
+///
+/// # Safety
+///
+/// `args` must point to three readable `i64`s naming a writable register.
+#[no_mangle]
+pub unsafe extern "C-unwind" fn rt_c_volatile_store(args: *const i64, argc: u32) -> i64 {
+    let a = args_of(args, argc, 3, "rt_c_volatile_store");
+    match volatile_store(a[0], a[1], a[2]) {
+        Ok(()) => 0,
+        Err(msg) => raise(msg).into_word(),
+    }
 }

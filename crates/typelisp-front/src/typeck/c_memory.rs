@@ -370,6 +370,66 @@ pub(crate) fn set_c_deref(cx: &Cx, heap: &mut Heap, locals: &Locals, place_args:
     Ok(t)
 }
 
+/// The type a `volatile-read-*`/`volatile-write-*` form reads or writes, and
+/// its spelling: the head says which.
+fn register_type(head: u32) -> (Type, &'static str) {
+    match head {
+        wk::VOLATILE_READ_U8 => (Type::U8, "volatile-read-u8"),
+        wk::VOLATILE_READ_U16 => (Type::U16, "volatile-read-u16"),
+        wk::VOLATILE_READ_U32 => (Type::U32, "volatile-read-u32"),
+        wk::VOLATILE_WRITE_U8 => (Type::U8, "volatile-write-u8"),
+        wk::VOLATILE_WRITE_U16 => (Type::U16, "volatile-write-u16"),
+        wk::VOLATILE_WRITE_U32 => (Type::U32, "volatile-write-u32"),
+        _ => unreachable!("the special-form dispatch sends only the volatile forms here"),
+    }
+}
+
+/// A volatile access is to memory nothing here can check: a register's
+/// address is a number the program takes on in an `(unsafe ...)`.
+fn require_unsafe(cx: &Cx, who: &str) -> Result<(), Error> {
+    if cx.in_unsafe() {
+        return Ok(());
+    }
+    Err(Error::TypeError(format!(
+        "`{}` reads or writes whatever is at the address it is given, so it needs `(unsafe ...)` — \
+         nothing here can check that the address is a register of that width",
+        who
+    )))
+}
+
+/// `(volatile-read-u8 addr)` and the other widths — `head` the form's head,
+/// `args` without it: the register at the address `addr` (an `int`), read
+/// once, where it is written.
+pub(crate) fn check_volatile_read(cx: &Cx, heap: &mut Heap, locals: &Locals, head: u32, args: &[(Value, Option<Loc>)], loc: Option<Loc>) -> Result<Typed, Error> {
+    let (ty, who) = register_type(head);
+    let [addr] = args else {
+        return Err(Error::TypeError(format!("{}: ({} address)", who, who)));
+    };
+    require_unsafe(cx, who)?;
+    let addr = int_arg(cx, heap, locals, addr)?;
+    let kind = c_kind(&ty).expect("a register is a C scalar");
+    let mut t = builtin(b::VOLATILE_LOAD, vec![addr, word(heap, kind as u64)?], ty);
+    t.loc = loc;
+    Ok(t)
+}
+
+/// `(volatile-write-u8 addr value)` and the other widths: `value` written to
+/// the register at `addr`, once, where it is written. Answers `()`: the
+/// register need not read back what was written to it.
+pub(crate) fn check_volatile_write(cx: &Cx, heap: &mut Heap, locals: &Locals, head: u32, args: &[(Value, Option<Loc>)], loc: Option<Loc>) -> Result<Typed, Error> {
+    let (ty, who) = register_type(head);
+    let [addr, (value, value_loc)] = args else {
+        return Err(Error::TypeError(format!("{}: ({} address value)", who, who)));
+    };
+    require_unsafe(cx, who)?;
+    let addr = int_arg(cx, heap, locals, addr)?;
+    let value = check_expr(cx, heap, locals, *value, Some(&ty), value_loc.clone())?;
+    let kind = c_kind(&ty).expect("a register is a C scalar");
+    let mut t = builtin(b::VOLATILE_STORE, vec![addr, word(heap, kind as u64)?, value], Type::Unit);
+    t.loc = loc;
+    Ok(t)
+}
+
 /// `recv::field` of the C struct the typed pointer `recv` points at, when
 /// it points at one.
 pub(crate) fn field_get(cx: &Cx, heap: &mut Heap, recv: Typed, field: SymRef) -> Option<Result<Typed, Error>> {

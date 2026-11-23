@@ -272,6 +272,34 @@ fn a_c_function_the_board_has_is_called() {
     assert_eq!(out.status.code(), Some(5));
 }
 
+/// The program drives the board's UART itself through its registers (CMSDK
+/// APB UART 0: data at `0x40004000`, state at `+4`, whose bit 0 is "still
+/// sending", control at `+8`, whose bit 0 enables sending), which
+/// `-nographic` shows on standard output; the control register reads back
+/// what was written to it.
+#[test]
+fn the_program_drives_a_register_with_volatile_reads_and_writes() {
+    let elf = built(
+        "board_volatile",
+        r#"
+(defun put-byte ((c u32)) ()
+  (unsafe
+    (loop (when (= (logand (volatile-read-u32 #x40004004) 1) 0) (break)))
+    (volatile-write-u32 #x40004000 c)))
+
+(defun main () int
+  (unsafe (volatile-write-u32 #x40004008 1))
+  (put-byte 114) (put-byte 101) (put-byte 103) (put-byte 10)
+  (unsafe (as int (volatile-read-u32 #x40004008))))
+"#,
+        "prog.elf",
+        &board_flags(&[]),
+    );
+    let out = run_board(&elf);
+    assert_eq!(text(&out.stdout), "reg\n", "stderr: {}", text(&out.stderr));
+    assert_eq!(out.status.code(), Some(1));
+}
+
 /// The board's functions (`typelisp_host_*`) as a board gives them, written
 /// in LLVM IR for want of a C compiler for the board in every environment the
 /// tests run in: output to the UART of QEMU's board (CMSDK APB UART 0 at

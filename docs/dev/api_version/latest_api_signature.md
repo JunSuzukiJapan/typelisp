@@ -1,11 +1,11 @@
-# ABI バージョン 0.3.69
+# ABI バージョン 0.3.70
 
 `scripts/regen-abi-version.sh` が生成した文書。手で編集しない。
 
-コンパイラが生成するコードが、ABI バージョン 0.3.69 のランタイムライブラリについて仮定していることの一覧。
+コンパイラが生成するコードが、ABI バージョン 0.3.70 のランタイムライブラリについて仮定していることの一覧。
 ここに書かれていない前提(シムが引数をどう扱うか、生成コードがヒープを直接読む箇所など)は含まない。
 
-内容ハッシュ (FNV-1a 64): `fcabefc1de665a89`
+内容ハッシュ (FNV-1a 64): `53b158e7a6cd3ecc`
 
 ## 呼び出し規約 (typelisp_abi)
 
@@ -818,6 +818,14 @@
 | 695 | ` fmt-param` |
 | 696 | ` fmt-select` |
 | 697 | ` fmt-bool` |
+| 698 | `volatile-read-u8` |
+| 699 | `volatile-read-u16` |
+| 700 | `volatile-read-u32` |
+| 701 | `volatile-write-u8` |
+| 702 | `volatile-write-u16` |
+| 703 | `volatile-write-u32` |
+| 704 | ` c-volatile-load` |
+| 705 | ` c-volatile-store` |
 
 ## 組み込み型 (typelisp_mem::BUILTIN_TYPES)
 
@@ -1042,6 +1050,8 @@
 | `rt_c_offset` | `i64 (ptr, i32)` |
 | `rt_c_ptr_check` | `i64 (ptr, i32)` |
 | `rt_c_store` | `i64 (ptr, i32)` |
+| `rt_c_volatile_load` | `i64 (ptr, i32)` |
+| `rt_c_volatile_store` | `i64 (ptr, i32)` |
 | `rt_car` | `i64 (ptr, i32)` |
 | `rt_cdr` | `i64 (ptr, i32)` |
 | `rt_cell_get` | `i64 (ptr, i32)` |

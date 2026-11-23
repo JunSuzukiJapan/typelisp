@@ -1021,4 +1021,14 @@ well_known_symbols! {
     F_FMT_PARAM => " fmt-param"
     F_FMT_SELECT => " fmt-select"
     F_FMT_BOOL => " fmt-bool"
+    "Appended 2026-11-23. The volatile reads and writes of a memory-mapped
+     register, one per width, and the internal builtins they lower to."
+    VOLATILE_READ_U8 => "volatile-read-u8"
+    VOLATILE_READ_U16 => "volatile-read-u16"
+    VOLATILE_READ_U32 => "volatile-read-u32"
+    VOLATILE_WRITE_U8 => "volatile-write-u8"
+    VOLATILE_WRITE_U16 => "volatile-write-u16"
+    VOLATILE_WRITE_U32 => "volatile-write-u32"
+    F_C_VOLATILE_LOAD => " c-volatile-load"
+    F_C_VOLATILE_STORE => " c-volatile-store"
 }

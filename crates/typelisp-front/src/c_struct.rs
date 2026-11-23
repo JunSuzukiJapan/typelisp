@@ -30,13 +30,17 @@ pub const OFFSET: u32 = wk::F_C_OFFSET;
 pub const LOAD: u32 = wk::F_C_LOAD;
 /// `(ADDR OFFSET KIND VALUE)` → `()`.
 pub const STORE: u32 = wk::F_C_STORE;
+/// `(ADDR KIND)` → the register's value, read volatile.
+pub const VOLATILE_LOAD: u32 = wk::F_C_VOLATILE_LOAD;
+/// `(ADDR KIND VALUE)` → `()`, written volatile.
+pub const VOLATILE_STORE: u32 = wk::F_C_VOLATILE_STORE;
 
 /// The variable the owning `unsafe` binds its arena to. Unwritable for the
 /// same reason the builtins' names are.
 pub const ARENA_VAR: &str = " c-arena";
 
 /// Each builtin with the `typelisp_rt` shim compiled code calls for it.
-pub const BUILTINS: [(u32, &str); 8] = [
+pub const BUILTINS: [(u32, &str); 10] = [
     (ARENA_OPEN, "rt_c_arena_open"),
     (ARENA_CLOSE, "rt_c_arena_close"),
     (ALLOC, "rt_c_alloc"),
@@ -45,6 +49,8 @@ pub const BUILTINS: [(u32, &str); 8] = [
     (OFFSET, "rt_c_offset"),
     (LOAD, "rt_c_load"),
     (STORE, "rt_c_store"),
+    (VOLATILE_LOAD, "rt_c_volatile_load"),
+    (VOLATILE_STORE, "rt_c_volatile_store"),
 ];
 
 /// The shim for `name`, if it is one of these builtins.
@@ -120,6 +126,20 @@ fn eval_known(heap: &mut Heap, name: SymRef, argv: &[Value]) -> Result<Value, Ev
             let raw = crate::eval::interp::encode_crossing_value(heap, v, &kind_repr(kind))?;
             // As `LOAD`.
             unsafe { c_mem::store(word(0)?.wrapping_add(word(1)?) as usize, kind, raw) };
+            Value::Empty
+        }
+        VOLATILE_LOAD => {
+            let kind = word(1)?;
+            // The program took the address on in the `unsafe` around the read.
+            let raw = unsafe { c_mem::volatile_load(word(0)?, kind) }.map_err(raised)?;
+            crate::eval::interp::decode_crossing_return(heap, raw, &kind_repr(kind))?
+        }
+        VOLATILE_STORE => {
+            let kind = word(1)?;
+            let v = argv.get(2).ok_or_else(|| EvalError::Internal(format!("{}: no value to store", name)))?;
+            let raw = crate::eval::interp::encode_crossing_value(heap, v, &kind_repr(kind))?;
+            // As `VOLATILE_LOAD`.
+            unsafe { c_mem::volatile_store(word(0)?, kind, raw) }.map_err(raised)?;
             Value::Empty
         }
         _ => unreachable!("rt_symbol accepted `{}`", name),

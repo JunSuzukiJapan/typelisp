@@ -140,6 +140,8 @@ release のランタイムでの測定（上と同じ hello）: `__text` 1,040,3
 - `unsafe` の中でだけ呼べる（`defffi` の呼び出しと同じ扱い）。
 - コンパイルすると LLVM の `load volatile`/`store volatile` になる。インタプリタでも同じ意味で動かす。
 
+済（2026-11-23）: 特殊形 `volatile-read-u8`/`-u16`/`-u32` と `volatile-write-u8`/`-u16`/`-u32`（`typeck::c_memory`）。番地は `int`、読んだ値はその幅の型、書く形は `()` を返す（レジスタは書いた値を読み返すとは限らない）。`c-deref` と同じく内部の組み込み関数（`" c-volatile-load"`/`" c-volatile-store"`、`c_struct.rs`）に下ろし、コンパイル済みコードはランタイムの `rt_c_volatile_load`/`rt_c_volatile_store`、インタプリタは同じ `c_mem::volatile_load`/`volatile_store` を呼ぶ。そこで `read_volatile`/`write_volatile`、つまり LLVM の `load volatile`/`store volatile` になる。島が命令を直接出す形にはしなかった（呼び出し 1 回ぶん遅いが、島の IR を増やさずに 3 つの実行経路が同じ関数を通る）。番地が負・機械の番地の幅を超える・幅の倍数でないときは、触る前に実行時エラー（整列していない volatile アクセスは未定義動作のため）。テストは `tests/volatile_test.rs`（ホストでは `malloc` の領域）と `aot_embedded_test.rs` の QEMU の UART を直接動かすもの。
+
 ### 段階 6: 割り込み
 
 割り込みハンドラを typelisp の関数で書く。ベクタテーブルに置けるのは、FFI のコールバックと同じく自由変数の無い関数だけにする。

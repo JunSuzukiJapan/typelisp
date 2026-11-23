@@ -302,6 +302,24 @@ $ qemu-system-arm -M mps2-an386 -nographic \
   void     typelisp_host_sleep_us(uint64_t us);                           // us マイクロ秒待つ
   ```
 
+- ボードのレジスタ（メモリに割り当てられた周辺機器）は `volatile-read-u8`・`volatile-read-u16`・
+  `volatile-read-u32` で読み、`volatile-write-u8`・`volatile-write-u16`・`volatile-write-u32` で書きます。
+  番地は `int` で渡し、読んだ値はその幅の型（`u8` など）になります。書いた式の場所で必ず 1 回読み書きし、
+  コンパイラは省いたり並べ替えたりしません。どれも `unsafe` の中でだけ使えます。番地が負のときと、
+  幅の倍数でないときは、読み書きの前に実行時エラーになります。
+
+  ```lisp
+  ;; QEMU の mps2-an386 の UART 0: データ 0x40004000、状態 0x40004004、制御 0x40004008
+  (defun put-byte ((c u32)) ()
+    (unsafe
+      (loop (when (= (logand (volatile-read-u32 #x40004004) 1) 0) (break)))   ; 送信中なら待つ
+      (volatile-write-u32 #x40004000 c)))
+
+  (defun main () ()
+    (unsafe (volatile-write-u32 #x40004008 1))                               ; 送信を有効にする
+    (put-byte 104) (put-byte 105) (put-byte 10))                             ; "hi" と改行
+  ```
+
 - 起動（ベクタテーブルと、RAM の準備）とメモリの確保はランタイムが行います。HardFault や処理されない
   割り込みが起きると、panic と同じ終了コード（1）で終わります。
 - `throw`/`catch`/`panic`、bignum・ratio・浮動小数、タスク・チャネル・`sleep` は実行ファイルと同じに

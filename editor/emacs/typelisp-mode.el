@@ -85,6 +85,9 @@ stands for where it is written, as a variable's name stands for its value.")
     "let" "let*" "if" "when" "unless" "cond" "case" "and" "or" "progn" "unsafe"
     ;; memory for `def-c-struct's and typed pointers, inside `unsafe'
     "c-alloc" "c-ref" "c-deref"
+    ;; the registers of a board, inside `unsafe'
+    "volatile-read-u8" "volatile-read-u16" "volatile-read-u32"
+    "volatile-write-u8" "volatile-write-u16" "volatile-write-u32"
     "the" "match" "if-let" "while-let" "make-instance"
     ;; CL's chapter-5 control forms (cl-parity-plan.md Phase 4a, §4/§7)
     "ecase" "ccase" "prog1" "prog2" "setq" "psetq" "psetf"
