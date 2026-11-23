@@ -217,28 +217,31 @@ pub fn dl_sym(_handle: usize, _symbol: &str) -> Option<usize> {
     unimplemented!("the FFI needs dlsym, which is POSIX")
 }
 
-/// What a socket wait is for: the readiness `poll_ready` reports and the
-/// scheduler parks a task on.
-///
-/// Defined here, in the crate that makes the `poll` call, so that the front
-/// end (which owns the scheduler) and the builtins (which own the sockets)
-/// name the same two things without either depending on the other for it.
-/// The wire form is `net-wait`'s second argument: 0 readable, 1 writable.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub enum Interest {
-    Readable,
-    Writable,
+use crate::sched::Interest;
+
+/// The scheduler's way to watch the descriptors its tasks wait on
+/// ([`crate::sched::Poller`]): [`poll_ready`].
+pub struct OsPoller;
+
+/// The one [`OsPoller`]: what every socket backend names as the poller its
+/// waits are watched with.
+pub static POLLER: OsPoller = OsPoller;
+
+impl crate::sched::Poller for OsPoller {
+    fn poll_ready(&self, fds: &[(i32, Interest)], timeout: Option<core::time::Duration>) -> Result<Vec<(i32, bool)>, String> {
+        poll_ready(fds, timeout).map_err(|e| e.to_string())
+    }
 }
 
-impl Interest {
-    /// The integer `net-wait` takes — `0` readable, `1` writable — or `None`
-    /// for anything else, which is the caller's error to report.
-    pub fn from_code(code: i64) -> Option<Interest> {
-        match code {
-            0 => Some(Interest::Readable),
-            1 => Some(Interest::Writable),
-            _ => None,
-        }
+impl crate::sched::Waker for SelfPipe {
+    fn read_fd(&self) -> i32 {
+        SelfPipe::read_fd(self)
+    }
+    fn kick(&self) {
+        SelfPipe::kick(self)
+    }
+    fn drain(&self) {
+        SelfPipe::drain(self)
     }
 }
 

@@ -138,14 +138,7 @@ pub unsafe extern "C" fn rt_run_entry(entry: i64) -> i64 {
 /// first).
 #[no_mangle]
 pub unsafe extern "C" fn rt_run_program(args: *const i64, argc: u32) -> i64 {
-    let program = read_program(args, argc, "rt_run_program");
-    // A `()`-returning `main` that returns normally exits 0; the word its
-    // `()` is encoded as is not an exit code.
-    let code = match run_program(&program) {
-        Ok(_) => EXIT_CODE_SUCCESS,
-        Err(code) => code,
-    };
-    exit_code(code)
+    run_entry(args, argc, "rt_run_program", false, None)
 }
 
 /// [`rt_run_program`] for a `main` declared to return `int`: the answer is
@@ -161,8 +154,34 @@ pub unsafe extern "C" fn rt_run_program(args: *const i64, argc: u32) -> i64 {
 /// [`rt_run_program`]'s.
 #[no_mangle]
 pub unsafe extern "C" fn rt_run_program_int(args: *const i64, argc: u32) -> i64 {
-    let program = read_program(args, argc, "rt_run_program_int");
-    let code = match run_program(&program) {
+    run_entry(args, argc, "rt_run_program_int", true, None)
+}
+
+/// What starts the OS threads that step tasks alongside the one running the
+/// program, on a target that has them: given the program's scheduler before
+/// its first initialiser. An `Err` is a configuration the program cannot run
+/// with, reported as `error: <message>`.
+pub type StartThreads = fn(&alloc::sync::Arc<crate::sched::SchedShared<crate::sched::CompiledTask>>, &mut Heap) -> Result<(), String>;
+
+/// The body of every program entry: [`rt_run_program`]'s, and with
+/// `returns_int` [`rt_run_program_int`]'s, with `start` for the entries of a
+/// target that has OS threads.
+///
+/// # Safety
+///
+/// [`rt_run_program`]'s.
+pub unsafe fn run_entry(args: *const i64, argc: u32, what: &str, returns_int: bool, start: Option<StartThreads>) -> i64 {
+    let program = read_program(args, argc, what);
+    let result = run_program(&program, start);
+    if !returns_int {
+        // A `()`-returning `main` that returns normally exits 0; the word its
+        // `()` is encoded as is not an exit code.
+        return exit_code(match result {
+            Ok(_) => EXIT_CODE_SUCCESS,
+            Err(code) => code,
+        });
+    }
+    let code = match result {
         Ok(Value::Int(n)) => n,
         Ok(Value::Boxed(id)) if active_heap().is_bignum(id) => {
             fatal(&format!("main returned {}, which is not a process exit code", active_heap().bignum_value(id)))
@@ -206,45 +225,24 @@ pub unsafe fn read_program(args: *const i64, argc: u32, what: &str) -> Program {
 /// into the heap (`sched`'s module comment). The worker threads share it
 /// through an `Arc`, and hold nothing else of this frame's.
 ///
-/// `TYPELISP_THREADS` threads step tasks, this one included
-/// ([`sched::thread_count`](crate::sched::thread_count)). The workers are
-/// started before the first initialiser, share this thread's heap (a view
-/// each), its global/vtable/stream tables and its printer's registrations,
-/// and are never joined: when `main` returns the program ends, and every
-/// task still running with it — Go's rule.
+/// With `start`, other OS threads step tasks too; they are started before
+/// the first initialiser, and are never joined: when `main` returns the
+/// program ends, and every task still running with it — Go's rule. Without
+/// it, this thread is the only one.
 ///
 /// # Safety
 ///
 /// [`rt_run_program`]'s.
-unsafe fn run_program(program: &Program) -> Result<Value, i64> {
+unsafe fn run_program(program: &Program, start: Option<StartThreads>) -> Result<Value, i64> {
     let heap = active_heap();
-    let sched = match crate::sched::SchedShared::<crate::sched::CompiledTask>::new() {
-        Ok(s) => alloc::sync::Arc::new(s),
-        Err(e) => fatal(&format!("the scheduler could not be set up: {}", e)),
-    };
+    let sched = alloc::sync::Arc::new(crate::sched::SchedShared::<crate::sched::CompiledTask>::new());
     // The printer reads the prelude's control variables from their compiled
     // slots, and the id -> slot table is this crate's.
     typelisp_print::aot::set_global_slots(global_perm_idx);
-    // Without std this thread is the only one.
-    #[cfg(feature = "std")]
-    {
-        let threads = match crate::sched::thread_count() {
-            Ok(n) => n,
-            Err(m) => {
-                typelisp_mem::host::eprintln(format_args!("error: {}", m));
-                return Err(EXIT_CODE_PANIC);
-            }
-        };
-        let rt = crate::shared::rt_shared();
-        let print = typelisp_print::shared::print_shared();
-        let hooks = typelisp_print::runtime::print_hooks();
-        let started = crate::sched::start_workers(&sched, heap, threads - 1, &(), move || {
-            crate::shared::set_rt_shared(alloc::sync::Arc::clone(&rt));
-            typelisp_print::shared::set_print_shared(alloc::sync::Arc::clone(&print));
-            typelisp_print::runtime::set_print_hooks(Some(hooks));
-        });
-        if let Err(e) = started {
-            fatal(&format!("a scheduler worker thread could not be started: {}", e));
+    if let Some(start) = start {
+        if let Err(m) = start(&sched, heap) {
+            typelisp_mem::host::eprintln(format_args!("error: {}", m));
+            return Err(EXIT_CODE_PANIC);
         }
     }
     // Built inside `admit`, on the task's own root stack — `entry` pushes

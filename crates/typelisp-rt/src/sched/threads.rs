@@ -3,15 +3,15 @@
 
 use typelisp_mem::prelude::*;
 use typelisp_mem::{Heap, RootStackId, Value};
-use super::{deliver_to, AnswerNow, ChanOp, DrivingGuard, Progress, SchedError, Scheduler, SelectOp, Slot, TaskBody, TaskId, TaskSlot, Waiting};
-#[cfg(feature = "std")]
-use super::ThreadStarter;
+use super::{deliver_to, AnswerNow, ChanOp, DrivingGuard, Progress, SchedError, Scheduler, SelectOp, Slot, TaskBody, TaskId, TaskSlot, ThreadStarter, Waiting, Waker};
 
 // ---- one scheduler, several threads -------------------------------------------
 
 /// A scheduler several OS threads step tasks from — `docs/dev/os-threads-design.md`
 /// §8. One thread calls [`drive_main`] and waits for the main task; the
-/// others ([`start_workers`]) run [`drive_worker`] until [`Self::shutdown`].
+/// others run [`drive_worker`] until [`Self::shutdown`]. Starting those is
+/// the runtime crate's that has OS threads (`typelisp-rt-posix`), through
+/// [`Self::install_threads`]; without it the one thread is all there is.
 ///
 /// **Every wait for the lock is native** ([`Self::lock`]), and that is what
 /// lets the lock be held across a heap operation that can stop for a
@@ -26,15 +26,10 @@ pub struct SchedShared<B: TaskBody> {
     state: typelisp_mem::sync::Mutex<SharedState<B>>,
     /// Where idle threads wait for [`Scheduler::dirty`].
     changed: typelisp_mem::sync::Condvar,
-    /// How an idle thread that is waiting on the network is woken instead —
-    /// see [`crate::os::SelfPipe`].
-    #[cfg(feature = "std")]
-    io_wake: crate::os::SelfPipe,
     /// The threads a [`Crew`] started this drive, for its end to join. A lock
     /// of its own, never held together with `state`: a `thread` starts its
     /// OS thread with `state` held and only then records it here.
-    #[cfg(feature = "std")]
-    joinable: typelisp_mem::sync::Mutex<Vec<std::thread::JoinHandle<()>>>,
+    joinable: typelisp_mem::sync::Mutex<Vec<alloc::boxed::Box<dyn Joiner>>>,
     /// Whether to look at another task after **every single step**, rather
     /// than letting the running one keep going until it yields, waits or
     /// finishes.
@@ -55,9 +50,8 @@ struct SharedState<B: TaskBody> {
     sched: Scheduler<B>,
     /// Whether some thread is in `poll` over the scheduler's socket waits
     /// with the lock let go of. One at a time: the others wait on the
-    /// condition variable, and a change the poller should see kicks the
-    /// pipe.
-    #[cfg(feature = "std")]
+    /// condition variable, and a change the poller should see kicks it
+    /// ([`Waker`]).
     polling: bool,
     /// The first task failure the program has had, and which task it was.
     /// [`drive_main`] reports it; a failure ends the program whichever task
@@ -66,16 +60,48 @@ struct SharedState<B: TaskBody> {
     /// Workers take no more tasks: the program failed, or [`SchedShared::shutdown`],
     /// or a [`Crew`]'s drive is over.
     stopped: bool,
+    /// The other threads, once [`SchedShared::install_threads`] has given
+    /// the scheduler a way to start them; `None` while this thread is the
+    /// only one.
+    threads: Option<OtherThreads>,
+}
+
+/// What a scheduler whose tasks run on several OS threads has.
+struct OtherThreads {
+    /// How a thread waiting on the scheduler's sockets is woken when
+    /// something it should see changes.
+    waker: alloc::sync::Arc<dyn Waker>,
     /// Threads that live for one drive at a time, or `None` for workers that
-    /// live as long as the program ([`start_workers`]).
-    #[cfg(feature = "std")]
+    /// live as long as the program.
     crew: Option<Crew>,
+}
+
+/// An OS thread started for the scheduler, to be waited for.
+pub trait Joiner: Send {
+    /// Waits for the thread to end. A thread that ended in a Rust panic
+    /// carries it on into the thread that waits.
+    fn join(self: alloc::boxed::Box<Self>);
+}
+
+/// Starts worker `i` of a [`Crew`], running [`drive_worker`].
+pub type Spawner = alloc::sync::Arc<dyn Fn(usize) -> Result<alloc::boxed::Box<dyn Joiner>, String> + Send + Sync>;
+
+/// How the runtime crate that has OS threads lets a scheduler use them
+/// ([`SchedShared::install_threads`]).
+pub struct Threads {
+    /// What `thread` starts an OS thread with, running [`drive_pinned`].
+    pub starter: ThreadStarter,
+    /// How a thread waiting on the scheduler's sockets is woken.
+    pub waker: alloc::sync::Arc<dyn Waker>,
+    /// For a scheduler whose owner is not always driving it: how many
+    /// workers a drive may start, and how. `None` when the workers were
+    /// started already and live as long as the program.
+    pub crew: Option<(usize, Spawner)>,
 }
 
 /// The threads of a scheduler whose owner is not always driving it — the
 /// interpreter's, which drives it once per top-level evaluation and does
 /// other things (reads the next line, checks the next form) in between.
-/// See [`install_crew`].
 ///
 /// Workers start with the drive, and only once there is a task one of them
 /// may take; the drive's end stops them, and a `thread`'s OS thread with
@@ -83,12 +109,11 @@ struct SharedState<B: TaskBody> {
 /// nothing has to reach a safepoint while the owner is away from the heap,
 /// and nothing outlives the owner either: a crew's threads run compiled
 /// code the owner's JIT holds.
-#[cfg(feature = "std")]
 struct Crew {
     /// How many workers a drive may start.
     workers: usize,
-    /// Starts one worker thread — see [`install_crew`].
-    spawn: alloc::sync::Arc<dyn Fn(usize) -> std::io::Result<std::thread::JoinHandle<()>> + Send + Sync>,
+    /// Starts one worker thread.
+    spawn: Spawner,
     /// Whether this drive's workers have been started.
     up: bool,
     /// Whether the last drive's end stopped the OS thread of a pinned task
@@ -97,26 +122,38 @@ struct Crew {
 }
 
 impl<B: TaskBody> SchedShared<B> {
-    /// Fails only if the operating system will not give this process a
-    /// pipe.
-    pub fn new() -> Result<SchedShared<B>, typelisp_mem::host::HostError> {
-        Ok(SchedShared {
+    pub fn new() -> SchedShared<B> {
+        SchedShared {
             state: typelisp_mem::sync::Mutex::new(SharedState {
                 sched: Scheduler::new(),
-                #[cfg(feature = "std")]
                 polling: false,
                 failure: None,
                 stopped: false,
-                #[cfg(feature = "std")]
-                crew: None,
+                threads: None,
             }),
             changed: typelisp_mem::sync::Condvar::new(),
-            #[cfg(feature = "std")]
-            io_wake: crate::os::SelfPipe::new()?,
-            #[cfg(feature = "std")]
             joinable: typelisp_mem::sync::Mutex::new(Vec::new()),
             every_step: core::sync::atomic::AtomicBool::new(false),
-        })
+        }
+    }
+
+    /// Lets tasks run on other OS threads: `thread` starts one through
+    /// `threads.starter`, and a crew's workers start with each drive.
+    pub fn install_threads(&self, heap: &mut Heap, threads: Threads) {
+        let mut s = self.lock(heap);
+        s.set_thread_starter(threads.starter);
+        let crew = threads.crew.map(|(workers, spawn)| Crew { workers, spawn, up: false, orphans: false });
+        s.guard.threads = Some(OtherThreads { waker: threads.waker, crew });
+    }
+
+    /// Records an OS thread for a crew's end to wait for.
+    pub fn keep_joinable(&self, thread: alloc::boxed::Box<dyn Joiner>) {
+        self.joinable.lock().push(thread);
+    }
+
+    /// The crew, if the scheduler has one.
+    fn crew_mut(state: &mut SharedState<B>) -> Option<&mut Crew> {
+        state.threads.as_mut().and_then(|t| t.crew.as_mut())
     }
 
     /// Takes the lock — **as native**, because the thread holding it may be
@@ -156,28 +193,22 @@ impl<B: TaskBody> SchedShared<B> {
     ///
     /// The wait is native — a thread finishing its step may need a
     /// collection, and this one must not be in the way of it.
-    #[cfg(feature = "std")]
     fn end_crew(&self, heap: &mut Heap) {
         {
             let mut s = self.lock(heap);
-            if s.guard.crew.is_none() {
+            if Self::crew_mut(&mut s.guard).is_none() {
                 return;
             }
             s.guard.stopped = true;
             s.guard.sched.dirty = true;
         }
         let threads = core::mem::take(&mut *self.joinable.lock());
-        let joined: Vec<std::thread::Result<()>> = heap.native(|| threads.into_iter().map(|t| t.join()).collect());
-        for r in joined {
-            if let Err(payload) = r {
-                std::panic::resume_unwind(payload);
-            }
-        }
+        heap.native(|| threads.into_iter().for_each(|t| t.join()));
         let mut s = self.lock(heap);
         s.guard.stopped = false;
         let had_pinned = !s.guard.sched.pinned_threads.is_empty();
         s.guard.sched.pinned_threads.clear();
-        if let Some(crew) = &mut s.guard.crew {
+        if let Some(crew) = Self::crew_mut(&mut s.guard) {
             crew.up = false;
             crew.orphans |= had_pinned;
         }
@@ -213,9 +244,7 @@ fn waiting_values(w: &Waiting) -> Vec<Value> {
                 SelectOp::Recv(..) => None,
             })
             .collect(),
-        Waiting::Task(_) | Waiting::Yield | Waiting::Until(_) | Waiting::Chan(_) | Waiting::Main => Vec::new(),
-        #[cfg(feature = "std")]
-        Waiting::Io { .. } => Vec::new(),
+        Waiting::Task(_) | Waiting::Yield | Waiting::Until(_) | Waiting::Chan(_) | Waiting::Main | Waiting::Io { .. } => Vec::new(),
     }
 }
 
@@ -250,13 +279,14 @@ impl<B: TaskBody> Drop for Locked<'_, B> {
 
 impl<'a, B: TaskBody> Locked<'a, B> {
     /// Wakes every idle thread if something changed: the ones waiting on the
-    /// condition variable, and the poller through its pipe.
+    /// condition variable, and the poller through its [`Waker`].
     fn flush(&mut self) {
         if core::mem::take(&mut self.guard.sched.dirty) {
             self.shared.changed.notify_all();
-            #[cfg(feature = "std")]
             if self.guard.polling {
-                self.shared.io_wake.kick();
+                if let Some(t) = &self.guard.threads {
+                    t.waker.kick();
+                }
             }
         }
     }
@@ -287,33 +317,32 @@ impl<'a, B: TaskBody> Locked<'a, B> {
     /// anything. A worker the system will not start is the drive's error,
     /// as it is the executable's (`run_program`): `TYPELISP_THREADS` asked
     /// for it.
-    #[cfg(feature = "std")]
     fn man_the_crew(&mut self) -> Result<(), SchedError> {
-        let Some(crew) = &mut self.guard.crew else { return Ok(()) };
+        let Some(crew) = SchedShared::crew_mut(&mut self.guard) else { return Ok(()) };
         if core::mem::take(&mut crew.orphans) {
             if let Err((id, e)) = self.guard.sched.restart_pinned() {
                 self.record_failure(id, e.into());
                 return Ok(());
             }
         }
-        let Some(crew) = &self.guard.crew else { return Ok(()) };
+        let Some(crew) = SchedShared::crew_mut(&mut self.guard) else { return Ok(()) };
         if crew.up || crew.workers == 0 {
             return Ok(());
         }
+        let (n, spawn) = (crew.workers, alloc::sync::Arc::clone(&crew.spawn));
         let slots = &self.guard.sched.slots;
         let for_workers = self.guard.sched.ready.iter().any(|t| !matches!(&slots[t.0], Slot::Parked(s) if s.main_only));
         if !for_workers {
             return Ok(());
         }
-        let (n, spawn) = (crew.workers, alloc::sync::Arc::clone(&crew.spawn));
-        if let Some(crew) = &mut self.guard.crew {
+        if let Some(crew) = SchedShared::crew_mut(&mut self.guard) {
             crew.up = true;
         }
         for i in 0..n {
             let t = spawn(i).map_err(|e| {
                 SchedError::Internal(format!("a scheduler worker thread could not be started: {}", e))
             })?;
-            self.shared.joinable.lock().push(t);
+            self.shared.keep_joinable(t);
         }
         Ok(())
     }
@@ -321,43 +350,45 @@ impl<'a, B: TaskBody> Locked<'a, B> {
     /// Waits — native — until something changes or `until` passes.
     fn wait(mut self, heap: &mut Heap, until: Option<core::time::Duration>) -> Locked<'a, B> {
         self.flush();
-        let changed = &self.shared.changed;
-        let guard = &mut self.guard;
-        #[cfg(all(feature = "std", not(target_family = "wasm")))]
-        heap.native(|| match until {
-            Some(d) => {
-                changed.wait_for(guard, d);
-            }
-            None => changed.wait(guard),
-        });
+        if self.guard.threads.is_some() {
+            let changed = &self.shared.changed;
+            let guard = &mut self.guard;
+            heap.native(|| match until {
+                Some(d) => {
+                    changed.wait_for(guard, d);
+                }
+                None => changed.wait(guard),
+            });
+            return self;
+        }
         // The one thread there is: nothing else can change anything while it
         // waits, so a wait with a deadline is a sleep, and one without is
         // never woken.
-        #[cfg(any(not(feature = "std"), target_family = "wasm"))]
-        {
-            let _ = (changed, guard);
-            match until {
-                Some(d) => heap.native(|| typelisp_mem::host::sleep(d)),
-                None => typelisp_abi::fatal("every task is waiting, and there is no other thread to wake one"),
-            }
+        match until {
+            Some(d) => heap.native(|| typelisp_mem::host::sleep(d)),
+            None => typelisp_abi::fatal("every task is waiting, and there is no other thread to wake one"),
         }
         self
     }
 
-    /// Waits on the scheduler's sockets — and the self-pipe, so that a change
+    /// Waits on the scheduler's sockets — and the [`Waker`], so that a change
     /// wakes it — for at most `until`, with the lock let go of, and wakes the
     /// tasks whose sockets are ready. The same three steps as
     /// [`Scheduler::wake_io`].
-    #[cfg(feature = "std")]
-    fn poll(mut self, heap: &mut Heap, until: Option<core::time::Duration>) -> Locked<'a, B> {
+    fn poll(mut self, heap: &mut Heap, poller: super::PollerRef, until: Option<core::time::Duration>) -> Locked<'a, B> {
         let shared = self.shared;
         self.guard.polling = true;
         let waits = self.guard.sched.io_snapshot();
-        let mut fds: Vec<(i32, crate::os::Interest)> = waits.iter().map(|w| (w.fd, w.interest)).collect();
-        fds.push((shared.io_wake.read_fd(), crate::os::Interest::Readable));
+        let mut fds: Vec<(i32, super::Interest)> = waits.iter().map(|w| (w.fd, w.interest)).collect();
+        let waker = self.guard.threads.as_ref().map(|t| alloc::sync::Arc::clone(&t.waker));
+        if let Some(w) = &waker {
+            fds.push((w.read_fd(), super::Interest::Readable));
+        }
         drop(self);
-        let polled = heap.native(|| crate::os::poll_ready(&fds, until));
-        shared.io_wake.drain();
+        let polled = heap.native(|| poller.0.poll_ready(&fds, until));
+        if let Some(w) = &waker {
+            w.drain();
+        }
         let mut s = shared.lock(heap);
         s.guard.polling = false;
         s.guard.sched.apply_io(heap, &waits, polled);
@@ -438,7 +469,6 @@ fn next<B: TaskBody>(shared: &SchedShared<B>, heap: &mut Heap, who: Who) -> Next
                 }
             }
         }
-        #[cfg(feature = "std")]
         if matches!(who, Who::Main(_)) {
             if let Err(e) = s.man_the_crew() {
                 s.guard.stopped = true;
@@ -447,7 +477,6 @@ fn next<B: TaskBody>(shared: &SchedShared<B>, heap: &mut Heap, who: Who) -> Next
             }
         }
         s.wake_due(heap);
-        #[cfg(feature = "std")]
         s.wake_io(heap, Some(core::time::Duration::ZERO));
         let taker = match who {
             Who::Main(_) => Taker::Main,
@@ -458,12 +487,12 @@ fn next<B: TaskBody>(shared: &SchedShared<B>, heap: &mut Heap, who: Who) -> Next
             return Next::Run(id, slot);
         }
         let deadline = s.earliest_deadline();
-        let io_waiting = s.waits_on_sockets();
+        let sockets = s.socket_poller();
         if matches!(who, Who::Main(_))
             && s.running == 0
             && s.pinned_ready.is_empty()
             && deadline.is_none()
-            && !io_waiting
+            && sockets.is_none()
         {
             // Nothing is out being stepped on any thread, no pinned thread
             // has its task ready to take, and nothing can become ready by
@@ -476,10 +505,11 @@ fn next<B: TaskBody>(shared: &SchedShared<B>, heap: &mut Heap, who: Who) -> Next
             ));
         }
         let until = deadline.map(|d| d.saturating_duration_since(typelisp_mem::host::Instant::now()));
-        #[cfg(feature = "std")]
-        if io_waiting && !s.guard.polling {
-            s = s.poll(heap, until);
-            continue;
+        if let Some(poller) = sockets {
+            if !s.guard.polling {
+                s = s.poll(heap, poller, until);
+                continue;
+            }
         }
         s = s.wait(heap, until);
     }
@@ -576,13 +606,11 @@ pub fn drive_main<B: TaskBody>(
     };
     // Ending a crew waits for its threads, and another thread's collection
     // may run meanwhile: the result is in nothing but this local.
-    #[cfg(feature = "std")]
     end_crew_holding(shared, heap, &result);
     result
 }
 
 /// [`SchedShared::end_crew`], with what the drive came to rooted meanwhile.
-#[cfg(feature = "std")]
 fn end_crew_holding<B: TaskBody>(shared: &SchedShared<B>, heap: &mut Heap, result: &Result<Value, B::Error>) {
     let carried = match result {
         Ok(v) => vec![*v],
@@ -629,158 +657,3 @@ pub fn drive_pinned<B: TaskBody>(shared: &SchedShared<B>, heap: &mut Heap, cx: &
     }
 }
 
-/// How a thread that steps tasks for `shared` is set up: a view of its own
-/// onto the heap the scheduler's tasks live in, registered as its active
-/// heap, and `setup` — which is where it takes on whatever else the thread
-/// that started it has per thread (the runtime's and the printer's shared
-/// tables). `cx` is what [`TaskBody::step`] gets there: there is no
-/// interpreter on any of these threads.
-#[cfg(feature = "std")]
-struct ThreadKit<B: TaskBody + 'static> {
-    shared: alloc::sync::Weak<SchedShared<B>>,
-    heap: alloc::sync::Arc<typelisp_mem::heap::HeapShared>,
-    setup: alloc::sync::Arc<dyn Fn() + Send + Sync>,
-    cx: &'static B::Cx,
-}
-
-#[cfg(feature = "std")]
-impl<B> ThreadKit<B>
-where
-    B: TaskBody + Send + 'static,
-    B::Error: Send,
-    B::Cx: Sync,
-{
-    /// Starts an OS thread named `name` that runs `run` on `shared`, set up
-    /// as the type's doc comment says.
-    ///
-    /// The kit holds a `Weak`: the scheduler holds the kit (in its thread
-    /// starter), and a strong handle there would keep it alive forever.
-    /// Upgrading cannot fail — a thread is started by one holding this
-    /// scheduler, and the started thread keeps the strong handle for as
-    /// long as it runs.
-    fn spawn(
-        &self,
-        name: String,
-        run: impl FnOnce(&SchedShared<B>, &mut Heap, &B::Cx) + Send + 'static,
-    ) -> std::io::Result<std::thread::JoinHandle<()>> {
-        let shared = self.shared.upgrade().expect("a scheduler starting a thread is alive");
-        let heap_shared = alloc::sync::Arc::clone(&self.heap);
-        let setup = alloc::sync::Arc::clone(&self.setup);
-        let cx = self.cx;
-        std::thread::Builder::new().name(name).spawn(move || {
-            let mut view = Heap::attach(&heap_shared);
-            typelisp_abi::set_active_heap(&mut view);
-            setup();
-            run(&shared, &mut view, cx);
-            typelisp_abi::set_active_heap(core::ptr::null_mut());
-        })
-    }
-
-    /// What lets `thread` start OS threads on this scheduler: each runs
-    /// [`drive_pinned`]. With `keep`, the thread is recorded for a
-    /// [`Crew`]'s end to join; without, it is detached, and its resources go
-    /// when it ends.
-    fn thread_starter(self: &alloc::sync::Arc<Self>, keep: bool) -> ThreadStarter {
-        let kit = alloc::sync::Arc::clone(self);
-        alloc::sync::Arc::new(move |own: TaskId| {
-            let t = kit.spawn(format!("typelisp-thread-{}", own.0), move |shared, heap, cx| {
-                drive_pinned(shared, heap, cx, own)
-            })?;
-            if keep {
-                let shared = kit.shared.upgrade().expect("a scheduler starting a thread is alive");
-                shared.joinable.lock().push(t);
-            }
-            Ok(())
-        })
-    }
-}
-
-/// Starts `n` worker threads on `shared`, each running [`drive_worker`]
-/// until the workers are stopped (see [`ThreadKit`] for how each is set up),
-/// and lets `thread` start OS threads from then on, set up the same way and
-/// running [`drive_pinned`] — with no workers (`n == 0`) too, since a
-/// `thread` is not one of them.
-///
-/// Workers that live as long as the program: an executable's. The
-/// interpreter's live for one drive at a time ([`install_crew`]).
-#[cfg(feature = "std")]
-pub fn start_workers<B>(
-    shared: &alloc::sync::Arc<SchedShared<B>>,
-    heap: &mut Heap,
-    n: usize,
-    cx: &'static B::Cx,
-    setup: impl Fn() + Send + Sync + 'static,
-) -> std::io::Result<Vec<std::thread::JoinHandle<()>>>
-where
-    B: TaskBody + Send + 'static,
-    B::Error: Send,
-    B::Cx: Sync,
-{
-    let kit = alloc::sync::Arc::new(ThreadKit {
-        shared: alloc::sync::Arc::downgrade(shared),
-        heap: heap.shared_handle(),
-        setup: alloc::sync::Arc::new(setup),
-        cx,
-    });
-    shared.lock(heap).set_thread_starter(kit.thread_starter(false));
-    (0..n).map(|i| kit.spawn(format!("typelisp-worker-{}", i), drive_worker)).collect()
-}
-
-/// Gives `shared` a [`Crew`] of `n` workers: threads that exist only while a
-/// [`drive_main`] runs, started once a ready task is one they may take, and
-/// stopped and joined when the drive ends. `thread` starts OS threads the
-/// same way, stopped with the rest and started again by the next drive.
-/// See [`ThreadKit`] for how each is set up.
-///
-/// What an owner that is not always driving has — the interpreter, which
-/// reads the next line and checks the next form between two drives, and
-/// whose JIT holds the code the threads run. No thread steps a task while
-/// the owner is away from the heap, so nothing waits on a thread that is
-/// blocked reading a terminal, and nothing outlives the owner.
-#[cfg(feature = "std")]
-pub fn install_crew<B>(
-    shared: &alloc::sync::Arc<SchedShared<B>>,
-    heap: &mut Heap,
-    n: usize,
-    cx: &'static B::Cx,
-    setup: impl Fn() + Send + Sync + 'static,
-) where
-    B: TaskBody + Send + 'static,
-    B::Error: Send,
-    B::Cx: Sync,
-{
-    let kit = alloc::sync::Arc::new(ThreadKit {
-        shared: alloc::sync::Arc::downgrade(shared),
-        heap: heap.shared_handle(),
-        setup: alloc::sync::Arc::new(setup),
-        cx,
-    });
-    let starter = kit.thread_starter(true);
-    let spawn = alloc::sync::Arc::new(move |i: usize| kit.spawn(format!("typelisp-worker-{}", i), drive_worker));
-    let mut s = shared.lock(heap);
-    s.set_thread_starter(starter);
-    s.guard.crew = Some(Crew { workers: n, spawn, up: false, orphans: false });
-}
-
-/// How many OS threads run tasks, the one that waits on the main task
-/// included: `TYPELISP_THREADS` when it is set, and the machine's
-/// parallelism when it is not.
-pub fn thread_count() -> Result<usize, String> {
-    // WebAssembly without the threads proposal, or a microcontroller: the
-    // one thread is all there is.
-    #[cfg(any(not(feature = "std"), target_family = "wasm"))]
-    return Ok(1);
-    #[cfg(all(feature = "std", not(target_family = "wasm")))]
-    match std::env::var("TYPELISP_THREADS") {
-        Ok(v) => match v.trim().parse::<usize>() {
-            Ok(n) if n >= 1 => Ok(n),
-            _ => Err(format!("TYPELISP_THREADS={:?} is not a number of threads (a whole number, 1 or more)", v)),
-        },
-        Err(std::env::VarError::NotPresent) => std::thread::available_parallelism()
-            .map(|n| n.get())
-            .map_err(|e| format!("cannot tell how many threads to run tasks on ({}); set TYPELISP_THREADS", e)),
-        Err(std::env::VarError::NotUnicode(v)) => {
-            Err(format!("TYPELISP_THREADS={:?} is not a number of threads (a whole number, 1 or more)", v))
-        }
-    }
-}

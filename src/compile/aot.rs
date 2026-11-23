@@ -708,6 +708,7 @@ pub fn compile_file_with(source_path: &str, output_path: &str, options: &BuildOp
             &callback_entries,
             eval_env.as_deref().map(|bytes| (bytes, eval_ns, crate::release::is_release())),
             main_returns_int,
+            options.target,
             HeapInit {
                 cells: match options.heap_cells {
                     Some(cells) => cells,
@@ -824,6 +825,7 @@ fn build_main_wrapper(
     callback_entries: &[(typelisp_front::ffi_callback::CallbackSig, inkwell::values::FunctionValue<'static>)],
     eval_env: Option<(&[u8], typelisp_mem::NsId, bool)>,
     main_returns_int: bool,
+    target: Target,
     heap: HeapInit,
 ) -> Result<(), String> {
     let tl_main = module
@@ -1085,11 +1087,16 @@ fn build_main_wrapper(
     }
     let entry_addr = tl_main.as_global_value().as_pointer_value().const_to_int(i64_ty);
     let call: CallSiteValue = if tl_main.get_type() == coroutine_fn_ty {
-        let entry_shim = match (eval_env.is_some(), main_returns_int) {
-            (true, true) => "rt_run_program_interp_int",
-            (true, false) => "rt_run_program_interp",
-            (false, true) => "rt_run_program_int",
-            (false, false) => "rt_run_program",
+        // A native executable's tasks run on OS threads too; a WebAssembly
+        // module has none.
+        let threads = matches!(target, Target::Host);
+        let entry_shim = match (eval_env.is_some(), main_returns_int, threads) {
+            (true, true, _) => "rt_run_program_interp_int",
+            (true, false, _) => "rt_run_program_interp",
+            (false, true, true) => "rt_run_program_threads_int",
+            (false, false, true) => "rt_run_program_threads",
+            (false, true, false) => "rt_run_program_int",
+            (false, false, false) => "rt_run_program",
         };
         let rt_run_program = module.add_function(entry_shim, fn_ty, None);
         let inits = module.add_global(i64_ty.array_type(init_addrs.len() as u32), None, "tl_global_inits");
@@ -1689,7 +1696,7 @@ mod tests {
         builder.build_call(exit, &[code.into()], "").unwrap();
         builder.build_unreachable().unwrap();
 
-        build_main_wrapper(ctx, &module, "tl_main", &[], &[], &[], &[], &[], &[], &[], &[], &[], None, false, super::HeapInit { cells: typelisp_rt::DEFAULT_AOT_HEAP_CAPACITY, fixed: false, max_memory: None }).expect("build_main_wrapper failed");
+        build_main_wrapper(ctx, &module, "tl_main", &[], &[], &[], &[], &[], &[], &[], &[], &[], None, false, super::Target::Host, super::HeapInit { cells: typelisp_rt::DEFAULT_AOT_HEAP_CAPACITY, fixed: false, max_memory: None }).expect("build_main_wrapper failed");
         module.verify().expect("module failed verification");
 
         let out_path = tmp_path("rt_ping_test");
@@ -1728,7 +1735,7 @@ mod tests {
         };
         builder.build_return(Some(&result)).unwrap();
 
-        build_main_wrapper(ctx, &module, "tl_main", &[], &[], &[], &[], &[], &[], &[], &[], &[], None, false, super::HeapInit { cells: typelisp_rt::DEFAULT_AOT_HEAP_CAPACITY, fixed: false, max_memory: None }).expect("build_main_wrapper failed");
+        build_main_wrapper(ctx, &module, "tl_main", &[], &[], &[], &[], &[], &[], &[], &[], &[], None, false, super::Target::Host, super::HeapInit { cells: typelisp_rt::DEFAULT_AOT_HEAP_CAPACITY, fixed: false, max_memory: None }).expect("build_main_wrapper failed");
         module.verify().expect("module failed verification");
 
         let out_path = tmp_path("rt_heap_init_test");

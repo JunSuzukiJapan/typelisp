@@ -55,6 +55,7 @@ mod core_test_support;
 mod task_body;
 
 /// What those worker threads print with.
+#[cfg(not(target_family = "wasm"))]
 mod worker_print;
 
 mod compiled;
@@ -71,6 +72,8 @@ mod strings;
 mod equality;
 pub(crate) use compiled::*;
 pub(crate) use builtins::*;
+// What the worker threads' printer snapshot reads (`worker_print`).
+#[cfg(not(target_family = "wasm"))]
 pub(crate) use printing::*;
 use read_hooks::*;
 pub use numeric::*;
@@ -264,14 +267,18 @@ pub struct Interp {
     /// `Interp::install_crew`.
     pub(crate) crew_installed: std::cell::Cell<bool>,
     /// What the crew's threads print with — see `worker_print`.
+    #[cfg(not(target_family = "wasm"))]
     pub(crate) worker_print: worker_print::SharedSnapshot,
     /// How many times what [`Self::worker_print`] copies has changed, and
     /// which of those the published snapshot reflects — see
     /// `Interp::printer_tables_changed`.
+    #[cfg(not(target_family = "wasm"))]
     pub(crate) print_generation: std::cell::Cell<u64>,
+    #[cfg(not(target_family = "wasm"))]
     pub(crate) published_generation: std::cell::Cell<u64>,
     /// The compiled bodies the published snapshot names, kept alive while a
     /// worker may be calling one — see `worker_print`.
+    #[cfg(not(target_family = "wasm"))]
     pub(crate) printer_bodies: RefCell<Vec<Rc<dyn CompiledBody>>>,
     /// Whether this is an `eval`-carrying executable's interpreter, whose
     /// program prints through the executable's own registration tables
@@ -538,14 +545,16 @@ impl Interp {
             step_quiet_depth: Cell::new(usize::MAX),
             dump_sources: RefCell::new(Vec::new()),
             recording: RefCell::new(None),
-            scheduler: std::sync::Arc::new(typelisp_rt::sched::SchedShared::new().unwrap_or_else(|e| {
-                typelisp_rt::fatal(&format!("the scheduler could not be set up: {}", e))
-            })),
+            scheduler: std::sync::Arc::new(typelisp_rt::sched::SchedShared::new()),
             driving: std::cell::Cell::new(false),
             crew_installed: std::cell::Cell::new(false),
+            #[cfg(not(target_family = "wasm"))]
             worker_print: Default::default(),
+            #[cfg(not(target_family = "wasm"))]
             print_generation: std::cell::Cell::new(1),
+            #[cfg(not(target_family = "wasm"))]
             published_generation: std::cell::Cell::new(0),
+            #[cfg(not(target_family = "wasm"))]
             printer_bodies: RefCell::new(Vec::new()),
             executable_printer: std::cell::Cell::new(false),
         }
@@ -1027,3 +1036,11 @@ thread_local! {
     static ACTIVE_INTERP: std::cell::Cell<*const Interp> = const { std::cell::Cell::new(std::ptr::null()) };
 }
 
+/// No worker thread prints on WebAssembly, which has none, so there is no
+/// snapshot of the printer's tables to keep (`worker_print`).
+#[cfg(target_family = "wasm")]
+impl Interp {
+    pub fn printer_tables_changed(&self) {}
+
+    fn refresh_print_snapshot(&self) {}
+}

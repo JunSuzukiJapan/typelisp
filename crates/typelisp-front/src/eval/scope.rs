@@ -281,8 +281,9 @@ impl ModuleScope {
     }
 
     /// Every function and method registered anywhere — what a worker
-    /// thread's printer is given a snapshot of (`worker_print`), and where a
-    /// `~/name/` directive's definition is found.
+    /// thread's printer is given a snapshot of (`worker_print`), which
+    /// WebAssembly, having no worker threads, has none of.
+    #[cfg(not(target_family = "wasm"))]
     pub(crate) fn collect_defs(&self, out: &mut Vec<Rc<FnDef>>) {
         for m in self.modules.values() {
             out.extend(m.fns.values().cloned());

@@ -75,7 +75,7 @@ impl ExtBackend for FileBackend {
     }
 
     /// A file is always ready, so there is nothing to wait on.
-    fn wait_fd(&self) -> StreamResult<i32> {
+    fn wait_fd(&self) -> StreamResult<(i32, typelisp_rt::sched::PollerRef)> {
         Err("net-wait: only a socket can be waited on".to_string())
     }
 }

@@ -147,7 +147,7 @@ fn run(threads: usize, children: i64, failing: bool, patience: Duration) -> (Res
     let observed = Arc::new(Observed { patience, ..Observed::default() });
     *OBSERVED.lock().unwrap() = Some(Arc::clone(&observed));
     let mut heap = Heap::with_capacity(1024);
-    let shared = Arc::new(SchedShared::<Probe>::new().unwrap());
+    let shared = Arc::new(SchedShared::<Probe>::new());
     let workers = start_workers(&shared, &mut heap, threads - 1, &(), || ()).unwrap();
     let main = shared.lock(&mut heap).admit(&mut heap, |heap| {
         heap.push_root(Value::Empty);
@@ -160,7 +160,7 @@ fn run(threads: usize, children: i64, failing: bool, patience: Duration) -> (Res
     let r = drive_main(&shared, &mut heap, &(), main);
     shared.shutdown(&mut heap);
     for w in workers {
-        heap.native(|| w.join().unwrap());
+        heap.native(|| w.join());
     }
     (r, observed)
 }

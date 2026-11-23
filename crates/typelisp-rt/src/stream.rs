@@ -127,8 +127,9 @@ pub trait ExtBackend: core::any::Any + Send {
     /// What the stream is attached to, as the printer shows it inside
     /// `#<...>` (see [`StreamTable::describe`]).
     fn describe(&self) -> StreamResult<String>;
-    /// The OS descriptor a task waiting on this stream parks on.
-    fn wait_fd(&self) -> StreamResult<i32>;
+    /// The OS descriptor a task waiting on this stream parks on, and what
+    /// watches it.
+    fn wait_fd(&self) -> StreamResult<(i32, crate::sched::PollerRef)>;
 }
 
 /// What a stream is attached to. Only *leaf* backends live here; a composite
@@ -382,7 +383,7 @@ impl StreamTable {
     /// The OS descriptor under a stream a task can wait on — what the
     /// scheduler hands to `poll`. Only a socket has one worth waiting on: a
     /// file is always ready, and a string stream has no descriptor at all.
-    pub fn raw_fd(&mut self, h: Handle) -> StreamResult<i32> {
+    pub fn raw_fd(&mut self, h: Handle) -> StreamResult<(i32, crate::sched::PollerRef)> {
         match &self.get(h)?.backend {
             Backend::Ext(b) => b.wait_fd(),
             Backend::Closed => Err("the stream is closed".to_string()),

@@ -52,7 +52,13 @@ use typelisp_mem::{Heap, RootScope, RootStackId, TypeId, Value};
 mod threads;
 mod compiled_wait;
 mod compiled_task;
+mod io;
+#[cfg(all(feature = "std", not(target_family = "wasm")))]
+mod os_threads;
 pub use threads::*;
+pub use io::*;
+#[cfg(all(feature = "std", not(target_family = "wasm")))]
+pub use os_threads::*;
 pub use compiled_wait::*;
 pub use compiled_task::*;
 
@@ -234,14 +240,15 @@ pub enum Waiting {
     /// also a sleep, and answers with a `bool`: `true` when the socket
     /// became ready, `false` when the clock ran out first. Without one the
     /// answer is unit, as `sleep`'s is.
-    #[cfg(feature = "std")]
-    Io { fd: i32, interest: crate::os::Interest, deadline: Option<typelisp_mem::host::Instant> },
+    ///
+    /// `poller` is what watches the descriptor: the one the socket's backend
+    /// named, which is the only way such a wait is made.
+    Io { fd: i32, interest: Interest, deadline: Option<typelisp_mem::host::Instant>, poller: PollerRef },
 }
 
 /// What an `Io` wait answers with once the socket is ready: unit for a
 /// plain `net-wait`, `true` for a `net-wait-for` (whose other answer,
 /// `false`, is the clock's).
-#[cfg(feature = "std")]
 fn io_ready_answer(deadline: Option<typelisp_mem::host::Instant>) -> Value {
     if deadline.is_some() {
         Value::Bool(true)
@@ -393,7 +400,6 @@ pub fn waiting_name(w: &Waiting) -> &'static str {
         Waiting::Spawn(..) => "`task`",
         Waiting::SpawnThread(..) => "`thread`",
         Waiting::Main => "a call that needs the interpreter",
-        #[cfg(feature = "std")]
         Waiting::Io { .. } => "a socket operation",
     }
 }
@@ -501,7 +507,7 @@ struct TaskSlot<B> {
 /// Starts the OS thread that runs a pinned task — see
 /// [`Scheduler::set_thread_starter`]. Called with the scheduler's lock held;
 /// it only starts the thread, which takes the lock itself once it runs.
-pub type ThreadStarter = alloc::sync::Arc<dyn Fn(TaskId) -> Result<(), typelisp_mem::host::HostError> + Send + Sync>;
+pub type ThreadStarter = alloc::sync::Arc<dyn Fn(TaskId) -> Result<(), String> + Send + Sync>;
 
 /// One position in the scheduler's table.
 ///
@@ -544,11 +550,11 @@ pub struct Scheduler<B> {
     /// thread, so the order among them means nothing.
     pinned_ready: Vec<TaskId>,
     /// How a `thread` gets its OS thread, or `None` for a scheduler nobody
-    /// started threads for ([`start_workers`]/[`install_crew`]), which
-    /// therefore refuses `thread`.
+    /// gave OS threads ([`SchedShared::install_threads`]), which therefore
+    /// refuses `thread`.
     thread_starter: Option<ThreadStarter>,
     /// The pinned tasks whose OS thread is running. A crew that lives for
-    /// one drive ([`install_crew`]) stops them with the rest when the drive
+    /// one drive stops them with the rest when the drive
     /// ends; a pinned task still alive then has no thread until the next
     /// drive starts it one again ([`Scheduler::restart_pinned`]).
     pinned_threads: Vec<TaskId>,
@@ -562,8 +568,10 @@ pub struct Scheduler<B> {
     sleeping: usize,
     /// How many tasks are `Waiting::Io` — `sleeping`'s twin, so that a
     /// program with no sockets never builds a `poll` set.
-    #[cfg(feature = "std")]
     io_waiting: usize,
+    /// What watches the socket waits: the poller of the first one, which is
+    /// every one's (a program has one crate with sockets).
+    poller: Option<PollerRef>,
     /// Every channel that has been made, by [`ChanId`]. See [`Chan`] for why
     /// none is ever removed.
     chans: Vec<Chan>,
@@ -596,8 +604,8 @@ impl<B> Default for Scheduler<B> {
             pinned_threads: Vec::new(),
             roots: None,
             sleeping: 0,
-            #[cfg(feature = "std")]
             io_waiting: 0,
+            poller: None,
             chans: Vec::new(),
             chan_roots: None,
             rng: 0,
@@ -613,8 +621,7 @@ impl<B: TaskBody> Scheduler<B> {
     }
 
     /// Lets `thread` start OS threads, through `start` — see
-    /// [`start_workers`], the one caller.
-    #[cfg(feature = "std")]
+    /// [`SchedShared::install_threads`], the one caller.
     fn set_thread_starter(&mut self, start: ThreadStarter) {
         self.thread_starter = Some(start);
     }
@@ -674,10 +681,11 @@ impl<B: TaskBody> Scheduler<B> {
     /// `thread`'s, which enters a compiled body with arguments rather than
     /// applying a closure the site built (`CompiledTask::enter_with`).
     pub fn admit_thread_with(&mut self, heap: &mut Heap, make: impl FnOnce(&mut Heap) -> B) -> Result<TaskId, SchedError> {
-        // Every scheduler that runs a program is given one — by
-        // `start_workers` or `install_crew` — before its first task.
+        // Where there are OS threads, every scheduler that runs a program is
+        // given a way to start one before its first task
+        // ([`SchedShared::install_threads`]).
         let Some(start) = self.thread_starter.clone() else {
-            return Err(SchedError::Internal("thread: this scheduler was given no way to start an OS thread".to_string()));
+            return Err(SchedError::Panic("thread: there are no OS threads here to start one on".to_string()));
         };
         let id = self.admit_as(heap, true, make);
         if let Err(e) = self.start_pinned(&start, id) {
@@ -692,7 +700,7 @@ impl<B: TaskBody> Scheduler<B> {
     }
 
     /// Starts the OS thread of pinned task `id`, and remembers that it runs.
-    fn start_pinned(&mut self, start: &ThreadStarter, id: TaskId) -> Result<(), typelisp_mem::host::HostError> {
+    fn start_pinned(&mut self, start: &ThreadStarter, id: TaskId) -> Result<(), String> {
         start(id)?;
         self.pinned_threads.push(id);
         Ok(())
@@ -702,7 +710,6 @@ impl<B: TaskBody> Scheduler<B> {
     /// none — the ones a crew's end stopped ([`install_crew`]). A thread the
     /// system will not start fails the program, as a panic in that task
     /// would: the task cannot run anywhere else.
-    #[cfg(feature = "std")]
     fn restart_pinned(&mut self) -> Result<(), (TaskId, SchedError)> {
         let Some(start) = self.thread_starter.clone() else { return Ok(()) };
         for i in 0..self.slots.len() {
@@ -831,9 +838,8 @@ impl<B: TaskBody> Scheduler<B> {
             // fails (a descriptor closed under the task) is reported as
             // ready, for the reason `poll_ready` gives — the retry will fail
             // with a message where a park would hang.
-            #[cfg(feature = "std")]
-            Waiting::Io { fd, interest, deadline } => {
-                match crate::os::poll_ready(&[(*fd, *interest)], Some(core::time::Duration::ZERO)) {
+            Waiting::Io { fd, interest, deadline, poller } => {
+                match poller.0.poll_ready(&[(*fd, *interest)], Some(core::time::Duration::ZERO)) {
                     Ok(ready) if ready.iter().any(|(_, r)| *r) => Some(Ok(io_ready_answer(*deadline))),
                     Ok(_) => match deadline {
                         Some(t) if *t <= typelisp_mem::host::Instant::now() => Some(Ok(Value::Bool(false))),
@@ -953,8 +959,8 @@ impl<B: TaskBody> Scheduler<B> {
                         self.sleeping += 1;
                         self.slots[id.0] = Slot::Blocked(slot, w);
                     }
-                    #[cfg(feature = "std")]
-                    Waiting::Io { .. } => {
+                    Waiting::Io { poller, .. } => {
+                        self.poller = Some(poller);
                         self.io_waiting += 1;
                         self.slots[id.0] = Slot::Blocked(slot, w);
                     }
@@ -1190,7 +1196,6 @@ impl<B: TaskBody> Scheduler<B> {
             // runs out first, the answer is `false`.
             match &self.slots[i] {
                 Slot::Blocked(_, Waiting::Until(t)) if *t <= now => due.push((*t, i, false)),
-                #[cfg(feature = "std")]
                 Slot::Blocked(_, Waiting::Io { deadline: Some(t), .. }) if *t <= now => due.push((*t, i, true)),
                 _ => {}
             }
@@ -1200,10 +1205,7 @@ impl<B: TaskBody> Scheduler<B> {
             let answer = if was_io { Value::Bool(false) } else { Value::Empty };
             self.wake(heap, i, Ok(answer));
             if was_io {
-                #[cfg(feature = "std")]
-                {
-                    self.io_waiting -= 1;
-                }
+                self.io_waiting -= 1;
             } else {
                 self.sleeping -= 1;
             }
@@ -1212,7 +1214,7 @@ impl<B: TaskBody> Scheduler<B> {
 
     /// Puts every task whose socket is ready back on the queue, waiting at
     /// most `timeout` for one to become so — **the one place a single
-    /// thread waits on the network**, by way of [`crate::os::poll_ready`].
+    /// thread waits on the network**, by way of the waits' [`Poller`].
     ///
     /// Called with a zero timeout before each task switch (`wake_due`'s
     /// reason: a socket that became readable while another task ran for a
@@ -1221,31 +1223,27 @@ impl<B: TaskBody> Scheduler<B> {
     /// [`drive_main`]'s threads wait on the network the same way, in the
     /// same three steps, except that the lock is let go of around the
     /// middle one ([`Locked::poll`]).
-    #[cfg(feature = "std")]
     fn wake_io(&mut self, heap: &mut Heap, timeout: Option<core::time::Duration>) {
-        if self.io_waiting == 0 {
-            return;
-        }
+        let Some(poller) = self.socket_poller() else { return };
         let waits = self.io_snapshot();
-        let fds: Vec<(i32, crate::os::Interest)> = waits.iter().map(|w| (w.fd, w.interest)).collect();
+        let fds: Vec<(i32, Interest)> = waits.iter().map(|w| (w.fd, w.interest)).collect();
         // Native unless it cannot block: other threads may collect while
         // this one waits on the network.
         let polled = match timeout {
-            Some(t) if t.is_zero() => crate::os::poll_ready(&fds, timeout),
-            _ => heap.native(|| crate::os::poll_ready(&fds, timeout)),
+            Some(t) if t.is_zero() => poller.0.poll_ready(&fds, timeout),
+            _ => heap.native(|| poller.0.poll_ready(&fds, timeout)),
         };
         self.apply_io(heap, &waits, polled);
     }
 
     /// Every socket wait, and which slot it is in — what a `poll` is built
     /// from.
-    #[cfg(feature = "std")]
     fn io_snapshot(&self) -> Vec<IoWait> {
         self.slots
             .iter()
             .enumerate()
             .filter_map(|(slot, s)| match s {
-                Slot::Blocked(_, Waiting::Io { fd, interest, deadline }) => {
+                Slot::Blocked(_, Waiting::Io { fd, interest, deadline, .. }) => {
                     Some(IoWait { slot, fd: *fd, interest: *interest, deadline: *deadline })
                 }
                 _ => None,
@@ -1266,8 +1264,7 @@ impl<B: TaskBody> Scheduler<B> {
     /// (`net-wait-for`'s deadline) and the task may since be waiting on
     /// something else — possibly another socket. Only a slot still waiting
     /// on exactly what was polled for is the one the answer is about.
-    #[cfg(feature = "std")]
-    fn apply_io(&mut self, heap: &mut Heap, waits: &[IoWait], polled: std::io::Result<Vec<(i32, bool)>>) {
+    fn apply_io(&mut self, heap: &mut Heap, waits: &[IoWait], polled: Result<Vec<(i32, bool)>, String>) {
         let ready: Vec<bool> = match polled {
             Ok(r) => r.iter().take(waits.len()).map(|(_, r)| *r).collect(),
             Err(_) => vec![true; waits.len()],
@@ -1275,7 +1272,7 @@ impl<B: TaskBody> Scheduler<B> {
         for (w, ready) in waits.iter().zip(ready) {
             let still = matches!(
                 &self.slots[w.slot],
-                Slot::Blocked(_, Waiting::Io { fd, interest, deadline })
+                Slot::Blocked(_, Waiting::Io { fd, interest, deadline, .. })
                     if *fd == w.fd && *interest == w.interest && *deadline == w.deadline
             );
             if !ready || !still {
@@ -1289,19 +1286,15 @@ impl<B: TaskBody> Scheduler<B> {
     /// Whether any task waits on the clock: a sleep, or a socket wait (which
     /// may have a deadline).
     fn on_the_clock(&self) -> bool {
-        #[cfg(feature = "std")]
-        if self.io_waiting > 0 {
-            return true;
-        }
-        self.sleeping > 0
+        self.io_waiting > 0 || self.sleeping > 0
     }
 
-    /// Whether any task waits on a socket. Without std there are none.
-    pub(super) fn waits_on_sockets(&self) -> bool {
-        #[cfg(feature = "std")]
-        return self.io_waiting > 0;
-        #[cfg(not(feature = "std"))]
-        false
+    /// What watches the socket waits, when any task waits on a socket.
+    pub(super) fn socket_poller(&self) -> Option<PollerRef> {
+        if self.io_waiting == 0 {
+            return None;
+        }
+        self.poller
     }
 
     /// The nearest deadline any task is sleeping until.
@@ -1316,7 +1309,6 @@ impl<B: TaskBody> Scheduler<B> {
             .iter()
             .filter_map(|s| match s {
                 Slot::Blocked(_, Waiting::Until(t)) => Some(*t),
-                #[cfg(feature = "std")]
                 Slot::Blocked(_, Waiting::Io { deadline: Some(t), .. }) => Some(*t),
                 _ => None,
             })
@@ -1327,11 +1319,10 @@ impl<B: TaskBody> Scheduler<B> {
 /// One task's socket wait, as it stood when a `poll` was built — see
 /// [`Scheduler::apply_io`] for why the whole wait is kept and not just the
 /// descriptor.
-#[cfg(feature = "std")]
 struct IoWait {
     slot: usize,
     fd: i32,
-    interest: crate::os::Interest,
+    interest: Interest,
     deadline: Option<typelisp_mem::host::Instant>,
 }
 
