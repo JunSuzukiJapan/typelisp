@@ -93,7 +93,7 @@ release のランタイムでの測定（上と同じ hello）: `__text` 1,040,3
 4. `typelisp-rt`: ネットワーク、ファイル、環境変数、プロセス、OS スレッドを std の下へ。
 5. 組み込みのランタイムのクレートと、使えない shim の拒否の表。
 
-1〜4 は済。5 つのクレートとも `cargo check -p <クレート> --lib --target thumbv7em-none-eabihf --no-default-features` が警告 0。決めたこと:
+1〜5 は済（5 は [runtime-split-plan.md](runtime-split-plan.md) でランタイムを分けた上で作った。拒否の表は段階 2 でターゲットと一緒に作る）。5 つのクレートとも `cargo check -p <クレート> --lib --target thumbv7em-none-eabihf --no-default-features` が警告 0。決めたこと:
 
 - 依存の書き方: ワークスペースの依存表では 5 つを `default-features = false` で宣言し、std が要る側（ルート、`typelisp-front`）が `features = ["std"]` を書く。各クレートの `std` は依存先の `std` を有効にする。
 - ハッシュ: `sxhash` は std の有無にかかわらず種を固定した `typelisp_mem::collections::FixedHasher`（foldhash）で数える。std の `DefaultHasher` とは値が違う。

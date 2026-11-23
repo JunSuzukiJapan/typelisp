@@ -66,6 +66,11 @@ jobs:
         run: cargo check -p typelisp-front --target wasm32-unknown-unknown --locked
         env:
           RUSTFLAGS: -D warnings
+      # The runtime for a board without an operating system, without std.
+      - name: Check the thumbv7em-none-eabihf runtime (warnings are errors)
+        run: cargo check -p typelisp-rt-embedded --target thumbv7em-none-eabihf --locked
+        env:
+          RUSTFLAGS: -D warnings
       - name: Build
         run: cargo build --workspace --locked
 
@@ -119,6 +124,11 @@ jobs:
           RUSTFLAGS: -D warnings
       - name: Check the wasm32-unknown-unknown runtime (warnings are errors)
         run: cargo check -p typelisp-front --target wasm32-unknown-unknown --locked
+        env:
+          RUSTFLAGS: -D warnings
+      # The runtime for a board without an operating system, without std.
+      - name: Check the thumbv7em-none-eabihf runtime (warnings are errors)
+        run: cargo check -p typelisp-rt-embedded --target thumbv7em-none-eabihf --locked
         env:
           RUSTFLAGS: -D warnings
       - name: Build

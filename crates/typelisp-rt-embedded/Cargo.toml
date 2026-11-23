@@ -1,0 +1,27 @@
+[package]
+name = "typelisp-rt-embedded"
+description = "The runtime typelisp links an executable for a board without an operating system with. Internal crate of typelisp."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+# Built by scripts/build-embedded-runtime.sh for each embedded target; nothing
+# depends on it, so it is not published.
+publish = false
+
+# What every target has (`typelisp-rt` and the crates below it), as one
+# static library, without std: the board gives memory, output and time
+# through the `typelisp_host_*` C functions (`typelisp_mem::host::board`).
+# Only for a target without an operating system does it have dependencies or
+# anything in it; elsewhere (the host, when the whole workspace is built) it is
+# an empty library. A member of the workspace but not a default member.
+[lib]
+name = "typelisp_rt_embedded"
+crate-type = ["staticlib"]
+
+[target.'cfg(target_os = "none")'.dependencies]
+typelisp-abi.workspace = true
+typelisp-mem.workspace = true
+typelisp-print.workspace = true
+typelisp-read.workspace = true
+typelisp-rt.workspace = true

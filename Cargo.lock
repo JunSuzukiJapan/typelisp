@@ -927,6 +927,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "typelisp-rt-embedded"
+version = "0.3.7"
+dependencies = [
+ "typelisp-abi",
+ "typelisp-mem",
+ "typelisp-print",
+ "typelisp-read",
+ "typelisp-rt",
+]
+
+[[package]]
 name = "typelisp-rt-posix"
 version = "0.3.7"
 dependencies = [

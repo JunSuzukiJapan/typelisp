@@ -190,6 +190,10 @@ cargo build -p typelisp-front || { echo "FAILED: building typelisp-front's stati
 # invocation here, for the same reason as the staticlib above.
 echo "=== scripts/build-wasm-runtime.sh (the runtimes for the WebAssembly tests) ==="
 "$repo_root/scripts/build-wasm-runtime.sh" || { echo "FAILED: building the WebAssembly runtimes"; exit 1; }
+# The runtime for a board without an operating system: nothing links it
+# yet, so this is what keeps it building without std.
+echo "=== scripts/build-embedded-runtime.sh (the runtime for a board) ==="
+"$repo_root/scripts/build-embedded-runtime.sh" || { echo "FAILED: building the embedded runtime"; exit 1; }
 # Every test target, built once before the workers start. Left to the
 # workers, the first few each build what changed at the same time, and each
 # one puts its own `target/debug/typl` in place: a test of another worker that

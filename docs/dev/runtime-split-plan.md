@@ -71,9 +71,11 @@ C1 と C2 は B に依存し、B は C1 と C2 を知らない。C2 は C1 に�
 
 ## 結果
 
-手順 1〜6 を終えた。
+手順 1〜7 を終えた。
 
 - `typelisp-rt` に残る std の cfg は、大域アロケータの選択と `no_std` の宣言だけ。libc・rustls・webpki-roots に依存しない。
 - C1 は `typelisp-rt-sys`、C2 は `typelisp-rt-posix`。wasm の `typelisp-front` は C2 に依存せず、`eval` からの呼び出しは Panic で断る。
 - shim の表は `src/compile/externs.rs` で、全ターゲットが持つもの（`rt_shims`）と C1・C2 のもの（`RuntimeCrate::shims`、届いた経路の説明つき）に分かれる。ターゲットが持たないクレートは `Target::missing_runtimes` が答え、そのクレートの shim に届くプログラムはコンパイル時に断る。
 - 表を分けると `rt_*` の宣言の順が変わるので、島と prelude を再生成した。
+- 組み込みのランタイムは `crates/typelisp-rt-embedded`（`staticlib`、公開しない）。`target_os = "none"` のときだけ中身があり、B の 5 つのクレートを束ねて、パニックハンドラと、使われない巻き戻しの入口（`rust_eh_personality`、`__aeabi_unwind_cpp_pr0`）を持つ。未定義で残るのはボードの関数（`typelisp_host_*`）だけ。`scripts/build-embedded-runtime.sh` がビルドし、全体テストのスクリプトと CI が毎回ビルドまたは検査する。
+- 組み込みで断る shim（C1、C2、`eval`）の表は、`Target` に組み込みのターゲットが加わる段階 2 で作る。

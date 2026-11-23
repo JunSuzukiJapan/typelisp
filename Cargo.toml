@@ -18,7 +18,7 @@ include = ["/src/**", "/build.rs", "/Cargo.toml", "/Cargo.lock", "/README_JP.md"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [workspace]
-members = ["crates/typelisp-abi", "crates/typelisp-front", "crates/typelisp-mem", "crates/typelisp-print", "crates/typelisp-read", "crates/typelisp-rt", "crates/typelisp-rt-sys", "crates/typelisp-rt-posix"]
+members = ["crates/typelisp-abi", "crates/typelisp-front", "crates/typelisp-mem", "crates/typelisp-print", "crates/typelisp-read", "crates/typelisp-rt", "crates/typelisp-rt-sys", "crates/typelisp-rt-posix", "crates/typelisp-rt-embedded"]
 # Plain `cargo build`/`cargo test` (no `-p`) only builds the root package by
 # default in a non-virtual workspace like this one — that's not enough to
 # produce `typelisp-rt`'s `staticlib` artifact, since the root package only
