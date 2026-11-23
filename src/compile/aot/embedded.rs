@@ -1,6 +1,6 @@
-//! A board without an operating system (`thumbv7em-none-eabihf`): emitting
-//! the module as an ARM object and linking it with `ld.lld` into an ELF
-//! executable.
+//! A board without an operating system (`thumbv7em-none-eabihf`,
+//! `thumbv8m.main-none-eabihf`): emitting the module as an ARM object and
+//! linking it with `ld.lld` into an ELF executable.
 //!
 //! The module is the one a native executable is made from, given the
 //! target's data layout before the passes run, as for WebAssembly (see
@@ -12,7 +12,7 @@
 //! entry, which gives the heap its memory and calls the module's `main`
 //! under the name [`BOARD_MAIN`]. Where flash and RAM are is the linker
 //! script `memory.x`, which `link.x` includes: the user's
-//! (`--linker-script`), or [`QEMU_MEMORY`]. The rest of what the runtime asks
+//! (`--linker-script`), or the QEMU board's ([`Board::qemu_memory`]). The rest of what the runtime asks
 //! of the board (`typelisp_host_*`) the runtime gives over semihosting, or
 //! the board as C functions in the objects and libraries the link is given
 //! (`--board-functions`, `--link`).
@@ -37,25 +37,59 @@ use crate::CompileTarget;
 /// exit code.
 const BOARD_MAIN: &str = "typelisp_main";
 
-/// The memory of the board QEMU's `mps2-an386` is (Arm's AN386, a Cortex-M4
-/// on an MPS2 FPGA board): 4 MiB of code memory at 0 and 4 MiB of RAM at
-/// `0x20000000`. The stack takes 1 MiB of the RAM, so that recursion goes
-/// deep in the tests; the rest above `.bss` is the heap.
-const QEMU_MEMORY: &str = "\
+/// A target that is a board: the core its code is for, and the QEMU board
+/// that stands for it, whose memory a program is linked for when the user
+/// gives no linker script.
+pub struct Board {
+    /// The core, as LLVM names it.
+    pub cpu: &'static str,
+    /// QEMU's name for the board (`-M`).
+    pub qemu_machine: &'static str,
+    /// The QEMU board's memory, as a `memory.x`. The stack takes 1 MiB of
+    /// the RAM, so that recursion goes deep in the tests; the rest above
+    /// `.bss` is the heap.
+    pub qemu_memory: &'static str,
+}
+
+/// `thumbv7em-none-eabihf`, on QEMU's `mps2-an386` (Arm's AN386, a
+/// Cortex-M4 on an MPS2 FPGA board): 4 MiB of code memory at 0 and 4 MiB of
+/// RAM at `0x20000000`.
+pub const CORTEX_M4: Board = Board {
+    cpu: "cortex-m4",
+    qemu_machine: "mps2-an386",
+    qemu_memory: "\
 MEMORY
 {
   FLASH : ORIGIN = 0x00000000, LENGTH = 4M
   RAM : ORIGIN = 0x20000000, LENGTH = 4M
 }
 _typelisp_stack_size = 1M;
-";
+",
+};
+
+/// `thumbv8m.main-none-eabihf`, on QEMU's `mps2-an505` (Arm's AN505, a
+/// Cortex-M33 with TrustZone): the core starts in the secure state, so the
+/// program is linked at the secure addresses of the 4 MiB of code memory
+/// (`0x10000000`) and of the 4 MiB of RAM (`0x38000000`).
+pub const CORTEX_M33: Board = Board {
+    cpu: "cortex-m33",
+    qemu_machine: "mps2-an505",
+    qemu_memory: "\
+MEMORY
+{
+  FLASH : ORIGIN = 0x10000000, LENGTH = 4M
+  RAM : ORIGIN = 0x38000000, LENGTH = 4M
+}
+_typelisp_stack_size = 1M;
+",
+};
 
 /// How much of RAM the stack takes when the user's `memory.x` does not say
 /// (`_typelisp_stack_size`).
 const DEFAULT_STACK: &str = "PROVIDE(_typelisp_stack_size = 64K);\n";
 
-/// The machine the triple names: a Cortex-M4 with its single-precision FPU,
-/// whose code runs from wherever it was linked to.
+/// The machine the triple names, with the core `cpu` and its
+/// single-precision FPU, whose code runs from wherever it was linked to.
 ///
 /// The triple is normalized first (`thumbv7em-unknown-none-eabihf`): read as
 /// written, `eabihf` would be the third part, the operating system, and the
@@ -63,20 +97,20 @@ const DEFAULT_STACK: &str = "PROVIDE(_typelisp_stack_size = 64K);\n";
 /// GNU names of the floating-point helpers (`__divdf3`) with the base calling
 /// convention, which the runtime's, built for the hard-float ABI, read their
 /// arguments from the wrong registers in.
-fn target_machine(triple: &str) -> Result<TargetMachine, String> {
+fn target_machine(triple: &str, cpu: &str) -> Result<TargetMachine, String> {
     Target::initialize_arm(&InitializationConfig::default());
     let triple = TargetMachine::normalize_triple(&TargetTriple::create(triple));
     let target = Target::from_triple(&triple).map_err(|e| e.to_string())?;
     target
         .create_target_machine(
             &triple,
-            "cortex-m4",
+            cpu,
             "",
             crate::compile::optimize::codegen_level(),
             RelocMode::Static,
             CodeModel::Default,
         )
-        .ok_or_else(|| "failed to create a target machine for thumbv7em-none-eabihf".to_string())
+        .ok_or_else(|| format!("failed to create a target machine for {}", triple))
 }
 
 /// Puts every function and global `module` defines in a section of its own,
@@ -163,7 +197,8 @@ pub(super) fn write_executable(
     items: &[CompileTarget],
     options: &BuildOptions,
 ) -> Result<(), String> {
-    let triple = super::Target::Thumbv7em.name();
+    let triple = options.target.name();
+    let board = options.target.board().ok_or_else(|| format!("internal error: {} is not a board", triple))?;
     let runtime = embedded_runtime_dir(triple)?;
     let linker = embedded_linker(&runtime)?;
     for file in &options.link {
@@ -173,9 +208,9 @@ pub(super) fn write_executable(
     }
     let memory_x = match options.linker_script.as_deref() {
         Some(path) => fs::read_to_string(path).map_err(|e| format!("--linker-script: {}: {}", path.display(), e))?,
-        None => QEMU_MEMORY.to_string(),
+        None => board.qemu_memory.to_string(),
     };
-    let tm = target_machine(triple)?;
+    let tm = target_machine(triple, board.cpu)?;
     module.set_triple(&tm.get_triple());
     module.set_data_layout(&tm.get_target_data().get_data_layout());
     module

@@ -304,7 +304,7 @@ Apple Silicon では macOS 26 以降、Intel では macOS 15 以降で動きま�
 コードの中で `panic`・`throw`・`unwind-protect` を使うと、異常終了することがあります。
 
 ビルド済みの `typl` は WebAssembly 向けのコンパイル（`typl -c --target wasm32-wasip1` など）と、
-Cortex-M のマイコン向けのコンパイル（`--target thumbv7em-none-eabihf`）にも対応しています。リンクに
+Cortex-M のマイコン向けのコンパイル（`--target thumbv7em-none-eabihf`、`--target thumbv8m.main-none-eabihf`）にも対応しています。リンクに
 rustup の toolchain のリンカを使うので、`--target` を使うときは rustup が要ります。
 
 インストール先は環境変数 `TYPELISP_HOME` で、バージョンは `TYPELISP_VERSION` で指定できます
@@ -420,8 +420,8 @@ cargo install --locked --path . --features wasm
 
 付けないときは、WebAssembly のためのものは何もビルドせず、`typl` にも入れません。
 
-Cortex-M のマイコン向けのコンパイル（`typl -c --target thumbv7em-none-eabihf`）も使うときは、
-`rustup target add thumbv7em-none-eabihf` を実行してから、`--features embedded` を付けます
+Cortex-M のマイコン向けのコンパイル（`typl -c --target thumbv7em-none-eabihf` など）も使うときは、
+`rustup target add thumbv7em-none-eabihf thumbv8m.main-none-eabihf` を実行してから、`--features embedded` を付けます
 （両方なら `--features wasm,embedded`）。
 
 ```sh

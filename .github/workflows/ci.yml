@@ -69,10 +69,12 @@ jobs:
       # The runtime for a board without an operating system, without std:
       # with the host functions over semihosting (what the tests run under
       # QEMU with), and without them (a board that gives its own).
-      - name: Check the thumbv7em-none-eabihf runtime (warnings are errors)
+      - name: Check the boards' runtimes (warnings are errors)
         run: |
-          cargo check -p typelisp-rt-embedded --target thumbv7em-none-eabihf --locked
-          cargo check -p typelisp-rt-semihosting --target thumbv7em-none-eabihf --locked
+          for target in thumbv7em-none-eabihf thumbv8m.main-none-eabihf; do
+            cargo check -p typelisp-rt-embedded --target "$target" --locked
+            cargo check -p typelisp-rt-semihosting --target "$target" --locked
+          done
         env:
           RUSTFLAGS: -D warnings
       - name: Build
@@ -133,10 +135,12 @@ jobs:
       # The runtime for a board without an operating system, without std:
       # with the host functions over semihosting (what the tests run under
       # QEMU with), and without them (a board that gives its own).
-      - name: Check the thumbv7em-none-eabihf runtime (warnings are errors)
+      - name: Check the boards' runtimes (warnings are errors)
         run: |
-          cargo check -p typelisp-rt-embedded --target thumbv7em-none-eabihf --locked
-          cargo check -p typelisp-rt-semihosting --target thumbv7em-none-eabihf --locked
+          for target in thumbv7em-none-eabihf thumbv8m.main-none-eabihf; do
+            cargo check -p typelisp-rt-embedded --target "$target" --locked
+            cargo check -p typelisp-rt-semihosting --target "$target" --locked
+          done
         env:
           RUSTFLAGS: -D warnings
       - name: Build

@@ -155,6 +155,14 @@ release のランタイムでの測定（上と同じ hello）: `__text` 1,040,3
 - `enable-interrupt`/`disable-interrupt`（`std::board`）はランタイムの関数にした（ランタイムが止めた割り込みを再開してよいかを知るため）。ボード以外の `typl -c` で届けばコンパイルエラー（`externs::BOARD_ONLY_SHIMS`）、インタプリタでは実行時エラー。ハンドラのあるプログラムをボード以外へコンパイルするのもエラー。
 - テスト: `aot_embedded_test.rs`（NVIC の保留レジスタで自分で起こす割り込み、cons を作り続ける間の SysTick、ハンドラの panic、`sleep` の拒否、ボード以外での拒否）、`interrupt_test.rs`（属性の検査、インタプリタでは普通の関数）。
 
+### Cortex-M33（済、2026-11-23）
+
+`thumbv8m.main-none-eabihf`（`Target::Thumbv8mMain`）。ランタイムはそのまま通った。ボードごとの違い（LLVM の CPU 名、既定のメモリ配置、QEMU のボード）は `aot/embedded.rs` の `Board` にまとめ、`Target::board()` で引く。QEMU は `mps2-an505`。コアは secure で起動するので、既定の配置は secure 側の番地（コード 0x10000000、RAM 0x38000000、各 4 MiB）。同梱（`build.rs` の `BOARD_TRIPLES`、環境変数は三つ組ごと）、`scripts/build-embedded-runtime.sh`、CI、配布物の確認も両方に。
+
+### Cortex-M0+（未着手）
+
+`thumbv6m-none-eabi` はコアに比較交換のアトミック命令が無く、Rust の `alloc::sync`（`Arc`）と `compare_exchange` が無い。ランタイムをビルドすると `typelisp-mem` で 40 件ほどのエラー（2026-11-23）。`typelisp_mem::sync` を、割り込みを止めて代わりにする実装（`portable-atomic` と `critical-section` など）に差し替えれば通る見込み。QEMU のボードは `microbit`（Cortex-M0）。
+
 ### 段階 7: AVR の判断
 
 LLVM 22 には AVR のバックエンドがある。判断の材料は次の 3 つ。
@@ -162,3 +170,13 @@ LLVM 22 には AVR のバックエンドがある。判断の材料は次の 3 �
 - 大きさ: ATmega328P（Uno）はフラッシュ 32KB、RAM 2KB、ATmega2560（Mega）はフラッシュ 256KB、RAM 8KB。段階 0〜4 の後の Cortex-M の hello world の大きさと比べる。
 - ポインタが 16bit。値を i64 の語で扱う呼び出し規約はそのまま使えるが、遅くて大きい。
 - Rust の `avr-none` は tier 3 で、nightly と `-Zbuild-std` が要る。使うかどうかはユーザーが決める。
+
+測った値（2026-11-23、release の `typl --features embedded`、`--release`、thumbv7em、semihosting）:
+
+| プログラム | text | data | bss |
+|---|---|---|---|
+| `(defun main () int 42)` | 373,304 | 332 | 2,444 |
+| hello（`println`） | 374,160 | 332 | 2,444 |
+| fib | 379,656 | 332 | 2,444 |
+
+`--no-cons` でも変わらない。プログラムによらず約 37 万バイトがランタイムで、大きいのは bignum（`num-bigint`）、浮動小数の印字（`flt2dec`）、印字器（`typelisp_print`）、スケジューラ、記号表・型表の初期化、ハッシュ表の型ごとの実体化。どれも 1 つは 14KB 以下で、長い尾になっている。ATmega328P（32KB/2KB）にも ATmega2560（256KB/8KB）にも、ランタイムだけで入らない（bss だけで Uno の RAM を超える）。AVR のコードは i64 の語の演算が多くの命令になるので、Thumb より大きくなる。今の設計のまま AVR に対応することはできず、対応するなら、bignum・浮動小数の印字・スケジューラを持たない別の小さなランタイムと、16bit の語の表現が要る。

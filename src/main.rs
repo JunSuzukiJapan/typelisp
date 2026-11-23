@@ -67,17 +67,18 @@ Options:
                          wasm32-wasip1 makes a WASI module, wasm32-unknown-unknown
                          a module and the JavaScript that runs it (default
                          OUTPUT: SOURCE with .wasm), thumbv7em-none-eabihf an
-                         ELF executable for a Cortex-M4F/M7 board (default
-                         OUTPUT: SOURCE with .elf)
-  --linker-script FILE   after --target thumbv7em-none-eabihf: the board's
-                         flash and RAM, as a memory.x (default: QEMU's
-                         mps2-an386)
-  --board-functions WHO  after --target thumbv7em-none-eabihf: who gives the
-                         board's output, input, exit and clock: semihosting
-                         (QEMU or a debugger; the default) or c (the board's
+                         ELF executable for a Cortex-M4F/M7 board and
+                         thumbv8m.main-none-eabihf one for a Cortex-M33 board
+                         (default OUTPUT: SOURCE with .elf)
+  --linker-script FILE   after --target for a board: the board's flash and
+                         RAM, as a memory.x (default: those of QEMU's
+                         mps2-an386 for a Cortex-M4, mps2-an505 for an M33)
+  --board-functions WHO  after --target for a board: who gives the board's
+                         output, input, exit and clock: semihosting (QEMU or
+                         a debugger; the default) or c (the board's
                          typelisp_host_* C functions, given with --link)
-  --link FILE            after --target thumbv7em-none-eabihf: an object or
-                         static library to link with (repeatable)
+  --link FILE            after --target for a board: an object or static
+                         library to link with (repeatable)
   --feature NAME         add a feature for #+/#- (repeatable)
   --on-redefine=POLICY   on redefinition: warn (default), error or silent
   --remove-lib           remove the library this typl wrote for compiled
@@ -251,7 +252,7 @@ fn compile_command(flag: &str, args: &[String], heap_cells: Option<usize>) -> i3
             options.no_cons = true;
         } else if let Some(v) = flag_value(a, "--target", &mut it) {
             let Some(v) = v else {
-                eprintln!("--target: needs a target (wasm32-wasip1, wasm32-unknown-unknown or thumbv7em-none-eabihf)");
+                eprintln!("--target: needs a target (wasm32-wasip1, wasm32-unknown-unknown, {})", typelisp::compile::aot::Target::board_names());
                 return 1;
             };
             match typelisp::compile::aot::Target::parse(v) {
@@ -327,8 +328,8 @@ fn compile_command(flag: &str, args: &[String], heap_cells: Option<usize>) -> i3
             return 1;
         }
     }
-    if let Some(flag) = board_only.filter(|_| options.target != typelisp::compile::aot::Target::Thumbv7em) {
-        eprintln!("{}: only for a board (--target thumbv7em-none-eabihf)", flag);
+    if let Some(flag) = board_only.filter(|_| options.target.board().is_none()) {
+        eprintln!("{}: only for a board (--target {})", flag, typelisp::compile::aot::Target::board_names());
         return 1;
     }
     let Some(source) = source else {
@@ -340,7 +341,7 @@ fn compile_command(flag: &str, args: &[String], heap_cells: Option<usize>) -> i3
         None if source.extension().is_some_and(|e| e == "typl") => match options.target {
             typelisp::compile::aot::Target::Host => source.with_extension(""),
             typelisp::compile::aot::Target::Wasip1 | typelisp::compile::aot::Target::Wasm32Unknown => source.with_extension("wasm"),
-            typelisp::compile::aot::Target::Thumbv7em => source.with_extension("elf"),
+            typelisp::compile::aot::Target::Thumbv7em | typelisp::compile::aot::Target::Thumbv8mMain => source.with_extension("elf"),
         },
         None => {
             eprintln!("{}: {} does not end in .typl, so give the executable's name with -o", flag, source.display());

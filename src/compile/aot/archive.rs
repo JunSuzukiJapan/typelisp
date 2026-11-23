@@ -315,26 +315,31 @@ pub(super) fn embedded_runtime_dir(triple: &str) -> Result<std::path::PathBuf, S
     #[cfg(typelisp_bundled_embedded)]
     {
         let dir = bundled_archive_dir()?.join(triple);
-        match triple {
-            "thumbv7em-none-eabihf" => {
-                write_file_once(&dir, "link.x", include_bytes!(env!("TYPELISP_BUNDLED_EMBEDDED_LINK_X")))?;
-                write_file_once(&dir, BoardFunctions::C.archive(), include_bytes!(env!("TYPELISP_BUNDLED_EMBEDDED_C_STATICLIB")))?;
-                write_file_once(
-                    &dir,
-                    BoardFunctions::Semihosting.archive(),
-                    include_bytes!(env!("TYPELISP_BUNDLED_EMBEDDED_SEMIHOSTING_STATICLIB")),
-                )?;
-            }
+        let [link_x, c, semihosting]: [&[u8]; 3] = match triple {
+            "thumbv7em-none-eabihf" => [
+                include_bytes!(env!("TYPELISP_BUNDLED_EMBEDDED_THUMBV7EM_NONE_EABIHF_LINK_X")),
+                include_bytes!(env!("TYPELISP_BUNDLED_EMBEDDED_THUMBV7EM_NONE_EABIHF_C_STATICLIB")),
+                include_bytes!(env!("TYPELISP_BUNDLED_EMBEDDED_THUMBV7EM_NONE_EABIHF_SEMIHOSTING_STATICLIB")),
+            ],
+            "thumbv8m.main-none-eabihf" => [
+                include_bytes!(env!("TYPELISP_BUNDLED_EMBEDDED_THUMBV8M_MAIN_NONE_EABIHF_LINK_X")),
+                include_bytes!(env!("TYPELISP_BUNDLED_EMBEDDED_THUMBV8M_MAIN_NONE_EABIHF_C_STATICLIB")),
+                include_bytes!(env!("TYPELISP_BUNDLED_EMBEDDED_THUMBV8M_MAIN_NONE_EABIHF_SEMIHOSTING_STATICLIB")),
+            ],
             _ => return Err(format!("internal error: no runtime for a board for {}", triple)),
-        }
+        };
+        write_file_once(&dir, "link.x", link_x)?;
+        write_file_once(&dir, BoardFunctions::C.archive(), c)?;
+        write_file_once(&dir, BoardFunctions::Semihosting.archive(), semihosting)?;
         Ok(dir)
     }
     #[cfg(all(typelisp_bundled_runtime, not(typelisp_bundled_embedded)))]
     {
-        let _ = triple;
-        Err("this typl was built without support for boards: --target thumbv7em-none-eabihf needs one built with \
-             `--features embedded` (`cargo install --features embedded ...`)"
-            .to_string())
+        Err(format!(
+            "this typl was built without support for boards: --target {} needs one built with \
+             `--features embedded` (`cargo install --features embedded ...`)",
+            triple
+        ))
     }
     #[cfg(not(typelisp_bundled_runtime))]
     {

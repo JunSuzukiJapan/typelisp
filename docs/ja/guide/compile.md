@@ -262,21 +262,25 @@ const code = await run({ write: (fd, text) => { /* 画面に出すなど */ } })
 ### 3.8 マイコン（Cortex-M）向けにコンパイルする
 
 `--target thumbv7em-none-eabihf` を付けると、OS の無い Cortex-M4F・M7 のボード向けの実行ファイル
-（ELF）を作ります。`-o` を省くと、ソースの `.typl` を `.elf` に変えた名前になります。
+（ELF）を作ります。`--target thumbv8m.main-none-eabihf` なら Cortex-M33 のボード向けです。`-o` を
+省くと、ソースの `.typl` を `.elf` に変えた名前になります。
 
 ```sh
 $ typl -c hello.typl --target thumbv7em-none-eabihf          # hello.elf ができる
 $ qemu-system-arm -M mps2-an386 -nographic \
     -semihosting-config enable=on,target=native -kernel hello.elf   # QEMU の Cortex-M4 で実行する
+$ typl -c hello.typl --target thumbv8m.main-none-eabihf
+$ qemu-system-arm -M mps2-an505 -nographic \
+    -semihosting-config enable=on,target=native -kernel hello.elf   # QEMU の Cortex-M33 で実行する
 ```
 
 - `install.sh` で入れた `typl` はそのまま使えます。`cargo install` で入れるときは、
-  `rustup target add thumbv7em-none-eabihf` を実行してから `--features embedded` を付けてインストールします
+  `rustup target add thumbv7em-none-eabihf thumbv8m.main-none-eabihf` を実行してから `--features embedded` を付けてインストールします
   （wasm と両方なら `--features wasm,embedded`）。リポジトリのデバッグビルドの `typl` では
   `scripts/build-embedded-runtime.sh` を実行します。リンクには rustup の toolchain のリンカを使います。
 - ボードのメモリの配置は `--linker-script FILE` で渡します。書き方は `cortex-m-rt` の `memory.x` と同じで、
   FLASH と RAM の番地と大きさを書きます。`_typelisp_stack_size = 32K;` のように書くと、RAM のうちスタックに
-  使う大きさになります（書かなければ 64KiB）。RAM の残りがヒープです。省いたときは QEMU の `mps2-an386`
+  使う大きさになります（書かなければ 64KiB）。RAM の残りがヒープです。省いたときは QEMU の `mps2-an386`（Cortex-M33 では `mps2-an505`）
   の配置になります。
 
   ```

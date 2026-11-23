@@ -2,7 +2,9 @@
 //! Cortex-M4F board built from the same program a native executable is, run
 //! under QEMU (`qemu-system-arm -M mps2-an386`, the host functions over
 //! semihosting) and compared with what the native one does, and the
-//! programs it refuses at compile time.
+//! programs it refuses at compile time. The same for a Cortex-M33
+//! (`thumbv8m.main-none-eabihf`, `-M mps2-an505`), less thoroughly: the
+//! two share everything but the core the code is for.
 //!
 //! Needs the runtime for a board built (`scripts/build-embedded-runtime.sh`,
 //! which the test scripts run) and `qemu-system-arm` on `PATH`.
@@ -17,6 +19,9 @@ use std::time::{Duration, Instant};
 const TYPL: &str = env!("CARGO_BIN_EXE_typl");
 
 const TARGET: &str = "thumbv7em-none-eabihf";
+
+/// The Cortex-M33 board, and the QEMU board that stands for it.
+const M33: (&str, &str) = ("thumbv8m.main-none-eabihf", "mps2-an505");
 
 /// How long a program may run under QEMU before the test calls it hung: a
 /// board's program that faults or never ends would otherwise hold the test
@@ -52,7 +57,12 @@ fn built(name: &str, source: &str, output: &str, flags: &[&str]) -> PathBuf {
 
 /// The flags for the board, then `flags`.
 fn board_flags<'a>(flags: &[&'a str]) -> Vec<&'a str> {
-    let mut all = vec!["--target", TARGET];
+    target_flags(TARGET, flags)
+}
+
+/// The flags for the board `target`, then `flags`.
+fn target_flags<'a>(target: &'a str, flags: &[&'a str]) -> Vec<&'a str> {
+    let mut all = vec!["--target", target];
     all.extend_from_slice(flags);
     all
 }
@@ -60,8 +70,13 @@ fn board_flags<'a>(flags: &[&'a str]) -> Vec<&'a str> {
 /// Runs the executable at `elf` on QEMU's Cortex-M4 board, its standard
 /// output and error over semihosting.
 fn run_board(elf: &Path) -> Output {
+    run_on("mps2-an386", elf)
+}
+
+/// Runs the executable at `elf` on the QEMU board `machine`.
+fn run_on(machine: &str, elf: &Path) -> Output {
     let child = Command::new("qemu-system-arm")
-        .args(["-M", "mps2-an386", "-nographic", "-semihosting-config", "enable=on,target=native", "-kernel"])
+        .args(["-M", machine, "-nographic", "-semihosting-config", "enable=on,target=native", "-kernel"])
         .arg(elf)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
@@ -96,9 +111,15 @@ fn text(b: &[u8]) -> String {
 /// What `source` prints and exits with on the board, after checking that
 /// the native executable prints and exits the same.
 fn same_as_native(name: &str, source: &str, flags: &[&str]) -> (String, String, Option<i32>) {
-    let elf = built(name, source, "prog.elf", &board_flags(flags));
+    same_as_native_on((TARGET, "mps2-an386"), name, source, flags)
+}
+
+/// [`same_as_native`] on the board `target`, run on the QEMU board
+/// `machine`.
+fn same_as_native_on((target, machine): (&str, &str), name: &str, source: &str, flags: &[&str]) -> (String, String, Option<i32>) {
+    let elf = built(name, source, "prog.elf", &target_flags(target, flags));
     let native = built(name, source, "prog", flags);
-    let b = run_board(&elf);
+    let b = run_on(machine, &elf);
     let n = Command::new(&native).output().expect("failed to run the native executable");
     assert_eq!(text(&b.stdout), text(&n.stdout), "stdout differs from the native executable's");
     assert_eq!(text(&b.stderr), text(&n.stderr), "stderr differs from the native executable's");
@@ -270,6 +291,52 @@ fn a_c_function_the_board_has_is_called() {
     let out = run_board(&elf);
     assert_eq!(text(&out.stdout), "leaving\n", "stderr: {}", text(&out.stderr));
     assert_eq!(out.status.code(), Some(5));
+}
+
+/// A Cortex-M33 runs what a Cortex-M4 does: integers past a fixnum, floats,
+/// recursion, a task and a channel.
+#[test]
+fn a_cortex_m33_runs_programs_as_natively() {
+    let (out, _, code) = same_as_native_on(
+        M33,
+        "m33_programs",
+        r#"
+(use std::sync::Chan)
+(defun fact ((n int)) int (if (= n 0) 1 (* n (fact (- n 1)))))
+(defun fill ((ch Chan<int>)) () (send ch 7) ())
+(defun main () int
+  (println "~a ~a" (fact 30) (* 1.5 2.25))
+  (let ((ch (the Chan<int> (Chan::new 0))))
+    (task (fill ch))
+    (println "~a" (unwrap (recv ch))))
+  3)
+"#,
+        &[],
+    );
+    assert_eq!(out, "265252859812191058636308480000000 3.375\n7\n");
+    assert_eq!(code, Some(3));
+}
+
+/// A Cortex-M33's interrupts reach their handlers as a Cortex-M4's do.
+#[test]
+fn a_cortex_m33_handles_an_interrupt() {
+    let elf = built(
+        "m33_interrupt",
+        r#"
+(use std::board::enable-interrupt)
+#[interrupt(5)]
+(defun on-five () () (println "handled"))
+(defun main () ()
+  (enable-interrupt 5)
+  (unsafe (volatile-write-u32 #xE000E200 (as u32 32)))
+  (println "after"))
+"#,
+        "prog.elf",
+        &target_flags(M33.0, &[]),
+    );
+    let out = run_on(M33.1, &elf);
+    assert_eq!(text(&out.stdout), "handled\nafter\n", "stderr: {}", text(&out.stderr));
+    assert_eq!(out.status.code(), Some(0));
 }
 
 /// The program drives the board's UART itself through its registers (CMSDK

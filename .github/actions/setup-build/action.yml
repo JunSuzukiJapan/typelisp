@@ -87,7 +87,7 @@ runs:
         # The runtimes `typl -c --target <triple>` links
         # (scripts/build-wasm-runtime.sh, scripts/build-embedded-runtime.sh)
         # are built for these targets.
-        retry rustup target add wasm32-wasip1 wasm32-unknown-unknown thumbv7em-none-eabihf
+        retry rustup target add wasm32-wasip1 wasm32-unknown-unknown thumbv7em-none-eabihf thumbv8m.main-none-eabihf
 
     # What the WebAssembly tests run the modules they build under
     # (scripts/run-wasi.mjs, and the loader typl writes beside a

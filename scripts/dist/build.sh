@@ -41,11 +41,12 @@
 #   would start on a macOS its code was not built for.
 #
 # - Built with `--features wasm,embedded`: typl holds the runtimes `typl -c
-#   --target wasm32-wasip1`, `--target wasm32-unknown-unknown` and `--target
-#   thumbv7em-none-eabihf` link, so the toolchain this runs with is a rustup
-#   one with the three targets added (`rustup target add wasm32-wasip1
-#   wasm32-unknown-unknown thumbv7em-none-eabihf`). The checks at the end run
-#   the modules under Node and the board's executable under QEMU
+#   --target wasm32-wasip1`, `--target wasm32-unknown-unknown`, `--target
+#   thumbv7em-none-eabihf` and `--target thumbv8m.main-none-eabihf` link, so
+#   the toolchain this runs with is a rustup one with the four targets added
+#   (`rustup target add wasm32-wasip1 wasm32-unknown-unknown
+#   thumbv7em-none-eabihf thumbv8m.main-none-eabihf`). The checks at the end
+#   run the modules under Node and the boards' executables under QEMU
 #   (`qemu-system-arm`).
 #
 # A cargo of its own in target/dist/build, so the ordinary release build in
@@ -219,6 +220,10 @@ printf '(defun main () i32 (println "ok") 0)\n' > "$work/aot.typl"
 "$typl" -c "$work/aot.typl" -o "$work/aot.elf" --target thumbv7em-none-eabihf
 [ "$(qemu-system-arm -M mps2-an386 -nographic -semihosting-config enable=on,target=native -kernel "$work/aot.elf" < /dev/null)" = ok ] ||
     { echo "error: the thumbv7em-none-eabihf check failed" >&2; exit 1; }
+# And on its Cortex-M33 board.
+"$typl" -c "$work/aot.typl" -o "$work/aot33.elf" --target thumbv8m.main-none-eabihf
+[ "$(qemu-system-arm -M mps2-an505 -nographic -semihosting-config enable=on,target=native -kernel "$work/aot33.elf" < /dev/null)" = ok ] ||
+    { echo "error: the thumbv8m.main-none-eabihf check failed" >&2; exit 1; }
 
 version="$("$typl" --version | awk '{ print $2 }')"
 name="typelisp-$version-$arch"

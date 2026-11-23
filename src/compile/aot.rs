@@ -300,9 +300,10 @@ pub struct BuildOptions {
     pub no_cons: bool,
     /// What the executable runs on (`--target`).
     pub target: Target,
-    /// For a board ([`Target::Thumbv7em`]): the file that says where its
-    /// flash and RAM are (`--linker-script`), in the form of `cortex-m-rt`'s
-    /// `memory.x`. `None` is the board QEMU's `mps2-an386` is.
+    /// For a board ([`Target::board`]): the file that says where its flash
+    /// and RAM are (`--linker-script`), in the form of `cortex-m-rt`'s
+    /// `memory.x`. `None` is the QEMU board that stands for the target's
+    /// core ([`embedded::Board::qemu_memory`]).
     pub linker_script: Option<std::path::PathBuf>,
     /// For a board: who gives the board's functions (`--board-functions`).
     pub board_functions: BoardFunctions,
@@ -358,6 +359,8 @@ pub enum Target {
     /// `thumbv7em-none-eabihf`: an ELF executable for a Cortex-M4F or M7
     /// board without an operating system.
     Thumbv7em,
+    /// `thumbv8m.main-none-eabihf`: the same for a Cortex-M33 board.
+    Thumbv8mMain,
 }
 
 impl Target {
@@ -367,11 +370,30 @@ impl Target {
             "wasm32-wasip1" => Ok(Target::Wasip1),
             "wasm32-unknown-unknown" => Ok(Target::Wasm32Unknown),
             "thumbv7em-none-eabihf" => Ok(Target::Thumbv7em),
+            "thumbv8m.main-none-eabihf" => Ok(Target::Thumbv8mMain),
             _ => Err(format!(
-                "--target: unknown target `{}` (the ones there are: wasm32-wasip1, wasm32-unknown-unknown, thumbv7em-none-eabihf)",
-                name
+                "--target: unknown target `{}` (the ones there are: wasm32-wasip1, wasm32-unknown-unknown, {})",
+                name,
+                Target::board_names()
             )),
         }
+    }
+
+    /// The targets that are boards without an operating system.
+    pub const BOARDS: [Target; 2] = [Target::Thumbv7em, Target::Thumbv8mMain];
+
+    /// The board the target is, if it is one.
+    pub fn board(self) -> Option<&'static embedded::Board> {
+        match self {
+            Target::Thumbv7em => Some(&embedded::CORTEX_M4),
+            Target::Thumbv8mMain => Some(&embedded::CORTEX_M33),
+            Target::Host | Target::Wasip1 | Target::Wasm32Unknown => None,
+        }
+    }
+
+    /// The boards' triples, for a message.
+    pub fn board_names() -> String {
+        Target::BOARDS.iter().map(|t| t.name()).collect::<Vec<_>>().join(", ")
     }
 
     /// The runtime crates the target has not got, whose shims a program
@@ -382,7 +404,7 @@ impl Target {
             Target::Host => &[],
             Target::Wasip1 => &[RuntimeCrate::Posix],
             Target::Wasm32Unknown => &[RuntimeCrate::Sys, RuntimeCrate::Posix],
-            Target::Thumbv7em => &[RuntimeCrate::Sys, RuntimeCrate::Posix, RuntimeCrate::Front],
+            Target::Thumbv7em | Target::Thumbv8mMain => &[RuntimeCrate::Sys, RuntimeCrate::Posix, RuntimeCrate::Front],
         }
     }
 
@@ -393,6 +415,7 @@ impl Target {
             Target::Wasip1 => "wasm32-wasip1",
             Target::Wasm32Unknown => "wasm32-unknown-unknown",
             Target::Thumbv7em => "thumbv7em-none-eabihf",
+            Target::Thumbv8mMain => "thumbv8m.main-none-eabihf",
         }
     }
 }
@@ -405,7 +428,7 @@ pub fn compile_file_with(source_path: &str, output_path: &str, options: &BuildOp
     crate::compile::driver::emitted_layout_is_runnable()?;
     // A board's C functions are the board's: while its program compiles,
     // `defffi` does not look for them here.
-    let _c_functions = crate::compile::ffi::CFunctionsOn::target(options.target == Target::Thumbv7em);
+    let _c_functions = crate::compile::ffi::CFunctionsOn::target(options.target.board().is_some());
     let source =
         fs::read_to_string(source_path).map_err(|e| format!("failed to read \"{}\": {}", source_path, e))?;
 
@@ -760,11 +783,11 @@ pub fn compile_file_with(source_path: &str, output_path: &str, options: &BuildOp
         // The functions a board runs when an interrupt comes.
         let mut interrupt_handlers = Vec::new();
         for (vector, path) in chk.interrupt_handlers() {
-            if options.target != Target::Thumbv7em {
+            if options.target.board().is_none() {
                 return Err(format!(
-                    "`{}` is an interrupt handler, and only a board has interrupts: compile it with --target {}",
+                    "`{}` is an interrupt handler, and only a board has interrupts: compile it with --target for one ({})",
                     path,
-                    Target::Thumbv7em.name()
+                    Target::board_names()
                 ));
             }
             let symbol = target_symbol_name(&CompileTarget::Fn(path));
@@ -795,7 +818,7 @@ pub fn compile_file_with(source_path: &str, output_path: &str, options: &BuildOp
                     Some(cells) => cells,
                     None if options.no_cons => 0,
                     None if eval_env.is_some() => EVAL_HEAP_CAPACITY,
-                    None if options.target == Target::Thumbv7em => BOARD_HEAP_CAPACITY,
+                    None if options.target.board().is_some() => BOARD_HEAP_CAPACITY,
                     None => typelisp_rt::DEFAULT_AOT_HEAP_CAPACITY,
                 },
                 fixed: options.heap_cells.is_some() || options.no_cons,
@@ -817,7 +840,7 @@ pub fn compile_file_with(source_path: &str, output_path: &str, options: &BuildOp
                 let shim = |table: &'static [(&'static str, &'static str)]| {
                     move |name: &str| table.iter().find(|(shim, _)| *shim == name).map(|(_, what)| what.to_string())
                 };
-                if options.target != Target::Thumbv7em {
+                if options.target.board().is_none() {
                     let entry = m.get_function(ENTRY_POINT_NAME).expect("build_main_wrapper defined `main`");
                     let uses = reach::uses(&m, entry, shim(crate::compile::externs::BOARD_ONLY_SHIMS));
                     if !uses.is_empty() {
@@ -838,11 +861,11 @@ pub fn compile_file_with(source_path: &str, output_path: &str, options: &BuildOp
             })
             .and_then(|()| match options.target {
                 Target::Host => write_executable(&m, output_path, &link_libraries, &items),
-                Target::Wasip1 | Target::Wasm32Unknown | Target::Thumbv7em => {
+                Target::Wasip1 | Target::Wasm32Unknown | Target::Thumbv7em | Target::Thumbv8mMain => {
                     let missing = options.target.missing_runtimes();
                     // A board calls its vendor's C functions; a WebAssembly
                     // module has no C library to find them in.
-                    let c_functions = options.target != Target::Thumbv7em;
+                    let c_functions = options.target.board().is_none();
                     let entry = m.get_function(ENTRY_POINT_NAME).expect("build_main_wrapper defined `main`");
                     let uses = reach::uses(&m, entry, |name| {
                         if let Some(what) = crate::compile::externs::unavailable_in(missing, name) {
@@ -854,7 +877,7 @@ pub fn compile_file_with(source_path: &str, output_path: &str, options: &BuildOp
                         let header = format!("--target {}: the program uses what the target does not have:", options.target.name());
                         return Err(reach::report(&header, &uses));
                     }
-                    if options.target == Target::Thumbv7em {
+                    if options.target.board().is_some() {
                         embedded::write_executable(&m, output_path, &items, options)
                     } else {
                         wasm::write_module(&m, output_path, &items, options.target)

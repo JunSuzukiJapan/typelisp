@@ -20,8 +20,8 @@
 #   scripts/build-embedded-runtime.sh            # the debug profile
 #   scripts/build-embedded-runtime.sh release    # the release profile
 #
-# Needs a rustup toolchain with the thumbv7em-none-eabihf target
-# (`rustup target add thumbv7em-none-eabihf`): $TYPELISP_EMBEDDED_TOOLCHAIN, or
+# Needs a rustup toolchain with the boards' targets (`rustup target add
+# thumbv7em-none-eabihf thumbv8m.main-none-eabihf`): $TYPELISP_EMBEDDED_TOOLCHAIN, or
 # rustup's default one when that is not set. A Rust that is not rustup's (a
 # package manager's) has no such target to add, so the toolchain is asked of
 # rustup rather than taken from PATH.
@@ -54,7 +54,7 @@ fi
 target_dir="${CARGO_TARGET_DIR:-$root/target}"
 build_dir="$target_dir/embedded"
 
-for target in thumbv7em-none-eabihf; do
+for target in thumbv7em-none-eabihf thumbv8m.main-none-eabihf; do
   if [ ! -d "$sysroot/lib/rustlib/$target" ]; then
     echo "build-embedded-runtime.sh: the toolchain at $sysroot has no $target target; run: rustup target add $target" >&2
     exit 1

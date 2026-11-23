@@ -181,19 +181,33 @@ fn bundled_wasm(cargo: &str, manifest_dir: &std::path::Path, target_dir: &std::p
 }
 
 // With the `embedded` feature, a release `typl` also carries what `typl -c
-// --target thumbv7em-none-eabihf` links a board's executable with: the
-// runtime built for the triple twice, for a board that gives its functions as
+// --target <board>` links a board's executable with, for each board's triple
+// (`BOARD_TRIPLES`): the runtime built for the triple twice, for a board that gives its functions as
 // C functions (`typelisp-rt-embedded`) and with them over semihosting
 // (`typelisp-rt-semihosting`), and `cortex-m-rt`'s linker script `link.x`,
 // which that build writes where its build script runs (`out_dir`, which the
-// build's messages say). Without the feature it carries none of it.
+// build's messages say). Without the feature it carries none of it. Each
+// file is named to the crate by `TYPELISP_BUNDLED_EMBEDDED_<TRIPLE>_...`, the
+// triple in capitals with `_` for what is not a letter or digit.
 //
 // The linker is not carried, for the reason `bundled_wasm` gives.
 fn bundled_embedded(cargo: &str, manifest_dir: &std::path::Path, target_dir: &std::path::Path, hasher: &mut std::hash::DefaultHasher) {
     if std::env::var_os("CARGO_FEATURE_EMBEDDED").is_none() {
         return;
     }
-    let triple = "thumbv7em-none-eabihf";
+    for triple in BOARD_TRIPLES {
+        bundled_board(cargo, manifest_dir, target_dir, triple, hasher);
+    }
+    println!("cargo:rustc-cfg=typelisp_bundled_embedded");
+}
+
+/// The triples of the boards `typl -c --target` builds for
+/// (`compile::aot::Target::BOARDS`).
+const BOARD_TRIPLES: [&str; 2] = ["thumbv7em-none-eabihf", "thumbv8m.main-none-eabihf"];
+
+/// What [`bundled_embedded`] carries for the board `triple`.
+fn bundled_board(cargo: &str, manifest_dir: &std::path::Path, target_dir: &std::path::Path, triple: &str, hasher: &mut std::hash::DefaultHasher) {
+    let triple_key: String = triple.chars().map(|c| if c.is_ascii_alphanumeric() { c.to_ascii_uppercase() } else { '_' }).collect();
     let rustc = std::env::var("RUSTC").expect("cargo sets RUSTC");
     let sysroot = std::process::Command::new(&rustc)
         .args(["--print", "sysroot"])
@@ -238,11 +252,10 @@ fn bundled_embedded(cargo: &str, manifest_dir: &std::path::Path, target_dir: &st
             .unwrap_or_else(|| panic!("build.rs: building {} did not say where cortex-m-rt wrote link.x", package));
         link_x = Some(std::path::PathBuf::from(out_dir).join("link.x"));
         let archive = dir.join(triple).join("release").join(format!("lib{}.a", package.replace('-', "_")));
-        bundle_file(&format!("TYPELISP_BUNDLED_EMBEDDED_{}_STATICLIB", key), &archive, hasher);
+        bundle_file(&format!("TYPELISP_BUNDLED_EMBEDDED_{}_{}_STATICLIB", triple_key, key), &archive, hasher);
     }
     let link_x = link_x.expect("two runtimes were built");
-    bundle_file("TYPELISP_BUNDLED_EMBEDDED_LINK_X", &link_x, hasher);
-    println!("cargo:rustc-cfg=typelisp_bundled_embedded");
+    bundle_file(&format!("TYPELISP_BUNDLED_EMBEDDED_{}_LINK_X", triple_key), &link_x, hasher);
 }
 
 // `path` for `include_bytes!(env!(name))`, and its bytes into the build id.
