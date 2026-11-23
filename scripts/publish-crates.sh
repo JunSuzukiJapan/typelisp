@@ -22,7 +22,7 @@ case "${1:-}" in
     *) echo "usage: scripts/publish-crates.sh [--dry-run]" >&2; exit 2 ;;
 esac
 
-crates=(typelisp-mem typelisp-abi typelisp-print typelisp-read typelisp-rt typelisp-front typelisp)
+crates=(typelisp-mem typelisp-abi typelisp-print typelisp-read typelisp-rt typelisp-rt-sys typelisp-rt-posix typelisp-rt-embedded typelisp-front typelisp)
 
 version="$(awk '/^\[workspace\.package\]/ { s = 1; next } /^\[/ { s = 0 } s && $1 == "version" { gsub(/"/, "", $3); print $3; exit }' Cargo.toml)"
 [ -n "$version" ] || { echo "error: no version in [workspace.package]" >&2; exit 1; }
