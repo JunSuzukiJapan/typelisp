@@ -544,7 +544,7 @@ Alokację, odczyt i zapis zapisuje się w następujących formach. Wszystkie mo�
 | `(c-alloc T)` / `(c-alloc T n)` | Alokuje `n` wartości typu `T` (1, jeśli pominięto). Zawartość jest wypełniona zerami. Zwraca `(ptr T)` |
 | `(c-ref p i)` | Wskaźnik na element `i` od `p`. Błąd, jeśli poza zaalokowanym zakresem |
 | `(c-deref p)` / `(setf (c-deref p) v)` | Odczytuje / zapisuje skalar, na który wskazuje `p` |
-| `(volatile-read-u32 addr)` / `(volatile-write-u32 addr v)` | odczytuje lub zapisuje rejestr pod adresem `addr` (`int`), dokładnie raz, w tym miejscu. Tak samo `-u8` i `-u16` |
+| `(volatile-read-u32 addr)` / `(volatile-write-u32 addr v)` | Odczytuje lub zapisuje rejestr pod adresem `addr` (`int`), dokładnie raz, w tym miejscu. Tak samo `-u8` i `-u16` |
 | `p::field` / `(setf p::field v)` | Odczytuje / zapisuje pole struktury. Odczyt pola będącego osadzoną strukturą daje jej adres (`(ptr inner-type)`) |
 | `(as ptr p)` | Zapomina typ, tworząc `ptr` (do przekazania do czegoś takiego jak `void *` w `qsort`). Nie ma konwersji z powrotem |
 

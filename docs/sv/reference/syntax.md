@@ -544,7 +544,7 @@ Allokering, läsning och skrivning skrivs i följande former. Alla kan användas
 | `(c-alloc T)` / `(c-alloc T n)` | Allokerar `n` värden av `T` (1 om utelämnat). Innehållet fylls med 0. Returnerar en `(ptr T)` |
 | `(c-ref p i)` | En pekare till element `i` från `p`. Ett fel om utanför det allokerade intervallet |
 | `(c-deref p)` / `(setf (c-deref p) v)` | Läser / skriver den skalär `p` pekar på |
-| `(volatile-read-u32 addr)` / `(volatile-write-u32 addr v)` | läser eller skriver registret på adressen `addr` (en `int`), exakt en gång, där den står. Samma för `-u8` och `-u16` |
+| `(volatile-read-u32 addr)` / `(volatile-write-u32 addr v)` | Läser eller skriver registret på adressen `addr` (en `int`), exakt en gång, där den står. Samma för `-u8` och `-u16` |
 | `p::field` / `(setf p::field v)` | Läser / skriver ett fält i en struct. Att läsa ett fält som är en inbäddad struct ger dess adress (`(ptr inner-type)`) |
 | `(as ptr p)` | Glömmer typen och gör en `ptr` (för att skicka till något som `void *` i `qsort`). Det finns ingen konvertering tillbaka |
 

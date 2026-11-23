@@ -542,7 +542,7 @@ Allocation, reading and writing are written in the following forms. All of them 
 | `(c-alloc T)` / `(c-alloc T n)` | Allocates `n` values of `T` (1 if omitted). The contents are filled with 0. Returns a `(ptr T)` |
 | `(c-ref p i)` | A pointer to element `i` from `p`. An error if outside the allocated range |
 | `(c-deref p)` / `(setf (c-deref p) v)` | Reads / writes the scalar `p` points to |
-| `(volatile-read-u32 addr)` / `(volatile-write-u32 addr v)` | read or write the register at address `addr` (an `int`), exactly once, where written. The same for `-u8` and `-u16` |
+| `(volatile-read-u32 addr)` / `(volatile-write-u32 addr v)` | Read or write the register at address `addr` (an `int`), exactly once, where written. The same for `-u8` and `-u16` |
 | `p::field` / `(setf p::field v)` | Reads / writes a field of a struct. Reading a field that is an embedded struct gives its address (`(ptr inner-type)`) |
 | `(as ptr p)` | Forgets the type, making a `ptr` (to pass to something like the `void *` of `qsort`). There is no conversion back |
 

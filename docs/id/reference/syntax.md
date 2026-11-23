@@ -570,7 +570,7 @@ Alokasi, pembacaan, dan penulisan ditulis dalam bentuk berikut. Semuanya hanya d
 | `(c-alloc T)` / `(c-alloc T n)` | Mengalokasikan `n` nilai `T` (1 jika dihilangkan). Isinya diisi 0. Mengembalikan `(ptr T)` |
 | `(c-ref p i)` | Pointer ke elemen `i` dari `p`. Kesalahan jika di luar rentang yang dialokasikan |
 | `(c-deref p)` / `(setf (c-deref p) v)` | Membaca / menulis skalar yang ditunjuk `p` |
-| `(volatile-read-u32 addr)` / `(volatile-write-u32 addr v)` | membaca atau menulis register di alamat `addr` (sebuah `int`), tepat sekali, di tempat ia ditulis. Sama untuk `-u8` dan `-u16` |
+| `(volatile-read-u32 addr)` / `(volatile-write-u32 addr v)` | Membaca atau menulis register di alamat `addr` (sebuah `int`), tepat sekali, di tempat ia ditulis. Sama untuk `-u8` dan `-u16` |
 | `p::field` / `(setf p::field v)` | Membaca / menulis field sebuah struct. Membaca field yang berupa struct tersemat memberikan alamatnya (`(ptr inner-type)`) |
 | `(as ptr p)` | Melupakan tipe, menjadikannya `ptr` (untuk diserahkan ke sesuatu seperti `void *` pada `qsort`). Tidak ada konversi balik |
 

@@ -565,7 +565,7 @@ verwenden.
 | `(c-alloc T)` / `(c-alloc T n)` | Legt `n` Werte von `T` an (1, wenn weggelassen). Der Inhalt wird mit 0 gefüllt. Gibt einen `(ptr T)` zurück |
 | `(c-ref p i)` | Ein Zeiger auf Element `i` ab `p`. Ein Fehler, wenn außerhalb des angelegten Bereichs |
 | `(c-deref p)` / `(setf (c-deref p) v)` | Liest / schreibt den Skalar, auf den `p` zeigt |
-| `(volatile-read-u32 addr)` / `(volatile-write-u32 addr v)` | liest oder schreibt das Register an der Adresse `addr` (ein `int`), genau einmal, an dieser Stelle. Ebenso `-u8` und `-u16` |
+| `(volatile-read-u32 addr)` / `(volatile-write-u32 addr v)` | Liest oder schreibt das Register an der Adresse `addr` (ein `int`), genau einmal, an dieser Stelle. Ebenso `-u8` und `-u16` |
 | `p::field` / `(setf p::field v)` | Liest / schreibt ein Feld eines Structs. Das Lesen eines Feldes, das ein eingebettetes Struct ist, liefert dessen Adresse (`(ptr inner-type)`) |
 | `(as ptr p)` | Vergisst den Typ und macht einen `ptr` daraus (um ihn an etwas wie das `void *` von `qsort` zu übergeben). Eine Umwandlung zurück gibt es nicht |
 

@@ -540,7 +540,7 @@ A alocação, a leitura e a escrita são escritas nas formas a seguir. Todas só
 | `(c-alloc T)` / `(c-alloc T n)` | Aloca `n` valores de `T` (1 se omitido). O conteúdo é preenchido com 0. Devolve um `(ptr T)` |
 | `(c-ref p i)` | Um ponteiro para o elemento `i` a partir de `p`. Erro se estiver fora do intervalo alocado |
 | `(c-deref p)` / `(setf (c-deref p) v)` | Lê / escreve o escalar para o qual `p` aponta |
-| `(volatile-read-u32 addr)` / `(volatile-write-u32 addr v)` | lê ou escreve o registrador no endereço `addr` (um `int`), exatamente uma vez, onde está escrito. O mesmo para `-u8` e `-u16` |
+| `(volatile-read-u32 addr)` / `(volatile-write-u32 addr v)` | Lê ou escreve o registrador no endereço `addr` (um `int`), exatamente uma vez, onde está escrito. O mesmo para `-u8` e `-u16` |
 | `p::field` / `(setf p::field v)` | Lê / escreve um campo de uma struct. Ler um campo que é uma struct embutida dá o seu endereço (`(ptr tipo-interno)`) |
 | `(as ptr p)` | Esquece o tipo, tornando-o um `ptr` (para passá-lo a algo como o `void *` de `qsort`). Não há conversão de volta |
 
