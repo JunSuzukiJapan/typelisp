@@ -14,7 +14,7 @@ use crate::dump::{CheckerDelta, RegistrySignature};
 use crate::types::{Path, Type};
 use crate::{Error, Heap, Loc, Value};
 
-use super::attribute::{TestCase, TestForms, Tests};
+use super::attribute::{TestCase, TestForms, Attributed};
 use super::expr::Notes;
 use super::registry::{AdtKind, Registry, Since};
 use super::toplevel::{check_toplevel, in_module, publish, publish_all, publish_name_view, publish_uses, CREATED};
@@ -112,8 +112,9 @@ pub struct Checker {
     /// Every C callback entry the checked code asks for, in the order first
     /// asked.
     callbacks: Vec<crate::ffi_callback::CallbackSig>,
-    /// What a `#[test]` definition is checked into, and the tests found.
-    tests: Tests,
+    /// What the definitions with an attribute are checked into: the tests
+    /// found, and the interrupt handlers.
+    attributed: Attributed,
     /// What checking has written down beside the trees.
     notes: Notes,
     /// The module forms are checked in now.
@@ -150,7 +151,7 @@ impl Checker {
             expr_ty: None,
             warnings: RefCell::default(),
             callbacks: Vec::new(),
-            tests: Tests::default(),
+            attributed: Attributed::default(),
             notes: Notes::default(),
             ns: NsId::ROOT,
             file_ns: Vec::new(),
@@ -198,7 +199,7 @@ impl Checker {
         // into the form, which is then reachable from nothing but the caller.
         // Nothing allocates between releasing them and the caller rooting it.
         let roots_base = heap.root_count();
-        let result = check_toplevel(reg, expander, heap, site, v, loc.clone(), &mut self.warnings.borrow_mut(), &self.notes, &mut self.tests);
+        let result = check_toplevel(reg, expander, heap, site, v, loc.clone(), &mut self.warnings.borrow_mut(), &self.notes, &mut self.attributed);
         heap.truncate_roots(roots_base);
         match result {
             Ok((form, ty, reached)) => {
@@ -258,7 +259,7 @@ impl Checker {
             return Err(at(Error::TypeError("an `in-module` form has no type".into())));
         }
         let roots_base = heap.root_count();
-        let result = check_toplevel(reg, expander, heap, site, v, loc.clone(), &mut self.warnings.borrow_mut(), &self.notes, &mut self.tests);
+        let result = check_toplevel(reg, expander, heap, site, v, loc.clone(), &mut self.warnings.borrow_mut(), &self.notes, &mut self.attributed);
         heap.truncate_roots(roots_base);
         reg.rollback();
         match result.map_err(at)? {
@@ -324,13 +325,13 @@ impl Checker {
     /// What a `#[test]` definition and a top-level expression are checked
     /// into — see [`TestForms`].
     pub fn set_test_forms(&mut self, forms: TestForms) {
-        self.tests.forms = forms;
+        self.attributed.forms = forms;
     }
 
     /// The tests recorded under [`TestForms::Collect`] since the last call,
     /// in the order they were defined.
     pub fn take_tests(&mut self) -> Vec<TestCase> {
-        std::mem::take(&mut self.tests.found)
+        std::mem::take(&mut self.attributed.found)
     }
 
     /// Every callback entry the checked code asks for, in the order it first
@@ -338,6 +339,12 @@ impl Checker {
     /// callback and registers it at startup.
     pub fn ffi_callbacks(&self) -> Vec<crate::ffi_callback::CallbackSig> {
         self.callbacks.clone()
+    }
+
+    /// The interrupt handlers (`#[interrupt(N)]`, `#[exception(NAME)]`), each
+    /// with the number of the vector-table entry it is at.
+    pub fn interrupt_handlers(&self) -> Vec<(u16, Path)> {
+        self.attributed.handlers.iter().map(|(v, p)| (*v, *p)).collect()
     }
 
     /// Reports every `defsignature` in this unit that never got a definition.

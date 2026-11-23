@@ -96,6 +96,13 @@ pub struct FrameStack {
     /// "has frames" at the end of every drive ([`FrameStack::drive`]) and on
     /// drop.
     counted: bool,
+    /// Whether an interrupt handler may run while this chain's compiled code
+    /// does ([`crate::interrupt::outside`]): a task's chain, which the
+    /// scheduler drives with nothing of its own half done. Not a chain a
+    /// machine frame drives — a `print-object` the printer called, a C
+    /// callback, an initialiser — whose caller may be part way through
+    /// something a handler would touch too.
+    interruptible: bool,
 }
 
 /// How many chains in the process have frames standing: suspended with a
@@ -148,7 +155,13 @@ impl Default for FrameStack {
 
 impl FrameStack {
     pub fn new() -> Self {
-        FrameStack { frames: Vec::new(), counted: false }
+        FrameStack { frames: Vec::new(), counted: false, interruptible: false }
+    }
+
+    /// A task's chain, whose compiled code an interrupt handler may break
+    /// into — see [`FrameStack::interruptible`].
+    pub fn for_task() -> Self {
+        FrameStack { frames: Vec::new(), counted: false, interruptible: true }
     }
 
     /// How deep the chain is. Zero means finished or not yet started.
@@ -173,7 +186,7 @@ impl FrameStack {
         let published = call_state::with(|s| s.enter(args, env));
         // Nothing may allocate between here and the prologue's copy — see
         // `call_state`'s doc comment.
-        let status = unsafe { activation(f, 0) };
+        let status = unsafe { activation(f, 0, self.interruptible) };
         match call_state::with(|s| s.entered(published)) {
             // SAFETY: the word is the address a prologue just published.
             Some(data) => self.frames.push(Entry { body: f, raw: unsafe { FrameRaw::from_data(data as *mut i64) }, roots }),
@@ -220,7 +233,7 @@ impl FrameStack {
         // SAFETY: a frame on the chain is live.
         unsafe {
             raw.set_word(typelisp_abi::FRAME_VALUE_SLOT, value);
-            activation_on(body, raw)
+            activation_on(body, raw, self.interruptible)
         }
     }
 
@@ -372,7 +385,7 @@ impl FrameStack {
             Some(top) => (top.body, top.raw),
             None => panic!("resume: there is no suspended chain to resume"),
         };
-        let status = unsafe { activation_on(top.0, top.1) };
+        let status = unsafe { activation_on(top.0, top.1, self.interruptible) };
         self.drive(heap, base, status)
     }
 
@@ -472,7 +485,7 @@ impl FrameStack {
                     // SAFETY: a frame on the chain is live.
                     status = unsafe {
                         caller_raw.set_word(typelisp_abi::FRAME_VALUE_SLOT, value);
-                        activation_on(caller_body, caller_raw)
+                        activation_on(caller_body, caller_raw, self.interruptible)
                     };
                 }
                 STATUS_CALL => match take_pending_call() {
@@ -495,7 +508,9 @@ impl FrameStack {
                         // catch is `activation`'s, for its reason: this is a
                         // compiled activation too.
                         crate::Callee::Classic { f, env } => {
-                            let v = unsafe { f(args.as_ptr(), args.len() as u32, env.as_ptr(), env.len() as u32) };
+                            let v = crate::interrupt::outside(self.interruptible, || unsafe {
+                                f(args.as_ptr(), args.len() as u32, env.as_ptr(), env.len() as u32)
+                            });
                             status = match typelisp_abi::is_raised() {
                                 true => taken_raise(true, STATUS_UNWIND, "a classic-ABI closure body"),
                                 false => self.hand_back(v),
@@ -523,7 +538,7 @@ impl FrameStack {
                             // SAFETY: as above, under the plain
                             // `compiled_fn_type` signature.
                             let f: crate::ClassicMethodFn = unsafe { core::mem::transmute(ptr) };
-                            let v = unsafe { f(args.as_ptr(), args.len() as u32) };
+                            let v = crate::interrupt::outside(self.interruptible, || unsafe { f(args.as_ptr(), args.len() as u32) });
                             status = match typelisp_abi::is_raised() {
                                 true => taken_raise(true, STATUS_UNWIND, "a classic-ABI method body"),
                                 false => self.hand_back(v),
@@ -573,7 +588,7 @@ impl FrameStack {
                 // SAFETY: a frame on the chain is live.
                 return Some(unsafe {
                     raw.set_word(typelisp_abi::FRAME_PC_SLOT, handler);
-                    activation_on(body, raw)
+                    activation_on(body, raw, self.interruptible)
                 });
             }
             let leaving = self.frames.pop().expect("a frame above the base");
@@ -601,8 +616,8 @@ fn frame_handler(raw: FrameRaw) -> i64 {
 
 /// [`activation`] resuming the frame `raw`: the body is handed the address of
 /// the frame's words, as the coroutine ABI says a resumed one is.
-unsafe fn activation_on(f: CoroutineFn, raw: FrameRaw) -> i64 {
-    activation(f, raw.data() as i64)
+unsafe fn activation_on(f: CoroutineFn, raw: FrameRaw, interruptible: bool) -> i64 {
+    activation(f, raw.data() as i64, interruptible)
 }
 
 /// Runs one compiled activation and takes what it raised.
@@ -619,8 +634,10 @@ unsafe fn activation_on(f: CoroutineFn, raw: FrameRaw) -> i64 {
 /// An activation that comes back with something else while an unwind waits
 /// went on running after a raise, which is a code generation bug: it is
 /// fatal here rather than a wrong answer later.
-unsafe fn activation(f: CoroutineFn, arg: i64) -> i64 {
-    let status = f(arg);
+///
+/// `interruptible` is the chain's [`FrameStack::interruptible`].
+unsafe fn activation(f: CoroutineFn, arg: i64, interruptible: bool) -> i64 {
+    let status = crate::interrupt::outside(interruptible, || f(arg));
     taken_raise(status & 0b11 == STATUS_UNWIND, status, "a compiled activation")
 }
 

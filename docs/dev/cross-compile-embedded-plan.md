@@ -146,6 +146,15 @@ release のランタイムでの測定（上と同じ hello）: `__text` 1,040,3
 
 割り込みハンドラを typelisp の関数で書く。ベクタテーブルに置けるのは、FFI のコールバックと同じく自由変数の無い関数だけにする。
 
+済（2026-11-23）。ユーザー決定: 割り込みは「すぐに対応する」。書き方は `#[interrupt(N)]`/`#[exception(NAME)]`（引数は括弧で囲む）。
+
+- 書き方: リーダーは `#[name(args)]` を `(name args...)` に読む。チェッカー（`typeck::attribute`）は引数無し・`()` を返す・型パラメータ無しの `defun` だけを受け、ベクタテーブルの番号（例外の番号、割り込みは 16+N）ごとに 1 つの関数を記録する（`Checker::interrupt_handlers`）。属性の名前は綴りで比べる（語彙に入れると `interrupt` などが予約語になるため）。`HardFault` はランタイムのもの。
+- いつ実行するか: その場で実行する。ただし**ランタイムが忙しい間は保留**し、忙しさが解けた瞬間に実行する。GC の最中だけでは足りない（確保の途中、スケジューラ・チャネル・出力の途中、借用中の thread-local も壊れる）ため、「コンパイル済みコードがランタイムの関数を呼んでいる間」を忙しいとした。ボード向けのリンクでは、モジュールが宣言する `rt_*` への呼び出しを、`typelisp_busy_enter`/`typelisp_busy_leave` で挟む内部関数に置き換える（`aot/embedded.rs` の `busy_around_runtime_calls`）。ランタイムがタスクのコンパイル済みコードを走らせる間（`FrameStack::for_task` の鎖の `activation`）だけ忙しさを外す（`interrupt::outside`）。入れ子のドライバ（`print-object`、C のコールバック、初期化）の中では外さない（呼んだ側が状態を使いかけのため）。保留中の割り込みは NVIC で止め、実行後にプログラムが有効にしていれば再開する。ハンドラどうしは割り込み合わない（優先度は全部同じ、実行中は保留）。
+- ハンドラの実行: `typelisp_rt::interrupt::run`。コンパイル済みコードとドライバの間の受け渡し（`call_state` と raise の受け皿）を退避してから走らせる（呼び出しを publish した直後に止められていることがある）。GC は止め、cons はアリーナを伸ばす（`Heap::inhibit_collection`、止めたプログラムがレジスタにだけ値を持っていることがある）。待つ操作は、スケジューラがその場で答えられるものだけ答え、他は panic（既存の `run_to_end`）。`sleep` とソケットの待ちはコンパイル時に断る（`externs::ALWAYS_WAITING_SHIMS` をハンドラから `reach` でたどる）。外へ出た panic/throw はプログラムを終わらせる。
+- ボードのランタイム: cortex-m-rt の `DefaultHandler` が全ての未処理の例外と割り込みを受けるので、そこから `interrupt::arrived` に渡す（`device` 機能やリンカスクリプトの追加は要らなかった）。NVIC の mask/unmask は `Controller` として起動時に渡す。
+- `enable-interrupt`/`disable-interrupt`（`std::board`）はランタイムの関数にした（ランタイムが止めた割り込みを再開してよいかを知るため）。ボード以外の `typl -c` で届けばコンパイルエラー（`externs::BOARD_ONLY_SHIMS`）、インタプリタでは実行時エラー。ハンドラのあるプログラムをボード以外へコンパイルするのもエラー。
+- テスト: `aot_embedded_test.rs`（NVIC の保留レジスタで自分で起こす割り込み、cons を作り続ける間の SysTick、ハンドラの panic、`sleep` の拒否、ボード以外での拒否）、`interrupt_test.rs`（属性の検査、インタプリタでは普通の関数）。
+
 ### 段階 7: AVR の判断
 
 LLVM 22 には AVR のバックエンドがある。判断の材料は次の 3 つ。

@@ -757,6 +757,22 @@ pub fn compile_file_with(source_path: &str, output_path: &str, options: &BuildOp
             let entry = crate::compile::ffi::emit_callback_entry_in_module(&m, &format!("tl_ffi_callback_entry${}", i), &sig)?;
             callback_entries.push((sig, entry));
         }
+        // The functions a board runs when an interrupt comes.
+        let mut interrupt_handlers = Vec::new();
+        for (vector, path) in chk.interrupt_handlers() {
+            if options.target != Target::Thumbv7em {
+                return Err(format!(
+                    "`{}` is an interrupt handler, and only a board has interrupts: compile it with --target {}",
+                    path,
+                    Target::Thumbv7em.name()
+                ));
+            }
+            let symbol = target_symbol_name(&CompileTarget::Fn(path));
+            let handler = m
+                .get_function(&symbol)
+                .ok_or_else(|| format!("internal error: the interrupt handler `{}` was not compiled into the module", path))?;
+            interrupt_handlers.push((vector, handler));
+        }
         build_main_wrapper(
             ctx,
             &m,
@@ -770,6 +786,7 @@ pub fn compile_file_with(source_path: &str, output_path: &str, options: &BuildOp
             &print_objects,
             &printer_globals,
             &callback_entries,
+            &interrupt_handlers,
             eval_env.as_deref().map(|bytes| (bytes, eval_ns, crate::release::is_release())),
             main_returns_int,
             options.target,
@@ -795,6 +812,29 @@ pub fn compile_file_with(source_path: &str, output_path: &str, options: &BuildOp
                     crate::compile::externs::CONS_MAKING_SHIMS.iter().find(|(shim, _)| *shim == name).map(|(_, what)| what.to_string())
                 });
                 if uses.is_empty() { Ok(()) } else { Err(reach::report("--no-cons: the program uses cons cells:", &uses)) }
+            })
+            .and_then(|()| {
+                let shim = |table: &'static [(&'static str, &'static str)]| {
+                    move |name: &str| table.iter().find(|(shim, _)| *shim == name).map(|(_, what)| what.to_string())
+                };
+                if options.target != Target::Thumbv7em {
+                    let entry = m.get_function(ENTRY_POINT_NAME).expect("build_main_wrapper defined `main`");
+                    let uses = reach::uses(&m, entry, shim(crate::compile::externs::BOARD_ONLY_SHIMS));
+                    if !uses.is_empty() {
+                        return Err(reach::report("the program uses what only a board has:", &uses));
+                    }
+                }
+                for (_, handler) in &interrupt_handlers {
+                    let uses = reach::uses(&m, *handler, shim(crate::compile::externs::ALWAYS_WAITING_SHIMS));
+                    if !uses.is_empty() {
+                        let header = format!(
+                            "the interrupt handler `{}` waits, and a handler cannot — it runs on top of the program it stopped:",
+                            handler.get_name().to_string_lossy()
+                        );
+                        return Err(reach::report(&header, &uses));
+                    }
+                }
+                Ok(())
             })
             .and_then(|()| match options.target {
                 Target::Host => write_executable(&m, output_path, &link_libraries, &items),
@@ -892,6 +932,7 @@ fn build_main_wrapper(
     print_objects: &[(typelisp_mem::TypeId, String)],
     printer_globals: &[(&str, usize)],
     callback_entries: &[(typelisp_front::ffi_callback::CallbackSig, inkwell::values::FunctionValue<'static>)],
+    interrupt_handlers: &[(u16, inkwell::values::FunctionValue<'static>)],
     eval_env: Option<(&[u8], typelisp_mem::NsId, bool)>,
     main_returns_int: bool,
     target: Target,
@@ -1015,6 +1056,13 @@ fn build_main_wrapper(
     // doc comment.
     if eval_env.is_some() {
         call_shim(ctx, module, &builder, "rt_eval_init", &[])?;
+    }
+    // A board's interrupt handlers (`typelisp_rt::interrupt`), each under its
+    // vector-table entry: after the heap, which a handler runs on.
+    for (vector, handler) in interrupt_handlers {
+        let i64_ty = ctx.i64_type();
+        let words = [i64_ty.const_int(u64::from(*vector), false), handler.as_global_value().as_pointer_value().const_to_int(i64_ty)];
+        call_shim(ctx, module, &builder, "rt_interrupt_register", &words)?;
     }
     // Trait-object vtables: after `rt_eval_init` (above), whose `Interp::new`
     // clears the table, and complete before `tl_main` can reach a `:dyn`
@@ -1770,7 +1818,7 @@ mod tests {
         builder.build_call(exit, &[code.into()], "").unwrap();
         builder.build_unreachable().unwrap();
 
-        build_main_wrapper(ctx, &module, "tl_main", &[], &[], &[], &[], &[], &[], &[], &[], &[], None, false, super::Target::Host, super::HeapInit { cells: typelisp_rt::DEFAULT_AOT_HEAP_CAPACITY, fixed: false, max_memory: None }).expect("build_main_wrapper failed");
+        build_main_wrapper(ctx, &module, "tl_main", &[], &[], &[], &[], &[], &[], &[], &[], &[], &[], None, false, super::Target::Host, super::HeapInit { cells: typelisp_rt::DEFAULT_AOT_HEAP_CAPACITY, fixed: false, max_memory: None }).expect("build_main_wrapper failed");
         module.verify().expect("module failed verification");
 
         let out_path = tmp_path("rt_ping_test");
@@ -1809,7 +1857,7 @@ mod tests {
         };
         builder.build_return(Some(&result)).unwrap();
 
-        build_main_wrapper(ctx, &module, "tl_main", &[], &[], &[], &[], &[], &[], &[], &[], &[], None, false, super::Target::Host, super::HeapInit { cells: typelisp_rt::DEFAULT_AOT_HEAP_CAPACITY, fixed: false, max_memory: None }).expect("build_main_wrapper failed");
+        build_main_wrapper(ctx, &module, "tl_main", &[], &[], &[], &[], &[], &[], &[], &[], &[], &[], None, false, super::Target::Host, super::HeapInit { cells: typelisp_rt::DEFAULT_AOT_HEAP_CAPACITY, fixed: false, max_memory: None }).expect("build_main_wrapper failed");
         module.verify().expect("module failed verification");
 
         let out_path = tmp_path("rt_heap_init_test");

@@ -300,6 +300,126 @@ fn the_program_drives_a_register_with_volatile_reads_and_writes() {
     assert_eq!(out.status.code(), Some(1));
 }
 
+/// An interrupt the program raises itself, by setting it pending in the
+/// NVIC (`0xE000E200`, a bit per interrupt): its handler runs before the
+/// program goes on, and the program's state is the handler's too.
+#[test]
+fn the_handler_of_an_interrupt_runs() {
+    let elf = built(
+        "board_interrupt",
+        r#"
+(use std::board::enable-interrupt)
+(defvar (*count* int) 0)
+
+#[interrupt(5)]
+(defun on-five () ()
+  (setf *count* (+ *count* 1))
+  (println "handled ~a" *count*))
+
+(defun main () int
+  (enable-interrupt 5)
+  (println "before")
+  (unsafe (volatile-write-u32 #xE000E200 (as u32 32)))
+  (println "after ~a" *count*)
+  (unsafe (volatile-write-u32 #xE000E200 (as u32 32)))
+  (println "end ~a" *count*)
+  *count*)
+"#,
+        "prog.elf",
+        &board_flags(&[]),
+    );
+    let out = run_board(&elf);
+    assert_eq!(text(&out.stdout), "before\nhandled 1\nafter 1\nhandled 2\nend 2\n", "stderr: {}", text(&out.stderr));
+    assert_eq!(out.status.code(), Some(2));
+}
+
+/// The core's timer (SysTick, every millisecond) breaks into a program that
+/// makes cons cells and collects all the while; the handler allocates too.
+#[test]
+fn a_timer_s_handler_runs_while_the_program_allocates() {
+    let elf = built(
+        "board_systick",
+        r#"
+(defvar (*ticks* int) 0)
+(defvar (*seen* Vector<int>) (Vector::new))
+
+#[exception(SysTick)]
+(defun on-tick () ()
+  (setf *ticks* (+ *ticks* 1))
+  (when (< (len *seen*) 5)
+    (push *seen* *ticks*)))
+
+(defun build ((n int) (acc Option<Sexpr>)) Option<Sexpr>
+  (if (= n 0) acc (build (- n 1) (Some (Sexpr::Cons (Sexpr::Int n) acc)))))
+
+(defun main () ()
+  (unsafe
+    (volatile-write-u32 #xE000E014 (as u32 25000))
+    (volatile-write-u32 #xE000E018 (as u32 0))
+    (volatile-write-u32 #xE000E010 (as u32 7)))
+  (let ((built 0))
+    (loop
+      (when (is-some (build 2000 ())) (setf built (+ built 1)))
+      (when (>= *ticks* 20) (break)))
+    (unsafe (volatile-write-u32 #xE000E010 (as u32 0)))
+    (println "~a ~a" *seen* (> built 0))))
+"#,
+        "prog.elf",
+        &board_flags(&[]),
+    );
+    let out = run_board(&elf);
+    assert_eq!(text(&out.stdout), "#(1 2 3 4 5) true\n", "stderr: {}", text(&out.stderr));
+    assert_eq!(out.status.code(), Some(0));
+}
+
+/// A panic out of a handler ends the program as an uncaught one does.
+#[test]
+fn a_panic_in_a_handler_ends_the_program() {
+    let elf = built(
+        "board_interrupt_panic",
+        r#"
+(use std::board::enable-interrupt)
+#[interrupt(3)]
+(defun on-three () () (panic "in the handler"))
+(defun main () ()
+  (enable-interrupt 3)
+  (unsafe (volatile-write-u32 #xE000E200 (as u32 8)))
+  (println "not reached"))
+"#,
+        "prog.elf",
+        &board_flags(&[]),
+    );
+    let out = run_board(&elf);
+    assert_eq!(text(&out.stdout), "");
+    assert!(text(&out.stderr).contains("panic: in the handler"), "stderr: {}", text(&out.stderr));
+    assert_eq!(out.status.code(), Some(1));
+}
+
+/// A handler cannot wait: it runs on top of the program it stopped.
+#[test]
+fn a_handler_that_sleeps_is_refused() {
+    let e = refused(
+        "board_interrupt_sleep",
+        r#"
+#[interrupt(3)]
+(defun on-three () () (sleep 0.1))
+(defun main () () (println "hi"))
+"#,
+    );
+    assert!(e.contains("waits, and a handler cannot") && e.contains("`sleep`"), "unexpected error: {}", e);
+}
+
+/// Only a board has interrupts.
+#[test]
+fn interrupts_are_refused_off_a_board() {
+    let (out, _) = build("native_interrupt", "#[interrupt(3)]\n(defun on-three () () (println \"x\"))\n(defun main () () (println \"hi\"))\n", "prog", &[]);
+    assert_eq!(out.status.code(), Some(1));
+    assert!(text(&out.stderr).contains("only a board has interrupts"), "stderr: {}", text(&out.stderr));
+    let (out, _) = build("native_enable_interrupt", "(use std::board::enable-interrupt)\n(defun main () () (enable-interrupt 3))\n", "prog", &[]);
+    assert_eq!(out.status.code(), Some(1));
+    assert!(text(&out.stderr).contains("only a board has") && text(&out.stderr).contains("`enable-interrupt`"), "stderr: {}", text(&out.stderr));
+}
+
 /// The board's functions (`typelisp_host_*`) as a board gives them, written
 /// in LLVM IR for want of a C compiler for the board in every environment the
 /// tests run in: output to the UART of QEMU's board (CMSDK APB UART 0 at

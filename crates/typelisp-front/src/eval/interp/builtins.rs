@@ -182,6 +182,12 @@ impl Interp {
                 Ok(secs) => typelisp_rt::sys_builtin::sleep(heap, secs).map(|()| Value::Empty).map_err(EvalError::Panic),
                 Err(e) => Err(e),
             }),
+            // There are no interrupts here: the runtime says so.
+            wk::F_ENABLE_INTERRUPT | wk::F_DISABLE_INTERRUPT => Some(match &args[0] {
+                Value::Int(n) if name.is(wk::F_ENABLE_INTERRUPT) => typelisp_rt::interrupt::enable(*n).map(|()| Value::Empty).map_err(EvalError::Panic),
+                Value::Int(n) => typelisp_rt::interrupt::disable(*n).map(|()| Value::Empty).map_err(EvalError::Panic),
+                other => Err(EvalError::Panic(format!("{}: argument is not an int, got {:?}", name, other))),
+            }),
             wk::F_LISP_IMPLEMENTATION_VERSION => Some(Ok(typelisp_rt::sys_builtin::lisp_implementation_version(heap))),
             wk::F_MACHINE_TYPE => Some(Ok(typelisp_rt::sys_builtin::machine_type(heap))),
             wk::F_SOFTWARE_TYPE => Some(Ok(typelisp_rt::sys_builtin::software_type(heap))),

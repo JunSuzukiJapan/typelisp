@@ -16,11 +16,17 @@
 //! of the board (`typelisp_host_*`) the runtime gives over semihosting, or
 //! the board as C functions in the objects and libraries the link is given
 //! (`--board-functions`, `--link`).
+//!
+//! An interrupt handler runs at once only while the program is in its own
+//! compiled code, never part way through a runtime function
+//! (`typelisp_rt::interrupt`): every call the module makes into the runtime
+//! is made through a function that marks the runtime busy around it
+//! ([`busy_around_runtime_calls`]).
 
 use std::fs;
 use std::process::Command;
 
-use inkwell::module::Module;
+use inkwell::module::{Linkage, Module};
 use inkwell::values::AsValueRef;
 use inkwell::targets::{CodeModel, FileType, InitializationConfig, RelocMode, Target, TargetMachine, TargetTriple};
 
@@ -105,6 +111,40 @@ fn sections_of_their_own(module: &Module<'static>) {
     }
 }
 
+/// Makes every call `module` makes into the runtime (a function it declares
+/// whose name starts with `rt_`) a call of a function of its own that calls
+/// `typelisp_busy_enter`, the runtime function and `typelisp_busy_leave`, so
+/// that an interrupt handler waits while the runtime works
+/// (`typelisp_rt::interrupt`). A use that is not a call — an address handed
+/// to the runtime — takes the same function, which behaves the same.
+fn busy_around_runtime_calls(module: &Module<'static>) -> Result<(), String> {
+    let ctx = module.get_context();
+    let bracket = ctx.void_type().fn_type(&[], false);
+    let declared = |name: &str| module.get_function(name).unwrap_or_else(|| module.add_function(name, bracket, None));
+    let (enter, leave) = (declared("typelisp_busy_enter"), declared("typelisp_busy_leave"));
+    let shims: Vec<_> = module
+        .get_functions()
+        .filter(|f| f.count_basic_blocks() == 0 && f.get_name().to_bytes().starts_with(b"rt_"))
+        .collect();
+    let builder = ctx.create_builder();
+    let failed = |e: inkwell::builder::BuilderError| format!("failed to build a runtime call's busy bracket: {}", e);
+    for shim in shims {
+        let name = shim.get_name().to_string_lossy().into_owned();
+        let busy = module.add_function(&format!("{}.busy", name), shim.get_type(), Some(Linkage::Internal));
+        shim.as_global_value().as_pointer_value().replace_all_uses_with(busy.as_global_value().as_pointer_value());
+        builder.position_at_end(ctx.append_basic_block(busy, "entry"));
+        builder.build_call(enter, &[], "").map_err(failed)?;
+        let args: Vec<_> = busy.get_param_iter().map(|p| p.into()).collect();
+        let answer = builder.build_call(shim, &args, "answer").map_err(failed)?;
+        builder.build_call(leave, &[], "").map_err(failed)?;
+        match answer.try_as_basic_value() {
+            inkwell::values::ValueKind::Basic(v) => builder.build_return(Some(&v)).map_err(failed)?,
+            inkwell::values::ValueKind::Instruction(_) => builder.build_return(None).map_err(failed)?,
+        };
+    }
+    Ok(())
+}
+
 /// Names `value`'s section `name`, as it is. Not inkwell's `set_section`,
 /// which on a macOS host puts a comma in front of a name without one (Mach-O
 /// spells a section `segment,section`) whatever the module's target is.
@@ -145,6 +185,7 @@ pub(super) fn write_executable(
         .set_name(BOARD_MAIN);
     super::wasm::split_address_words(module)?;
     crate::compile::codegen_prep::prepare(module)?;
+    busy_around_runtime_calls(module)?;
     crate::compile::optimize::run_llvm_passes(module, &tm)?;
     sections_of_their_own(module);
 

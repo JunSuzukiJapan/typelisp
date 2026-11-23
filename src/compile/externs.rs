@@ -223,6 +223,8 @@ pub(crate) fn rt_builtin_symbol(name: SymRef) -> Option<&'static str> {
         // was the reason it could not be compiled at all: with tasks the same
         // source would mean two different things on the two sides, silently.
         wk::F_SLEEP => "rt_suspend_sleep",
+        wk::F_ENABLE_INTERRUPT => "rt_interrupt_enable",
+        wk::F_DISABLE_INTERRUPT => "rt_interrupt_disable",
         wk::F_YIELD => "rt_suspend_yield",
         // `(net-wait h interest)` parks the task on a socket: the third of
         // the free builtins that suspend, and the reason the prelude's
@@ -592,6 +594,19 @@ fn posix_shims() -> [(&'static str, usize, &'static str); 40] {
 /// `call_state::SUSPEND_MAIN`.
 pub(crate) const RT_SUSPEND_MAIN: &str = "rt_suspend_main";
 
+/// The shims that always wait, which an interrupt handler cannot reach
+/// (`typelisp_rt::interrupt`), with what each is in a message. The others
+/// that suspend may be answered at once — a `recv` with something buffered,
+/// a finished task's `wait` — and are a panic in a handler only when they
+/// would wait.
+pub(crate) const ALWAYS_WAITING_SHIMS: &[(&str, &str)] =
+    &[("rt_suspend_sleep", "`sleep`"), ("rt_suspend_io", "waiting on a socket"), ("rt_suspend_io_for", "waiting on a socket")];
+
+/// The shims of what only a board has, which a program for any other target
+/// cannot reach, with what each is in a message.
+pub(crate) const BOARD_ONLY_SHIMS: &[(&str, &str)] =
+    &[("rt_interrupt_enable", "`enable-interrupt`"), ("rt_interrupt_disable", "`disable-interrupt`")];
+
 /// The prefix every suspending shim's name carries, and the whole of how the
 /// bridge tells one from an ordinary runtime entry point.
 pub(crate) const RT_SUSPEND_PREFIX: &str = "rt_suspend_";
@@ -852,11 +867,12 @@ pub(crate) fn rt_extern_functions() -> Vec<(&'static str, usize)> {
 
 /// The shims every target has: `typelisp-rt`'s, the printer's, the reader's
 /// and `rt_llvm_call`.
-fn rt_shims() -> [(&'static str, usize); 321] {
+fn rt_shims() -> [(&'static str, usize); 324] {
     use typelisp_rt::c_mem::{
         rt_c_alloc, rt_c_arena_close, rt_c_arena_open, rt_c_index, rt_c_load, rt_c_offset, rt_c_ptr_check, rt_c_store,
         rt_c_volatile_load, rt_c_volatile_store,
     };
+    use typelisp_rt::interrupt::{rt_interrupt_disable, rt_interrupt_enable, rt_interrupt_register};
     use typelisp_rt::equality::{rt_sexpr_eq, rt_sexpr_eql, rt_sexpr_equal, rt_sexpr_equalp, rt_sxhash_eq, rt_sxhash_eql, rt_sxhash_equalp};
     use typelisp_rt::ffi_callback::{
         rt_ffi_callback_address, rt_ffi_callback_enter, rt_ffi_callback_invoke, rt_ffi_callback_leave,
@@ -1125,6 +1141,10 @@ fn rt_shims() -> [(&'static str, usize); 321] {
         ("rt_c_store", rt_c_store as *const () as usize),
         ("rt_c_volatile_load", rt_c_volatile_load as *const () as usize),
         ("rt_c_volatile_store", rt_c_volatile_store as *const () as usize),
+        // A board's interrupt handlers (`typelisp_rt::interrupt`).
+        ("rt_interrupt_register", rt_interrupt_register as *const () as usize),
+        ("rt_interrupt_enable", rt_interrupt_enable as *const () as usize),
+        ("rt_interrupt_disable", rt_interrupt_disable as *const () as usize),
         ("rt_str_new", rt_str_new as *const () as usize),
         ("rt_str_length", rt_str_length as *const () as usize),
         ("rt_str_ref", rt_str_ref as *const () as usize),

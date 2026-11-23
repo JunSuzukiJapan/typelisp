@@ -1,11 +1,11 @@
-# ABI バージョン 0.3.70
+# ABI バージョン 0.3.71
 
 `scripts/regen-abi-version.sh` が生成した文書。手で編集しない。
 
-コンパイラが生成するコードが、ABI バージョン 0.3.70 のランタイムライブラリについて仮定していることの一覧。
+コンパイラが生成するコードが、ABI バージョン 0.3.71 のランタイムライブラリについて仮定していることの一覧。
 ここに書かれていない前提(シムが引数をどう扱うか、生成コードがヒープを直接読む箇所など)は含まない。
 
-内容ハッシュ (FNV-1a 64): `53b158e7a6cd3ecc`
+内容ハッシュ (FNV-1a 64): `e8cc08f8daed72df`
 
 ## 呼び出し規約 (typelisp_abi)
 
@@ -826,6 +826,8 @@
 | 703 | `volatile-write-u32` |
 | 704 | ` c-volatile-load` |
 | 705 | ` c-volatile-store` |
+| 706 | `enable-interrupt` |
+| 707 | `disable-interrupt` |
 
 ## 組み込み型 (typelisp_mem::BUILTIN_TYPES)
 
@@ -1222,6 +1224,9 @@
 | `rt_intern` | `i64 (ptr, i32)` |
 | `rt_intern_path` | `i64 (ptr, i32)` |
 | `rt_intern_symbol` | `i64 (ptr, i32)` |
+| `rt_interrupt_disable` | `i64 (ptr, i32)` |
+| `rt_interrupt_enable` | `i64 (ptr, i32)` |
+| `rt_interrupt_register` | `i64 (ptr, i32)` |
 | `rt_keywordp` | `i64 (ptr, i32)` |
 | `rt_lisp_implementation_version` | `i64 (ptr, i32)` |
 | `rt_list_to_path` | `i64 (ptr, i32)` |
@@ -2305,6 +2310,8 @@
 | `std::%internal::sxhash-eq` | `rt_sxhash_eq` | `<T> (T) -> int` |
 | `std::%internal::sxhash-eql` | `rt_sxhash_eql` | `<T> (T) -> int` |
 | `std::%internal::sxhash-equalp` | `rt_sxhash_equalp` | `<T> (T) -> int` |
+| `std::board::disable-interrupt` | `rt_interrupt_disable` | `(int) -> ()` |
+| `std::board::enable-interrupt` | `rt_interrupt_enable` | `(int) -> ()` |
 | `std::cmp::eq` | `rt_sexpr_eq` | `<T> (T, T) -> bool` |
 | `std::cmp::eql` | `rt_sexpr_eql` | `<T> (T, T) -> bool` |
 | `std::cmp::equalp` | `rt_sexpr_equalp` | `<T> (T, T) -> bool` |

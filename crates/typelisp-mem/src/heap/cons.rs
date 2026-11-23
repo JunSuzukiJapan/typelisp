@@ -42,6 +42,16 @@ impl Heap {
         self.shared.gc_stress.store(on, Ordering::Relaxed);
     }
 
+    /// While `on`, a `cons` that finds no free cell grows the arena rather
+    /// than collect, and fails with [`Error::HeapExhausted`] when it cannot
+    /// grow. For code that runs where a collection is not safe: an interrupt
+    /// handler, entered between any two instructions of a program that may
+    /// hold a value in a register only, out of sight of the roots. Answers
+    /// whether it was on before.
+    pub fn inhibit_collection(&self, on: bool) -> bool {
+        self.shared.collect_inhibited.swap(on, Ordering::SeqCst)
+    }
+
     /// Whether [`Heap::set_gc_stress`] is currently on.
     pub fn gc_stress(&self) -> bool {
         self.shared.gc_stress.load(Ordering::Relaxed)
@@ -95,7 +105,8 @@ impl Heap {
         // keeps rooted — which is exactly what makes it a safe place to let
         // *another* thread's collection run too.
         self.safepoint();
-        if self.gc_stress() {
+        let inhibited = self.shared.collect_inhibited.load(Ordering::SeqCst);
+        if self.gc_stress() && !inhibited {
             // Deliberately collect before *every* allocation so a caller that
             // failed to root an intermediate value is caught here, at the
             // allocation that invalidates it, instead of surfacing later as
@@ -106,6 +117,12 @@ impl Heap {
         loop {
             if let Some(v) = self.pop_free(car, cdr) {
                 return Ok(v);
+            }
+            if inhibited {
+                if self.grow() {
+                    continue;
+                }
+                return Err(Error::HeapExhausted);
             }
             let reclaimed = self.gc();
             // A collection that hands back one cell is not a collection that

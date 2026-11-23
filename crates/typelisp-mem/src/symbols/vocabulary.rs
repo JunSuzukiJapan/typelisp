@@ -313,6 +313,7 @@ pub const HOMED_VOCABULARY: &[(&[&str], &[u32])] = &[
     (&["std", "sexpr"], &[wk::SEXPR, wk::CONS, wk::F_SEXPR_ATOM, wk::F_SEXPR_BOOL, wk::F_SEXPR_CAR, wk::F_SEXPR_CDR, wk::F_SEXPR_CHAR, wk::F_SEXPR_CONS, wk::F_SEXPR_CONSP, wk::F_SEXPR_F32, wk::F_SEXPR_F64, wk::F_SEXPR_I16, wk::F_SEXPR_I32, wk::F_SEXPR_I8, wk::F_SEXPR_INT, wk::F_SEXPR_NULL, wk::F_SEXPR_STR, wk::F_SEXPR_SYM_NAME, wk::F_SEXPR_SYMP, wk::F_SEXPR_U16, wk::F_SEXPR_U32, wk::F_SEXPR_U8]),
     (&["std", "symbol"], &[wk::INTERN, wk::F_KEYWORDP, wk::F_SYMBOL_TO_STRING]),
     (&["std", "thread"], &[wk::TASK_TYPE, wk::THREAD_TYPE, wk::F_SLEEP, wk::F_YIELD]),
+    (&["std", "board"], &[wk::F_ENABLE_INTERRUPT, wk::F_DISABLE_INTERRUPT]),
     (&["std", "time"], &[wk::F_GET_INTERNAL_REAL_TIME, wk::F_GET_INTERNAL_RUN_TIME, wk::F_GET_UNIVERSAL_TIME, wk::F_TIMEZONE_DAYLIGHT_P, wk::F_TIMEZONE_OFFSET_SECONDS]),
     (&[MEMBER_MODULE], MEMBER_VOCABULARY),
 ];

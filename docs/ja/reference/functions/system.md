@@ -350,3 +350,13 @@ CL にあってここに無いもの: `eval-when`（`:compile-toplevel`/`:load-t
 | `with-standard-io-syntax` | `(with-standard-io-syntax body...)` | — | 印字制御変数を全部標準値に、`*read-eval*` を `true` にして `body` を走らせる（[印字](printing.md#6-印字量の制御)） |
 | `exit` | `(exit code)` | `int→!` | プロセスを終了する |
 | `dump` | `(dump path)` | `string→bool` | いまの環境（型情報 + コンパイル済み本体）を1ファイルへ書き出す。`typl --image <path>` で立ち上げ直せる。インタプリタ専用（[構文リファレンス 10.1](../syntax.md#101-ダンプ)） |
+
+## 11. マイコンの割り込み（`std::board`）
+
+`(use std::board::enable-interrupt)` のように取り込んで使う。割り込みのハンドラの書き方は
+[構文リファレンス 3.17](../syntax.md#317-interruptn--exceptionname--割り込みハンドラ)。
+
+| 名前 | 形式 | 型 | 説明 |
+|---|---|---|---|
+| `enable-interrupt` | `(enable-interrupt n)` | `int→()` | 周辺機器の割り込み `n`（0〜239）が来るようにする。マイコンの外では実行時エラー（`typl -c` ではコンパイルエラー） |
+| `disable-interrupt` | `(disable-interrupt n)` | `int→()` | 割り込み `n` が来ないようにする。マイコンの外での扱いは `enable-interrupt` と同じ |

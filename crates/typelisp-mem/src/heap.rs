@@ -356,6 +356,9 @@ pub struct HeapShared {
     // When set, every `cons` collects first — see `set_gc_stress`. Shared
     // so that a view attached after it was switched on is under stress too.
     gc_stress: AtomicBool,
+    /// Whether a `cons` that finds no free cell grows the arena instead of
+    /// collecting — [`Heap::inhibit_collection`].
+    collect_inhibited: AtomicBool,
 }
 
 // Every field is behind a lock or an atomic, so the auto traits fail only
@@ -466,6 +469,7 @@ impl Heap {
             threads: ThreadRegistry::new(),
             gc_count: crate::sync::AtomicCount::new(0),
             gc_stress: AtomicBool::new(false),
+            collect_inhibited: AtomicBool::new(false),
         });
 
         let slot = shared.threads.register();

@@ -1031,4 +1031,6 @@ well_known_symbols! {
     VOLATILE_WRITE_U32 => "volatile-write-u32"
     F_C_VOLATILE_LOAD => " c-volatile-load"
     F_C_VOLATILE_STORE => " c-volatile-store"
+    F_ENABLE_INTERRUPT => "enable-interrupt"
+    F_DISABLE_INTERRUPT => "disable-interrupt"
 }

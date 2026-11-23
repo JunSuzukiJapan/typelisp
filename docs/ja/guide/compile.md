@@ -320,6 +320,24 @@ $ qemu-system-arm -M mps2-an386 -nographic \
     (put-byte 104) (put-byte 105) (put-byte 10))                             ; "hi" と改行
   ```
 
+- 割り込みが来たときに呼ばれる関数は、`defun` に `#[interrupt(N)]`（周辺機器の割り込み `N`）か
+  `#[exception(SysTick)]` のような属性を付けて書きます。割り込みは `(enable-interrupt N)` で有効にします。
+  ハンドラはその場で実行され、ランタイムの処理の途中に来たときだけ、その処理が終わってから実行されます。
+  ハンドラの中では待てません（`sleep` はコンパイルエラーです）。詳しくは
+  [構文リファレンス](../reference/syntax.md) の 3.17 節にあります。
+
+  ```lisp
+  (use std::board::enable-interrupt)
+
+  #[interrupt(5)]
+  (defun on-five () ()
+    (println "interrupt 5"))
+
+  (defun main () ()
+    (enable-interrupt 5)
+    (unsafe (volatile-write-u32 #xE000E200 (as u32 32))))   ; 割り込み 5 を自分で起こす（NVIC の保留レジスタ）
+  ```
+
 - 起動（ベクタテーブルと、RAM の準備）とメモリの確保はランタイムが行います。HardFault や処理されない
   割り込みが起きると、panic と同じ終了コード（1）で終わります。
 - `throw`/`catch`/`panic`、bignum・ratio・浮動小数、タスク・チャネル・`sleep` は実行ファイルと同じに

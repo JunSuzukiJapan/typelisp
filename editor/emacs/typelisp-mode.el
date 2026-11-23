@@ -359,7 +359,9 @@ function types; `&optional' and `&key' are `defmacro'-only.")
     "y-or-n-p" "yes-or-no-p"
     ;; the REPL tool layer's ordinary functions (CLHS 25.2).  `heap-info' is
     ;; what `room' prints and what a program reads the same numbers from.
-    "room" "heap-info" "dribble")
+    "room" "heap-info" "dribble"
+    ;; a board's interrupts
+    "enable-interrupt" "disable-interrupt")
   "Builtin functions and methods from the standard catalog.
 See docs/ja/reference/functions/.")
 

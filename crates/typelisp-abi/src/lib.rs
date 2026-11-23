@@ -34,7 +34,7 @@ pub mod dribble;
 // `concat!` takes literals only. `scripts/regen-abi-version.sh` is what
 // rewrites them, and only when that description changed or the typelisp
 // version's MAJOR.MINOR did.
-macro_rules! with_abi_version { ($then:ident) => { $then!(0, 3, 70) }; }
+macro_rules! with_abi_version { ($then:ident) => { $then!(0, 3, 71) }; }
 
 macro_rules! dotted { ($major:literal, $minor:literal, $patch:literal) => { concat!($major, ".", $minor, ".", $patch) }; }
 
@@ -245,6 +245,31 @@ pub fn raise(msg: String) -> Raised {
 pub fn raise_payload(payload: Box<dyn core::any::Any + Send>) -> Raised {
     RAISED.with(|r| *r.borrow_mut() = Some(payload));
     Raised(())
+}
+
+/// What crosses between compiled code and its driver on this thread — the
+/// [`call_state`] and an unwind not yet taken — set aside by
+/// [`set_aside_crossing`].
+pub struct Crossing {
+    call: call_state::State,
+    raised: Option<Box<dyn core::any::Any + Send>>,
+}
+
+/// Takes what crosses between compiled code and its driver on this thread,
+/// leaving nothing in flight, for code that runs between two instructions of
+/// the program — an interrupt handler — to cross on its own. The program may
+/// have been stopped after it published a call and before its driver took
+/// it. [`restore_crossing`] puts it back.
+pub fn set_aside_crossing() -> Crossing {
+    let call = THREAD.with(|t| core::mem::replace(&mut *t.call.borrow_mut(), call_state::State::new()));
+    let raised = RAISED.with(|r| r.borrow_mut().take());
+    Crossing { call, raised }
+}
+
+/// Puts back what [`set_aside_crossing`] took.
+pub fn restore_crossing(saved: Crossing) {
+    THREAD.with(|t| *t.call.borrow_mut() = saved.call);
+    RAISED.with(|r| *r.borrow_mut() = saved.raised);
 }
 
 /// Whether an unwind is waiting on this thread. Does not take it: the code

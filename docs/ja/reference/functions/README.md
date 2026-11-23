@@ -30,6 +30,7 @@
 | モジュール | 名前 |
 |---|---|
 | `std::array` | `array-iter` |
+| `std::board` | `disable-interrupt`、`enable-interrupt` |
 | `std::char` | `digit->char`、`digit-weight`、`name->char` |
 | `std::collections` | `Deque`、`HashSet`、`Scope`、`SortedTable`、`hashtable-iter` |
 | `std::env` | `command-line-args`、`getenv`、`home-directory` |

@@ -137,6 +137,7 @@ pub mod start {
         // SAFETY: once, before anything allocates, with memory nothing else
         // uses.
         unsafe { HEAP.init(heap_start, heap_end - heap_start) };
+        typelisp_rt::interrupt::set_controller(&NVIC);
         // SAFETY: the program typl compiled, which takes nothing.
         let code = unsafe { typelisp_main() };
         typelisp_mem::host::exit(code)
@@ -168,10 +169,38 @@ pub mod start {
         typelisp_mem::host::exit(typelisp_rt::EXIT_CODE_PANIC as i32)
     }
 
-    /// Any other exception or interrupt nothing handles, the same way.
+    /// Every other exception and interrupt: the program's handler for it
+    /// (`typelisp_rt::interrupt`), or, when it has none, the end of the
+    /// program the way a fault ends it. `irqn` is the entry's number in the
+    /// vector table less 16.
     #[cortex_m_rt::exception]
     unsafe fn DefaultHandler(irqn: i16) {
+        if typelisp_rt::interrupt::arrived((i32::from(irqn) + 16) as usize) {
+            return;
+        }
         let _ = writeln!(Stderr, "unhandled exception or interrupt {}", irqn);
         typelisp_mem::host::exit(typelisp_rt::EXIT_CODE_PANIC as i32)
     }
+
+    /// An interrupt, by its number, as the NVIC takes one.
+    #[derive(Clone, Copy)]
+    struct Irq(u16);
+
+    // SAFETY: the number is the interrupt's own, which the program named and
+    // the runtime checked is below 240.
+    unsafe impl cortex_m::interrupt::InterruptNumber for Irq {
+        fn number(self) -> u16 {
+            self.0
+        }
+    }
+
+    /// Masking and unmasking an interrupt, for the runtime's interrupt
+    /// handlers. All interrupts keep the priority they reset to, the same
+    /// for all, so that a handler is never interrupted by another.
+    static NVIC: typelisp_rt::interrupt::Controller = typelisp_rt::interrupt::Controller {
+        mask: |n| cortex_m::peripheral::NVIC::mask(Irq(n)),
+        // SAFETY: unmasking breaks no critical section: the runtime holds
+        // none, and an interrupt that comes then waits for the runtime.
+        unmask: |n| unsafe { cortex_m::peripheral::NVIC::unmask(Irq(n)) },
+    };
 }

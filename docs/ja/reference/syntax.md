@@ -71,9 +71,11 @@ typelisp は静的型付きの Lisp。文法は S 式。組み込み関数・メ
   型になる（`#{"foo" 123}` は `#{string int}`）。要素は 1〜12 個。評価するたびに新しいタプルが
   できる。計算した値から作るには `(tuple a b)` を使う。S 式データが期待される場所では、要素が
   すべてデータのタプル——`Sexpr` の `Tuple` 変種——になる。
-- **属性**: `#[test]` は次のフォームに付く印（Rust と同じ書き方）。今ある属性は `test` だけで、
-  `defun` に付ける（[3.16 `#[test]`](#316-test--テスト関数)）。`read` で読むと
-  `(%internal::attribute (test) フォーム)` というリストになる。
+- **属性**: `#[test]` は次のフォームに付く印（Rust と同じ書き方）。今ある属性は `test`、
+  `interrupt(N)`、`exception(NAME)` の 3 つで、どれも `defun` に付ける
+  （[3.16 `#[test]`](#316-test--テスト関数)、[3.17 割り込みハンドラ](#317-interruptn--exceptionname--割り込みハンドラ)）。
+  引数のある属性は名前の直後に括弧を続けて書く。`read` で読むと
+  `(%internal::attribute (test) フォーム)`、`(%internal::attribute ((interrupt 7)) フォーム)` というリストになる。
 - **空リスト `()`**: 文脈によって `Unit` 型の値、または `Option<Sexpr>` の `None` になる。
   **`Sexpr` に空リストの変種は無い**——`Sexpr` は「空でない S 式」を表し、S 式データの型は
   `Option<Sexpr>` である（[4.3 match](#43-match--パターンマッチ) の「`Option<Sexpr>` のパターン」参照）。
@@ -1266,6 +1268,44 @@ test result: FAILED. 1 passed; 1 failed; 0 filtered out
 
 テストの中で `print` したものは、そのまま標準出力に出る（取り込まない）。調べるための出力は、標準エラー出力に
 書く `eprint`/`eprintln`（[印字](functions/printing.md)）を使うと、プログラムの出力と混ざらない。
+
+### 3.17 `#[interrupt(N)]` / `#[exception(NAME)]` — 割り込みハンドラ
+
+```lisp
+(use std::board::enable-interrupt)
+(defvar (*received* int) 0)
+
+#[interrupt(7)]
+(defun on-uart () ()
+  (unsafe (volatile-write-u32 #x4000400C 1))   ; 割り込みの要因を消す
+  (setf *received* (+ *received* 1))
+  ())
+
+(defun main () ()
+  (enable-interrupt 7)
+  ...)
+```
+
+マイコン向けにコンパイルしたプログラム（[コンパイル](../guide/compile.md) の 3.8 節）で、割り込みが
+来たときに呼ばれる関数を書く。`#[interrupt(N)]` は周辺機器の割り込み `N`（0〜239）、`#[exception(NAME)]`
+はコアの例外 `NAME` のハンドラになる。`NAME` は `NonMaskableInt`、`MemoryManagement`、`BusFault`、
+`UsageFault`、`SVCall`、`DebugMonitor`、`PendSV`、`SysTick` のどれか（`HardFault` はランタイムが受け持ち、
+プログラムを終わらせる）。
+
+- 引数を取らず `()` を返す、トップレベルの `defun` に付ける（型パラメータも取れない）。1 つの割り込みに
+  ハンドラは 1 つ、1 つの関数が受け持つ割り込みも 1 つ。
+- 周辺機器の割り込みは `(enable-interrupt N)` で有効にするまで来ない（`(disable-interrupt N)` で止める。
+  [システム](functions/system.md)）。SysTick などの例外は、その例外を起こす設定をレジスタに書けば来る。
+- ハンドラは割り込みが来たその場で実行される。ただしランタイムの処理（確保、GC、出力、タスクの切り替え
+  など）の途中に来たときは、その処理が終わるまで待ってから実行される。ハンドラどうしは割り込み合わない。
+- ハンドラの中では GC が起きない（必要ならヒープを伸ばす）。プログラムの状態（グローバル変数など）は
+  そのまま読み書きできる。
+- ハンドラは待てない。`sleep` を使うハンドラはコンパイルエラーになる。チャネルの受信など、待つかどうかが
+  実行時に決まる操作は、待たずに済むときだけ使え、待つことになれば panic になる。
+- ハンドラから外へ出る `panic` と `throw` は、捕まえられなかったときと同じくプログラムを終わらせる。
+- インタプリタや、マイコン以外に向けたコンパイルでは割り込みは来ない。インタプリタではハンドラは普通の
+  関数として呼べる（テストに使える）。マイコン以外に向けた `typl -c` では、ハンドラがあるとコンパイル
+  エラーになる。
 
 ## 4. 束縛・条件分岐
 

@@ -163,7 +163,7 @@ impl CompiledTask {
         heap.push_root(Value::Empty);
         heap.push_root(Value::Empty);
         CompiledTask {
-            chain: crate::coroutine::FrameStack::new(),
+            chain: crate::coroutine::FrameStack::for_task(),
             state: CompiledState::Entry(f),
             sbase,
             wake: Wake::Unit,
@@ -192,7 +192,7 @@ impl CompiledTask {
         });
         heap.push_root(held);
         CompiledTask {
-            chain: crate::coroutine::FrameStack::new(),
+            chain: crate::coroutine::FrameStack::for_task(),
             state: CompiledState::EnterWith(entry, args),
             sbase,
             wake: Wake::Unit,
@@ -355,7 +355,7 @@ impl TaskBody for CompiledTask {
         heap.push_root(closure);
         heap.push_root(Value::Empty);
         CompiledTask {
-            chain: crate::coroutine::FrameStack::new(),
+            chain: crate::coroutine::FrameStack::for_task(),
             state: CompiledState::Start(closure),
             sbase,
             wake: Wake::Unit,

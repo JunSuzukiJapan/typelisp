@@ -37,12 +37,13 @@ pub(crate) fn define(reg: &mut Registry) {
     let eval = std_module("eval");
     let num = std_module("num");
     let fmt = std_module("fmt");
+    let board = std_module("board");
     let option = StdModule::OPTION.ns();
     let result = StdModule::RESULT.ns();
     let sexpr_ns = StdModule::SEXPR.ns();
     let primitive_ns = StdModule::PRIMITIVE.ns();
     let modules = [
-        NsId::ROOT, std_ns, internal, random, time, repl, env, thread, sync, symbol, process, cmp, reader, eval, num, fmt, option, result,
+        NsId::ROOT, std_ns, internal, random, time, repl, env, thread, sync, symbol, process, cmp, reader, eval, num, fmt, board, option, result,
         StdModule::VEC.ns(), sexpr_ns, StdModule::COLLECTIONS.ns(), StdModule::FS.ns(), StdModule::NET.ns(), primitive_ns, NsId::CORE,
         prelude_ns(),
     ];
@@ -140,6 +141,12 @@ pub(crate) fn define(reg: &mut Registry) {
     // before this code ever runs).
     function(reg, num, "parse-float", vec![Type::Str], result_of(Type::F64, error_ty(wk::PARSE_FLOAT_ERROR)));
     system::define(reg, env, thread, time, internal, reader);
+    // A board's interrupts, by number: whether each comes. The runtime masks
+    // one while its handler waits to run, and unmasks it after only if the
+    // program had enabled it, which is why these are not register writes the
+    // program makes itself.
+    function(reg, board, "enable-interrupt", vec![Type::Int], Type::Unit);
+    function(reg, board, "disable-interrupt", vec![Type::Int], Type::Unit);
     // `read`: parses one `Sexpr` form out of a string with the same reader
     // `typl`/the REPL use for source text (`crate::read::Reader::read`) —
     // CL's `read-from-string`.

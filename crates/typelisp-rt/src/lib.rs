@@ -55,6 +55,7 @@ pub mod mem_limit;
 pub mod c_mem;
 pub mod ffi_callback;
 pub mod integer;
+pub mod interrupt;
 pub mod rational;
 pub mod readtable;
 pub mod result_value;

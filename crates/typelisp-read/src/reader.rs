@@ -1445,8 +1445,10 @@ fn read_tuple(cur: &mut Cursor, heap: &mut Heap, ctx: Ctx<'_>) -> Result<Value, 
 }
 
 /// The head of the form `#[ATTR...] FORM` reads as:
-/// `(%internal::attribute (ATTR...) FORM)`. Which attributes exist, and what
-/// they do to `FORM`, is the checker's business.
+/// `(%internal::attribute (ATTR...) FORM)`. An attribute with arguments,
+/// `name(ARG...)` with the parenthesis right after the name, reads as the
+/// list `(name ARG...)`. Which attributes exist, and what they do to `FORM`,
+/// is the checker's business.
 pub const ATTRIBUTE_HEAD: [u32; 2] = [wk::INTERNAL_MODULE_NAME, wk::ATTRIBUTE];
 
 /// `#[ATTR...] FORM` -> `(%internal::attribute (ATTR...) FORM)`. The cursor
@@ -1455,7 +1457,7 @@ pub const ATTRIBUTE_HEAD: [u32; 2] = [wk::INTERNAL_MODULE_NAME, wk::ATTRIBUTE];
 fn read_attribute(cur: &mut Cursor, heap: &mut Heap, ctx: Ctx<'_>) -> Result<Value, Error> {
     cur.next(); // '['
     let mark = heap.root_count();
-    let attrs = read_elements(cur, heap, ctx, ']', "#[")?;
+    let attrs = read_attribute_elements(cur, heap, ctx)?;
     if attrs.is_empty() {
         restore_roots(heap, mark);
         return Err(Error::ReadError("`#[]` names no attribute".to_string()));
@@ -1482,6 +1484,49 @@ fn read_attribute(cur: &mut Cursor, heap: &mut Heap, ctx: Ctx<'_>) -> Result<Val
     })();
     restore_roots(heap, mark);
     result
+}
+
+/// The attributes up to `]`, rooted as [`read_elements`] roots them: each a
+/// datum, and a name with `(` right after it the list of that name and what
+/// the parentheses hold — `interrupt(7)` is `(interrupt 7)`.
+fn read_attribute_elements(cur: &mut Cursor, heap: &mut Heap, ctx: Ctx<'_>) -> Result<Vec<Value>, Error> {
+    let mark = heap.root_count();
+    let mut elems: Vec<Value> = Vec::new();
+    let read = |cur: &mut Cursor, heap: &mut Heap, elems: &mut Vec<Value>| -> Result<bool, Error> {
+        skip_ws_comments(cur, heap, ctx)?;
+        match cur.peek() {
+            None => Err(Error::ReadError("end of input inside `#[`".to_string())),
+            Some(']') => {
+                cur.next();
+                Ok(false)
+            }
+            Some(_) => {
+                let name = read_datum(cur, heap, ctx)?;
+                heap.push_root(name);
+                let attr = if matches!(name, Value::Symbol(_)) && cur.peek() == Some('(') {
+                    let args = read_datum(cur, heap, ctx)?;
+                    heap.push_root(args);
+                    let attr = heap.cons(name, args)?;
+                    heap.push_root(attr);
+                    attr
+                } else {
+                    name
+                };
+                elems.push(attr);
+                Ok(true)
+            }
+        }
+    };
+    loop {
+        match read(cur, heap, &mut elems) {
+            Ok(true) => {}
+            Ok(false) => return Ok(elems),
+            Err(e) => {
+                restore_roots(heap, mark);
+                return Err(e);
+            }
+        }
+    }
 }
 
 /// The data up to `close`, each rooted as it is read so that reading the next
