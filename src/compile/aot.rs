@@ -326,6 +326,17 @@ impl Target {
         }
     }
 
+    /// The runtime crates the target has not got, whose shims a program
+    /// compiled for it must not reach.
+    pub(crate) fn missing_runtimes(self) -> &'static [crate::compile::externs::RuntimeCrate] {
+        use crate::compile::externs::RuntimeCrate;
+        match self {
+            Target::Host => &[],
+            Target::Wasip1 => &[RuntimeCrate::Posix],
+            Target::Wasm32Unknown => &[RuntimeCrate::Sys, RuntimeCrate::Posix],
+        }
+    }
+
     /// The target triple, as `--target` spells it.
     pub fn name(self) -> &'static str {
         match self {
@@ -734,13 +745,10 @@ pub fn compile_file_with(source_path: &str, output_path: &str, options: &BuildOp
             .and_then(|()| match options.target {
                 Target::Host => write_executable(&m, output_path, &link_libraries, &items),
                 Target::Wasip1 | Target::Wasm32Unknown => {
-                    let unavailable = match options.target {
-                        Target::Wasip1 => crate::compile::externs::wasm_unavailable,
-                        _ => crate::compile::externs::wasm_unknown_unavailable,
-                    };
+                    let missing = options.target.missing_runtimes();
                     let entry = m.get_function(ENTRY_POINT_NAME).expect("build_main_wrapper defined `main`");
                     let uses = reach::uses(&m, entry, |name| {
-                        if let Some(what) = unavailable(name) {
+                        if let Some(what) = crate::compile::externs::unavailable_in(missing, name) {
                             return Some(what.to_string());
                         }
                         ffi_decls.iter().any(|d| d.c_symbol == name).then(|| format!("the C function `{}`", name))

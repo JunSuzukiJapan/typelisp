@@ -442,61 +442,126 @@ pub const BUILTIN_TYPE_TABLES: [BuiltinTypeTable; 11] = [
     BuiltinTypeTable { name: "typelisp_rt_sys::dribble::RESULT_TYPES", row: BuiltinTypeRow::Result, rows: typelisp_rt_sys::dribble::RESULT_TYPES },
 ];
 
-/// The shims a WebAssembly executable has not got, each with what a program
-/// reaches it through: what `typl -c --target wasm32-wasip1` refuses a
-/// program for (`compile::aot::reach`), so that it fails to compile rather
-/// than to link or to run.
-///
-/// Two kinds. The sockets are not in the WebAssembly runtime at all (every
-/// `rt_net_` shim, [`WASM_UNAVAILABLE_PREFIX`], and the waits on one). The
-/// rest are in it but need what WASI does not give: another OS thread, CPU
-/// time, the host's name and OS release, a file's owner, and starting a
-/// process. The local time zone is not here: a call that passes a zone is
-/// the same function as one that asks for the local one, so refusing the
-/// shim would refuse both; the runtime answers that the local zone is unknown
-/// instead (`typelisp_mem::host::timezone_at`).
-pub(crate) const WASM_UNAVAILABLE_SHIMS: [(&str, &str); 8] = [
-    ("rt_suspend_io", "waiting on a socket"),
-    ("rt_suspend_io_for", "waiting on a socket"),
-    ("rt_suspend_thread", "an OS thread (`thread`)"),
-    ("rt_get_internal_run_time", "`get-internal-run-time`"),
-    ("rt_machine_instance", "`machine-instance`"),
-    ("rt_software_version", "`software-version`"),
-    ("rt_file_owner_name", "`file-author`"),
-    ("rt_ed_open", "`ed`, which starts an editor"),
-];
-
-/// The prefix of the socket shims, none of which a WebAssembly runtime has.
-pub(crate) const WASM_UNAVAILABLE_PREFIX: (&str, &str) = ("rt_net_", "a socket");
-
-/// What `name` is, when it is a shim a WebAssembly executable has not got
-/// ([`WASM_UNAVAILABLE_SHIMS`]).
-pub(crate) fn wasm_unavailable(name: &str) -> Option<&'static str> {
-    if name.starts_with(WASM_UNAVAILABLE_PREFIX.0) {
-        return Some(WASM_UNAVAILABLE_PREFIX.1);
-    }
-    WASM_UNAVAILABLE_SHIMS.iter().find(|(shim, _)| *shim == name).map(|(_, what)| *what)
+/// A runtime crate that some targets have not got, so that a program reaching
+/// one of its shims is refused for them (`compile::aot::reach`): it fails to
+/// compile rather than to link or to run.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) enum RuntimeCrate {
+    /// `typelisp-rt-sys`: files, the environment, the command line and
+    /// `dribble`, which WASI has and `wasm32-unknown-unknown` has not.
+    Sys,
+    /// `typelisp-rt-posix`: sockets, OS threads and what else only an
+    /// operating system answers, which WASI has not.
+    Posix,
 }
 
-/// The shims that need a file system, which `wasm32-unknown-unknown` has not
-/// got (`typelisp_mem::host` gives it standard output and error only): opening
-/// a file, and every `rt_file_` shim ([`NO_FILE_SYSTEM_PREFIX`]).
-pub(crate) const NO_FILE_SYSTEM_SHIMS: [(&str, &str); 1] = [("rt_stream_open_file", "opening a file")];
-
-/// The prefix of the shims that ask the file system about a path.
-pub(crate) const NO_FILE_SYSTEM_PREFIX: (&str, &str) = ("rt_file_", "a file or directory operation");
-
-/// What `name` is, when it is a shim a `wasm32-unknown-unknown` module has
-/// not got: a WASI module's ([`wasm_unavailable`]), and the file system
-/// ([`NO_FILE_SYSTEM_SHIMS`]).
-pub(crate) fn wasm_unknown_unavailable(name: &str) -> Option<&'static str> {
-    if let Some(what) = wasm_unavailable(name) {
-        return Some(what);
+impl RuntimeCrate {
+    /// The crate's shims, each with its address and what a program reaches
+    /// it through.
+    pub(crate) fn shims(self) -> &'static [(&'static str, usize, &'static str)] {
+        match self {
+            RuntimeCrate::Sys => {
+                static SHIMS: std::sync::OnceLock<[(&str, usize, &str); 14]> = std::sync::OnceLock::new();
+                SHIMS.get_or_init(sys_shims)
+            }
+            RuntimeCrate::Posix => {
+                static SHIMS: std::sync::OnceLock<[(&str, usize, &str); 40]> = std::sync::OnceLock::new();
+                SHIMS.get_or_init(posix_shims)
+            }
+        }
     }
-    if name.starts_with(NO_FILE_SYSTEM_PREFIX.0) {
-        return Some(NO_FILE_SYSTEM_PREFIX.1);
-    }
-    NO_FILE_SYSTEM_SHIMS.iter().find(|(shim, _)| *shim == name).map(|(_, what)| *what)
+}
+
+/// What `name` is, when it is a shim of one of `missing`.
+pub(crate) fn unavailable_in(missing: &[RuntimeCrate], name: &str) -> Option<&'static str> {
+    missing.iter().flat_map(|runtime| runtime.shims()).find(|(shim, _, _)| *shim == name).map(|(_, _, what)| *what)
+}
+
+/// `typelisp-rt-sys`'s shims.
+fn sys_shims() -> [(&'static str, usize, &'static str); 14] {
+    use typelisp_rt_sys::{
+        rt_command_line_args, rt_dribble_start, rt_dribble_stop, rt_getenv, rt_home_directory,
+        rt_file_create_directories, rt_file_delete, rt_file_directory_p, rt_file_exists_p,
+        rt_file_list_directory, rt_file_modified_date, rt_file_rename,
+        rt_file_truename, rt_stream_open_file,
+    };
+    [
+        ("rt_stream_open_file", rt_stream_open_file as *const () as usize, "opening a file"),
+        ("rt_file_exists_p", rt_file_exists_p as *const () as usize, "a file or directory operation"),
+        ("rt_file_delete", rt_file_delete as *const () as usize, "a file or directory operation"),
+        ("rt_file_rename", rt_file_rename as *const () as usize, "a file or directory operation"),
+        ("rt_file_truename", rt_file_truename as *const () as usize, "a file or directory operation"),
+        ("rt_file_modified_date", rt_file_modified_date as *const () as usize, "a file or directory operation"),
+        ("rt_file_directory_p", rt_file_directory_p as *const () as usize, "a file or directory operation"),
+        ("rt_file_list_directory", rt_file_list_directory as *const () as usize, "a file or directory operation"),
+        ("rt_file_create_directories", rt_file_create_directories as *const () as usize, "a file or directory operation"),
+        ("rt_command_line_args", rt_command_line_args as *const () as usize, "the command line's arguments"),
+        ("rt_getenv", rt_getenv as *const () as usize, "an environment variable"),
+        ("rt_home_directory", rt_home_directory as *const () as usize, "the home directory"),
+        ("rt_dribble_start", rt_dribble_start as *const () as usize, "`dribble`"),
+        ("rt_dribble_stop", rt_dribble_stop as *const () as usize, "`dribble`"),
+    ]
+}
+
+/// `typelisp-rt-posix`'s shims. The local time zone is not here: a call
+/// that passes a zone is the same function as one that asks for the local
+/// one, so refusing the shim would refuse both; the runtime answers that the
+/// local zone is unknown instead (`typelisp_mem::host::timezone_at`).
+fn posix_shims() -> [(&'static str, usize, &'static str); 40] {
+    use typelisp_rt_posix::{
+        rt_ed_open, rt_file_owner_name, rt_get_internal_run_time, rt_machine_instance, rt_software_version,
+        rt_suspend_io, rt_suspend_io_for, rt_suspend_thread,
+        rt_net_accept, rt_net_buffered_p, rt_net_connect_begin, rt_net_connect_finish, rt_net_fill, rt_net_flush,
+        rt_net_listen, rt_net_local_address, rt_net_peer_address, rt_net_pop_byte, rt_net_pop_char,
+        rt_net_push_byte, rt_net_push_string, rt_net_shutdown_write,
+        rt_net_resolve_begin, rt_net_resolve_finish, rt_net_tls_handshake, rt_net_tls_start,
+        rt_net_tls_listen, rt_net_socket_error, rt_net_peer_subject, rt_net_server_name, rt_net_set_nodelay,
+        rt_net_set_keepalive, rt_net_set_keepalive_period, rt_net_tls_add_certificate,
+        rt_net_udp_bind, rt_net_udp_last_sender, rt_net_udp_recv, rt_net_udp_send_to,
+        rt_net_unix_connect, rt_net_unix_listen,
+    };
+    [
+        ("rt_suspend_io", rt_suspend_io as *const () as usize, "waiting on a socket"),
+        ("rt_suspend_io_for", rt_suspend_io_for as *const () as usize, "waiting on a socket"),
+        ("rt_net_resolve_begin", rt_net_resolve_begin as *const () as usize, "a socket"),
+        ("rt_net_resolve_finish", rt_net_resolve_finish as *const () as usize, "a socket"),
+        ("rt_net_tls_start", rt_net_tls_start as *const () as usize, "a socket"),
+        ("rt_net_tls_listen", rt_net_tls_listen as *const () as usize, "a socket"),
+        ("rt_net_socket_error", rt_net_socket_error as *const () as usize, "a socket"),
+        ("rt_net_peer_subject", rt_net_peer_subject as *const () as usize, "a socket"),
+        ("rt_net_server_name", rt_net_server_name as *const () as usize, "a socket"),
+        ("rt_net_set_nodelay", rt_net_set_nodelay as *const () as usize, "a socket"),
+        ("rt_net_set_keepalive", rt_net_set_keepalive as *const () as usize, "a socket"),
+        ("rt_net_set_keepalive_period", rt_net_set_keepalive_period as *const () as usize, "a socket"),
+        ("rt_net_tls_add_certificate", rt_net_tls_add_certificate as *const () as usize, "a socket"),
+        ("rt_net_tls_handshake", rt_net_tls_handshake as *const () as usize, "a socket"),
+        ("rt_net_udp_bind", rt_net_udp_bind as *const () as usize, "a socket"),
+        ("rt_net_udp_send_to", rt_net_udp_send_to as *const () as usize, "a socket"),
+        ("rt_net_udp_recv", rt_net_udp_recv as *const () as usize, "a socket"),
+        ("rt_net_udp_last_sender", rt_net_udp_last_sender as *const () as usize, "a socket"),
+        ("rt_net_connect_begin", rt_net_connect_begin as *const () as usize, "a socket"),
+        ("rt_net_connect_finish", rt_net_connect_finish as *const () as usize, "a socket"),
+        ("rt_net_listen", rt_net_listen as *const () as usize, "a socket"),
+        ("rt_net_unix_connect", rt_net_unix_connect as *const () as usize, "a socket"),
+        ("rt_net_unix_listen", rt_net_unix_listen as *const () as usize, "a socket"),
+        ("rt_net_accept", rt_net_accept as *const () as usize, "a socket"),
+        ("rt_net_fill", rt_net_fill as *const () as usize, "a socket"),
+        ("rt_net_pop_byte", rt_net_pop_byte as *const () as usize, "a socket"),
+        ("rt_net_pop_char", rt_net_pop_char as *const () as usize, "a socket"),
+        ("rt_net_buffered_p", rt_net_buffered_p as *const () as usize, "a socket"),
+        ("rt_net_push_string", rt_net_push_string as *const () as usize, "a socket"),
+        ("rt_net_push_byte", rt_net_push_byte as *const () as usize, "a socket"),
+        ("rt_net_flush", rt_net_flush as *const () as usize, "a socket"),
+        ("rt_net_shutdown_write", rt_net_shutdown_write as *const () as usize, "a socket"),
+        ("rt_net_local_address", rt_net_local_address as *const () as usize, "a socket"),
+        ("rt_net_peer_address", rt_net_peer_address as *const () as usize, "a socket"),
+        ("rt_suspend_thread", rt_suspend_thread as *const () as usize, "an OS thread (`thread`)"),
+        ("rt_file_owner_name", rt_file_owner_name as *const () as usize, "`file-author`"),
+        ("rt_get_internal_run_time", rt_get_internal_run_time as *const () as usize, "`get-internal-run-time`"),
+        ("rt_machine_instance", rt_machine_instance as *const () as usize, "`machine-instance`"),
+        ("rt_software_version", rt_software_version as *const () as usize, "`software-version`"),
+        ("rt_ed_open", rt_ed_open as *const () as usize, "`ed`, which starts an editor"),
+    ]
 }
 
 /// The suspension [`needs_interpreter`]'s calls are preceded by —
@@ -753,7 +818,17 @@ pub(crate) fn native_lowered_primitive_methods(ty: u32) -> &'static [u32] {
 /// reference-counted `ClosureBox`, plus the shared binding cells
 /// (`BoxedObj::Cell`) captured names live in so compiled and interpreted
 /// `setf` mutate the very same object.
-pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 378] {
+pub(crate) fn rt_extern_functions() -> Vec<(&'static str, usize)> {
+    let mut shims = rt_shims().to_vec();
+    for runtime in [RuntimeCrate::Sys, RuntimeCrate::Posix] {
+        shims.extend(runtime.shims().iter().map(|(name, addr, _)| (*name, *addr)));
+    }
+    shims
+}
+
+/// The shims every target has: `typelisp-rt`'s, the printer's, the reader's,
+/// `eval`'s and `rt_llvm_call`.
+fn rt_shims() -> [(&'static str, usize); 324] {
     use typelisp_rt::c_mem::{
         rt_c_alloc, rt_c_arena_close, rt_c_arena_open, rt_c_index, rt_c_load, rt_c_offset, rt_c_ptr_check, rt_c_store,
     };
@@ -783,24 +858,6 @@ pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 378] {
         rt_suspend_chan_new, rt_suspend_chan_recv, rt_suspend_chan_select, rt_suspend_chan_send,
         rt_suspend_task, rt_suspend_main, rt_suspend_sleep,
         rt_suspend_wait, rt_suspend_yield,
-    };
-    use typelisp_rt_posix::{
-        rt_ed_open, rt_file_owner_name, rt_get_internal_run_time, rt_machine_instance, rt_software_version,
-        rt_suspend_io, rt_suspend_io_for, rt_suspend_thread,
-        rt_net_accept, rt_net_buffered_p, rt_net_connect_begin, rt_net_connect_finish, rt_net_fill, rt_net_flush,
-        rt_net_listen, rt_net_local_address, rt_net_peer_address, rt_net_pop_byte, rt_net_pop_char,
-        rt_net_push_byte, rt_net_push_string, rt_net_shutdown_write,
-        rt_net_resolve_begin, rt_net_resolve_finish, rt_net_tls_handshake, rt_net_tls_start,
-        rt_net_tls_listen, rt_net_socket_error, rt_net_peer_subject, rt_net_server_name, rt_net_set_nodelay,
-        rt_net_set_keepalive, rt_net_set_keepalive_period, rt_net_tls_add_certificate,
-        rt_net_udp_bind, rt_net_udp_last_sender, rt_net_udp_recv, rt_net_udp_send_to,
-        rt_net_unix_connect, rt_net_unix_listen,
-    };
-    use typelisp_rt_sys::{
-        rt_command_line_args, rt_dribble_start, rt_dribble_stop, rt_getenv, rt_home_directory,
-        rt_file_create_directories, rt_file_delete, rt_file_directory_p, rt_file_exists_p,
-        rt_file_list_directory, rt_file_modified_date, rt_file_rename,
-        rt_file_truename, rt_stream_open_file,
     };
     use typelisp_rt::sys_builtin::{
         rt_exit,
@@ -1165,7 +1222,6 @@ pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 378] {
         ("rt_stream_stderr", rt_stream_stderr as *const () as usize),
         ("rt_stream_string_input", rt_stream_string_input as *const () as usize),
         ("rt_stream_string_output", rt_stream_string_output as *const () as usize),
-        ("rt_stream_open_file", rt_stream_open_file as *const () as usize),
         ("rt_stream_close", rt_stream_close as *const () as usize),
         ("rt_stream_open_p", rt_stream_open_p as *const () as usize),
         ("rt_stream_describe", rt_stream_describe as *const () as usize),
@@ -1176,44 +1232,9 @@ pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 378] {
         ("rt_stream_write_byte", rt_stream_write_byte as *const () as usize),
         ("rt_stream_unread_char", rt_stream_unread_char as *const () as usize),
         ("rt_suspend_sleep", rt_suspend_sleep as *const () as usize),
-        ("rt_suspend_io", rt_suspend_io as *const () as usize),
-        ("rt_suspend_io_for", rt_suspend_io_for as *const () as usize),
-        ("rt_net_resolve_begin", rt_net_resolve_begin as *const () as usize),
-        ("rt_net_resolve_finish", rt_net_resolve_finish as *const () as usize),
-        ("rt_net_tls_start", rt_net_tls_start as *const () as usize),
-        ("rt_net_tls_listen", rt_net_tls_listen as *const () as usize),
-        ("rt_net_socket_error", rt_net_socket_error as *const () as usize),
-        ("rt_net_peer_subject", rt_net_peer_subject as *const () as usize),
-        ("rt_net_server_name", rt_net_server_name as *const () as usize),
-        ("rt_net_set_nodelay", rt_net_set_nodelay as *const () as usize),
-        ("rt_net_set_keepalive", rt_net_set_keepalive as *const () as usize),
-        ("rt_net_set_keepalive_period", rt_net_set_keepalive_period as *const () as usize),
-        ("rt_net_tls_add_certificate", rt_net_tls_add_certificate as *const () as usize),
-        ("rt_net_tls_handshake", rt_net_tls_handshake as *const () as usize),
-        ("rt_net_udp_bind", rt_net_udp_bind as *const () as usize),
-        ("rt_net_udp_send_to", rt_net_udp_send_to as *const () as usize),
-        ("rt_net_udp_recv", rt_net_udp_recv as *const () as usize),
-        ("rt_net_udp_last_sender", rt_net_udp_last_sender as *const () as usize),
-        ("rt_net_connect_begin", rt_net_connect_begin as *const () as usize),
-        ("rt_net_connect_finish", rt_net_connect_finish as *const () as usize),
-        ("rt_net_listen", rt_net_listen as *const () as usize),
-        ("rt_net_unix_connect", rt_net_unix_connect as *const () as usize),
-        ("rt_net_unix_listen", rt_net_unix_listen as *const () as usize),
-        ("rt_net_accept", rt_net_accept as *const () as usize),
-        ("rt_net_fill", rt_net_fill as *const () as usize),
-        ("rt_net_pop_byte", rt_net_pop_byte as *const () as usize),
-        ("rt_net_pop_char", rt_net_pop_char as *const () as usize),
-        ("rt_net_buffered_p", rt_net_buffered_p as *const () as usize),
-        ("rt_net_push_string", rt_net_push_string as *const () as usize),
-        ("rt_net_push_byte", rt_net_push_byte as *const () as usize),
-        ("rt_net_flush", rt_net_flush as *const () as usize),
-        ("rt_net_shutdown_write", rt_net_shutdown_write as *const () as usize),
-        ("rt_net_local_address", rt_net_local_address as *const () as usize),
-        ("rt_net_peer_address", rt_net_peer_address as *const () as usize),
         ("rt_suspend_wait", rt_suspend_wait as *const () as usize),
         ("rt_suspend_yield", rt_suspend_yield as *const () as usize),
         ("rt_suspend_task", rt_suspend_task as *const () as usize),
-        ("rt_suspend_thread", rt_suspend_thread as *const () as usize),
         ("rt_suspend_main", rt_suspend_main as *const () as usize),
         ("rt_thread_current_id", rt_thread_current_id as *const () as usize),
         ("rt_thread_available_parallelism", rt_thread_available_parallelism as *const () as usize),
@@ -1235,31 +1256,13 @@ pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 378] {
         ("rt_stream_at_line_start", rt_stream_at_line_start as *const () as usize),
         ("rt_stream_finish_output", rt_stream_finish_output as *const () as usize),
         ("rt_stream_take_output_string", rt_stream_take_output_string as *const () as usize),
-        ("rt_file_exists_p", rt_file_exists_p as *const () as usize),
-        ("rt_file_delete", rt_file_delete as *const () as usize),
-        ("rt_file_rename", rt_file_rename as *const () as usize),
-        ("rt_file_truename", rt_file_truename as *const () as usize),
-        ("rt_file_modified_date", rt_file_modified_date as *const () as usize),
-        ("rt_file_owner_name", rt_file_owner_name as *const () as usize),
-        ("rt_file_directory_p", rt_file_directory_p as *const () as usize),
-        ("rt_file_list_directory", rt_file_list_directory as *const () as usize),
-        ("rt_file_create_directories", rt_file_create_directories as *const () as usize),
-        ("rt_command_line_args", rt_command_line_args as *const () as usize),
-        ("rt_getenv", rt_getenv as *const () as usize),
-        ("rt_home_directory", rt_home_directory as *const () as usize),
         ("rt_lisp_implementation_version", rt_lisp_implementation_version as *const () as usize),
         ("rt_machine_type", rt_machine_type as *const () as usize),
-        ("rt_get_internal_run_time", rt_get_internal_run_time as *const () as usize),
-        ("rt_machine_instance", rt_machine_instance as *const () as usize),
         ("rt_machine_version", rt_machine_version as *const () as usize),
-        ("rt_software_version", rt_software_version as *const () as usize),
         ("rt_timezone_offset_seconds", rt_timezone_offset_seconds as *const () as usize),
         ("rt_timezone_daylight_p", rt_timezone_daylight_p as *const () as usize),
         ("rt_software_type", rt_software_type as *const () as usize),
         ("rt_heap_info", rt_heap_info as *const () as usize),
-        ("rt_dribble_start", rt_dribble_start as *const () as usize),
-        ("rt_dribble_stop", rt_dribble_stop as *const () as usize),
-        ("rt_ed_open", rt_ed_open as *const () as usize),
         ("rt_int_to_ratio", rt_int_to_ratio as *const () as usize),
         ("rt_float_to_int", rt_float_to_int as *const () as usize),
         ("rt_float_to_ratio", rt_float_to_ratio as *const () as usize),
@@ -1537,19 +1540,14 @@ mod cons_making_shim_tests {
         }
     }
 
+    /// A shim in two runtime crates' tables would be refused for a target
+    /// by the one it has not got though the other one gives it.
     #[test]
-    fn every_wasm_unavailable_shim_is_a_shim() {
-        let shims = rt_extern_functions();
-        for (name, _) in super::WASM_UNAVAILABLE_SHIMS {
-            assert!(shims.iter().any(|(n, _)| *n == name), "{} is not in rt_extern_functions", name);
+    fn no_shim_is_in_two_runtime_crates() {
+        let mut seen = std::collections::HashSet::new();
+        for name in rt_extern_functions().iter().map(|(name, _)| *name) {
+            assert!(seen.insert(name), "{} is in rt_extern_functions twice", name);
         }
-        let prefix = super::WASM_UNAVAILABLE_PREFIX.0;
-        assert!(shims.iter().any(|(n, _)| n.starts_with(prefix)), "no shim starts with {}", prefix);
-        for (name, _) in super::NO_FILE_SYSTEM_SHIMS {
-            assert!(shims.iter().any(|(n, _)| *n == name), "{} is not in rt_extern_functions", name);
-        }
-        let prefix = super::NO_FILE_SYSTEM_PREFIX.0;
-        assert!(shims.iter().any(|(n, _)| n.starts_with(prefix)), "no shim starts with {}", prefix);
     }
 
     #[test]

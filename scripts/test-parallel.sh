@@ -190,6 +190,12 @@ cargo build -p typelisp-front || { echo "FAILED: building typelisp-front's stati
 # invocation here, for the same reason as the staticlib above.
 echo "=== scripts/build-wasm-runtime.sh (the runtimes for the WebAssembly tests) ==="
 "$repo_root/scripts/build-wasm-runtime.sh" || { echo "FAILED: building the WebAssembly runtimes"; exit 1; }
+# Every test target, built once before the workers start. Left to the
+# workers, the first few each build what changed at the same time, and each
+# one puts its own `target/debug/typl` in place: a test of another worker that
+# runs `typl` in between finds no file there.
+echo "=== cargo test --no-run (every test target, before the workers) ==="
+cargo test --no-run --lib --tests || { echo "FAILED: building the test targets"; exit 1; }
 
 mkdir -p "$logdir"
 # Fresh verdicts: without this, a target whose worker never ran would be

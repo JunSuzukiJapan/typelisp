@@ -68,3 +68,12 @@ C1 と C2 は B に依存し、B は C1 と C2 を知らない。C2 は C1 に�
 5. `typelisp-rt-posix` を作り、C2 の中身を移す。テスト（`crates/typelisp-rt/tests` のスレッドとソケットのもの）も移す。
 6. 組み込み関数の表をクレートごとにし、拒否をクレートから決める。
 7. 組み込みのランタイムのクレート（cross-compile-embedded-plan.md の段階 1 の手順 5）。
+
+## 結果
+
+手順 1〜6 を終えた。
+
+- `typelisp-rt` に残る std の cfg は、大域アロケータの選択と `no_std` の宣言だけ。libc・rustls・webpki-roots に依存しない。
+- C1 は `typelisp-rt-sys`、C2 は `typelisp-rt-posix`。wasm の `typelisp-front` は C2 に依存せず、`eval` からの呼び出しは Panic で断る。
+- shim の表は `src/compile/externs.rs` で、全ターゲットが持つもの（`rt_shims`）と C1・C2 のもの（`RuntimeCrate::shims`、届いた経路の説明つき）に分かれる。ターゲットが持たないクレートは `Target::missing_runtimes` が答え、そのクレートの shim に届くプログラムはコンパイル時に断る。
+- 表を分けると `rt_*` の宣言の順が変わるので、島と prelude を再生成した。
