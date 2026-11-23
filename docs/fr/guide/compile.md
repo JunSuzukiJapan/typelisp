@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ 0d6d73aceba107bf7480412efc65502ef674dda8 -->
+<!-- translated-from: docs/ja/guide/compile.md @ 0af7d052ede61d9b74e6590bb00955c0c9c3b9a4 -->
 # Compilation
 
 Sauf indication contraire, les programmes typelisp s'exécutent dans l'interpréteur. Il existe en outre deux façons
@@ -273,6 +273,20 @@ $ qemu-system-arm -M mps2-an386 -nographic \
   (defun main () ()
     (unsafe (volatile-write-u32 #x40004008 1))                               ; activer l'envoi
     (put-byte 104) (put-byte 105) (put-byte 10))                             ; "hi" et un saut de ligne
+  ```
+
+- La fonction appelée quand une interruption arrive s'écrit comme un `defun` avec l'attribut `#[interrupt(N)]` (l'interruption de périphérique `N`) ou un attribut comme `#[exception(SysTick)]`. Une interruption s'active avec `(enable-interrupt N)`. Un gestionnaire s'exécute aussitôt ; seulement s'il arrive au milieu du travail du runtime s'exécute-t-il une fois ce travail fini. Un gestionnaire ne peut pas attendre (`sleep` est une erreur de compilation). Les détails sont dans la section 3.17 de la [référence de la syntaxe](../reference/syntax.md).
+
+  ```lisp
+  (use std::board::enable-interrupt)
+
+  #[interrupt(5)]
+  (defun on-five () ()
+    (println "interrupt 5"))
+
+  (defun main () ()
+    (enable-interrupt 5)
+    (unsafe (volatile-write-u32 #xE000E200 (as u32 32))))   ; lever soi-même l'interruption 5 (le registre des interruptions en attente du NVIC)
   ```
 
 - Le runtime démarre le programme (la table des vecteurs et la préparation de la RAM) et alloue la mémoire. Un HardFault ou une interruption non traitée termine le programme avec le code de sortie d'un panic (1).

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ 0d6d73aceba107bf7480412efc65502ef674dda8 -->
+<!-- translated-from: docs/ja/guide/compile.md @ 0af7d052ede61d9b74e6590bb00955c0c9c3b9a4 -->
 # Kompilering
 
 Om du inte gör något annat körs typelisp-program i tolken. Dessutom finns två sätt att kompilera till
@@ -272,6 +272,20 @@ $ qemu-system-arm -M mps2-an386 -nographic \
   (defun main () ()
     (unsafe (volatile-write-u32 #x40004008 1))                               ; slå på sändning
     (put-byte 104) (put-byte 105) (put-byte 10))                             ; "hi" och en radbrytning
+  ```
+
+- Skriv funktionen som anropas när ett avbrott kommer som en `defun` med attributet `#[interrupt(N)]` (kringutrustningsavbrottet `N`) eller ett som `#[exception(SysTick)]`. Slå på ett avbrott med `(enable-interrupt N)`. En hanterare körs genast; bara när den kommer mitt i körtidsmiljöns arbete körs den efter att arbetet är klart. En hanterare kan inte vänta (`sleep` är ett kompileringsfel). Detaljerna finns i avsnitt 3.17 i [syntaxreferensen](../reference/syntax.md).
+
+  ```lisp
+  (use std::board::enable-interrupt)
+
+  #[interrupt(5)]
+  (defun on-five () ()
+    (println "interrupt 5"))
+
+  (defun main () ()
+    (enable-interrupt 5)
+    (unsafe (volatile-write-u32 #xE000E200 (as u32 32))))   ; utlös avbrott 5 själv (NVIC:s register för väntande avbrott)
   ```
 
 - Körmiljön startar programmet (vektortabellen och förberedelsen av RAM) och allokerar minne. Ett HardFault eller ett obehandlat avbrott avslutar programmet med en panics slutkod (1).

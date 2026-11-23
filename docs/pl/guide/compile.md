@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ 0d6d73aceba107bf7480412efc65502ef674dda8 -->
+<!-- translated-from: docs/ja/guide/compile.md @ 0af7d052ede61d9b74e6590bb00955c0c9c3b9a4 -->
 # Kompilacja
 
 O ile nie zrobisz nic więcej, programy typelisp działają w interpreterze. Ponadto istnieją dwa
@@ -269,6 +269,20 @@ $ qemu-system-arm -M mps2-an386 -nographic \
   (defun main () ()
     (unsafe (volatile-write-u32 #x40004008 1))                               ; włącz wysyłanie
     (put-byte 104) (put-byte 105) (put-byte 10))                             ; "hi" i znak nowej linii
+  ```
+
+- Funkcję wywoływaną, gdy nadchodzi przerwanie, pisze się jako `defun` z atrybutem `#[interrupt(N)]` (przerwanie peryferyjne `N`) lub takim jak `#[exception(SysTick)]`. Przerwanie włącza się przez `(enable-interrupt N)`. Procedura obsługi uruchamia się od razu; tylko gdy nadejdzie w trakcie pracy środowiska uruchomieniowego, uruchamia się po jej zakończeniu. Procedura obsługi nie może czekać (`sleep` to błąd kompilacji). Szczegóły są w sekcji 3.17 [dokumentacji składni](../reference/syntax.md).
+
+  ```lisp
+  (use std::board::enable-interrupt)
+
+  #[interrupt(5)]
+  (defun on-five () ()
+    (println "interrupt 5"))
+
+  (defun main () ()
+    (enable-interrupt 5)
+    (unsafe (volatile-write-u32 #xE000E200 (as u32 32))))   ; samemu wywołać przerwanie 5 (rejestr oczekujących przerwań NVIC)
   ```
 
 - Środowisko uruchomieniowe uruchamia program (tablica wektorów i przygotowanie RAM) i przydziela pamięć. HardFault lub nieobsłużone przerwanie kończy program kodem wyjścia panic (1).

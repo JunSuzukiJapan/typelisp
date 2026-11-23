@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/system.md @ 7622044725db7d28dabb691d82e592367d9284e8 -->
+<!-- translated-from: docs/ja/reference/functions/system.md @ 0af7d052ede61d9b74e6590bb00955c0c9c3b9a4 -->
 # Tiempo, entorno e implementación
 
 Funciones de tiempo, consultas sobre el entorno de ejecución, herramientas de la implementación, análisis y
@@ -376,3 +376,12 @@ de ejecución: lo que se compila es la forma expandida del cuerpo.
 | `with-standard-io-syntax` | `(with-standard-io-syntax body...)` | — | Ejecuta `body` con todas las variables de control de la impresora en sus valores estándar y `*read-eval*` a `true` ([Impresión](printing.md#6-controlar-cuánto-se-imprime)) |
 | `exit` | `(exit code)` | `int→!` | Termina el proceso |
 | `dump` | `(dump path)` | `string→bool` | Escribe el entorno actual (información de tipos más cuerpos compilados) en un archivo. `typl --image <path>` vuelve a arrancar desde él. Solo del intérprete ([Referencia de sintaxis 10.1](../syntax.md#101-volcados)) |
+
+## 11. Interrupciones de un microcontrolador (`std::board`)
+
+Se traen con un `use`, como `(use std::board::enable-interrupt)`. Cómo escribir un manejador de interrupción está en la [referencia de sintaxis 3.17](../syntax.md#317-interruptn--exceptionname--manejadores-de-interrupción).
+
+| Nombre | Forma | Tipo | Descripción |
+|---|---|---|---|
+| `enable-interrupt` | `(enable-interrupt n)` | `int→()` | Hace que llegue la interrupción de periférico `n` (de 0 a 239). Fuera de un microcontrolador, un error en tiempo de ejecución (un error de compilación con `typl -c`) |
+| `disable-interrupt` | `(disable-interrupt n)` | `int→()` | Hace que la interrupción `n` deje de llegar. Fuera de un microcontrolador, igual que `enable-interrupt` |

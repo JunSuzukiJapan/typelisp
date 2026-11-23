@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ 0d6d73aceba107bf7480412efc65502ef674dda8 -->
+<!-- translated-from: docs/ja/guide/compile.md @ 0af7d052ede61d9b74e6590bb00955c0c9c3b9a4 -->
 # Compiling
 
 Unless you do anything else, typelisp programs run in the interpreter. In addition there are two
@@ -278,6 +278,20 @@ $ qemu-system-arm -M mps2-an386 -nographic \
   (defun main () ()
     (unsafe (volatile-write-u32 #x40004008 1))                               ; enable sending
     (put-byte 104) (put-byte 105) (put-byte 10))                             ; "hi" and a newline
+  ```
+
+- Write the function called when an interrupt comes as a `defun` with the attribute `#[interrupt(N)]` (the peripheral interrupt `N`) or one like `#[exception(SysTick)]`. Enable an interrupt with `(enable-interrupt N)`. A handler runs at once, and only when it comes in the middle of the runtime's work does it run after that work is done. A handler cannot wait (`sleep` is a compile error). The details are in section 3.17 of the [syntax reference](../reference/syntax.md).
+
+  ```lisp
+  (use std::board::enable-interrupt)
+
+  #[interrupt(5)]
+  (defun on-five () ()
+    (println "interrupt 5"))
+
+  (defun main () ()
+    (enable-interrupt 5)
+    (unsafe (volatile-write-u32 #xE000E200 (as u32 32))))   ; raise interrupt 5 itself (the NVIC's pending register)
   ```
 
 - The runtime starts the program (the vector table and getting RAM ready) and allocates memory. A HardFault or an interrupt nothing handles ends the program with the exit code of a panic (1).

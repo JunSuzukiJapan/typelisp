@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ 0d6d73aceba107bf7480412efc65502ef674dda8 -->
+<!-- translated-from: docs/ja/guide/compile.md @ 0af7d052ede61d9b74e6590bb00955c0c9c3b9a4 -->
 # कंपाइल करना
 
 यदि आप और कुछ न करें, तो typelisp प्रोग्राम इंटरप्रेटर में चलते हैं। इसके अलावा नेटिव कोड में कंपाइल करने के दो तरीके हैं, और एक पर्यावरण को सहेजने का तरीका है। विनिर्देश का विवरण [सिंटैक्स संदर्भ अध्याय 10](../reference/syntax.md#10-कंपाइलेशन) में है।
@@ -244,6 +244,20 @@ $ qemu-system-arm -M mps2-an386 -nographic \
   (defun main () ()
     (unsafe (volatile-write-u32 #x40004008 1))                               ; भेजना चालू करें
     (put-byte 104) (put-byte 105) (put-byte 10))                             ; "hi" और नई पंक्ति
+  ```
+
+- इंटरप्ट आने पर बुलाया जाने वाला फ़ंक्शन `#[interrupt(N)]` (पेरिफेरल इंटरप्ट `N`) या `#[exception(SysTick)]` जैसी विशेषता वाले `defun` के रूप में लिखें। इंटरप्ट को `(enable-interrupt N)` से चालू करें। हैंडलर तुरंत चलता है, और केवल रनटाइम के काम के बीच आने पर ही उस काम के बाद चलता है। हैंडलर प्रतीक्षा नहीं कर सकता (`sleep` कंपाइल त्रुटि है)। विवरण [सिंटैक्स संदर्भ](../reference/syntax.md) के खंड 3.17 में है।
+
+  ```lisp
+  (use std::board::enable-interrupt)
+
+  #[interrupt(5)]
+  (defun on-five () ()
+    (println "interrupt 5"))
+
+  (defun main () ()
+    (enable-interrupt 5)
+    (unsafe (volatile-write-u32 #xE000E200 (as u32 32))))   ; इंटरप्ट 5 को स्वयं उठाएँ (NVIC का पेंडिंग रजिस्टर)
   ```
 
 - रनटाइम प्रोग्राम शुरू करता है (वेक्टर टेबल और RAM की तैयारी) और मेमोरी आवंटित करता है। HardFault या बिना हैंडलर का इंटरप्ट प्रोग्राम को panic के निकास कोड (1) से समाप्त करता है।

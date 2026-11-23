@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 0d6d73aceba107bf7480412efc65502ef674dda8 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 0af7d052ede61d9b74e6590bb00955c0c9c3b9a4 -->
 # typelisp-syntaxisreferentie
 
 typelisp is een statisch getypeerde Lisp, geschreven in S-expressies. Voor de lijst met ingebouwde
@@ -84,7 +84,7 @@ functies en methoden zie [Ingebouwde functies](functions/README.md); voor de lij
   nieuwe tuple. Om er een te bouwen uit berekende waarden gebruik je `(tuple a b)`. Waar
   S-expressiedata worden verwacht, is het een tuple waarvan alle elementen data zijn: de variant
   `Tuple` van `Sexpr`.
-- **Attributen**: `#[test]` is een markering die aan de volgende vorm vastzit (geschreven zoals in Rust). Het enige attribuut tot nu toe is `test`, en dat hoort bij een `defun` ([3.16 `#[test]`](#316-test--testfuncties)). Gelezen met `read` wordt het de lijst `(%internal::attribute (test) form)`.
+- **Attributen**: `#[test]` is een markering op de volgende vorm (geschreven zoals in Rust). Er zijn drie attributen, `test`, `interrupt(N)` en `exception(NAME)`, die elk op een `defun` staan ([3.16 `#[test]`](#316-test--testfuncties), [3.17 interrupthandlers](#317-interruptn--exceptionname--interrupthandlers)). Een attribuut met argumenten schrijf je met het haakje direct na de naam. Gelezen met `read` worden ze de lijsten `(%internal::attribute (test) form)` en `(%internal::attribute ((interrupt 7)) form)`.
 - **De lege lijst `()`**: afhankelijk van de context de waarde van het type `Unit` of de `None` van
   `Option<Sexpr>`. **`Sexpr` heeft geen variant voor de lege lijst**: `Sexpr` betekent "een niet-lege
   S-expressie", en het type van S-expressiedata is `Option<Sexpr>` (zie "Patronen voor
@@ -1369,6 +1369,33 @@ test result: FAILED. 1 passed; 1 failed; 0 filtered out
 ```
 
 Wat een test met `print` afdrukt, gaat direct naar standaarduitvoer (het wordt niet opgevangen). Voor uitvoer om iets te onderzoeken schrijven `eprint`/`eprintln` ([Afdrukken](functions/printing.md)) naar standaardfout en mengen ze zich niet met de uitvoer van het programma.
+
+### 3.17 `#[interrupt(N)]` / `#[exception(NAME)]` — interrupthandlers
+
+```lisp
+(use std::board::enable-interrupt)
+(defvar (*received* int) 0)
+
+#[interrupt(7)]
+(defun on-uart () ()
+  (unsafe (volatile-write-u32 #x4000400C 1))   ; wis wat de interrupt veroorzaakte
+  (setf *received* (+ *received* 1))
+  ())
+
+(defun main () ()
+  (enable-interrupt 7)
+  ...)
+```
+
+In een programma dat voor een microcontroller is gecompileerd (paragraaf 3.8 van [Compileren](../guide/compile.md)) zijn dit de functies die worden aangeroepen als er een interrupt komt. `#[interrupt(N)]` maakt een functie de handler van periferie-interrupt `N` (0 tot en met 239), en `#[exception(NAME)]` van de core-exception `NAME`, een van `NonMaskableInt`, `MemoryManagement`, `BusFault`, `UsageFault`, `SVCall`, `DebugMonitor`, `PendSV`, `SysTick` (`HardFault` is van de runtime en beëindigt het programma).
+
+- Ze staan op een `defun` op het hoogste niveau die niets neemt en `()` teruggeeft (ook geen typeparameters). Een interrupt heeft één handler, en een functie behandelt één interrupt.
+- Een periferie-interrupt komt pas als `(enable-interrupt N)` hem inschakelt (`(disable-interrupt N)` stopt hem; zie [Systeem](functions/system.md)). Een exception zoals SysTick komt zodra de registers zo zijn ingesteld dat hij optreedt.
+- Een handler draait meteen, waar de interrupt kwam. Komt die midden in werk van de runtime (toewijzen, garbage collection, uitvoer, van taak wisselen enzovoort), dan draait de handler zodra dat werk klaar is. Handlers onderbreken elkaar niet.
+- In een handler vindt geen garbage collection plaats (de heap groeit als dat nodig is). De toestand van het programma, zoals globale variabelen, is gewoon te lezen en te schrijven.
+- Een handler kan niet wachten. Een handler die `sleep` gebruikt, is een compileerfout. Een bewerking die maar soms wacht, zoals ontvangen uit een kanaal, is te gebruiken zolang die niet hoeft te wachten; zou dat wel moeten, dan is het een panic.
+- Een `panic` of `throw` die een handler verlaat, beëindigt het programma, zoals een niet-opgevangen doet.
+- In de interpreter en in een programma dat voor iets anders dan een microcontroller is gecompileerd, komt geen interrupt. In de interpreter is een handler als gewone functie aan te roepen (voor tests). `typl -c` voor iets anders dan een microcontroller weigert een programma met een handler.
 
 ## 4. Binding en voorwaarden
 

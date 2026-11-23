@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/system.md @ 7622044725db7d28dabb691d82e592367d9284e8 -->
+<!-- translated-from: docs/ja/reference/functions/system.md @ 0af7d052ede61d9b74e6590bb00955c0c9c3b9a4 -->
 # Waktu, Lingkungan, dan Implementasi
 
 Fungsi untuk waktu, pertanyaan tentang lingkungan runtime, alat implementasi, penguraian dan
@@ -381,3 +381,12 @@ tersisa saat dijalankan: yang dikompilasi adalah bentuk ekspansi dari badan.
 | `with-standard-io-syntax` | `(with-standard-io-syntax body...)` | — | Menjalankan `body` dengan setiap variabel kendali pencetak pada nilai standarnya dan `*read-eval*` disetel ke `true` ([Pencetakan](printing.md#6-mengendalikan-seberapa-banyak-yang-dicetak)) |
 | `exit` | `(exit code)` | `int→!` | Mengakhiri proses |
 | `dump` | `(dump path)` | `string→bool` | Menulis lingkungan saat ini (informasi tipe ditambah badan terkompilasi) ke satu berkas. `typl --image <path>` memulai lagi darinya. Hanya untuk interpreter ([Referensi Sintaks 10.1](../syntax.md#101-dump)) |
+
+## 11. Interupsi mikrokontroler (`std::board`)
+
+Bawa masuk dengan `use`, seperti `(use std::board::enable-interrupt)`. Cara menulis penangan interupsi ada di [referensi sintaks 3.17](../syntax.md#317-interruptn--exceptionname--penangan-interupsi).
+
+| Nama | Bentuk | Tipe | Keterangan |
+|---|---|---|---|
+| `enable-interrupt` | `(enable-interrupt n)` | `int→()` | Membuat interupsi periferal `n` (0 sampai 239) datang. Di luar mikrokontroler, galat waktu jalan (galat kompilasi di bawah `typl -c`) |
+| `disable-interrupt` | `(disable-interrupt n)` | `int→()` | Membuat interupsi `n` berhenti datang. Di luar mikrokontroler, sama seperti `enable-interrupt` |

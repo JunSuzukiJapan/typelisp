@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ 0d6d73aceba107bf7480412efc65502ef674dda8 -->
+<!-- translated-from: docs/ja/guide/compile.md @ 0af7d052ede61d9b74e6590bb00955c0c9c3b9a4 -->
 # Derleme
 
 Başka bir şey yapmazsanız typelisp programları yorumlayıcıda çalışır. Buna ek olarak yerel koda
@@ -271,6 +271,20 @@ $ qemu-system-arm -M mps2-an386 -nographic \
   (defun main () ()
     (unsafe (volatile-write-u32 #x40004008 1))                               ; göndermeyi aç
     (put-byte 104) (put-byte 105) (put-byte 10))                             ; "hi" ve yeni satır
+  ```
+
+- Bir kesme geldiğinde çağrılan fonksiyonu, `#[interrupt(N)]` (çevre birimi kesmesi `N`) ya da `#[exception(SysTick)]` gibi bir özniteliği olan bir `defun` olarak yazın. Bir kesmeyi `(enable-interrupt N)` ile etkinleştirin. İşleyici hemen çalışır; yalnızca çalışma zamanının işinin ortasında geldiğinde o iş bittikten sonra çalışır. Bir işleyici bekleyemez (`sleep` bir derleme hatasıdır). Ayrıntılar [sözdizimi başvurusu](../reference/syntax.md) bölüm 3.17'dedir.
+
+  ```lisp
+  (use std::board::enable-interrupt)
+
+  #[interrupt(5)]
+  (defun on-five () ()
+    (println "interrupt 5"))
+
+  (defun main () ()
+    (enable-interrupt 5)
+    (unsafe (volatile-write-u32 #xE000E200 (as u32 32))))   ; kesme 5'i kendin tetikle (NVIC'nin bekleyen kesmeler yazmacı)
   ```
 
 - Çalışma zamanı programı başlatır (vektör tablosu ve RAM'in hazırlanması) ve belleği ayırır. Bir HardFault veya işlenmeyen bir kesme, programı bir panic'in çıkış koduyla (1) bitirir.

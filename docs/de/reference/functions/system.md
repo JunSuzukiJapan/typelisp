@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/system.md @ 7622044725db7d28dabb691d82e592367d9284e8 -->
+<!-- translated-from: docs/ja/reference/functions/system.md @ 0af7d052ede61d9b74e6590bb00955c0c9c3b9a4 -->
 # Zeit, Umgebung und Implementierung
 
 Funktionen für Zeit, Abfragen der Laufzeitumgebung, Werkzeuge der Implementierung, Parsen und Auswerten von
@@ -372,3 +372,12 @@ Beide sind Spezialformen, die **Namen, die keine Werte sind**, lexikalisch binde
 | `with-standard-io-syntax` | `(with-standard-io-syntax body...)` | — | Führt `body` aus, mit jeder Steuervariable der Ausgabe auf ihrem Standardwert und `*read-eval*` auf `true` ([Ausgabe](printing.md#6-steuern-wie-viel-ausgegeben-wird)) |
 | `exit` | `(exit code)` | `int→!` | Beendet den Prozess |
 | `dump` | `(dump path)` | `string→bool` | Schreibt die aktuelle Umgebung (Typinformation plus kompilierte Rümpfe) in eine Datei. `typl --image <path>` startet erneut daraus. Nur im Interpreter ([Syntaxreferenz 10.1](../syntax.md#101-dumps)) |
+
+## 11. Interrupts eines Mikrocontrollers (`std::board`)
+
+Mit einem `use` einbinden, etwa `(use std::board::enable-interrupt)`. Wie man einen Interrupt-Handler schreibt, steht in [Syntaxreferenz 3.17](../syntax.md#317-interruptn--exceptionname--interrupt-handler).
+
+| Name | Form | Typ | Beschreibung |
+|---|---|---|---|
+| `enable-interrupt` | `(enable-interrupt n)` | `int→()` | Lässt den Peripherie-Interrupt `n` (0 bis 239) kommen. Außerhalb eines Mikrocontrollers ein Laufzeitfehler (unter `typl -c` ein Kompilierfehler) |
+| `disable-interrupt` | `(disable-interrupt n)` | `int→()` | Lässt Interrupt `n` nicht mehr kommen. Außerhalb eines Mikrocontrollers wie `enable-interrupt` |

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/system.md @ 7622044725db7d28dabb691d82e592367d9284e8 -->
+<!-- translated-from: docs/ja/reference/functions/system.md @ 0af7d052ede61d9b74e6590bb00955c0c9c3b9a4 -->
 # 시간, 환경, 구현
 
 시간 함수, 실행 환경에 대한 질의, 구현 도구, 텍스트의 해석과 평가, 문서 문자열, 매크로.
@@ -337,3 +337,12 @@ CL에 있고 이 언어에 없는 것: `eval-when`(`:compile-toplevel`/`:load-to
 | `with-standard-io-syntax` | `(with-standard-io-syntax body...)` | — | 모든 프린터 제어 변수를 표준 값으로, `*read-eval*`을 `true`로 해서 `body`를 실행한다([출력](printing.md#6-출력량-제어)) |
 | `exit` | `(exit code)` | `int→!` | 프로세스를 끝낸다 |
 | `dump` | `(dump path)` | `string→bool` | 현재 환경(타입 정보와 컴파일된 본체)을 하나의 파일에 쓴다. `typl --image <path>`로 거기서 다시 시작한다. 인터프리터 전용([문법 레퍼런스 10.1](../syntax.md#101-덤프)) |
+
+## 11. 마이크로컨트롤러의 인터럽트(`std::board`)
+
+`(use std::board::enable-interrupt)`처럼 `use`로 가져와 씁니다. 인터럽트 핸들러를 쓰는 법은 [구문 레퍼런스 3.17](../syntax.md#317-interruptn--exceptionname--인터럽트-핸들러)에 있습니다.
+
+| 이름 | 형식 | 타입 | 설명 |
+|---|---|---|---|
+| `enable-interrupt` | `(enable-interrupt n)` | `int→()` | 주변 장치 인터럽트 `n`(0~239)이 오게 한다. 마이크로컨트롤러 밖에서는 실행 시간 오류(`typl -c`에서는 컴파일 오류) |
+| `disable-interrupt` | `(disable-interrupt n)` | `int→()` | 인터럽트 `n`이 오지 않게 한다. 마이크로컨트롤러 밖에서의 취급은 `enable-interrupt`와 같다 |

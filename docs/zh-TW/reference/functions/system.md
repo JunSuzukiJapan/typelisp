@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/system.md @ 7622044725db7d28dabb691d82e592367d9284e8 -->
+<!-- translated-from: docs/ja/reference/functions/system.md @ 0af7d052ede61d9b74e6590bb00955c0c9c3b9a4 -->
 # 時間、執行環境與實作
 
 時間、執行環境的查詢、實作工具、文字的解析與求值、文件字串，以及巨集相關的函式。
@@ -309,3 +309,12 @@ CL 中有而這裡沒有的：`eval-when`（`:compile-toplevel`/`:load-toplevel`
 | `with-standard-io-syntax` | `(with-standard-io-syntax body...)` | — | 把所有列印控制變數設為標準值、把 `*read-eval*` 設為 `true`，然後執行 `body`（[列印](printing.md#6-控制列印量)） |
 | `exit` | `(exit code)` | `int→!` | 結束行程 |
 | `dump` | `(dump path)` | `string→bool` | 把目前的環境（型別資訊＋編譯後的本體）寫到一個檔案。可以用 `typl --image <path>` 重新啟動。直譯器專用（[語法參考 10.1](../syntax.md#101-傾印)） |
+
+## 11. 微控制器的中斷（`std::board`）
+
+像 `(use std::board::enable-interrupt)` 這樣用 `use` 引入後使用。中斷處理程式的寫法見 [語法參考 3.17](../syntax.md#317-interruptn--exceptionname--中斷處理程式)。
+
+| 名稱 | 形式 | 型別 | 說明 |
+|---|---|---|---|
+| `enable-interrupt` | `(enable-interrupt n)` | `int→()` | 使周邊中斷 `n`（0～239）能夠到來。在微控制器之外是執行時期錯誤（在 `typl -c` 中是編譯錯誤） |
+| `disable-interrupt` | `(disable-interrupt n)` | `int→()` | 使中斷 `n` 不再到來。在微控制器之外的處理與 `enable-interrupt` 相同 |

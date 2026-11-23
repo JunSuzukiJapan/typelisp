@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 0d6d73aceba107bf7480412efc65502ef674dda8 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 0af7d052ede61d9b74e6590bb00955c0c9c3b9a4 -->
 # typelisp 문법 레퍼런스
 
 typelisp는 S 식으로 쓰는 정적 타입 Lisp이다. 내장 함수와 메서드의 목록은 [내장 함수](functions/README.md), 타입 목록은
@@ -55,7 +55,7 @@ typelisp는 S 식으로 쓰는 정적 타입 Lisp이다. 내장 함수와 메서
   정해지고(`(the #{i32 f64} #{1 2.0})`), 문맥이 없으면 각 요소 자신의 타입이 된다(`#{"foo" 123}`는 `#{string int}`). 요소는
   1~12개. 평가할 때마다 새 튜플이 만들어진다. 계산한 값으로 만들려면 `(tuple a b)`를 쓴다. S 식 데이터가 기대되는 곳에서는 요소가 모두 데이터인 튜플, 곧
   `Sexpr`의 `Tuple` 변형이 된다.
-- **속성**: `#[test]`는 다음 폼에 붙는 표시입니다(Rust와 같은 표기). 현재 속성은 `test` 하나뿐이며 `defun`에 붙입니다([3.16 `#[test]`](#316-test--테스트-함수)). `read`로 읽으면 `(%internal::attribute (test) form)`이라는 리스트가 됩니다.
+- **속성**: `#[test]`는 다음 폼에 붙이는 표시입니다(Rust와 같은 표기). 속성은 `test`, `interrupt(N)`, `exception(NAME)` 세 가지이며 모두 `defun`에 붙입니다([3.16 `#[test]`](#316-test--테스트-함수), [3.17 인터럽트 핸들러](#317-interruptn--exceptionname--인터럽트-핸들러)). 인자가 있는 속성은 이름 바로 뒤에 괄호를 붙여 씁니다. `read`로 읽으면 `(%internal::attribute (test) form)`, `(%internal::attribute ((interrupt 7)) form)` 리스트가 됩니다.
 - **빈 리스트 `()`**: 문맥에 따라 `Unit` 타입의 값이거나 `Option<Sexpr>`의 `None`이다. **`Sexpr`에는 빈 리스트 변형이
   없다.** `Sexpr`는 "비어 있지 않은 S 식"을 뜻하며, S 식 데이터의 타입은 `Option<Sexpr>`이다([4.3 match](#43-match--패턴-매칭)의
   "`Option<Sexpr>`의 패턴" 참고).
@@ -1137,6 +1137,33 @@ test result: FAILED. 1 passed; 1 failed; 0 filtered out
 ```
 
 테스트 안에서 `print`한 내용은 그대로 표준 출력으로 나갑니다(가로채지 않음). 조사를 위한 출력에는 표준 오류 출력에 쓰는 `eprint`/`eprintln`([출력](functions/printing.md))을 사용하면 프로그램의 출력과 섞이지 않습니다.
+
+### 3.17 `#[interrupt(N)]` / `#[exception(NAME)]` — 인터럽트 핸들러
+
+```lisp
+(use std::board::enable-interrupt)
+(defvar (*received* int) 0)
+
+#[interrupt(7)]
+(defun on-uart () ()
+  (unsafe (volatile-write-u32 #x4000400C 1))   ; 인터럽트의 원인을 지운다
+  (setf *received* (+ *received* 1))
+  ())
+
+(defun main () ()
+  (enable-interrupt 7)
+  ...)
+```
+
+마이크로컨트롤러용으로 컴파일한 프로그램([컴파일](../guide/compile.md)의 3.8절)에서, 인터럽트가 올 때 호출되는 함수를 씁니다. `#[interrupt(N)]`은 주변 장치 인터럽트 `N`(0~239)의, `#[exception(NAME)]`은 코어 예외 `NAME`의 핸들러가 됩니다. `NAME`은 `NonMaskableInt`, `MemoryManagement`, `BusFault`, `UsageFault`, `SVCall`, `DebugMonitor`, `PendSV`, `SysTick` 중 하나입니다(`HardFault`는 런타임이 맡아 프로그램을 끝냅니다).
+
+- 인자를 받지 않고 `()`를 반환하는 최상위 `defun`에 붙입니다(타입 매개변수도 받을 수 없습니다). 인터럽트 하나에 핸들러는 하나, 함수 하나가 맡는 인터럽트도 하나입니다.
+- 주변 장치 인터럽트는 `(enable-interrupt N)`으로 켤 때까지 오지 않습니다(`(disable-interrupt N)`으로 멈춥니다. [시스템](functions/system.md) 참고). SysTick 같은 예외는 그 예외를 일으키도록 레지스터를 설정하면 옵니다.
+- 핸들러는 인터럽트가 온 그 자리에서 바로 실행됩니다. 다만 런타임의 처리(할당, GC, 출력, 태스크 전환 등) 도중에 오면, 그 처리가 끝난 뒤에 실행됩니다. 핸들러끼리는 서로 끼어들지 않습니다.
+- 핸들러 안에서는 GC가 일어나지 않습니다(필요하면 힙을 늘립니다). 전역 변수 같은 프로그램의 상태는 그대로 읽고 쓸 수 있습니다.
+- 핸들러는 기다릴 수 없습니다. `sleep`을 쓰는 핸들러는 컴파일 오류입니다. 채널 수신처럼 기다릴지가 실행 시간에 정해지는 연산은 기다리지 않아도 될 때만 쓸 수 있고, 기다리게 되면 panic입니다.
+- 핸들러 밖으로 나가는 `panic`과 `throw`는 잡히지 않았을 때와 같이 프로그램을 끝냅니다.
+- 인터프리터나 마이크로컨트롤러 이외를 대상으로 한 컴파일에서는 인터럽트가 오지 않습니다. 인터프리터에서는 핸들러를 보통 함수처럼 호출할 수 있습니다(테스트에 쓸 수 있습니다). 마이크로컨트롤러 이외를 대상으로 한 `typl -c`는 핸들러가 있으면 컴파일 오류입니다.
 
 ## 4. 바인딩과 조건 분기
 

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/system.md @ 7622044725db7d28dabb691d82e592367d9284e8 -->
+<!-- translated-from: docs/ja/reference/functions/system.md @ 0af7d052ede61d9b74e6590bb00955c0c9c3b9a4 -->
 # Czas, środowisko i implementacja
 
 Funkcje do obsługi czasu, zapytania o środowisko uruchomieniowe, narzędzia implementacji, parsowanie i
@@ -368,3 +368,12 @@ kompilowana jest rozwinięta postać ciała.
 | `with-standard-io-syntax` | `(with-standard-io-syntax body...)` | — | Wykonuje `body` z każdą zmienną sterującą drukarki ustawioną na wartość standardową i `*read-eval*` ustawionym na `true` ([Wypisywanie](printing.md#6-kontrolowanie-ile-jest-wypisywane)) |
 | `exit` | `(exit code)` | `int→!` | Kończy proces |
 | `dump` | `(dump path)` | `string→bool` | Zapisuje bieżące środowisko (informacje o typach plus skompilowane ciała) do jednego pliku. `typl --image <path>` startuje od niego ponownie. Tylko interpreter ([Referencja składni 10.1](../syntax.md#101-zrzuty-dumps)) |
+
+## 11. Przerwania mikrokontrolera (`std::board`)
+
+Sprowadza się je przez `use`, np. `(use std::board::enable-interrupt)`. Jak napisać procedurę obsługi przerwania, opisuje [dokumentacja składni 3.17](../syntax.md#317-interruptn--exceptionname--procedury-obsługi-przerwań).
+
+| Nazwa | Forma | Typ | Opis |
+|---|---|---|---|
+| `enable-interrupt` | `(enable-interrupt n)` | `int→()` | Sprawia, że przerwanie peryferyjne `n` (od 0 do 239) nadchodzi. Poza mikrokontrolerem błąd czasu wykonania (błąd kompilacji przy `typl -c`) |
+| `disable-interrupt` | `(disable-interrupt n)` | `int→()` | Sprawia, że przerwanie `n` przestaje nadchodzić. Poza mikrokontrolerem jak `enable-interrupt` |

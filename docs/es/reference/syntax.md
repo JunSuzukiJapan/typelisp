@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 0d6d73aceba107bf7480412efc65502ef674dda8 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 0af7d052ede61d9b74e6590bb00955c0c9c3b9a4 -->
 # Referencia de sintaxis de typelisp
 
 typelisp es un Lisp con tipado estático que se escribe en expresiones S. Para la lista de funciones y métodos
@@ -83,7 +83,7 @@ incorporados, consulta [Funciones incorporadas](functions/README.md); para la li
   `#{string int}`). Una tupla tiene de 1 a 12 elementos. Cada evaluación crea una tupla nueva. Para
   construir una a partir de valores calculados, se usa `(tuple a b)`. Donde se esperan datos de
   S-expresión, es una tupla cuyos elementos son todos datos: la variante `Tuple` de `Sexpr`.
-- **Atributos**: `#[test]` es una marca que se une a la forma siguiente (escrita como en Rust). El único atributo por ahora es `test`, y va sobre un `defun` ([3.16 `#[test]`](#316-test--funciones-de-prueba)). Leído con `read`, se convierte en la lista `(%internal::attribute (test) form)`.
+- **Atributos**: `#[test]` es una marca que se pone a la forma siguiente (escrita como en Rust). Hay tres atributos, `test`, `interrupt(N)` y `exception(NAME)`, y cada uno va en un `defun` ([3.16 `#[test]`](#316-test--funciones-de-prueba), [3.17 manejadores de interrupción](#317-interruptn--exceptionname--manejadores-de-interrupción)). Un atributo con argumentos se escribe con el paréntesis justo después de su nombre. Leídos con `read`, son las listas `(%internal::attribute (test) form)` y `(%internal::attribute ((interrupt 7)) form)`.
 - **La lista vacía `()`**: según el contexto, el valor del tipo `Unit` o el `None` de `Option<Sexpr>`.
   **`Sexpr` no tiene variante de lista vacía**: `Sexpr` significa "una expresión S no vacía", y el tipo de los
   datos de expresiones S es `Option<Sexpr>` (consulta "Patrones para `Option<Sexpr>`" en
@@ -1341,6 +1341,33 @@ test result: FAILED. 1 passed; 1 failed; 0 filtered out
 ```
 
 Lo que una prueba imprime con `print` va directamente a la salida estándar (no se captura). Para la salida destinada a investigar, `eprint`/`eprintln` ([Impresión](functions/printing.md)) escriben en la salida de error estándar y no se mezclan con la salida del programa.
+
+### 3.17 `#[interrupt(N)]` / `#[exception(NAME)]` — manejadores de interrupción
+
+```lisp
+(use std::board::enable-interrupt)
+(defvar (*received* int) 0)
+
+#[interrupt(7)]
+(defun on-uart () ()
+  (unsafe (volatile-write-u32 #x4000400C 1))   ; borrar lo que provocó la interrupción
+  (setf *received* (+ *received* 1))
+  ())
+
+(defun main () ()
+  (enable-interrupt 7)
+  ...)
+```
+
+En un programa compilado para un microcontrolador (sección 3.8 de [Compilar](../guide/compile.md)), son las funciones que se llaman cuando llega una interrupción. `#[interrupt(N)]` hace de una función el manejador de la interrupción de periférico `N` (de 0 a 239), y `#[exception(NAME)]` de la excepción del núcleo `NAME`, una de `NonMaskableInt`, `MemoryManagement`, `BusFault`, `UsageFault`, `SVCall`, `DebugMonitor`, `PendSV`, `SysTick` (`HardFault` es del entorno de ejecución y termina el programa).
+
+- Van en un `defun` de nivel superior que no toma nada y devuelve `()` (tampoco parámetros de tipo). Una interrupción tiene un manejador, y una función maneja una interrupción.
+- Una interrupción de periférico no llega hasta que `(enable-interrupt N)` la habilita (`(disable-interrupt N)` la detiene; véase [Sistema](functions/system.md)). Una excepción como SysTick llega en cuanto los registros se configuran para provocarla.
+- Un manejador se ejecuta en el acto, donde llegó la interrupción. Si llega en medio del trabajo del entorno de ejecución (asignar memoria, recolectar basura, escribir la salida, cambiar de tarea, etc.), el manejador se ejecuta en cuanto ese trabajo termina. Los manejadores no se interrumpen entre sí.
+- En un manejador no hay recolección de basura (el montón crece si hace falta). El estado del programa, como las variables globales, se lee y escribe como siempre.
+- Un manejador no puede esperar. Un manejador que usa `sleep` es un error de compilación. Una operación que solo a veces espera, como recibir de un canal, se puede usar mientras no tenga que esperar; si tuviera que hacerlo, es un panic.
+- Un `panic` o `throw` que sale de un manejador termina el programa, como uno no capturado.
+- En el intérprete y en un programa compilado para algo que no sea un microcontrolador no llega ninguna interrupción. En el intérprete un manejador se puede llamar como una función normal (para pruebas). `typl -c` para algo que no sea un microcontrolador rechaza un programa con un manejador.
 
 ## 4. Enlaces y condicionales
 

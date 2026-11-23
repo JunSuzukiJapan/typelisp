@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 0d6d73aceba107bf7480412efc65502ef674dda8 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 0af7d052ede61d9b74e6590bb00955c0c9c3b9a4 -->
 # typelisp Syntax Reference
 
 typelisp is a statically typed Lisp, written in S-expressions. For the list of built-in functions and
@@ -79,7 +79,7 @@ and for reading error messages, [errors.md](errors.md).
   `#{string int}`). A tuple has 1 to 12 elements. Each evaluation makes a new tuple. To build one
   from computed values, use `(tuple a b)`. Where S-expression data is expected, it is a tuple whose
   elements are all data: the `Tuple` variant of `Sexpr`.
-- **Attributes**: `#[test]` is a mark attached to the next form (written as in Rust). The only attribute so far is `test`, which goes on a `defun` ([3.16 `#[test]`](#316-test--test-functions)). Read with `read`, it becomes the list `(%internal::attribute (test) form)`.
+- **Attributes**: `#[test]` is a mark attached to the next form (written as in Rust). There are three attributes, `test`, `interrupt(N)` and `exception(NAME)`, each of which goes on a `defun` ([3.16 `#[test]`](#316-test--test-functions), [3.17 interrupt handlers](#317-interruptn--exceptionname--interrupt-handlers)). An attribute with arguments is written with the parenthesis right after its name. Read with `read`, they become the lists `(%internal::attribute (test) form)` and `(%internal::attribute ((interrupt 7)) form)`.
 - **The empty list `()`**: depending on context, the value of the `Unit` type or the `None` of
   `Option<Sexpr>`. **`Sexpr` has no empty-list variant**: `Sexpr` means "a non-empty S-expression",
   and the type of S-expression data is `Option<Sexpr>` (see "Patterns for `Option<Sexpr>`" in
@@ -1320,6 +1320,33 @@ test result: FAILED. 1 passed; 1 failed; 0 filtered out
 ```
 
 What a test `print`s goes straight to standard output (it is not captured). For output meant for investigating, `eprint`/`eprintln` ([Printing](functions/printing.md)) write to standard error and do not mix with the program's output.
+
+### 3.17 `#[interrupt(N)]` / `#[exception(NAME)]` — interrupt handlers
+
+```lisp
+(use std::board::enable-interrupt)
+(defvar (*received* int) 0)
+
+#[interrupt(7)]
+(defun on-uart () ()
+  (unsafe (volatile-write-u32 #x4000400C 1))   ; clear what raised the interrupt
+  (setf *received* (+ *received* 1))
+  ())
+
+(defun main () ()
+  (enable-interrupt 7)
+  ...)
+```
+
+In a program compiled for a microcontroller (section 3.8 of [Compiling](../guide/compile.md)), these are the functions called when an interrupt comes. `#[interrupt(N)]` makes one the handler of the peripheral interrupt `N` (0 to 239), and `#[exception(NAME)]` of the core exception `NAME`, one of `NonMaskableInt`, `MemoryManagement`, `BusFault`, `UsageFault`, `SVCall`, `DebugMonitor`, `PendSV`, `SysTick` (`HardFault` is the runtime's, and ends the program).
+
+- They go on a top-level `defun` that takes nothing and returns `()` (no type parameters either). One interrupt has one handler, and one function handles one interrupt.
+- A peripheral interrupt does not come until `(enable-interrupt N)` enables it (`(disable-interrupt N)` stops it; see [System](functions/system.md)). An exception such as SysTick comes once the registers are set to raise it.
+- A handler runs at once, where the interrupt came. If it comes in the middle of the runtime's work (allocating, collecting, output, switching tasks and so on), the handler runs as soon as that work is done. Handlers do not interrupt each other.
+- No garbage collection happens in a handler (the heap grows if it needs to). The program's state, such as global variables, can be read and written as usual.
+- A handler cannot wait. A handler that uses `sleep` is a compile error. An operation that waits only sometimes, such as receiving from a channel, can be used while it need not wait; if it would, it is a panic.
+- A `panic` or `throw` leaving a handler ends the program, as an uncaught one does.
+- No interrupt comes in the interpreter or in a program compiled for anything but a microcontroller. In the interpreter a handler can be called as an ordinary function (for tests). `typl -c` for anything but a microcontroller refuses a program with a handler.
 
 ## 4. Binding and conditionals
 

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 0d6d73aceba107bf7480412efc65502ef674dda8 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 0af7d052ede61d9b74e6590bb00955c0c9c3b9a4 -->
 # typelisp 语法参考
 
 typelisp 是一种静态类型的 Lisp，语法采用 S 表达式。内置函数和方法的一览见[内置函数](functions/README.md)，类型一览见
@@ -47,7 +47,7 @@ typelisp 是一种静态类型的 Lisp，语法采用 S 表达式。内置函数
 - **向量**：`#(1 2 3)`（与 CL 相同）。内容全部是字面量，不会求值——`#(a b)` 中的 `a` 是符号而不是变量。元素类型由上下文决定（`(the Vector<i32> #(1 2))`），没有上下文时取第一个元素的类型（`#(1 2 3)` 是 `Vector<int>`）。元素类型必须一致，`#(1 "a")` 是类型错误。既没有元素也没有上下文的 `#()` 也是类型错误。每次求值都会创建新的向量。在期望 S 表达式数据的位置（`(the Option<Sexpr> #(1 x))`、`'#(..)`、`read` 读到的数据），它是元素全部为数据的 `Vector<Option<Sexpr>>`——即 `Sexpr` 的 `Vector` 变体。
 - **数组**：`#2A((1 2) (3 4))`（与 CL 相同）。`#` 与 `A` 之间的数是维数，内容中列表嵌套的前这么多层就是各个维度。`#0A x` 是只有一个元素的零维数组。同一层的列表长度不一致是读取错误。类型的确定方式与向量相同，结果是 `Array<T>`（没有元素时需要上下文，例如 `(the Array<f64> #2A(()))`）。作为 S 表达式数据，它是 `Array<Option<Sexpr>>`——即 `Sexpr` 的 `Array` 变体。
 - **元组**：`#{"foo" 123 45.6}`。内容全部是字面量，不求值（`#{a b}` 的 `a` 是符号）。各元素的类型按位置由上下文决定（`(the #{i32 f64} #{1 2.0})`），没有上下文时就是各元素自身的类型（`#{"foo" 123}` 是 `#{string int}`）。元素为 1～12 个。每次求值都会产生新的元组。要用计算出的值构造元组，使用 `(tuple a b)`。在期望 S 表达式数据的位置，它是元素全部为数据的元组——即 `Sexpr` 的 `Tuple` 变体。
-- **属性**：`#[test]` 是附加在下一个形式上的标记（与 Rust 的写法相同）。目前唯一的属性是 `test`，加在 `defun` 上（[3.16 `#[test]`](#316-test--测试函数)）。用 `read` 读取时，它成为列表 `(%internal::attribute (test) form)`。
+- **属性**：`#[test]` 是附在下一个形式上的标记（写法与 Rust 相同）。属性有 `test`、`interrupt(N)`、`exception(NAME)` 三个，都附在 `defun` 上（[3.16 `#[test]`](#316-test--测试函数)、[3.17 中断处理程序](#317-interruptn--exceptionname--中断处理程序)）。带参数的属性在名字后面紧接括号书写。用 `read` 读取，会成为 `(%internal::attribute (test) form)`、`(%internal::attribute ((interrupt 7)) form)` 这样的列表。
 - **空列表 `()`**：根据上下文，是 `Unit` 类型的值，或者是 `Option<Sexpr>` 的 `None`。**`Sexpr` 没有空列表的变体**——`Sexpr`
   表示"非空的 S 表达式"，S 表达式数据的类型是 `Option<Sexpr>`（见 [4.3 match](#43-match--模式匹配) 的"`Option<Sexpr>` 的模式"）。
 - **quote/quasiquote/unquote**：
@@ -1055,6 +1055,33 @@ test result: FAILED. 1 passed; 1 failed; 0 filtered out
 ```
 
 测试中 `print` 的内容会直接输出到标准输出（不捕获）。用于调查的输出，使用写到标准错误输出的 `eprint`/`eprintln`（[打印](functions/printing.md)），就不会与程序的输出混在一起。
+
+### 3.17 `#[interrupt(N)]` / `#[exception(NAME)]` — 中断处理程序
+
+```lisp
+(use std::board::enable-interrupt)
+(defvar (*received* int) 0)
+
+#[interrupt(7)]
+(defun on-uart () ()
+  (unsafe (volatile-write-u32 #x4000400C 1))   ; 清除引发中断的原因
+  (setf *received* (+ *received* 1))
+  ())
+
+(defun main () ()
+  (enable-interrupt 7)
+  ...)
+```
+
+在为微控制器编译的程序中（[编译](../guide/compile.md) 的 3.8 节），这里写的是中断到来时被调用的函数。`#[interrupt(N)]` 使函数成为外设中断 `N`（0～239）的处理程序，`#[exception(NAME)]` 使其成为内核异常 `NAME` 的处理程序，`NAME` 是 `NonMaskableInt`, `MemoryManagement`, `BusFault`, `UsageFault`, `SVCall`, `DebugMonitor`, `PendSV`, `SysTick` 之一（`HardFault` 由运行时负责，会结束程序）。
+
+- 附在不接受参数并返回 `()` 的顶层 `defun` 上（也不能有类型参数）。一个中断只有一个处理程序，一个函数也只处理一个中断。
+- 外设中断在用 `(enable-interrupt N)` 启用之前不会到来（用 `(disable-interrupt N)` 停止。参见 [系统](functions/system.md)）。SysTick 等异常只要把寄存器设为引发它就会到来。
+- 处理程序在中断到来的地方立即执行。但若在运行时的处理（分配、GC、输出、任务切换等）途中到来，则等该处理结束后再执行。处理程序之间不会互相打断。
+- 处理程序中不会发生 GC（需要时会扩大堆）。程序的状态（全局变量等）可以照常读写。
+- 处理程序不能等待。使用 `sleep` 的处理程序会产生编译错误。像从通道接收这样是否等待在运行时才决定的操作，只有在无需等待时才能使用，若需要等待则会 panic。
+- 离开处理程序的 `panic` 和 `throw` 会像未被捕获时一样结束程序。
+- 在解释器中以及面向微控制器以外目标的编译中，中断不会到来。在解释器中，处理程序可以像普通函数一样调用（可用于测试）。面向微控制器以外目标的 `typl -c`，若有处理程序会产生编译错误。
 
 ## 4. 绑定与条件分支
 

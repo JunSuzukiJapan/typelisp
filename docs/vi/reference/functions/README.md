@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/README.md @ 398532233e28225bb121ed5b18609d41ea1bf813 -->
+<!-- translated-from: docs/ja/reference/functions/README.md @ 0af7d052ede61d9b74e6590bb00955c0c9c3b9a4 -->
 # Hàm dựng sẵn
 
 Danh sách các hàm dựng sẵn, phương thức và thư viện chuẩn. Về cú pháp (các dạng đặc biệt và cách định
@@ -32,6 +32,7 @@ Mọi tên khác được đưa vào bằng `use`, như `(use std::net::tcp-conn
 | Module | Tên |
 |---|---|
 | `std::array` | `array-iter` |
+| `std::board` | `disable-interrupt`, `enable-interrupt` |
 | `std::char` | `digit->char`, `digit-weight`, `name->char` |
 | `std::collections` | `Deque`, `HashSet`, `Scope`, `SortedTable`, `hashtable-iter` |
 | `std::env` | `command-line-args`, `getenv`, `home-directory` |

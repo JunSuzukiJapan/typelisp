@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 0d6d73aceba107bf7480412efc65502ef674dda8 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 0af7d052ede61d9b74e6590bb00955c0c9c3b9a4 -->
 # Syntaxreferens för typelisp
 
 typelisp är ett statiskt typat Lisp, skrivet med S-uttryck. För listan över inbyggda funktioner och
@@ -81,7 +81,7 @@ och för att läsa felmeddelanden, [errors.md](errors.md).
   `#{string int}`). En tupel har 1 till 12 element. Varje evaluering skapar en ny tupel. För att
   bygga en av beräknade värden använder man `(tuple a b)`. Där S-uttrycksdata förväntas är det en
   tupel vars element alla är data: varianten `Tuple` av `Sexpr`.
-- **Attribut**: `#[test]` är en markering som hör till nästa form (skriven som i Rust). Det enda attributet hittills är `test`, och det sätts på en `defun` ([3.16 `#[test]`](#316-test--testfunktioner)). Läst med `read` blir det listan `(%internal::attribute (test) form)`.
+- **Attribut**: `#[test]` är en markering på nästa form (skriven som i Rust). Det finns tre attribut, `test`, `interrupt(N)` och `exception(NAME)`, som vart och ett sitter på en `defun` ([3.16 `#[test]`](#316-test--testfunktioner), [3.17 avbrottshanterare](#317-interruptn--exceptionname--avbrottshanterare)). Ett attribut med argument skrivs med parentesen direkt efter namnet. Lästa med `read` blir de listorna `(%internal::attribute (test) form)` och `(%internal::attribute ((interrupt 7)) form)`.
 - **Den tomma listan `()`**: beroende på sammanhang värdet av typen `Unit` eller `None` i
   `Option<Sexpr>`. **`Sexpr` har ingen variant för den tomma listan**: `Sexpr` betyder "ett icke-tomt
   S-uttryck", och typen för S-uttrycksdata är `Option<Sexpr>` (se "Mönster för `Option<Sexpr>`" i
@@ -1317,6 +1317,33 @@ test result: FAILED. 1 passed; 1 failed; 0 filtered out
 ```
 
 Det ett test skriver ut med `print` går direkt till standard ut (det fångas inte upp). För utdata avsedda för felsökning skriver `eprint`/`eprintln` ([Utskrift](functions/printing.md)) till standard fel och blandas inte med programmets utdata.
+
+### 3.17 `#[interrupt(N)]` / `#[exception(NAME)]` — avbrottshanterare
+
+```lisp
+(use std::board::enable-interrupt)
+(defvar (*received* int) 0)
+
+#[interrupt(7)]
+(defun on-uart () ()
+  (unsafe (volatile-write-u32 #x4000400C 1))   ; nollställ det som utlöste avbrottet
+  (setf *received* (+ *received* 1))
+  ())
+
+(defun main () ()
+  (enable-interrupt 7)
+  ...)
+```
+
+I ett program kompilerat för en mikrokontroller (avsnitt 3.8 i [Kompilera](../guide/compile.md)) är detta de funktioner som anropas när ett avbrott kommer. `#[interrupt(N)]` gör en funktion till hanterare för kringutrustningsavbrottet `N` (0 till 239), och `#[exception(NAME)]` för kärnans undantag `NAME`, ett av `NonMaskableInt`, `MemoryManagement`, `BusFault`, `UsageFault`, `SVCall`, `DebugMonitor`, `PendSV`, `SysTick` (`HardFault` tillhör körtidsmiljön och avslutar programmet).
+
+- De sitter på en `defun` på toppnivå som inte tar något och returnerar `()` (inga typparametrar heller). Ett avbrott har en hanterare, och en funktion hanterar ett avbrott.
+- Ett kringutrustningsavbrott kommer inte förrän `(enable-interrupt N)` slår på det (`(disable-interrupt N)` stoppar det; se [System](functions/system.md)). Ett undantag som SysTick kommer så snart registren är inställda för att utlösa det.
+- En hanterare körs genast, där avbrottet kom. Kommer det mitt i körtidsmiljöns arbete (allokering, skräpsamling, utmatning, byte av uppgift och så vidare) körs hanteraren så snart det arbetet är klart. Hanterare avbryter inte varandra.
+- Ingen skräpsamling sker i en hanterare (heapen växer vid behov). Programmets tillstånd, som globala variabler, läses och skrivs som vanligt.
+- En hanterare kan inte vänta. En hanterare som använder `sleep` är ett kompileringsfel. En operation som bara ibland väntar, som att ta emot från en kanal, går att använda så länge den inte behöver vänta; skulle den behöva det är det en panic.
+- En `panic` eller `throw` som lämnar en hanterare avslutar programmet, som en ofångad gör.
+- Inget avbrott kommer i tolken eller i ett program kompilerat för något annat än en mikrokontroller. I tolken kan en hanterare anropas som en vanlig funktion (för tester). `typl -c` för något annat än en mikrokontroller avvisar ett program med en hanterare.
 
 ## 4. Bindning och villkor
 

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ 0d6d73aceba107bf7480412efc65502ef674dda8 -->
+<!-- translated-from: docs/ja/guide/compile.md @ 0af7d052ede61d9b74e6590bb00955c0c9c3b9a4 -->
 # Biên dịch
 
 Nếu bạn không làm gì thêm, chương trình typelisp chạy trong trình thông dịch. Ngoài ra còn có hai
@@ -268,6 +268,20 @@ $ qemu-system-arm -M mps2-an386 -nographic \
   (defun main () ()
     (unsafe (volatile-write-u32 #x40004008 1))                               ; bật gửi
     (put-byte 104) (put-byte 105) (put-byte 10))                             ; "hi" và xuống dòng
+  ```
+
+- Viết hàm được gọi khi có ngắt đến dưới dạng `defun` có thuộc tính `#[interrupt(N)]` (ngắt ngoại vi `N`) hoặc như `#[exception(SysTick)]`. Bật ngắt bằng `(enable-interrupt N)`. Trình xử lý chạy ngay; chỉ khi ngắt đến giữa lúc runtime đang làm việc thì nó chạy sau khi công việc đó xong. Trình xử lý không thể chờ (`sleep` là lỗi biên dịch). Chi tiết ở mục 3.17 của [tài liệu tham khảo cú pháp](../reference/syntax.md).
+
+  ```lisp
+  (use std::board::enable-interrupt)
+
+  #[interrupt(5)]
+  (defun on-five () ()
+    (println "interrupt 5"))
+
+  (defun main () ()
+    (enable-interrupt 5)
+    (unsafe (volatile-write-u32 #xE000E200 (as u32 32))))   ; tự gây ra ngắt 5 (thanh ghi chờ xử lý của NVIC)
   ```
 
 - Runtime khởi động chương trình (bảng vector và chuẩn bị RAM) và cấp phát bộ nhớ. Một HardFault hoặc ngắt không được xử lý kết thúc chương trình với mã thoát của panic (1).

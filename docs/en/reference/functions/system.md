@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/system.md @ 7622044725db7d28dabb691d82e592367d9284e8 -->
+<!-- translated-from: docs/ja/reference/functions/system.md @ 0af7d052ede61d9b74e6590bb00955c0c9c3b9a4 -->
 # Time, Environment and Implementation
 
 Functions for time, queries about the runtime environment, implementation tools, parsing and
@@ -368,3 +368,12 @@ what gets compiled is the expanded form of the body.
 | `with-standard-io-syntax` | `(with-standard-io-syntax body...)` | — | Runs `body` with every printer control variable at its standard value and `*read-eval*` set to `true` ([Printing](printing.md#6-controlling-how-much-is-printed)) |
 | `exit` | `(exit code)` | `int→!` | Ends the process |
 | `dump` | `(dump path)` | `string→bool` | Writes the current environment (type information plus compiled bodies) to one file. `typl --image <path>` starts again from it. Interpreter-only ([Syntax Reference 10.1](../syntax.md#101-dumps)) |
+
+## 11. Microcontroller interrupts (`std::board`)
+
+Bring them in with a `use`, as in `(use std::board::enable-interrupt)`. How to write an interrupt handler is in [syntax reference 3.17](../syntax.md#317-interruptn--exceptionname--interrupt-handlers).
+
+| Name | Form | Type | Description |
+|---|---|---|---|
+| `enable-interrupt` | `(enable-interrupt n)` | `int→()` | Makes the peripheral interrupt `n` (0 to 239) come. Off a microcontroller, a runtime error (a compile error under `typl -c`) |
+| `disable-interrupt` | `(disable-interrupt n)` | `int→()` | Makes interrupt `n` stop coming. Off a microcontroller, as for `enable-interrupt` |

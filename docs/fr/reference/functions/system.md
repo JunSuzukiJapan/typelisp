@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/system.md @ 7622044725db7d28dabb691d82e592367d9284e8 -->
+<!-- translated-from: docs/ja/reference/functions/system.md @ 0af7d052ede61d9b74e6590bb00955c0c9c3b9a4 -->
 # Temps, environnement et implémentation
 
 Les fonctions de temps, les questions sur l'environnement d'exécution, les outils de l'implémentation, l'analyse et
@@ -369,3 +369,12 @@ l'exécution : ce qui est compilé, c'est la forme développée du corps.
 | `with-standard-io-syntax` | `(with-standard-io-syntax body...)` | — | Exécute `body` avec chaque variable de contrôle de l'affichage à sa valeur standard et `*read-eval*` à `true` ([Affichage](printing.md#6-contrôler-la-quantité-imprimée)) |
 | `exit` | `(exit code)` | `int→!` | Termine le processus |
 | `dump` | `(dump path)` | `string→bool` | Écrit l'environnement courant (informations de type plus corps compilés) dans un fichier. `typl --image <path>` repart de celui-ci. Propre à l'interpréteur ([Référence de la syntaxe 10.1](../syntax.md#101-dumps)) |
+
+## 11. Interruptions d'un microcontrôleur (`std::board`)
+
+À importer avec un `use`, comme `(use std::board::enable-interrupt)`. L'écriture d'un gestionnaire d'interruption est décrite dans la [référence de la syntaxe 3.17](../syntax.md#317-interruptn--exceptionname--gestionnaires-dinterruption).
+
+| Nom | Forme | Type | Description |
+|---|---|---|---|
+| `enable-interrupt` | `(enable-interrupt n)` | `int→()` | Fait arriver l'interruption de périphérique `n` (de 0 à 239). Hors d'un microcontrôleur, une erreur à l'exécution (une erreur de compilation sous `typl -c`) |
+| `disable-interrupt` | `(disable-interrupt n)` | `int→()` | Fait cesser l'arrivée de l'interruption `n`. Hors d'un microcontrôleur, comme `enable-interrupt` |

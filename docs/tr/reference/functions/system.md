@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/system.md @ 7622044725db7d28dabb691d82e592367d9284e8 -->
+<!-- translated-from: docs/ja/reference/functions/system.md @ 0af7d052ede61d9b74e6590bb00955c0c9c3b9a4 -->
 # Zaman, Ortam ve Gerçekleştirim
 
 Zaman, çalışma zamanı ortamı hakkındaki sorgular, gerçekleştirim araçları, metin ayrıştırma ve
@@ -369,3 +369,12 @@ kalmaz: derlenen şey gövdenin açılmış biçimidir.
 | `with-standard-io-syntax` | `(with-standard-io-syntax body...)` | — | `body`'yi her yazıcı denetim değişkeni standart değerinde ve `*read-eval*` `true` olarak ayarlı çalıştırır ([Yazdırma](printing.md#6-ne-kadarının-yazdırılacağını-denetleme)) |
 | `exit` | `(exit code)` | `int→!` | Süreci bitirir |
 | `dump` | `(dump path)` | `string→bool` | Geçerli ortamı (tür bilgisi artı derlenmiş gövdeler) tek bir dosyaya yazar. `typl --image <path>` ondan yeniden başlar. Yalnızca yorumlayıcıya özgü ([Sözdizimi Başvurusu 10.1](../syntax.md#101-dumplar)) |
+
+## 11. Bir mikrodenetleyicinin kesmeleri (`std::board`)
+
+`(use std::board::enable-interrupt)` gibi bir `use` ile içeri alın. Kesme işleyicisinin nasıl yazılacağı [sözdizimi başvurusu 3.17](../syntax.md#317-interruptn--exceptionname--kesme-işleyicileri) içindedir.
+
+| Ad | Biçim | Tür | Açıklama |
+|---|---|---|---|
+| `enable-interrupt` | `(enable-interrupt n)` | `int→()` | Çevre birimi kesmesi `n`'nin (0 ile 239 arası) gelmesini sağlar. Mikrodenetleyici dışında bir çalışma zamanı hatası (`typl -c` altında bir derleme hatası) |
+| `disable-interrupt` | `(disable-interrupt n)` | `int→()` | Kesme `n`'nin artık gelmemesini sağlar. Mikrodenetleyici dışında `enable-interrupt` gibi |

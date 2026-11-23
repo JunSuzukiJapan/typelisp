@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/system.md @ 7622044725db7d28dabb691d82e592367d9284e8 -->
+<!-- translated-from: docs/ja/reference/functions/system.md @ 0af7d052ede61d9b74e6590bb00955c0c9c3b9a4 -->
 # Thời gian, môi trường và triển khai
 
 Các hàm về thời gian, truy vấn môi trường chạy, công cụ triển khai, phân tích và đánh giá văn bản, docstring
@@ -361,3 +361,12 @@ lúc chạy: thứ được biên dịch là dạng đã khai triển của thâ
 | `with-standard-io-syntax` | `(with-standard-io-syntax body...)` | — | Chạy `body` với mọi biến điều khiển bộ in ở giá trị chuẩn và `*read-eval*` đặt là `true` ([In](printing.md#6-điều-khiển-lượng-được-in)) |
 | `exit` | `(exit code)` | `int→!` | Kết thúc tiến trình |
 | `dump` | `(dump path)` | `string→bool` | Ghi môi trường hiện tại (thông tin kiểu cộng các thân đã biên dịch) vào một tệp. `typl --image <path>` khởi động lại từ đó. Chỉ dành cho trình thông dịch ([Tham chiếu cú pháp 10.1](../syntax.md#101-dump)) |
+
+## 11. Ngắt của vi điều khiển (`std::board`)
+
+Đưa vào bằng `use`, như `(use std::board::enable-interrupt)`. Cách viết trình xử lý ngắt có trong [tài liệu tham khảo cú pháp 3.17](../syntax.md#317-interruptn--exceptionname--trình-xử-lý-ngắt).
+
+| Tên | Dạng | Kiểu | Mô tả |
+|---|---|---|---|
+| `enable-interrupt` | `(enable-interrupt n)` | `int→()` | Cho ngắt ngoại vi `n` (từ 0 đến 239) đến. Ngoài vi điều khiển là lỗi thời gian chạy (lỗi biên dịch khi dùng `typl -c`) |
+| `disable-interrupt` | `(disable-interrupt n)` | `int→()` | Khiến ngắt `n` không còn đến. Ngoài vi điều khiển giống `enable-interrupt` |

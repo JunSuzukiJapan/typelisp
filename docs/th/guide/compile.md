@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ 0d6d73aceba107bf7480412efc65502ef674dda8 -->
+<!-- translated-from: docs/ja/guide/compile.md @ 0af7d052ede61d9b74e6590bb00955c0c9c3b9a4 -->
 # การคอมไพล์
 
 หากไม่ทำอะไรเพิ่ม โปรแกรม typelisp จะรันในอินเทอร์พรีเตอร์ นอกจากนี้ยังมีวิธีคอมไพล์เป็นโค้ดเนทีฟ
@@ -270,6 +270,20 @@ $ qemu-system-arm -M mps2-an386 -nographic \
   (defun main () ()
     (unsafe (volatile-write-u32 #x40004008 1))                               ; เปิดการส่ง
     (put-byte 104) (put-byte 105) (put-byte 10))                             ; "hi" และขึ้นบรรทัดใหม่
+  ```
+
+- เขียนฟังก์ชันที่ถูกเรียกเมื่ออินเทอร์รัปต์มาถึงเป็น `defun` ที่มีแอตทริบิวต์ `#[interrupt(N)]` (อินเทอร์รัปต์ของอุปกรณ์ต่อพ่วง `N`) หรือแบบ `#[exception(SysTick)]` เปิดอินเทอร์รัปต์ด้วย `(enable-interrupt N)` ตัวจัดการทำงานทันที เฉพาะเมื่อมาระหว่างงานของรันไทม์เท่านั้นจึงทำงานหลังงานนั้นเสร็จ ตัวจัดการรอไม่ได้ (`sleep` เป็นข้อผิดพลาดตอนคอมไพล์) รายละเอียดอยู่ในหัวข้อ 3.17 ของ [ข้อมูลอ้างอิงไวยากรณ์](../reference/syntax.md)
+
+  ```lisp
+  (use std::board::enable-interrupt)
+
+  #[interrupt(5)]
+  (defun on-five () ()
+    (println "interrupt 5"))
+
+  (defun main () ()
+    (enable-interrupt 5)
+    (unsafe (volatile-write-u32 #xE000E200 (as u32 32))))   ; ก่ออินเทอร์รัปต์ 5 เอง (รีจิสเตอร์ pending ของ NVIC)
   ```
 
 - รันไทม์เริ่มโปรแกรม (ตารางเวกเตอร์และการเตรียม RAM) และจัดสรรหน่วยความจำ เมื่อเกิด HardFault หรืออินเทอร์รัปต์ที่ไม่มีตัวจัดการ โปรแกรมจะจบด้วยรหัสออกเดียวกับ panic (1)

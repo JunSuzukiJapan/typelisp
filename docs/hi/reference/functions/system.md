@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/system.md @ 7622044725db7d28dabb691d82e592367d9284e8 -->
+<!-- translated-from: docs/ja/reference/functions/system.md @ 0af7d052ede61d9b74e6590bb00955c0c9c3b9a4 -->
 # समय, पर्यावरण और इम्प्लीमेंटेशन
 
 समय के फ़ंक्शन, रनटाइम पर्यावरण के बारे में प्रश्न, इम्प्लीमेंटेशन उपकरण, पाठ को पार्स और मूल्यांकित करना, डॉकस्ट्रिंग और macro।
@@ -293,3 +293,12 @@ macro कैसे परिभाषित करें यह [सिंटै
 | `with-standard-io-syntax` | `(with-standard-io-syntax body...)` | — | `body` को हर प्रिंटर नियंत्रण वेरिएबल को उसके मानक मान पर और `*read-eval*` को `true` पर रखकर चलाता है ([प्रिंटिंग](printing.md#6-कितना-प्रिंट-हो-इसे-नियंत्रित-करना)) |
 | `exit` | `(exit code)` | `int→!` | प्रोसेस समाप्त करता है |
 | `dump` | `(dump path)` | `string→bool` | वर्तमान पर्यावरण (टाइप जानकारी और कंपाइल की हुई बॉडी) को एक फ़ाइल में लिखता है। `typl --image <path>` उसी से फिर शुरू होता है। केवल-इंटरप्रेटर ([सिंटैक्स संदर्भ 10.1](../syntax.md#101-डंप)) |
+
+## 11. माइक्रोकंट्रोलर के इंटरप्ट (`std::board`)
+
+`(use std::board::enable-interrupt)` की तरह `use` से लाएँ। इंटरप्ट हैंडलर लिखने का तरीका [सिंटैक्स संदर्भ 3.17](../syntax.md#317-interruptn--exceptionname--इंटरप्ट-हैंडलर) में है।
+
+| नाम | रूप | टाइप | विवरण |
+|---|---|---|---|
+| `enable-interrupt` | `(enable-interrupt n)` | `int→()` | पेरिफेरल इंटरप्ट `n` (0 से 239) को आने देता है। माइक्रोकंट्रोलर के बाहर रनटाइम त्रुटि (`typl -c` में कंपाइल त्रुटि) |
+| `disable-interrupt` | `(disable-interrupt n)` | `int→()` | इंटरप्ट `n` का आना रोकता है। माइक्रोकंट्रोलर के बाहर `enable-interrupt` जैसा |

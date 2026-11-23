@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/system.md @ 7622044725db7d28dabb691d82e592367d9284e8 -->
+<!-- translated-from: docs/ja/reference/functions/system.md @ 0af7d052ede61d9b74e6590bb00955c0c9c3b9a4 -->
 # เวลา สภาพแวดล้อม และการ implement
 
 ฟังก์ชันสำหรับเวลา การสอบถามสภาพแวดล้อมขณะรัน เครื่องมือของการ implement การแยกวิเคราะห์และ
@@ -357,3 +357,12 @@ hover ของ language server (`typl-lsp`) แสดง docstring ด้วย
 | `with-standard-io-syntax` | `(with-standard-io-syntax body...)` | — | รัน `body` โดยให้ตัวแปรควบคุมตัวพิมพ์ทุกตัวอยู่ที่ค่ามาตรฐานและ `*read-eval*` เป็น `true` ([การพิมพ์](printing.md#6-การควบคุมปริมาณที่พิมพ์)) |
 | `exit` | `(exit code)` | `int→!` | จบโพรเซส |
 | `dump` | `(dump path)` | `string→bool` | เขียนสภาพแวดล้อมปัจจุบัน (ข้อมูลชนิดบวกตัวเนื้อหาที่คอมไพล์แล้ว) ลงไฟล์เดียว `typl --image <path>` เริ่มใหม่จากมัน ใช้ได้เฉพาะในอินเทอร์พรีเตอร์ ([เอกสารอ้างอิงไวยากรณ์ 10.1](../syntax.md#101-dump)) |
+
+## 11. อินเทอร์รัปต์ของไมโครคอนโทรลเลอร์ (`std::board`)
+
+นำเข้าด้วย `use` เช่น `(use std::board::enable-interrupt)` วิธีเขียนตัวจัดการอินเทอร์รัปต์อยู่ใน [ข้อมูลอ้างอิงไวยากรณ์ 3.17](../syntax.md#317-interruptn--exceptionname--ตัวจัดการอินเทอร์รัปต์)
+
+| ชื่อ | รูปแบบ | ชนิด | คำอธิบาย |
+|---|---|---|---|
+| `enable-interrupt` | `(enable-interrupt n)` | `int→()` | ให้อินเทอร์รัปต์ของอุปกรณ์ต่อพ่วง `n` (0 ถึง 239) มาได้ นอกไมโครคอนโทรลเลอร์เป็นข้อผิดพลาดขณะทำงาน (ภายใต้ `typl -c` เป็นข้อผิดพลาดตอนคอมไพล์) |
+| `disable-interrupt` | `(disable-interrupt n)` | `int→()` | ทำให้อินเทอร์รัปต์ `n` ไม่มาอีก นอกไมโครคอนโทรลเลอร์เหมือน `enable-interrupt` |

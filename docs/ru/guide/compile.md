@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ 0d6d73aceba107bf7480412efc65502ef674dda8 -->
+<!-- translated-from: docs/ja/guide/compile.md @ 0af7d052ede61d9b74e6590bb00955c0c9c3b9a4 -->
 # Компиляция
 
 Если ничего специально не делать, программы typelisp выполняются интерпретатором. Кроме того, есть два способа
@@ -268,6 +268,20 @@ $ qemu-system-arm -M mps2-an386 -nographic \
   (defun main () ()
     (unsafe (volatile-write-u32 #x40004008 1))                               ; включить передачу
     (put-byte 104) (put-byte 105) (put-byte 10))                             ; "hi" и перевод строки
+  ```
+
+- Функцию, вызываемую при приходе прерывания, пишут как `defun` с атрибутом `#[interrupt(N)]` (прерывание периферии `N`) или вроде `#[exception(SysTick)]`. Прерывание включается через `(enable-interrupt N)`. Обработчик выполняется сразу; только если оно пришло посреди работы среды выполнения, он выполняется после её окончания. Обработчик не может ждать (`sleep` — ошибка компиляции). Подробности — в разделе 3.17 [справочника по синтаксису](../reference/syntax.md).
+
+  ```lisp
+  (use std::board::enable-interrupt)
+
+  #[interrupt(5)]
+  (defun on-five () ()
+    (println "interrupt 5"))
+
+  (defun main () ()
+    (enable-interrupt 5)
+    (unsafe (volatile-write-u32 #xE000E200 (as u32 32))))   ; самим вызвать прерывание 5 (регистр ожидающих прерываний NVIC)
   ```
 
 - Среда выполнения запускает программу (таблица векторов и подготовка RAM) и выделяет память. HardFault или необработанное прерывание завершает программу с кодом выхода panic (1).

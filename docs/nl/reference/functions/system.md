@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/system.md @ 7622044725db7d28dabb691d82e592367d9284e8 -->
+<!-- translated-from: docs/ja/reference/functions/system.md @ 0af7d052ede61d9b74e6590bb00955c0c9c3b9a4 -->
 # Tijd, omgeving en implementatie
 
 Functies voor tijd, vragen over de runtime-omgeving, implementatiehulpmiddelen, het parsen en
@@ -379,3 +379,12 @@ niets over: wat wordt gecompileerd is de geëxpandeerde vorm van de body.
 | `with-standard-io-syntax` | `(with-standard-io-syntax body...)` | — | Voert `body` uit met elke besturingsvariabele van de printer op zijn standaardwaarde en `*read-eval*` op `true` ([Afdrukken](printing.md#6-bepalen-hoeveel-wordt-afgedrukt)) |
 | `exit` | `(exit code)` | `int→!` | Beëindigt het proces |
 | `dump` | `(dump path)` | `string→bool` | Schrijft de huidige omgeving (typeinformatie plus gecompileerde bodies) naar één bestand. `typl --image <path>` start er opnieuw vanuit. Alleen voor de interpreter ([Syntaxreferentie 10.1](../syntax.md#101-dumps)) |
+
+## 11. Interrupts van een microcontroller (`std::board`)
+
+Haal ze binnen met een `use`, zoals `(use std::board::enable-interrupt)`. Hoe je een interrupthandler schrijft, staat in [syntaxreferentie 3.17](../syntax.md#317-interruptn--exceptionname--interrupthandlers).
+
+| Naam | Vorm | Type | Beschrijving |
+|---|---|---|---|
+| `enable-interrupt` | `(enable-interrupt n)` | `int→()` | Laat periferie-interrupt `n` (0 tot en met 239) komen. Buiten een microcontroller een runtimefout (een compileerfout onder `typl -c`) |
+| `disable-interrupt` | `(disable-interrupt n)` | `int→()` | Laat interrupt `n` niet meer komen. Buiten een microcontroller zoals `enable-interrupt` |

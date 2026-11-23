@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 0d6d73aceba107bf7480412efc65502ef674dda8 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 0af7d052ede61d9b74e6590bb00955c0c9c3b9a4 -->
 # Riferimento della sintassi di typelisp
 
 typelisp è un Lisp a tipizzazione statica, scritto in S-expression. Per l'elenco delle funzioni e dei
@@ -85,7 +85,7 @@ metodi predefiniti, si veda [Funzioni predefinite](functions/README.md); per l'e
   (`#{"foo" 123}` è `#{string int}`). Una tupla ha da 1 a 12 elementi. Ogni valutazione crea una
   nuova tupla. Per costruirne una da valori calcolati si usa `(tuple a b)`. Dove sono attesi dati
   S-espressione, è una tupla i cui elementi sono tutti dati: la variante `Tuple` di `Sexpr`.
-- **Attributi**: `#[test]` è un contrassegno attaccato alla forma successiva (scritto come in Rust). L'unico attributo per ora è `test`, che va su un `defun` ([3.16 `#[test]`](#316-test--funzioni-di-test)). Letto con `read`, diventa la lista `(%internal::attribute (test) form)`.
+- **Attributi**: `#[test]` è un segno posto sulla forma successiva (scritto come in Rust). Ci sono tre attributi, `test`, `interrupt(N)` ed `exception(NAME)`, ciascuno su un `defun` ([3.16 `#[test]`](#316-test--funzioni-di-test), [3.17 gestori di interrupt](#317-interruptn--exceptionname--gestori-di-interrupt)). Un attributo con argomenti si scrive con la parentesi subito dopo il nome. Letti con `read`, diventano le liste `(%internal::attribute (test) form)` e `(%internal::attribute ((interrupt 7)) form)`.
 - **La lista vuota `()`**: a seconda del contesto, il valore del tipo `Unit` o il `None` di
   `Option<Sexpr>`. **`Sexpr` non ha una variante lista vuota**: `Sexpr` significa "una S-expression non
   vuota", e il tipo dei dati S-expression è `Option<Sexpr>` (si veda "Pattern per `Option<Sexpr>`" in
@@ -1366,6 +1366,33 @@ test result: FAILED. 1 passed; 1 failed; 0 filtered out
 ```
 
 Ciò che un test stampa con `print` va direttamente sullo standard output (non viene catturato). Per l'output destinato all'indagine, `eprint`/`eprintln` ([Stampa](functions/printing.md)) scrivono sullo standard error e non si mescolano con l'output del programma.
+
+### 3.17 `#[interrupt(N)]` / `#[exception(NAME)]` — gestori di interrupt
+
+```lisp
+(use std::board::enable-interrupt)
+(defvar (*received* int) 0)
+
+#[interrupt(7)]
+(defun on-uart () ()
+  (unsafe (volatile-write-u32 #x4000400C 1))   ; cancellare ciò che ha sollevato l'interrupt
+  (setf *received* (+ *received* 1))
+  ())
+
+(defun main () ()
+  (enable-interrupt 7)
+  ...)
+```
+
+In un programma compilato per un microcontrollore (sezione 3.8 di [Compilare](../guide/compile.md)), sono le funzioni chiamate quando arriva un interrupt. `#[interrupt(N)]` rende una funzione il gestore dell'interrupt di periferica `N` (da 0 a 239), e `#[exception(NAME)]` quello dell'eccezione del core `NAME`, una tra `NonMaskableInt`, `MemoryManagement`, `BusFault`, `UsageFault`, `SVCall`, `DebugMonitor`, `PendSV`, `SysTick` (`HardFault` è del runtime, e termina il programma).
+
+- Vanno su un `defun` di primo livello che non prende nulla e restituisce `()` (nemmeno parametri di tipo). Un interrupt ha un gestore, e una funzione gestisce un interrupt.
+- Un interrupt di periferica non arriva finché `(enable-interrupt N)` non lo abilita (`(disable-interrupt N)` lo ferma; vedi [Sistema](functions/system.md)). Un'eccezione come SysTick arriva appena i registri sono impostati per sollevarla.
+- Un gestore si esegue subito, dove è arrivato l'interrupt. Se arriva a metà del lavoro del runtime (allocazione, garbage collection, output, cambio di task e così via), il gestore si esegue appena quel lavoro è finito. I gestori non si interrompono a vicenda.
+- In un gestore non avviene garbage collection (l'heap cresce se serve). Lo stato del programma, come le variabili globali, si legge e si scrive come al solito.
+- Un gestore non può attendere. Un gestore che usa `sleep` è un errore di compilazione. Un'operazione che attende solo a volte, come ricevere da un canale, si può usare finché non deve attendere; se dovesse farlo, è un panic.
+- Un `panic` o un `throw` che esce da un gestore termina il programma, come uno non catturato.
+- Nell'interprete e in un programma compilato per qualcosa che non sia un microcontrollore non arriva alcun interrupt. Nell'interprete un gestore si può chiamare come una funzione ordinaria (per i test). `typl -c` per qualcosa che non sia un microcontrollore rifiuta un programma con un gestore.
 
 ## 4. Binding e condizionali
 

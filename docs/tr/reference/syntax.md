@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 0d6d73aceba107bf7480412efc65502ef674dda8 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 0af7d052ede61d9b74e6590bb00955c0c9c3b9a4 -->
 # typelisp Sözdizimi Başvurusu
 
 typelisp, S-ifadelerle yazılan, statik tür denetimli bir Lisp'tir. Yerleşik fonksiyonların ve metotların
@@ -82,7 +82,7 @@ hata mesajlarının okunması için [errors.md](errors.md) belgelerine bakın.
   olur). Bir demetin 1 ile 12 arasında öğesi vardır. Her değerlendirme yeni bir demet oluşturur.
   Hesaplanmış değerlerden bir demet kurmak için `(tuple a b)` kullanılır. S-ifadesi verisi beklenen
   yerlerde, tüm öğeleri veri olan bir demettir: `Sexpr`'in `Tuple` varyantı.
-- **Öznitelikler**: `#[test]`, sonraki forma bağlanan bir işarettir (Rust'taki gibi yazılır). Şimdilik tek öznitelik `test`'tir ve bir `defun` üzerine konur ([3.16 `#[test]`](#316-test--test-fonksiyonları)). `read` ile okunduğunda `(%internal::attribute (test) form)` listesi olur.
+- **Öznitelikler**: `#[test]`, sonraki forma takılan bir işarettir (Rust'taki gibi yazılır). Üç öznitelik vardır: `test`, `interrupt(N)` ve `exception(NAME)`; her biri bir `defun` üzerine konur ([3.16 `#[test]`](#316-test--test-fonksiyonları), [3.17 kesme işleyicileri](#317-interruptn--exceptionname--kesme-işleyicileri)). Argümanlı bir öznitelik, adının hemen ardından parantezle yazılır. `read` ile okununca `(%internal::attribute (test) form)` ve `(%internal::attribute ((interrupt 7)) form)` listeleri olur.
 - **Boş liste `()`**: bağlama göre `Unit` türünün değeri ya da `Option<Sexpr>`'in `None`'ı.
   **`Sexpr`'in boş liste varyantı yoktur**: `Sexpr`, "boş olmayan bir S-ifade" demektir ve S-ifade
   verisinin türü `Option<Sexpr>`'dir ([4.3 match](#43-match--örüntü-eşleme) içindeki "`Option<Sexpr>`
@@ -1311,6 +1311,33 @@ test result: FAILED. 1 passed; 1 failed; 0 filtered out
 ```
 
 Bir testin `print` ile yazdıkları doğrudan standart çıktıya gider (yakalanmaz). İnceleme amaçlı çıktı için `eprint`/`eprintln` ([Yazdırma](functions/printing.md)) standart hata çıktısına yazar ve programın çıktısıyla karışmaz.
+
+### 3.17 `#[interrupt(N)]` / `#[exception(NAME)]` — kesme işleyicileri
+
+```lisp
+(use std::board::enable-interrupt)
+(defvar (*received* int) 0)
+
+#[interrupt(7)]
+(defun on-uart () ()
+  (unsafe (volatile-write-u32 #x4000400C 1))   ; kesmeye yol açanı temizle
+  (setf *received* (+ *received* 1))
+  ())
+
+(defun main () ()
+  (enable-interrupt 7)
+  ...)
+```
+
+Bir mikrodenetleyici için derlenen programda ([Derleme](../guide/compile.md) bölüm 3.8), bunlar bir kesme geldiğinde çağrılan fonksiyonlardır. `#[interrupt(N)]` bir fonksiyonu çevre birimi kesmesi `N`'nin (0 ile 239 arası), `#[exception(NAME)]` ise `NonMaskableInt`, `MemoryManagement`, `BusFault`, `UsageFault`, `SVCall`, `DebugMonitor`, `PendSV`, `SysTick` arasından çekirdek istisnası `NAME`'in işleyicisi yapar (`HardFault` çalışma zamanınındır ve programı bitirir).
+
+- Hiçbir şey almayan ve `()` döndüren üst düzey bir `defun` üzerine konur (tür parametresi de olmaz). Bir kesmenin bir işleyicisi vardır ve bir fonksiyon bir kesmeyi işler.
+- Bir çevre birimi kesmesi, `(enable-interrupt N)` onu etkinleştirene kadar gelmez (`(disable-interrupt N)` onu durdurur; bkz. [Sistem](functions/system.md)). SysTick gibi bir istisna, yazmaçlar onu tetikleyecek biçimde ayarlanınca gelir.
+- Bir işleyici hemen, kesmenin geldiği yerde çalışır. Kesme çalışma zamanının işinin ortasında gelirse (bellek ayırma, çöp toplama, çıktı, görev değiştirme vb.), işleyici o iş biter bitmez çalışır. İşleyiciler birbirini kesmez.
+- Bir işleyicide çöp toplama olmaz (gerekirse yığın büyür). Global değişkenler gibi programın durumu her zamanki gibi okunup yazılabilir.
+- Bir işleyici bekleyemez. `sleep` kullanan bir işleyici derleme hatasıdır. Kanaldan almak gibi yalnızca bazen bekleyen bir işlem, beklemesi gerekmedikçe kullanılabilir; gerekirse bu bir panic'tir.
+- Bir işleyiciden çıkan `panic` veya `throw`, yakalanmamış olanın yaptığı gibi programı bitirir.
+- Yorumlayıcıda ve mikrodenetleyiciden başka bir şey için derlenmiş programda hiçbir kesme gelmez. Yorumlayıcıda bir işleyici sıradan bir fonksiyon gibi çağrılabilir (testler için). Mikrodenetleyiciden başka bir şey için `typl -c`, işleyicisi olan bir programı reddeder.
 
 ## 4. Bağlama ve koşullar
 

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/system.md @ 7622044725db7d28dabb691d82e592367d9284e8 -->
+<!-- translated-from: docs/ja/reference/functions/system.md @ 0af7d052ede61d9b74e6590bb00955c0c9c3b9a4 -->
 # الزمن والبيئة والتنفيذ
 
 دوال الزمن والاستعلام عن بيئة التشغيل وأدوات التنفيذ وتحليل النصوص وتقييمها والسلاسل التوثيقية والماكرو.
@@ -352,3 +352,12 @@ time-zone is supplied, daylight saving time information is ignored*).
 | `with-standard-io-syntax` | `(with-standard-io-syntax body...)` | — | تنفّذ `body` وكل متغير تحكم في الطابعة عند قيمته القياسية و`*read-eval*` مضبوط على `true` ([الطباعة](printing.md#6-التحكم-في-مقدار-ما-يطبع)) |
 | `exit` | `(exit code)` | `int→!` | تنهي العملية |
 | `dump` | `(dump path)` | `string→bool` | تكتب البيئة الراهنة (معلومات الأنواع مع الأجسام المترجمة) إلى ملف واحد. ويبدأ `typl --image <path>` منها من جديد. خاصة بالمفسِّر فقط ([مرجع الصياغة 10.1](../syntax.md#101-ملفات-الـ-dump)) |
+
+## 11. مقاطعات المتحكم الدقيق (`std::board`)
+
+تُجلب بـ `use`، مثل `(use std::board::enable-interrupt)`. طريقة كتابة معالج المقاطعة في [مرجع الصياغة 3.17](../syntax.md#317-interruptn--exceptionname--معالجات-المقاطعات).
+
+| الاسم | الشكل | النوع | الوصف |
+|---|---|---|---|
+| `enable-interrupt` | `(enable-interrupt n)` | `int→()` | يجعل مقاطعة الطرفية `n` (من 0 إلى 239) تصل. خارج المتحكم الدقيق خطأ وقت التشغيل (وخطأ ترجمة مع `typl -c`) |
+| `disable-interrupt` | `(disable-interrupt n)` | `int→()` | يجعل المقاطعة `n` تتوقف عن الوصول. خارج المتحكم الدقيق كـ `enable-interrupt` |

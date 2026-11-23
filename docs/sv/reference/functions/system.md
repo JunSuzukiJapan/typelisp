@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/system.md @ 7622044725db7d28dabb691d82e592367d9284e8 -->
+<!-- translated-from: docs/ja/reference/functions/system.md @ 0af7d052ede61d9b74e6590bb00955c0c9c3b9a4 -->
 # Tid, miljö och implementation
 
 Funktioner för tid, frågor om körmiljön, implementationsverktyg, tolkning och utvärdering av text,
@@ -363,3 +363,12 @@ det som kompileras är den expanderade formen av kroppen.
 | `with-standard-io-syntax` | `(with-standard-io-syntax body...)` | — | Kör `body` med varje utskriftskontrollvariabel på sitt standardvärde och `*read-eval*` satt till `true` ([Utskrift](printing.md#6-styra-hur-mycket-som-skrivs-ut)) |
 | `exit` | `(exit code)` | `int→!` | Avslutar processen |
 | `dump` | `(dump path)` | `string→bool` | Skriver den aktuella miljön (typinformation plus kompilerade kroppar) till en fil. `typl --image <path>` startar om från den. Bara för tolken ([Syntaxreferens 10.1](../syntax.md#101-dumpar)) |
+
+## 11. En mikrokontrollers avbrott (`std::board`)
+
+Hämta in dem med en `use`, som `(use std::board::enable-interrupt)`. Hur man skriver en avbrottshanterare står i [syntaxreferensen 3.17](../syntax.md#317-interruptn--exceptionname--avbrottshanterare).
+
+| Namn | Form | Typ | Beskrivning |
+|---|---|---|---|
+| `enable-interrupt` | `(enable-interrupt n)` | `int→()` | Låter kringutrustningsavbrottet `n` (0 till 239) komma. Utanför en mikrokontroller ett körtidsfel (ett kompileringsfel under `typl -c`) |
+| `disable-interrupt` | `(disable-interrupt n)` | `int→()` | Låter avbrottet `n` sluta komma. Utanför en mikrokontroller som `enable-interrupt` |

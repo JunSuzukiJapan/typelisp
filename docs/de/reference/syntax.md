@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 0d6d73aceba107bf7480412efc65502ef674dda8 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 0af7d052ede61d9b74e6590bb00955c0c9c3b9a4 -->
 # Syntaxreferenz von typelisp
 
 typelisp ist ein statisch typisiertes Lisp, geschrieben in S-Ausdrücken. Die Liste der eingebauten Funktionen
@@ -85,7 +85,7 @@ und Methoden steht unter [Eingebaute Funktionen](functions/README.md), die Liste
   Auswertung erzeugt ein neues Tupel. Um eines aus berechneten Werten zu bauen, verwendet man
   `(tuple a b)`. Wo S-Ausdrucksdaten erwartet werden, ist es ein Tupel, dessen Elemente alle Daten
   sind: die Variante `Tuple` von `Sexpr`.
-- **Attribute**: `#[test]` ist eine Markierung, die an der nächsten Form hängt (wie in Rust geschrieben). Das bisher einzige Attribut ist `test`, und es gehört an ein `defun` ([3.16 `#[test]`](#316-test--testfunktionen)). Mit `read` gelesen wird daraus die Liste `(%internal::attribute (test) form)`.
+- **Attribute**: `#[test]` ist eine Markierung an der folgenden Form (geschrieben wie in Rust). Es gibt drei Attribute, `test`, `interrupt(N)` und `exception(NAME)`, die jeweils an ein `defun` gehören ([3.16 `#[test]`](#316-test--testfunktionen), [3.17 Interrupt-Handler](#317-interruptn--exceptionname--interrupt-handler)). Ein Attribut mit Argumenten schreibt man mit der Klammer direkt nach dem Namen. Mit `read` gelesen, werden daraus die Listen `(%internal::attribute (test) form)` und `(%internal::attribute ((interrupt 7)) form)`.
 - **Die leere Liste `()`**: je nach Kontext der Wert des Typs `Unit` oder das `None` von `Option<Sexpr>`.
   **`Sexpr` hat keine Variante für die leere Liste**: `Sexpr` bedeutet „ein nicht leerer S-Ausdruck“, und der
   Typ von S-Ausdrucksdaten ist `Option<Sexpr>` (siehe „Muster für `Option<Sexpr>`“ in
@@ -1358,6 +1358,33 @@ test result: FAILED. 1 passed; 1 failed; 0 filtered out
 ```
 
 Was ein Test mit `print` ausgibt, geht direkt auf die Standardausgabe (es wird nicht abgefangen). Für Ausgaben zur Untersuchung schreiben `eprint`/`eprintln` ([Ausgabe](functions/printing.md)) auf die Standardfehlerausgabe und vermischen sich nicht mit der Ausgabe des Programms.
+
+### 3.17 `#[interrupt(N)]` / `#[exception(NAME)]` — Interrupt-Handler
+
+```lisp
+(use std::board::enable-interrupt)
+(defvar (*received* int) 0)
+
+#[interrupt(7)]
+(defun on-uart () ()
+  (unsafe (volatile-write-u32 #x4000400C 1))   ; die Ursache des Interrupts löschen
+  (setf *received* (+ *received* 1))
+  ())
+
+(defun main () ()
+  (enable-interrupt 7)
+  ...)
+```
+
+In einem für einen Mikrocontroller kompilierten Programm (Abschnitt 3.8 von [Kompilieren](../guide/compile.md)) sind das die Funktionen, die aufgerufen werden, wenn ein Interrupt kommt. `#[interrupt(N)]` macht eine Funktion zum Handler des Peripherie-Interrupts `N` (0 bis 239), `#[exception(NAME)]` zum Handler der Core-Exception `NAME`, einer von `NonMaskableInt`, `MemoryManagement`, `BusFault`, `UsageFault`, `SVCall`, `DebugMonitor`, `PendSV`, `SysTick` (`HardFault` gehört der Laufzeit und beendet das Programm).
+
+- Sie gehören an ein `defun` auf oberster Ebene, das nichts nimmt und `()` zurückgibt (auch keine Typparameter). Ein Interrupt hat einen Handler, und eine Funktion behandelt einen Interrupt.
+- Ein Peripherie-Interrupt kommt erst, wenn `(enable-interrupt N)` ihn einschaltet (`(disable-interrupt N)` stoppt ihn; siehe [System](functions/system.md)). Eine Exception wie SysTick kommt, sobald die Register so gesetzt sind, dass sie ausgelöst wird.
+- Ein Handler läuft sofort, dort, wo der Interrupt kam. Kommt er mitten in der Arbeit der Laufzeit (Allokation, Garbage Collection, Ausgabe, Taskwechsel usw.), läuft der Handler, sobald diese Arbeit fertig ist. Handler unterbrechen einander nicht.
+- In einem Handler findet keine Garbage Collection statt (der Heap wächst bei Bedarf). Der Zustand des Programms, etwa globale Variablen, lässt sich wie gewohnt lesen und schreiben.
+- Ein Handler kann nicht warten. Ein Handler, der `sleep` benutzt, ist ein Kompilierfehler. Eine Operation, die nur manchmal wartet, etwa das Empfangen aus einem Kanal, ist nutzbar, solange sie nicht warten muss; müsste sie es, ist das ein Panic.
+- Ein `panic` oder `throw`, das einen Handler verlässt, beendet das Programm, wie ein nicht gefangenes es tut.
+- Im Interpreter und in einem Programm, das nicht für einen Mikrocontroller kompiliert ist, kommt kein Interrupt. Im Interpreter lässt sich ein Handler als gewöhnliche Funktion aufrufen (für Tests). `typl -c` für etwas anderes als einen Mikrocontroller weist ein Programm mit Handler zurück.
 
 ## 4. Bindung und Verzweigung
 

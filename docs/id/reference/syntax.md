@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 0d6d73aceba107bf7480412efc65502ef674dda8 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 0af7d052ede61d9b74e6590bb00955c0c9c3b9a4 -->
 # Referensi Sintaks typelisp
 
 typelisp adalah Lisp dengan tipe statis, ditulis dalam S-expression. Untuk daftar fungsi bawaan dan
@@ -84,7 +84,7 @@ untuk membaca pesan kesalahan, [errors.md](errors.md).
   adalah `#{string int}`). Tuple memiliki 1 sampai 12 elemen. Setiap evaluasi membuat tuple baru.
   Untuk membangunnya dari nilai yang dihitung, gunakan `(tuple a b)`. Di tempat yang mengharapkan
   data S-ekspresi, ia menjadi tuple yang semua elemennya data: varian `Tuple` dari `Sexpr`.
-- **Atribut**: `#[test]` adalah tanda yang melekat pada bentuk berikutnya (ditulis seperti di Rust). Satu-satunya atribut sejauh ini adalah `test`, dan dipasang pada `defun` ([3.16 `#[test]`](#316-test--fungsi-uji)). Jika dibaca dengan `read`, ia menjadi daftar `(%internal::attribute (test) form)`.
+- **Atribut**: `#[test]` adalah tanda yang dipasang pada form berikutnya (ditulis seperti di Rust). Ada tiga atribut, `test`, `interrupt(N)`, dan `exception(NAME)`, masing-masing dipasang pada `defun` ([3.16 `#[test]`](#316-test--fungsi-uji), [3.17 penangan interupsi](#317-interruptn--exceptionname--penangan-interupsi)). Atribut dengan argumen ditulis dengan tanda kurung tepat setelah namanya. Dibaca dengan `read`, keduanya menjadi daftar `(%internal::attribute (test) form)` dan `(%internal::attribute ((interrupt 7)) form)`.
 - **Daftar kosong `()`**: tergantung konteks, nilai tipe `Unit` atau `None` pada `Option<Sexpr>`.
   **`Sexpr` tidak memiliki varian daftar kosong**: `Sexpr` berarti "S-expression tak kosong", dan
   tipe data S-expression adalah `Option<Sexpr>` (lihat "Pola untuk `Option<Sexpr>`" pada
@@ -1364,6 +1364,33 @@ test result: FAILED. 1 passed; 1 failed; 0 filtered out
 ```
 
 Apa yang dicetak pengujian dengan `print` langsung masuk ke keluaran standar (tidak ditangkap). Untuk keluaran yang dimaksudkan untuk menyelidiki masalah, `eprint`/`eprintln` ([Pencetakan](functions/printing.md)) menulis ke galat standar dan tidak bercampur dengan keluaran program.
+
+### 3.17 `#[interrupt(N)]` / `#[exception(NAME)]` — penangan interupsi
+
+```lisp
+(use std::board::enable-interrupt)
+(defvar (*received* int) 0)
+
+#[interrupt(7)]
+(defun on-uart () ()
+  (unsafe (volatile-write-u32 #x4000400C 1))   ; hapus penyebab interupsi
+  (setf *received* (+ *received* 1))
+  ())
+
+(defun main () ()
+  (enable-interrupt 7)
+  ...)
+```
+
+Dalam program yang dikompilasi untuk mikrokontroler (bagian 3.8 dari [Kompilasi](../guide/compile.md)), inilah fungsi yang dipanggil saat interupsi datang. `#[interrupt(N)]` menjadikan fungsi penangan interupsi periferal `N` (0 sampai 239), dan `#[exception(NAME)]` penangan eksepsi inti `NAME`, salah satu dari `NonMaskableInt`, `MemoryManagement`, `BusFault`, `UsageFault`, `SVCall`, `DebugMonitor`, `PendSV`, `SysTick` (`HardFault` milik runtime, dan mengakhiri program).
+
+- Dipasang pada `defun` tingkat atas yang tidak menerima apa pun dan mengembalikan `()` (tanpa parameter tipe juga). Satu interupsi punya satu penangan, dan satu fungsi menangani satu interupsi.
+- Interupsi periferal tidak datang sampai `(enable-interrupt N)` mengaktifkannya (`(disable-interrupt N)` menghentikannya; lihat [Sistem](functions/system.md)). Eksepsi seperti SysTick datang begitu register diatur untuk memicunya.
+- Penangan berjalan saat itu juga, di tempat interupsi datang. Jika datang di tengah pekerjaan runtime (alokasi, pengumpulan sampah, keluaran, pergantian tugas, dan sebagainya), penangan berjalan begitu pekerjaan itu selesai. Penangan tidak saling menginterupsi.
+- Tidak ada pengumpulan sampah di dalam penangan (heap membesar jika perlu). Keadaan program, seperti variabel global, dapat dibaca dan ditulis seperti biasa.
+- Penangan tidak dapat menunggu. Penangan yang memakai `sleep` adalah galat kompilasi. Operasi yang hanya kadang menunggu, seperti menerima dari kanal, dapat dipakai selama tidak perlu menunggu; jika harus menunggu, itu panic.
+- `panic` atau `throw` yang keluar dari penangan mengakhiri program, seperti yang tidak tertangkap.
+- Tidak ada interupsi di interpreter atau di program yang dikompilasi untuk selain mikrokontroler. Di interpreter, penangan dapat dipanggil sebagai fungsi biasa (untuk pengujian). `typl -c` untuk selain mikrokontroler menolak program yang punya penangan.
 
 ## 4. Pengikatan dan percabangan
 

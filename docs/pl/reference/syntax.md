@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 0d6d73aceba107bf7480412efc65502ef674dda8 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 0af7d052ede61d9b74e6590bb00955c0c9c3b9a4 -->
 # Referencja składni typelisp
 
 typelisp to statycznie typowany Lisp zapisywany w S-wyrażeniach. Listę funkcji wbudowanych i
@@ -81,7 +81,7 @@ a informacje o czytaniu komunikatów o błędach w [errors.md](errors.md).
   `#{string int}`). Krotka ma od 1 do 12 elementów. Każde obliczenie tworzy nową krotkę. Aby
   zbudować ją z obliczonych wartości, używa się `(tuple a b)`. Tam, gdzie oczekiwane są dane
   S-wyrażeń, jest to krotka, której wszystkie elementy są danymi: wariant `Tuple` typu `Sexpr`.
-- **Atrybuty**: `#[test]` to znacznik dołączony do następnej formy (zapisywany jak w Rust). Jedynym atrybutem jest na razie `test`, który umieszcza się na `defun` ([3.16 `#[test]`](#316-test--funkcje-testowe)). Odczytany przez `read` staje się listą `(%internal::attribute (test) form)`.
+- **Atrybuty**: `#[test]` to znacznik dołączany do następnej formy (zapisywany jak w Ruście). Są trzy atrybuty, `test`, `interrupt(N)` i `exception(NAME)`, a każdy umieszcza się na `defun` ([3.16 `#[test]`](#316-test--funkcje-testowe), [3.17 procedury obsługi przerwań](#317-interruptn--exceptionname--procedury-obsługi-przerwań)). Atrybut z argumentami zapisuje się z nawiasem tuż po nazwie. Odczytane przez `read`, stają się listami `(%internal::attribute (test) form)` i `(%internal::attribute ((interrupt 7)) form)`.
 - **Pusta lista `()`**: zależnie od kontekstu wartość typu `Unit` lub `None` z
   `Option<Sexpr>`. **`Sexpr` nie ma wariantu pustej listy**: `Sexpr` oznacza „niepuste S-wyrażenie",
   a typem danych w postaci S-wyrażeń jest `Option<Sexpr>` (zobacz „Wzorce dla `Option<Sexpr>`" w
@@ -1317,6 +1317,33 @@ test result: FAILED. 1 passed; 1 failed; 0 filtered out
 ```
 
 To, co test wypisuje przez `print`, trafia prosto na standardowe wyjście (nie jest przechwytywane). Do wyjścia służącego badaniu problemów są `eprint`/`eprintln` ([Wypisywanie](functions/printing.md)), które piszą na standardowe wyjście błędów i nie mieszają się z wyjściem programu.
+
+### 3.17 `#[interrupt(N)]` / `#[exception(NAME)]` — procedury obsługi przerwań
+
+```lisp
+(use std::board::enable-interrupt)
+(defvar (*received* int) 0)
+
+#[interrupt(7)]
+(defun on-uart () ()
+  (unsafe (volatile-write-u32 #x4000400C 1))   ; wyczyść przyczynę przerwania
+  (setf *received* (+ *received* 1))
+  ())
+
+(defun main () ()
+  (enable-interrupt 7)
+  ...)
+```
+
+W programie skompilowanym na mikrokontroler (sekcja 3.8 w [Kompilacji](../guide/compile.md)) są to funkcje wywoływane, gdy nadchodzi przerwanie. `#[interrupt(N)]` czyni funkcję procedurą obsługi przerwania peryferyjnego `N` (od 0 do 239), a `#[exception(NAME)]` wyjątku rdzenia `NAME`, jednego z `NonMaskableInt`, `MemoryManagement`, `BusFault`, `UsageFault`, `SVCall`, `DebugMonitor`, `PendSV`, `SysTick` (`HardFault` należy do środowiska uruchomieniowego i kończy program).
+
+- Umieszcza się je na `defun` najwyższego poziomu, które nic nie przyjmuje i zwraca `()` (bez parametrów typu). Jedno przerwanie ma jedną procedurę obsługi, a jedna funkcja obsługuje jedno przerwanie.
+- Przerwanie peryferyjne nie nadchodzi, dopóki `(enable-interrupt N)` go nie włączy (`(disable-interrupt N)` je zatrzymuje; zob. [System](functions/system.md)). Wyjątek taki jak SysTick nadchodzi, gdy rejestry zostaną ustawione tak, by go wywołać.
+- Procedura obsługi uruchamia się od razu, tam, gdzie nadeszło przerwanie. Jeśli przyjdzie w trakcie pracy środowiska uruchomieniowego (alokacji, odśmiecania, wyjścia, przełączania zadań itd.), procedura uruchamia się, gdy tylko ta praca się skończy. Procedury obsługi nie przerywają się nawzajem.
+- W procedurze obsługi nie zachodzi odśmiecanie (sterta rośnie w razie potrzeby). Stan programu, na przykład zmienne globalne, można czytać i zapisywać jak zwykle.
+- Procedura obsługi nie może czekać. Procedura obsługi używająca `sleep` to błąd kompilacji. Operacji, która czeka tylko czasem, jak odbiór z kanału, można używać, dopóki nie musi czekać; gdyby musiała, jest to panic.
+- `panic` lub `throw` opuszczające procedurę obsługi kończy program, tak jak nieprzechwycone.
+- W interpreterze i w programie skompilowanym na coś innego niż mikrokontroler żadne przerwanie nie nadchodzi. W interpreterze procedurę obsługi można wywołać jak zwykłą funkcję (do testów). `typl -c` na coś innego niż mikrokontroler odrzuca program z procedurą obsługi.
 
 ## 4. Wiązanie i instrukcje warunkowe
 

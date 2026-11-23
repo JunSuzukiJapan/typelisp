@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 0d6d73aceba107bf7480412efc65502ef674dda8 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 0af7d052ede61d9b74e6590bb00955c0c9c3b9a4 -->
 # Referência de sintaxe do typelisp
 
 typelisp é um Lisp com tipagem estática, escrito em expressões S. Para a lista de funções e métodos embutidos,
@@ -80,7 +80,7 @@ mensagens de erro, [errors.md](errors.md).
   `#{string int}`). Uma tupla tem de 1 a 12 elementos. Cada avaliação cria uma tupla nova. Para
   construir uma a partir de valores calculados, use `(tuple a b)`. Onde dados de S-expressão são
   esperados, é uma tupla cujos elementos são todos dados: a variante `Tuple` de `Sexpr`.
-- **Atributos**: `#[test]` é uma marca presa à forma seguinte (escrita como em Rust). O único atributo por enquanto é `test`, que vai sobre um `defun` ([3.16 `#[test]`](#316-test--funções-de-teste)). Lido com `read`, vira a lista `(%internal::attribute (test) form)`.
+- **Atributos**: `#[test]` é uma marca posta na forma seguinte (escrita como em Rust). Há três atributos, `test`, `interrupt(N)` e `exception(NAME)`, e cada um vai em um `defun` ([3.16 `#[test]`](#316-test--funções-de-teste), [3.17 tratadores de interrupção](#317-interruptn--exceptionname--tratadores-de-interrupção)). Um atributo com argumentos se escreve com o parêntese logo após o nome. Lidos com `read`, viram as listas `(%internal::attribute (test) form)` e `(%internal::attribute ((interrupt 7)) form)`.
 - **A lista vazia `()`**: conforme o contexto, o valor do tipo `Unit` ou o `None` de `Option<Sexpr>`.
   **`Sexpr` não tem variante de lista vazia**: `Sexpr` significa "uma expressão S não vazia", e o tipo dos dados
   de expressões S é `Option<Sexpr>` (veja "Padrões para `Option<Sexpr>`" em
@@ -1312,6 +1312,33 @@ test result: FAILED. 1 passed; 1 failed; 0 filtered out
 ```
 
 O que um teste imprime com `print` vai direto para a saída padrão (não é capturado). Para saída voltada à investigação, `eprint`/`eprintln` ([Impressão](functions/printing.md)) escrevem na saída de erro padrão e não se misturam com a saída do programa.
+
+### 3.17 `#[interrupt(N)]` / `#[exception(NAME)]` — tratadores de interrupção
+
+```lisp
+(use std::board::enable-interrupt)
+(defvar (*received* int) 0)
+
+#[interrupt(7)]
+(defun on-uart () ()
+  (unsafe (volatile-write-u32 #x4000400C 1))   ; limpar o que gerou a interrupção
+  (setf *received* (+ *received* 1))
+  ())
+
+(defun main () ()
+  (enable-interrupt 7)
+  ...)
+```
+
+Em um programa compilado para um microcontrolador (seção 3.8 de [Compilar](../guide/compile.md)), são as funções chamadas quando chega uma interrupção. `#[interrupt(N)]` faz de uma função o tratador da interrupção de periférico `N` (de 0 a 239), e `#[exception(NAME)]` o da exceção do núcleo `NAME`, uma de `NonMaskableInt`, `MemoryManagement`, `BusFault`, `UsageFault`, `SVCall`, `DebugMonitor`, `PendSV`, `SysTick` (`HardFault` é do runtime, e encerra o programa).
+
+- Vão em um `defun` de nível superior que não recebe nada e retorna `()` (nem parâmetros de tipo). Uma interrupção tem um tratador, e uma função trata uma interrupção.
+- Uma interrupção de periférico não chega até que `(enable-interrupt N)` a habilite (`(disable-interrupt N)` a interrompe; veja [Sistema](functions/system.md)). Uma exceção como SysTick chega assim que os registradores são configurados para gerá-la.
+- Um tratador roda na hora, onde a interrupção chegou. Se ela chegar no meio do trabalho do runtime (alocação, coleta de lixo, saída, troca de tarefa etc.), o tratador roda assim que esse trabalho termina. Os tratadores não interrompem uns aos outros.
+- Não há coleta de lixo em um tratador (o heap cresce se precisar). O estado do programa, como as variáveis globais, se lê e escreve como de costume.
+- Um tratador não pode esperar. Um tratador que usa `sleep` é um erro de compilação. Uma operação que só às vezes espera, como receber de um canal, pode ser usada enquanto não precisar esperar; se precisar, é um panic.
+- Um `panic` ou `throw` que sai de um tratador encerra o programa, como um não capturado.
+- Nenhuma interrupção chega no interpretador nem em um programa compilado para algo que não seja um microcontrolador. No interpretador, um tratador pode ser chamado como uma função comum (para testes). `typl -c` para algo que não seja um microcontrolador recusa um programa com tratador.
 
 ## 4. Vínculos e condicionais
 

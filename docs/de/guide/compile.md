@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ 0d6d73aceba107bf7480412efc65502ef674dda8 -->
+<!-- translated-from: docs/ja/guide/compile.md @ 0af7d052ede61d9b74e6590bb00955c0c9c3b9a4 -->
 # Kompilierung
 
 Ohne weiteres Zutun laufen typelisp-Programme im Interpreter. Darüber hinaus gibt es zwei Wege, in nativen
@@ -275,6 +275,20 @@ $ qemu-system-arm -M mps2-an386 -nographic \
   (defun main () ()
     (unsafe (volatile-write-u32 #x40004008 1))                               ; Senden einschalten
     (put-byte 104) (put-byte 105) (put-byte 10))                             ; "hi" und ein Zeilenumbruch
+  ```
+
+- Die Funktion, die bei einem Interrupt aufgerufen wird, schreibt man als `defun` mit dem Attribut `#[interrupt(N)]` (Peripherie-Interrupt `N`) oder einem wie `#[exception(SysTick)]`. Ein Interrupt wird mit `(enable-interrupt N)` eingeschaltet. Ein Handler läuft sofort; nur wenn er mitten in der Arbeit der Laufzeit kommt, läuft er, nachdem diese fertig ist. Ein Handler kann nicht warten (`sleep` ist ein Kompilierfehler). Details stehen in Abschnitt 3.17 der [Syntaxreferenz](../reference/syntax.md).
+
+  ```lisp
+  (use std::board::enable-interrupt)
+
+  #[interrupt(5)]
+  (defun on-five () ()
+    (println "interrupt 5"))
+
+  (defun main () ()
+    (enable-interrupt 5)
+    (unsafe (volatile-write-u32 #xE000E200 (as u32 32))))   ; Interrupt 5 selbst auslösen (das Pending-Register des NVIC)
   ```
 
 - Die Laufzeitumgebung startet das Programm (Vektortabelle und Vorbereitung des RAM) und verwaltet den Speicher. Ein HardFault oder ein unbehandelter Interrupt beendet das Programm mit dem Exit-Code eines Panic (1).

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 0d6d73aceba107bf7480412efc65502ef674dda8 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 0af7d052ede61d9b74e6590bb00955c0c9c3b9a4 -->
 # Tham chiếu cú pháp typelisp
 
 typelisp là một ngôn ngữ Lisp có kiểu tĩnh, được viết bằng S-expression. Về danh sách các hàm và phương thức
@@ -76,7 +76,7 @@ dựng sẵn, xem [Hàm dựng sẵn](functions/README.md); về danh sách các
   (`#{"foo" 123}` là `#{string int}`). Một tuple có từ 1 đến 12 phần tử. Mỗi lần đánh giá tạo ra một
   tuple mới. Để dựng từ các giá trị đã tính, dùng `(tuple a b)`. Ở nơi mong đợi dữ liệu
   S-expression, nó là tuple mà mọi phần tử đều là dữ liệu: variant `Tuple` của `Sexpr`.
-- **Thuộc tính**: `#[test]` là một dấu gắn vào dạng tiếp theo (viết như trong Rust). Hiện chỉ có một thuộc tính là `test`, và nó đặt lên một `defun` ([3.16 `#[test]`](#316-test--hàm-kiểm-thử)). Khi đọc bằng `read`, nó trở thành danh sách `(%internal::attribute (test) form)`.
+- **Thuộc tính**: `#[test]` là dấu gắn vào dạng tiếp theo (viết như trong Rust). Có ba thuộc tính là `test`, `interrupt(N)` và `exception(NAME)`, mỗi cái gắn vào một `defun` ([3.16 `#[test]`](#316-test--hàm-kiểm-thử), [3.17 trình xử lý ngắt](#317-interruptn--exceptionname--trình-xử-lý-ngắt)). Thuộc tính có đối số được viết với dấu ngoặc ngay sau tên. Khi đọc bằng `read`, chúng thành các danh sách `(%internal::attribute (test) form)` và `(%internal::attribute ((interrupt 7)) form)`.
 - **Danh sách rỗng `()`**: tùy ngữ cảnh, là giá trị của kiểu `Unit` hoặc là `None` của `Option<Sexpr>`.
   **`Sexpr` không có variant danh sách rỗng**: `Sexpr` nghĩa là "một S-expression không rỗng", và kiểu của dữ
   liệu S-expression là `Option<Sexpr>` (xem "Mẫu cho `Option<Sexpr>`" ở
@@ -1284,6 +1284,33 @@ test result: FAILED. 1 passed; 1 failed; 0 filtered out
 ```
 
 Những gì kiểm thử in ra bằng `print` đi thẳng ra đầu ra chuẩn (không bị thu giữ). Với đầu ra dùng để điều tra, `eprint`/`eprintln` ([In](functions/printing.md)) ghi ra đầu ra lỗi chuẩn và không lẫn với đầu ra của chương trình.
+
+### 3.17 `#[interrupt(N)]` / `#[exception(NAME)]` — trình xử lý ngắt
+
+```lisp
+(use std::board::enable-interrupt)
+(defvar (*received* int) 0)
+
+#[interrupt(7)]
+(defun on-uart () ()
+  (unsafe (volatile-write-u32 #x4000400C 1))   ; xóa nguyên nhân gây ra ngắt
+  (setf *received* (+ *received* 1))
+  ())
+
+(defun main () ()
+  (enable-interrupt 7)
+  ...)
+```
+
+Trong chương trình biên dịch cho vi điều khiển (mục 3.8 của [Biên dịch](../guide/compile.md)), đây là các hàm được gọi khi có ngắt đến. `#[interrupt(N)]` biến một hàm thành trình xử lý ngắt ngoại vi `N` (từ 0 đến 239), và `#[exception(NAME)]` thành trình xử lý ngoại lệ lõi `NAME`, một trong `NonMaskableInt`, `MemoryManagement`, `BusFault`, `UsageFault`, `SVCall`, `DebugMonitor`, `PendSV`, `SysTick` (`HardFault` thuộc về runtime, và kết thúc chương trình).
+
+- Chúng gắn vào một `defun` cấp cao nhất không nhận gì và trả về `()` (cũng không có tham số kiểu). Một ngắt có một trình xử lý, và một hàm xử lý một ngắt.
+- Ngắt ngoại vi không đến cho tới khi `(enable-interrupt N)` bật nó (`(disable-interrupt N)` dừng nó; xem [Hệ thống](functions/system.md)). Ngoại lệ như SysTick đến ngay khi các thanh ghi được đặt để gây ra nó.
+- Trình xử lý chạy ngay, tại nơi ngắt đến. Nếu ngắt đến giữa lúc runtime đang làm việc (cấp phát, thu gom rác, xuất, chuyển tác vụ, v.v.), trình xử lý chạy ngay khi công việc đó xong. Các trình xử lý không ngắt lẫn nhau.
+- Trong trình xử lý không có thu gom rác (heap lớn lên nếu cần). Trạng thái của chương trình, như biến toàn cục, đọc và ghi như thường.
+- Trình xử lý không thể chờ. Trình xử lý dùng `sleep` là lỗi biên dịch. Thao tác chỉ đôi khi phải chờ, như nhận từ kênh, dùng được khi không phải chờ; nếu phải chờ, đó là panic.
+- `panic` hoặc `throw` thoát khỏi trình xử lý sẽ kết thúc chương trình, như khi không được bắt.
+- Trong trình thông dịch và trong chương trình biên dịch cho thứ khác vi điều khiển, không có ngắt nào đến. Trong trình thông dịch, trình xử lý gọi được như hàm thường (để kiểm thử). `typl -c` cho thứ khác vi điều khiển từ chối chương trình có trình xử lý.
 
 ## 4. Ràng buộc và rẽ nhánh
 

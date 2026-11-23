@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ 0d6d73aceba107bf7480412efc65502ef674dda8 -->
+<!-- translated-from: docs/ja/guide/compile.md @ 0af7d052ede61d9b74e6590bb00955c0c9c3b9a4 -->
 # 編譯
 
 不做任何處理的話，typelisp 程式由直譯器執行。此外還有兩種編譯為原生碼的方法，以及一種保存環境的方法。規格的詳情見
@@ -255,6 +255,20 @@ $ qemu-system-arm -M mps2-an386 -nographic \
   (defun main () ()
     (unsafe (volatile-write-u32 #x40004008 1))                               ; 啟用傳送
     (put-byte 104) (put-byte 105) (put-byte 10))                             ; "hi" 與換行
+  ```
+
+- 中斷到來時被呼叫的函式，寫成帶有 `#[interrupt(N)]`（周邊中斷 `N`）或 `#[exception(SysTick)]` 這類屬性的 `defun`。中斷用 `(enable-interrupt N)` 啟用。處理程式當場執行，只有在執行時期處理途中到來時，才會在該處理結束後執行。處理程式中不能等待（`sleep` 是編譯錯誤）。詳見 [語法參考](../reference/syntax.md) 的 3.17 節。
+
+  ```lisp
+  (use std::board::enable-interrupt)
+
+  #[interrupt(5)]
+  (defun on-five () ()
+    (println "interrupt 5"))
+
+  (defun main () ()
+    (enable-interrupt 5)
+    (unsafe (volatile-write-u32 #xE000E200 (as u32 32))))   ; 自己引發中斷 5（NVIC 的擱置暫存器）
   ```
 
 - 啟動（向量表和 RAM 的準備）和記憶體配置由執行環境完成。發生 HardFault 或未處理的中斷時，以與 panic 相同的結束碼（1）結束。
