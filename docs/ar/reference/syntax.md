@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ cec1c96be6655e3c218d04c38f2fbe63a5baf936 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 0d6d73aceba107bf7480412efc65502ef674dda8 -->
 # مرجع صياغة typelisp
 
 typelisp لغة Lisp ذات أنواع ساكنة، تُكتب بتعبيرات رمزية (S-expressions). ولقائمة الدوال والتوابع المضمنة
@@ -506,6 +506,7 @@ C عند تمريرها**، وتُحرَّر بعد الاستدعاء. ووجو
 | `(c-alloc T)` / `(c-alloc T n)` | يحجز `n` قيمة من `T` (1 إذا حُذفت). وتُملأ المحتويات بـ 0. ويعيد `(ptr T)` |
 | `(c-ref p i)` | مؤشر إلى العنصر `i` من `p`. خطأ إذا كان خارج النطاق المحجوز |
 | `(c-deref p)` / `(setf (c-deref p) v)` | يقرأ / يكتب القيمة العددية التي يشير إليها `p` |
+| `(volatile-read-u32 addr)` / `(volatile-write-u32 addr v)` | يقرأ أو يكتب السجل عند العنوان `addr` (من نوع `int`) مرة واحدة بالضبط في موضعه. وكذلك `-u8` و`-u16` |
 | `p::field` / `(setf p::field v)` | يقرأ / يكتب حقلًا من بنية. وقراءة حقل هو بنية مضمَّنة تعطي عنوانها (`(ptr inner-type)`) |
 | `(as ptr p)` | ينسى النوع فيصنع `ptr` (لتمريره إلى مثل `void *` في `qsort`). ولا يوجد تحويل عكسي |
 

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ 849e94e087680155a16df844f633f16017703f95 -->
+<!-- translated-from: docs/ja/guide/compile.md @ 0d6d73aceba107bf7480412efc65502ef674dda8 -->
 # 컴파일
 
 아무것도 하지 않으면 typelisp 프로그램은 인터프리터에서 실행된다. 그 밖에 네이티브 코드로 컴파일하는 방법이 두 가지,
@@ -249,6 +249,20 @@ $ qemu-system-arm -M mps2-an386 -nographic \
   uint64_t typelisp_host_now_us(void);                                    // 거꾸로 가지 않는 시계의 마이크로초
   int64_t  typelisp_host_unix_us(void);                                   // 1970-01-01부터의 마이크로초
   void     typelisp_host_sleep_us(uint64_t us);                           // us 마이크로초 기다린다
+  ```
+
+- 보드의 레지스터(메모리에 매핑된 주변 장치)는 `volatile-read-u8`, `volatile-read-u16`, `volatile-read-u32`로 읽고 `volatile-write-u8`, `volatile-write-u16`, `volatile-write-u32`로 씁니다. 주소는 `int`로 넘기며, 읽은 값은 그 폭의 타입(`u8` 등)이 됩니다. 식을 쓴 자리에서 반드시 한 번 읽거나 쓰며, 컴파일러는 이를 생략하거나 옮기지 않습니다. 모두 `unsafe` 안에서만 쓸 수 있습니다. 주소가 음수이거나 폭의 배수가 아니면, 읽거나 쓰기 전에 실행 시간 오류가 됩니다.
+
+  ```lisp
+  ;; QEMU mps2-an386의 UART 0: 데이터 0x40004000, 상태 0x40004004, 제어 0x40004008
+  (defun put-byte ((c u32)) ()
+    (unsafe
+      (loop (when (= (logand (volatile-read-u32 #x40004004) 1) 0) (break)))   ; 송신 중이면 기다린다
+      (volatile-write-u32 #x40004000 c)))
+
+  (defun main () ()
+    (unsafe (volatile-write-u32 #x40004008 1))                               ; 송신을 켠다
+    (put-byte 104) (put-byte 105) (put-byte 10))                             ; "hi"와 줄바꿈
   ```
 
 - 기동(벡터 테이블과 RAM 준비)과 메모리 확보는 런타임이 합니다. HardFault나 처리되지 않는 인터럽트가 일어나면 panic과 같은 종료 코드(1)로 끝납니다.

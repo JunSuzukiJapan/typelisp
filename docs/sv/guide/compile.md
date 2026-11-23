@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ 849e94e087680155a16df844f633f16017703f95 -->
+<!-- translated-from: docs/ja/guide/compile.md @ 0d6d73aceba107bf7480412efc65502ef674dda8 -->
 # Kompilering
 
 Om du inte gör något annat körs typelisp-program i tolken. Dessutom finns två sätt att kompilera till
@@ -258,6 +258,20 @@ $ qemu-system-arm -M mps2-an386 -nographic \
   uint64_t typelisp_host_now_us(void);                                    // mikrosekunder på en klocka som aldrig går bakåt
   int64_t  typelisp_host_unix_us(void);                                   // mikrosekunder sedan 1970-01-01
   void     typelisp_host_sleep_us(uint64_t us);                           // väntar us mikrosekunder
+  ```
+
+- Ett korts register (kringutrustning mappad i minnet) läses med `volatile-read-u8`, `volatile-read-u16` och `volatile-read-u32` och skrivs med `volatile-write-u8`, `volatile-write-u16` och `volatile-write-u32`. Adressen är en `int`, och det lästa värdet har breddens typ (`u8` och så vidare). Var och en läser eller skriver exakt en gång, där den står; kompilatorn varken utelämnar eller flyttar den. Alla kan bara användas inuti `unsafe`. En adress som är negativ, eller inte en multipel av bredden, är ett körtidsfel innan något läses eller skrivs.
+
+  ```lisp
+  ;; UART 0 på QEMU:s mps2-an386: data 0x40004000, status 0x40004004, styrning 0x40004008
+  (defun put-byte ((c u32)) ()
+    (unsafe
+      (loop (when (= (logand (volatile-read-u32 #x40004004) 1) 0) (break)))   ; vänta medan den sänder
+      (volatile-write-u32 #x40004000 c)))
+
+  (defun main () ()
+    (unsafe (volatile-write-u32 #x40004008 1))                               ; slå på sändning
+    (put-byte 104) (put-byte 105) (put-byte 10))                             ; "hi" och en radbrytning
   ```
 
 - Körmiljön startar programmet (vektortabellen och förberedelsen av RAM) och allokerar minne. Ett HardFault eller ett obehandlat avbrott avslutar programmet med en panics slutkod (1).

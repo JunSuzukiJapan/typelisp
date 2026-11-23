@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ 849e94e087680155a16df844f633f16017703f95 -->
+<!-- translated-from: docs/ja/guide/compile.md @ 0d6d73aceba107bf7480412efc65502ef674dda8 -->
 # Derleme
 
 Başka bir şey yapmazsanız typelisp programları yorumlayıcıda çalışır. Buna ek olarak yerel koda
@@ -257,6 +257,20 @@ $ qemu-system-arm -M mps2-an386 -nographic \
   uint64_t typelisp_host_now_us(void);                                    // hiç geri gitmeyen bir saatin mikrosaniyesi
   int64_t  typelisp_host_unix_us(void);                                   // 1970-01-01'den bu yana mikrosaniye
   void     typelisp_host_sleep_us(uint64_t us);                           // us mikrosaniye bekler
+  ```
+
+- Bir kartın yazmaçları (belleğe eşlenmiş çevre birimleri) `volatile-read-u8`, `volatile-read-u16` ve `volatile-read-u32` ile okunur, `volatile-write-u8`, `volatile-write-u16` ve `volatile-write-u32` ile yazılır. Adres bir `int` olarak verilir ve okunan değer o genişliğin türündedir (`u8` vb.). Her biri yazıldığı yerde tam olarak bir kez okur veya yazar; derleyici onu atlamaz ve yerini değiştirmez. Hepsi yalnızca `unsafe` içinde kullanılabilir. Negatif ya da genişliğin katı olmayan bir adres, bir şey okunmadan veya yazılmadan önce çalışma zamanı hatasıdır.
+
+  ```lisp
+  ;; QEMU'nun mps2-an386 kartının UART 0'ı: veri 0x40004000, durum 0x40004004, denetim 0x40004008
+  (defun put-byte ((c u32)) ()
+    (unsafe
+      (loop (when (= (logand (volatile-read-u32 #x40004004) 1) 0) (break)))   ; gönderirken bekle
+      (volatile-write-u32 #x40004000 c)))
+
+  (defun main () ()
+    (unsafe (volatile-write-u32 #x40004008 1))                               ; göndermeyi aç
+    (put-byte 104) (put-byte 105) (put-byte 10))                             ; "hi" ve yeni satır
   ```
 
 - Çalışma zamanı programı başlatır (vektör tablosu ve RAM'in hazırlanması) ve belleği ayırır. Bir HardFault veya işlenmeyen bir kesme, programı bir panic'in çıkış koduyla (1) bitirir.

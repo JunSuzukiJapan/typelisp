@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ 849e94e087680155a16df844f633f16017703f95 -->
+<!-- translated-from: docs/ja/guide/compile.md @ 0d6d73aceba107bf7480412efc65502ef674dda8 -->
 # Compilazione
 
 Se non fai altro, i programmi typelisp vengono eseguiti nell'interprete. Inoltre esistono due modi per
@@ -259,6 +259,20 @@ $ qemu-system-arm -M mps2-an386 -nographic \
   uint64_t typelisp_host_now_us(void);                                    // microsecondi di un orologio che non torna mai indietro
   int64_t  typelisp_host_unix_us(void);                                   // microsecondi dal 1970-01-01
   void     typelisp_host_sleep_us(uint64_t us);                           // attende us microsecondi
+  ```
+
+- I registri di una scheda (periferiche mappate in memoria) si leggono con `volatile-read-u8`, `volatile-read-u16` e `volatile-read-u32`, e si scrivono con `volatile-write-u8`, `volatile-write-u16` e `volatile-write-u32`. L'indirizzo è un `int` e il valore letto ha il tipo della larghezza (`u8` e così via). Ognuno legge o scrive esattamente una volta, dove è scritto; il compilatore non lo omette né lo sposta. Tutti si possono usare solo dentro `unsafe`. Un indirizzo negativo, o non multiplo della larghezza, è un errore a runtime prima di leggere o scrivere qualsiasi cosa.
+
+  ```lisp
+  ;; UART 0 del mps2-an386 di QEMU: dati 0x40004000, stato 0x40004004, controllo 0x40004008
+  (defun put-byte ((c u32)) ()
+    (unsafe
+      (loop (when (= (logand (volatile-read-u32 #x40004004) 1) 0) (break)))   ; attendere mentre trasmette
+      (volatile-write-u32 #x40004000 c)))
+
+  (defun main () ()
+    (unsafe (volatile-write-u32 #x40004008 1))                               ; abilitare la trasmissione
+    (put-byte 104) (put-byte 105) (put-byte 10))                             ; "hi" e un a capo
   ```
 
 - Il runtime avvia il programma (la tabella dei vettori e la preparazione della RAM) e alloca la memoria. Un HardFault o un interrupt non gestito termina il programma con il codice di uscita di un panic (1).

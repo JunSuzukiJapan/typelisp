@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ 849e94e087680155a16df844f633f16017703f95 -->
+<!-- translated-from: docs/ja/guide/compile.md @ 0d6d73aceba107bf7480412efc65502ef674dda8 -->
 # Compilación
 
 Si no se hace nada más, los programas de typelisp se ejecutan en el intérprete. Además hay dos formas de
@@ -256,6 +256,20 @@ $ qemu-system-arm -M mps2-an386 -nographic \
   uint64_t typelisp_host_now_us(void);                                    // microsegundos de un reloj que nunca retrocede
   int64_t  typelisp_host_unix_us(void);                                   // microsegundos desde 1970-01-01
   void     typelisp_host_sleep_us(uint64_t us);                           // espera us microsegundos
+  ```
+
+- Los registros de una placa (periféricos asignados a memoria) se leen con `volatile-read-u8`, `volatile-read-u16` y `volatile-read-u32`, y se escriben con `volatile-write-u8`, `volatile-write-u16` y `volatile-write-u32`. La dirección es un `int` y el valor leído tiene el tipo de su anchura (`u8`, etc.). Cada uno lee o escribe exactamente una vez, donde está escrito; el compilador no lo omite ni lo mueve. Todos solo pueden usarse dentro de `unsafe`. Una dirección negativa, o que no sea múltiplo de la anchura, es un error en tiempo de ejecución antes de leer o escribir nada.
+
+  ```lisp
+  ;; UART 0 del mps2-an386 de QEMU: datos 0x40004000, estado 0x40004004, control 0x40004008
+  (defun put-byte ((c u32)) ()
+    (unsafe
+      (loop (when (= (logand (volatile-read-u32 #x40004004) 1) 0) (break)))   ; esperar mientras envía
+      (volatile-write-u32 #x40004000 c)))
+
+  (defun main () ()
+    (unsafe (volatile-write-u32 #x40004008 1))                               ; habilitar el envío
+    (put-byte 104) (put-byte 105) (put-byte 10))                             ; "hi" y un salto de línea
   ```
 
 - El runtime inicia el programa (la tabla de vectores y la preparación de la RAM) y reserva la memoria. Un HardFault o una interrupción sin manejar termina el programa con el código de salida de un panic (1).

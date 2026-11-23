@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ cec1c96be6655e3c218d04c38f2fbe63a5baf936 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 0d6d73aceba107bf7480412efc65502ef674dda8 -->
 # Referencia de sintaxis de typelisp
 
 typelisp es un Lisp con tipado estático que se escribe en expresiones S. Para la lista de funciones y métodos
@@ -553,6 +553,7 @@ de `unsafe`.
 | `(c-alloc T)` / `(c-alloc T n)` | Reserva `n` valores de `T` (1 si se omite). El contenido se rellena con 0. Devuelve un `(ptr T)` |
 | `(c-ref p i)` | Un puntero al elemento `i` desde `p`. Error si está fuera del rango reservado |
 | `(c-deref p)` / `(setf (c-deref p) v)` | Lee / escribe el escalar al que apunta `p` |
+| `(volatile-read-u32 addr)` / `(volatile-write-u32 addr v)` | lee o escribe el registro en la dirección `addr` (un `int`), exactamente una vez, donde está escrito. Igual con `-u8` y `-u16` |
 | `p::field` / `(setf p::field v)` | Lee / escribe un campo de un struct. Leer un campo que es un struct incrustado da su dirección (`(ptr tipo-interior)`) |
 | `(as ptr p)` | Olvida el tipo, convirtiéndolo en un `ptr` (para pasarlo a algo como el `void *` de `qsort`). No hay conversión de vuelta |
 

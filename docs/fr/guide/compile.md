@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ 849e94e087680155a16df844f633f16017703f95 -->
+<!-- translated-from: docs/ja/guide/compile.md @ 0d6d73aceba107bf7480412efc65502ef674dda8 -->
 # Compilation
 
 Sauf indication contraire, les programmes typelisp s'exécutent dans l'interpréteur. Il existe en outre deux façons
@@ -259,6 +259,20 @@ $ qemu-system-arm -M mps2-an386 -nographic \
   uint64_t typelisp_host_now_us(void);                                    // microsecondes d'une horloge qui ne recule jamais
   int64_t  typelisp_host_unix_us(void);                                   // microsecondes depuis 1970-01-01
   void     typelisp_host_sleep_us(uint64_t us);                           // attend us microsecondes
+  ```
+
+- Les registres d'une carte (périphériques projetés en mémoire) se lisent avec `volatile-read-u8`, `volatile-read-u16` et `volatile-read-u32`, et s'écrivent avec `volatile-write-u8`, `volatile-write-u16` et `volatile-write-u32`. L'adresse est un `int`, et la valeur lue a le type de la largeur (`u8`, etc.). Chacun lit ou écrit exactement une fois, là où il est écrit ; le compilateur ne l'omet ni ne le déplace. Tous ne s'utilisent qu'à l'intérieur de `unsafe`. Une adresse négative, ou qui n'est pas un multiple de la largeur, est une erreur à l'exécution avant toute lecture ou écriture.
+
+  ```lisp
+  ;; UART 0 du mps2-an386 de QEMU : données 0x40004000, état 0x40004004, contrôle 0x40004008
+  (defun put-byte ((c u32)) ()
+    (unsafe
+      (loop (when (= (logand (volatile-read-u32 #x40004004) 1) 0) (break)))   ; attendre tant qu'il envoie
+      (volatile-write-u32 #x40004000 c)))
+
+  (defun main () ()
+    (unsafe (volatile-write-u32 #x40004008 1))                               ; activer l'envoi
+    (put-byte 104) (put-byte 105) (put-byte 10))                             ; "hi" et un saut de ligne
   ```
 
 - Le runtime démarre le programme (la table des vecteurs et la préparation de la RAM) et alloue la mémoire. Un HardFault ou une interruption non traitée termine le programme avec le code de sortie d'un panic (1).

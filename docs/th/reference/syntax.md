@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ cec1c96be6655e3c218d04c38f2fbe63a5baf936 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 0d6d73aceba107bf7480412efc65502ef674dda8 -->
 # เอกสารอ้างอิงไวยากรณ์ typelisp
 
 typelisp เป็น Lisp ที่มีระบบชนิดแบบสถิต เขียนด้วย S-expression สำหรับรายการฟังก์ชันและเมทอดที่มีให้ในตัว
@@ -507,6 +507,7 @@ GC ไม่ติดตาม `ptr` มันชี้ออกนอกฮี�
 | `(c-alloc T)` / `(c-alloc T n)` | จัดสรรค่า `T` จำนวน `n` ค่า (1 หากละ) เนื้อหาถูกเติมด้วย 0 คืน `(ptr T)` |
 | `(c-ref p i)` | ตัวชี้ไปยังสมาชิกตัวที่ `i` จาก `p` ข้อผิดพลาดหากอยู่นอกช่วงที่จัดสรร |
 | `(c-deref p)` / `(setf (c-deref p) v)` | อ่าน / เขียนสเกลาร์ที่ `p` ชี้ไป |
+| `(volatile-read-u32 addr)` / `(volatile-write-u32 addr v)` | อ่านหรือเขียนรีจิสเตอร์ที่ที่อยู่ `addr` (`int`) ครั้งเดียวพอดี ณ ตำแหน่งนั้น `-u8` และ `-u16` ก็เช่นกัน |
 | `p::field` / `(setf p::field v)` | อ่าน / เขียนฟิลด์ของ struct การอ่านฟิลด์ที่เป็น struct ที่ฝังอยู่ให้ที่อยู่ของมัน (`(ptr inner-type)`) |
 | `(as ptr p)` | ลืมชนิด ทำให้เป็น `ptr` (เพื่อส่งให้สิ่งอย่าง `void *` ของ `qsort`) ไม่มีการแปลงกลับ |
 

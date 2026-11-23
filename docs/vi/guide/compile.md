@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ 849e94e087680155a16df844f633f16017703f95 -->
+<!-- translated-from: docs/ja/guide/compile.md @ 0d6d73aceba107bf7480412efc65502ef674dda8 -->
 # Biên dịch
 
 Nếu bạn không làm gì thêm, chương trình typelisp chạy trong trình thông dịch. Ngoài ra còn có hai
@@ -254,6 +254,20 @@ $ qemu-system-arm -M mps2-an386 -nographic \
   uint64_t typelisp_host_now_us(void);                                    // micro giây của đồng hồ không bao giờ lùi
   int64_t  typelisp_host_unix_us(void);                                   // micro giây kể từ 1970-01-01
   void     typelisp_host_sleep_us(uint64_t us);                           // chờ us micro giây
+  ```
+
+- Thanh ghi của bo mạch (thiết bị ngoại vi ánh xạ vào bộ nhớ) được đọc bằng `volatile-read-u8`, `volatile-read-u16` và `volatile-read-u32`, và được ghi bằng `volatile-write-u8`, `volatile-write-u16` và `volatile-write-u32`. Địa chỉ được truyền dưới dạng `int`, và giá trị đọc được có kiểu theo độ rộng (`u8`, v.v.). Mỗi lệnh đọc hoặc ghi đúng một lần, tại nơi nó được viết; trình biên dịch không bỏ đi hay di chuyển nó. Tất cả chỉ dùng được bên trong `unsafe`. Địa chỉ âm, hoặc không phải bội số của độ rộng, là lỗi thời gian chạy trước khi đọc hay ghi bất cứ thứ gì.
+
+  ```lisp
+  ;; UART 0 của mps2-an386 trong QEMU: dữ liệu 0x40004000, trạng thái 0x40004004, điều khiển 0x40004008
+  (defun put-byte ((c u32)) ()
+    (unsafe
+      (loop (when (= (logand (volatile-read-u32 #x40004004) 1) 0) (break)))   ; chờ khi đang gửi
+      (volatile-write-u32 #x40004000 c)))
+
+  (defun main () ()
+    (unsafe (volatile-write-u32 #x40004008 1))                               ; bật gửi
+    (put-byte 104) (put-byte 105) (put-byte 10))                             ; "hi" và xuống dòng
   ```
 
 - Runtime khởi động chương trình (bảng vector và chuẩn bị RAM) và cấp phát bộ nhớ. Một HardFault hoặc ngắt không được xử lý kết thúc chương trình với mã thoát của panic (1).

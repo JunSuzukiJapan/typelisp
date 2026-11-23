@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ 849e94e087680155a16df844f633f16017703f95 -->
+<!-- translated-from: docs/ja/guide/compile.md @ 0d6d73aceba107bf7480412efc65502ef674dda8 -->
 # Compileren
 
 Tenzij je iets anders doet, draaien typelisp-programma's in de interpreter. Daarnaast zijn er twee
@@ -265,6 +265,20 @@ $ qemu-system-arm -M mps2-an386 -nographic \
   uint64_t typelisp_host_now_us(void);                                    // microseconden van een klok die nooit teruggaat
   int64_t  typelisp_host_unix_us(void);                                   // microseconden sinds 1970-01-01
   void     typelisp_host_sleep_us(uint64_t us);                           // wacht us microseconden
+  ```
+
+- De registers van een bord (in het geheugen afgebeelde randapparatuur) lees je met `volatile-read-u8`, `volatile-read-u16` en `volatile-read-u32`, en schrijf je met `volatile-write-u8`, `volatile-write-u16` en `volatile-write-u32`. Het adres is een `int`, en de gelezen waarde heeft het type van de breedte (`u8` enzovoort). Elk leest of schrijft precies één keer, op de plek waar het staat; de compiler laat het niet weg en verplaatst het niet. Alle zijn alleen binnen `unsafe` te gebruiken. Een adres dat negatief is, of geen veelvoud van de breedte, is een runtimefout voordat er iets gelezen of geschreven wordt.
+
+  ```lisp
+  ;; UART 0 van de mps2-an386 van QEMU: data 0x40004000, status 0x40004004, besturing 0x40004008
+  (defun put-byte ((c u32)) ()
+    (unsafe
+      (loop (when (= (logand (volatile-read-u32 #x40004004) 1) 0) (break)))   ; wachten zolang hij verstuurt
+      (volatile-write-u32 #x40004000 c)))
+
+  (defun main () ()
+    (unsafe (volatile-write-u32 #x40004008 1))                               ; versturen inschakelen
+    (put-byte 104) (put-byte 105) (put-byte 10))                             ; "hi" en een nieuwe regel
   ```
 
 - De runtime start het programma (de vectortabel en het klaarmaken van het RAM) en wijst geheugen toe. Een HardFault of een onafgehandelde interrupt beëindigt het programma met de exitcode van een panic (1).

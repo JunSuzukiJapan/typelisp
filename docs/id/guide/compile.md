@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ 849e94e087680155a16df844f633f16017703f95 -->
+<!-- translated-from: docs/ja/guide/compile.md @ 0d6d73aceba107bf7480412efc65502ef674dda8 -->
 # Kompilasi
 
 Jika Anda tidak melakukan apa-apa lagi, program typelisp berjalan di interpreter. Selain itu ada dua
@@ -260,6 +260,20 @@ $ qemu-system-arm -M mps2-an386 -nographic \
   uint64_t typelisp_host_now_us(void);                                    // mikrodetik pada jam yang tidak pernah mundur
   int64_t  typelisp_host_unix_us(void);                                   // mikrodetik sejak 1970-01-01
   void     typelisp_host_sleep_us(uint64_t us);                           // menunggu us mikrodetik
+  ```
+
+- Register papan (periferal yang dipetakan ke memori) dibaca dengan `volatile-read-u8`, `volatile-read-u16`, dan `volatile-read-u32`, dan ditulis dengan `volatile-write-u8`, `volatile-write-u16`, dan `volatile-write-u32`. Alamat diberikan sebagai `int`, dan nilai yang dibaca bertipe sesuai lebarnya (`u8` dan seterusnya). Masing-masing membaca atau menulis tepat sekali, di tempat ia ditulis; kompiler tidak menghilangkan atau memindahkannya. Semuanya hanya dapat digunakan di dalam `unsafe`. Alamat yang negatif, atau bukan kelipatan lebarnya, adalah galat waktu jalan sebelum apa pun dibaca atau ditulis.
+
+  ```lisp
+  ;; UART 0 dari mps2-an386 QEMU: data 0x40004000, status 0x40004004, kontrol 0x40004008
+  (defun put-byte ((c u32)) ()
+    (unsafe
+      (loop (when (= (logand (volatile-read-u32 #x40004004) 1) 0) (break)))   ; tunggu selama sedang mengirim
+      (volatile-write-u32 #x40004000 c)))
+
+  (defun main () ()
+    (unsafe (volatile-write-u32 #x40004008 1))                               ; aktifkan pengiriman
+    (put-byte 104) (put-byte 105) (put-byte 10))                             ; "hi" dan baris baru
   ```
 
 - Runtime memulai program (tabel vektor dan menyiapkan RAM) dan mengalokasikan memori. HardFault atau interupsi tanpa penangan mengakhiri program dengan kode keluar panic (1).

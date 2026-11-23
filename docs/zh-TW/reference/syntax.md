@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ cec1c96be6655e3c218d04c38f2fbe63a5baf936 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 0d6d73aceba107bf7480412efc65502ef674dda8 -->
 # typelisp 語法參考
 
 typelisp 是一種靜態型別的 Lisp，語法採用 S 運算式。內建函式與方法的一覽見[內建函式](functions/README.md)，型別一覽見 [types.md](types.md)，
@@ -398,6 +398,7 @@ C 函式的呼叫只能寫在 `unsafe` 中，所以只有在 `unsafe` 中才能�
 | `(c-alloc T)` / `(c-alloc T n)` | 配置 `n` 個（省略時 1 個）`T`。內容填入 0。回傳 `(ptr T)` |
 | `(c-ref p i)` | 從 `p` 起第 `i` 個元素的指標。超出配置範圍時是錯誤 |
 | `(c-deref p)` / `(setf (c-deref p) v)` | 讀取／寫入 `p` 所指的純量 |
+| `(volatile-read-u32 addr)` / `(volatile-write-u32 addr v)` | 讀取或寫入位址 `addr`（`int`）處的暫存器，在該位置恰好一次。`-u8`、`-u16` 亦同 |
 | `p::field` / `(setf p::field v)` | 讀取／寫入結構的欄位。讀取嵌入的結構欄位會得到其位址（`(ptr 內部型別)`） |
 | `(as ptr p)` | 忘掉型別成為 `ptr`（為了傳給 `qsort` 的 `void *` 之類）。沒有反方向的轉換 |
 

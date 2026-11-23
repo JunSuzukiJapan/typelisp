@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ 849e94e087680155a16df844f633f16017703f95 -->
+<!-- translated-from: docs/ja/guide/compile.md @ 0d6d73aceba107bf7480412efc65502ef674dda8 -->
 # الترجمة
 
 إذا لم تفعل شيئًا آخر فإن برامج typelisp تعمل في المفسِّر (interpreter). وإضافة إلى ذلك توجد طريقتان
@@ -254,6 +254,20 @@ $ qemu-system-arm -M mps2-an386 -nographic \
   uint64_t typelisp_host_now_us(void);                                    // ميكروثوانٍ على ساعة لا ترجع أبدًا
   int64_t  typelisp_host_unix_us(void);                                   // ميكروثوانٍ منذ 1970-01-01
   void     typelisp_host_sleep_us(uint64_t us);                           // تنتظر us ميكروثانية
+  ```
+
+- تُقرأ سجلات اللوحة (الأجهزة الطرفية المعيَّنة في الذاكرة) بـ `volatile-read-u8` و`volatile-read-u16` و`volatile-read-u32`، وتُكتب بـ `volatile-write-u8` و`volatile-write-u16` و`volatile-write-u32`. يُمرَّر العنوان بوصفه `int`، وتكون القيمة المقروءة من نوع عرضها (`u8` وما إلى ذلك). كلٌّ منها يقرأ أو يكتب مرة واحدة بالضبط في الموضع الذي كُتب فيه، ولا يحذفه المترجم ولا ينقله. لا تُستخدم جميعها إلا داخل `unsafe`. العنوان السالب، أو الذي ليس من مضاعفات العرض، خطأ وقت التشغيل قبل قراءة أي شيء أو كتابته.
+
+  ```lisp
+  ;; UART 0 في لوحة mps2-an386 في QEMU: البيانات 0x40004000، الحالة 0x40004004، التحكم 0x40004008
+  (defun put-byte ((c u32)) ()
+    (unsafe
+      (loop (when (= (logand (volatile-read-u32 #x40004004) 1) 0) (break)))   ; انتظر أثناء الإرسال
+      (volatile-write-u32 #x40004000 c)))
+
+  (defun main () ()
+    (unsafe (volatile-write-u32 #x40004008 1))                               ; فعِّل الإرسال
+    (put-byte 104) (put-byte 105) (put-byte 10))                             ; "hi" وسطر جديد
   ```
 
 - تبدأ بيئة التشغيل البرنامج (جدول المتجهات وتهيئة RAM) وتخصّص الذاكرة. HardFault أو مقاطعة بلا معالج ينهي البرنامج برمز خروج panic (1).

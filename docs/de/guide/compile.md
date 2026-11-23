@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ 849e94e087680155a16df844f633f16017703f95 -->
+<!-- translated-from: docs/ja/guide/compile.md @ 0d6d73aceba107bf7480412efc65502ef674dda8 -->
 # Kompilierung
 
 Ohne weiteres Zutun laufen typelisp-Programme im Interpreter. Darüber hinaus gibt es zwei Wege, in nativen
@@ -261,6 +261,20 @@ $ qemu-system-arm -M mps2-an386 -nographic \
   uint64_t typelisp_host_now_us(void);                                    // Mikrosekunden einer Uhr, die nie zurückläuft
   int64_t  typelisp_host_unix_us(void);                                   // Mikrosekunden seit 1970-01-01
   void     typelisp_host_sleep_us(uint64_t us);                           // wartet us Mikrosekunden
+  ```
+
+- Die Register einer Platine (in den Speicher eingeblendete Peripherie) werden mit `volatile-read-u8`, `volatile-read-u16` und `volatile-read-u32` gelesen und mit `volatile-write-u8`, `volatile-write-u16` und `volatile-write-u32` geschrieben. Die Adresse ist ein `int`, der gelesene Wert hat den Typ der Breite (`u8` usw.). Jeder Zugriff liest oder schreibt genau einmal, an der Stelle, an der er steht; der Compiler lässt ihn weder weg noch verschiebt er ihn. Alle sind nur innerhalb von `unsafe` nutzbar. Eine negative Adresse oder eine, die kein Vielfaches der Breite ist, ist ein Laufzeitfehler, bevor etwas gelesen oder geschrieben wird.
+
+  ```lisp
+  ;; UART 0 des mps2-an386 von QEMU: Daten 0x40004000, Status 0x40004004, Steuerung 0x40004008
+  (defun put-byte ((c u32)) ()
+    (unsafe
+      (loop (when (= (logand (volatile-read-u32 #x40004004) 1) 0) (break)))   ; warten, solange gesendet wird
+      (volatile-write-u32 #x40004000 c)))
+
+  (defun main () ()
+    (unsafe (volatile-write-u32 #x40004008 1))                               ; Senden einschalten
+    (put-byte 104) (put-byte 105) (put-byte 10))                             ; "hi" und ein Zeilenumbruch
   ```
 
 - Die Laufzeitumgebung startet das Programm (Vektortabelle und Vorbereitung des RAM) und verwaltet den Speicher. Ein HardFault oder ein unbehandelter Interrupt beendet das Programm mit dem Exit-Code eines Panic (1).

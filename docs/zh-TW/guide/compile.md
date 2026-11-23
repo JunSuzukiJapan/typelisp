@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ 849e94e087680155a16df844f633f16017703f95 -->
+<!-- translated-from: docs/ja/guide/compile.md @ 0d6d73aceba107bf7480412efc65502ef674dda8 -->
 # 編譯
 
 不做任何處理的話，typelisp 程式由直譯器執行。此外還有兩種編譯為原生碼的方法，以及一種保存環境的方法。規格的詳情見
@@ -241,6 +241,20 @@ $ qemu-system-arm -M mps2-an386 -nographic \
   uint64_t typelisp_host_now_us(void);                                    // 不會倒退的時鐘的微秒數
   int64_t  typelisp_host_unix_us(void);                                   // 自 1970-01-01 起的微秒數
   void     typelisp_host_sleep_us(uint64_t us);                           // 等待 us 微秒
+  ```
+
+- 板子的暫存器（對映到記憶體的周邊裝置）用 `volatile-read-u8`、`volatile-read-u16`、`volatile-read-u32` 讀取，用 `volatile-write-u8`、`volatile-write-u16`、`volatile-write-u32` 寫入。位址以 `int` 傳入，讀到的值是該寬度的型別（`u8` 等）。每個都在寫下它的位置恰好讀寫一次，編譯器既不省略也不移動它。它們都只能在 `unsafe` 中使用。位址為負數或不是寬度的倍數時，在讀寫之前就是執行期錯誤。
+
+  ```lisp
+  ;; QEMU 的 mps2-an386 的 UART 0：資料 0x40004000，狀態 0x40004004，控制 0x40004008
+  (defun put-byte ((c u32)) ()
+    (unsafe
+      (loop (when (= (logand (volatile-read-u32 #x40004004) 1) 0) (break)))   ; 傳送中則等待
+      (volatile-write-u32 #x40004000 c)))
+
+  (defun main () ()
+    (unsafe (volatile-write-u32 #x40004008 1))                               ; 啟用傳送
+    (put-byte 104) (put-byte 105) (put-byte 10))                             ; "hi" 與換行
   ```
 
 - 啟動（向量表和 RAM 的準備）和記憶體配置由執行環境完成。發生 HardFault 或未處理的中斷時，以與 panic 相同的結束碼（1）結束。

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ 849e94e087680155a16df844f633f16017703f95 -->
+<!-- translated-from: docs/ja/guide/compile.md @ 0d6d73aceba107bf7480412efc65502ef674dda8 -->
 # Compilação
 
 Se você não fizer nada além disso, os programas typelisp são executados no interpretador. Além disso há duas
@@ -256,6 +256,20 @@ $ qemu-system-arm -M mps2-an386 -nographic \
   uint64_t typelisp_host_now_us(void);                                    // microssegundos de um relógio que nunca volta
   int64_t  typelisp_host_unix_us(void);                                   // microssegundos desde 1970-01-01
   void     typelisp_host_sleep_us(uint64_t us);                           // espera us microssegundos
+  ```
+
+- Os registradores de uma placa (periféricos mapeados em memória) são lidos com `volatile-read-u8`, `volatile-read-u16` e `volatile-read-u32`, e escritos com `volatile-write-u8`, `volatile-write-u16` e `volatile-write-u32`. O endereço é um `int`, e o valor lido tem o tipo da largura (`u8` etc.). Cada um lê ou escreve exatamente uma vez, onde está escrito; o compilador não o omite nem o move. Todos só podem ser usados dentro de `unsafe`. Um endereço negativo, ou que não seja múltiplo da largura, é um erro em tempo de execução antes de qualquer leitura ou escrita.
+
+  ```lisp
+  ;; UART 0 do mps2-an386 do QEMU: dados 0x40004000, estado 0x40004004, controle 0x40004008
+  (defun put-byte ((c u32)) ()
+    (unsafe
+      (loop (when (= (logand (volatile-read-u32 #x40004004) 1) 0) (break)))   ; esperar enquanto envia
+      (volatile-write-u32 #x40004000 c)))
+
+  (defun main () ()
+    (unsafe (volatile-write-u32 #x40004008 1))                               ; habilitar o envio
+    (put-byte 104) (put-byte 105) (put-byte 10))                             ; "hi" e uma quebra de linha
   ```
 
 - O runtime inicia o programa (a tabela de vetores e o preparo da RAM) e aloca a memória. Um HardFault ou uma interrupção não tratada encerra o programa com o código de saída de um panic (1).
