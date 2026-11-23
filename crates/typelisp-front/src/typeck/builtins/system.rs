@@ -88,11 +88,7 @@ fn streams(reg: &mut Registry, ns: NsId) {
     // name (`probe-file`, `delete-file`, `rename-file`, `truename`,
     // `file-write-date`, `directory-p`, `directory`,
     // `ensure-directories-exist`).
-    //
-    // The `file-` prefix is load-bearing, not decorative: `Interp::
-    // eval_builtin` routes every `stream-`/`file-` name to
-    // `stream_builtin::stream_builtin`, so a filesystem builtin spelled
-    // otherwise would be unreachable interpreted.
+    // Their implementation is `typelisp_rt_sys::fs_builtin`.
     native("file-exists-p", vec![Type::Str], Type::Bool);
     native("file-delete", vec![Type::Str], unit_or_err.clone());
     native("file-rename", vec![Type::Str, Type::Str], unit_or_err.clone());

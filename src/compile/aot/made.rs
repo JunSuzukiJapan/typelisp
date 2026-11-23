@@ -48,18 +48,11 @@ const DIRECT: &[(u32, TypeSpec)] = &[
 /// Every builtin that can make a value of a [`TRACKED`] type, with a type
 /// its value is made of. The stream, socket and system builtins make what
 /// their result-type tables say and nothing else: each table's lookup stops
-/// the process for a builtin with no row (`stream_builtin::lookup`), and the
+/// the process for a builtin with no row (`typelisp_rt::result_value::type_in`), and the
 /// one value they make outside the `Result` (`file-write-date`'s
 /// `universal-time`) is in its row.
 fn makers() -> impl Iterator<Item = &'static (u32, TypeSpec)> {
-    use typelisp_rt::{net_builtin, stream_builtin, sys_builtin};
-    stream_builtin::RESULT_TYPES
-        .iter()
-        .chain(stream_builtin::INNER_TYPES)
-        .chain(net_builtin::RESULT_TYPES)
-        .chain(net_builtin::INNER_TYPES)
-        .chain(sys_builtin::RESULT_TYPES)
-        .chain(DIRECT)
+    crate::compile::externs::BUILTIN_TYPE_TABLES.iter().flat_map(|t| t.rows.iter()).chain(DIRECT)
 }
 
 /// `ty`'s definition, when it is a named type.

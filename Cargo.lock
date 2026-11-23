@@ -847,6 +847,7 @@ dependencies = [
  "typelisp-print",
  "typelisp-read",
  "typelisp-rt",
+ "typelisp-rt-sys",
 ]
 
 [[package]]
@@ -872,6 +873,7 @@ dependencies = [
  "typelisp-print",
  "typelisp-read",
  "typelisp-rt",
+ "typelisp-rt-sys",
 ]
 
 [[package]]
@@ -880,6 +882,7 @@ version = "0.3.7"
 dependencies = [
  "foldhash",
  "hashbrown",
+ "libc",
  "lock_api",
  "num-bigint",
  "num-rational",
@@ -923,6 +926,15 @@ dependencies = [
  "typelisp-print",
  "typelisp-read",
  "webpki-roots",
+]
+
+[[package]]
+name = "typelisp-rt-sys"
+version = "0.3.7"
+dependencies = [
+ "typelisp-abi",
+ "typelisp-mem",
+ "typelisp-rt",
 ]
 
 [[package]]

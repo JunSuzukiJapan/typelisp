@@ -398,7 +398,6 @@ pub fn list_exhausted(heap: &Heap) -> bool {
 fn write_stdout(heap: &mut Heap, text: &str) -> Result<(), String> {
     // One of the three doors a session's output leaves by; see
     // `typelisp_abi::dribble`'s module docs for the other two.
-    #[cfg(feature = "std")]
     typelisp_abi::dribble::note(text);
     heap.native(|| typelisp_mem::host::write_stdout(text.as_bytes()).and_then(|()| typelisp_mem::host::flush_stdout()))
     .map_err(|e| format!("print: {}", e))

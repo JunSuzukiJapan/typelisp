@@ -85,7 +85,13 @@ impl Interp {
                         .map_err(EvalError::Panic),
                 )
             }
-            wk::F_FILE_CREATE_DIRECTORIES | wk::F_FILE_DELETE | wk::F_FILE_DIRECTORY_P | wk::F_FILE_EXISTS_P | wk::F_FILE_LIST_DIRECTORY | wk::F_FILE_MODIFIED_DATE | wk::F_FILE_OWNER_NAME | wk::F_FILE_RENAME | wk::F_FILE_TRUENAME | wk::F_STREAM_AT_LINE_START | wk::F_STREAM_CLOSE | wk::F_STREAM_DESCRIBE | wk::F_STREAM_FINISH_OUTPUT | wk::F_STREAM_INPUT_P | wk::F_STREAM_LISTEN | wk::F_STREAM_OPEN_FILE | wk::F_STREAM_OPEN_P | wk::F_STREAM_OUTPUT_P | wk::F_STREAM_POSITION | wk::F_STREAM_READ_BYTE | wk::F_STREAM_READ_CHAR | wk::F_STREAM_STDERR | wk::F_STREAM_STDIN | wk::F_STREAM_STDOUT | wk::F_STREAM_STRING_INPUT | wk::F_STREAM_STRING_OUTPUT | wk::F_STREAM_TAKE_OUTPUT_STRING | wk::F_STREAM_UNREAD_CHAR | wk::F_STREAM_WRITE_BYTE | wk::F_STREAM_WRITE_STRING => {
+            wk::F_FILE_CREATE_DIRECTORIES | wk::F_FILE_DELETE | wk::F_FILE_DIRECTORY_P | wk::F_FILE_EXISTS_P | wk::F_FILE_LIST_DIRECTORY | wk::F_FILE_MODIFIED_DATE | wk::F_FILE_OWNER_NAME | wk::F_FILE_RENAME | wk::F_FILE_TRUENAME | wk::F_STREAM_OPEN_FILE => {
+                Some(match typelisp_rt_sys::fs_builtin::fs_builtin(heap, name, args)? {
+                    Ok(v) => Ok(v),
+                    Err(e) => Err(EvalError::Internal(e)),
+                })
+            }
+            wk::F_STREAM_AT_LINE_START | wk::F_STREAM_CLOSE | wk::F_STREAM_DESCRIBE | wk::F_STREAM_FINISH_OUTPUT | wk::F_STREAM_INPUT_P | wk::F_STREAM_LISTEN | wk::F_STREAM_OPEN_P | wk::F_STREAM_OUTPUT_P | wk::F_STREAM_POSITION | wk::F_STREAM_READ_BYTE | wk::F_STREAM_READ_CHAR | wk::F_STREAM_STDERR | wk::F_STREAM_STDIN | wk::F_STREAM_STDOUT | wk::F_STREAM_STRING_INPUT | wk::F_STREAM_STRING_OUTPUT | wk::F_STREAM_TAKE_OUTPUT_STRING | wk::F_STREAM_UNREAD_CHAR | wk::F_STREAM_WRITE_BYTE | wk::F_STREAM_WRITE_STRING => {
                 self.eval_stream_builtin(heap, name, args)
             }
             // The sockets. `net-wait` never arrives here: `finish_call`
@@ -122,15 +128,15 @@ impl Interp {
             // the compiled shims wrap — the `file-*` half of Phase 9c needs
             // no arm here at all, since the `starts_with("file-")` guard
             // above already routes it to `eval_stream_builtin`.
-            wk::F_COMMAND_LINE_ARGS => Some(Ok(typelisp_rt::sys_builtin::command_line_args(heap))),
+            wk::F_COMMAND_LINE_ARGS => Some(Ok(typelisp_rt_sys::env::command_line_args(heap))),
             wk::F_GETENV => Some(match &args[0] {
                 Value::Str(id) => {
                     let name = heap.string(*id).to_string();
-                    Ok(typelisp_rt::sys_builtin::getenv(heap, &name))
+                    Ok(typelisp_rt_sys::env::getenv(heap, &name))
                 }
                 other => Err(EvalError::Panic(format!("getenv: argument is not a string, got {:?}", other))),
             }),
-            wk::F_HOME_DIRECTORY => Some(Ok(typelisp_rt::sys_builtin::home_directory(heap))),
+            wk::F_HOME_DIRECTORY => Some(Ok(typelisp_rt_sys::env::home_directory(heap))),
             // The REPL tool layer's runtime half. `trace`/`untrace`/`step`/
             // `disassemble` are *not* here — those are special forms with
             // their own core nodes, the same way `compile` is.
@@ -138,11 +144,11 @@ impl Interp {
             wk::F_DRIBBLE_START => Some(match &args[0] {
                 Value::Str(id) => {
                     let path = heap.string(*id).to_string();
-                    Ok(typelisp_rt::sys_builtin::dribble_start(heap, &path))
+                    Ok(typelisp_rt_sys::dribble::dribble_start(heap, &path))
                 }
                 other => Err(EvalError::Panic(format!("dribble: argument is not a string, got {:?}", other))),
             }),
-            wk::F_DRIBBLE_STOP => Some(Ok(typelisp_rt::sys_builtin::dribble_stop(heap))),
+            wk::F_DRIBBLE_STOP => Some(Ok(typelisp_rt_sys::dribble::dribble_stop(heap))),
             wk::F_ED_OPEN => Some(match (&args[0], &args[1]) {
                 (Value::Str(id), Value::Int(line)) => {
                     let path = heap.string(*id).to_string();
@@ -667,7 +673,7 @@ pub(crate) fn eval_builtin_method(
 }
 
 impl Interp {
-    /// The `stream-*` / `file-*` built-ins: a thin adapter over
+    /// The `stream-*` built-ins: a thin adapter over
     /// [`typelisp_rt::stream_builtin::stream_builtin`], which is
     /// the implementation — and is also what the compiled `rt_stream_*` shims
     /// call, so an interpreted and a compiled call to `read-char` are the same

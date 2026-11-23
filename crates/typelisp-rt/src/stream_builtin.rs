@@ -1,5 +1,6 @@
-//! The `stream-*`/`file-*` builtins as *values*: one implementation, called
-//! from both sides of the compile boundary.
+//! The `stream-*` builtins as *values*: one implementation, called from both
+//! sides of the compile boundary. Opening a file and the `file-*` builtins
+//! are `typelisp-rt-sys`'s, over the same table.
 //!
 //! [`crate::stream`] owns the OS resources and speaks Rust types
 //! (`StreamResult<Option<char>>`, ...). This module is the layer above it,
@@ -8,7 +9,7 @@
 //! `Interp::eval_stream_builtin` (interpreted) and the `rt_stream_*` shims in
 //! [`crate::lib`](crate) (compiled) call.
 //!
-//! Writing it once is the whole point. These twenty builtins are not
+//! Writing it once is the whole point. These builtins are not
 //! arithmetic: each has a failure mode, a wrapper shape, and an error message
 //! text, and a program that opens a file in compiled code and reads it in
 //! interpreted code must see one behaviour. A second implementation on this
@@ -26,39 +27,15 @@
 use typelisp_mem::prelude::*;
 use typelisp_mem::{spec, wk, Heap, StdModule, SymRef, TypeId, TypeSpec, Value};
 
+use crate::result_value::{err_in, ok_in, option_in, TypeTable};
 use crate::stream::with_streams;
 
-// The types the results here are built with — `TypeId::OPTION`, `RESULT`,
-// and `FILE_ERROR` — come from `typelisp_mem`'s pre-interned table rather
-// than being named here, because this crate has no `Path` to derive a name
-// from (the same standing exception `rt_data_new` has, which receives its key
-// as a string from compiled code). That their names are the ones
-// `type_key::type_key_of` produces is asserted by
-// `tests/type_identity_guard_test.rs` — checked, not assumed, because the
-// failure it guards is silent: a value built here under a key nobody else
-// spells would be unmatchable and fail to print.
-//
-// `Vector<T>`'s box is a `Struct`, not an `Enum` — the "just a box + a name"
-// representation `value.rs`'s `BoxedObj` doc comment describes, whose *fields
-// are its elements*. `file-list-directory` builds one directly.
+pub const FILE_ERROR: TypeSpec = TypeSpec::Named(StdModule::FS, "FileError", &[]);
 
-const FILE_ERROR: TypeSpec = TypeSpec::Named(StdModule::FS, "FileError", &[]);
-
-/// The runtime type each builtin's *result* carries, and — for the ones
-/// that wrap something generic inside it — the type of that inner value.
-///
-/// A type's identity includes its instantiation, and these shims build their
-/// `Result`/`Option`/`Vector` boxes with no checker to ask: this crate sits
-/// below it. So the type is written here, once per builtin, and
-/// `tests/type_identity_guard_test.rs` compares every row against that
-/// builtin's own registry return type. Checked rather than assumed for the
-/// reason the module comment gives: a value built under a type nobody else
-/// gives it is unmatchable and fails to print.
-///
+/// The runtime type each builtin's *result* carries ([`crate::result_value`]).
 /// A builtin whose result is not a box (`stream-stdin`'s handle,
 /// `stream-open-p`'s `bool`) has no row and needs none.
-pub const RESULT_TYPES: &[(u32, TypeSpec)] = &[
-    (wk::F_STREAM_OPEN_FILE, TypeSpec::Named(StdModule::RESULT, "Result", &[spec::I32, FILE_ERROR])),
+pub const RESULT_TYPES: TypeTable = &[
     (wk::F_STREAM_CLOSE, TypeSpec::Named(StdModule::RESULT, "Result", &[spec::UNIT, FILE_ERROR])),
     (wk::F_STREAM_INPUT_P, TypeSpec::Named(StdModule::RESULT, "Result", &[spec::BOOL, FILE_ERROR])),
     (wk::F_STREAM_OUTPUT_P, TypeSpec::Named(StdModule::RESULT, "Result", &[spec::BOOL, FILE_ERROR])),
@@ -72,56 +49,28 @@ pub const RESULT_TYPES: &[(u32, TypeSpec)] = &[
     (wk::F_STREAM_WRITE_STRING, TypeSpec::Named(StdModule::RESULT, "Result", &[spec::UNIT, FILE_ERROR])),
     (wk::F_STREAM_FINISH_OUTPUT, TypeSpec::Named(StdModule::RESULT, "Result", &[spec::UNIT, FILE_ERROR])),
     (wk::F_STREAM_TAKE_OUTPUT_STRING, TypeSpec::Named(StdModule::RESULT, "Result", &[spec::STRING, FILE_ERROR])),
-    (wk::F_FILE_DELETE, TypeSpec::Named(StdModule::RESULT, "Result", &[spec::UNIT, FILE_ERROR])),
-    (wk::F_FILE_TRUENAME, TypeSpec::Named(StdModule::RESULT, "Result", &[spec::STRING, FILE_ERROR])),
-    (wk::F_FILE_MODIFIED_DATE, TypeSpec::Named(StdModule::RESULT, "Result", &[TypeSpec::Named(StdModule::TIME, "universal-time", &[]), FILE_ERROR])),
-    (wk::F_FILE_OWNER_NAME, TypeSpec::Named(StdModule::RESULT, "Result", &[TypeSpec::Named(StdModule::OPTION, "Option", &[spec::STRING]), FILE_ERROR])),
-    (wk::F_FILE_LIST_DIRECTORY, TypeSpec::Named(StdModule::RESULT, "Result", &[TypeSpec::Named(StdModule::VEC, "Vector", &[spec::STRING]), FILE_ERROR])),
-    (wk::F_FILE_CREATE_DIRECTORIES, TypeSpec::Named(StdModule::RESULT, "Result", &[spec::UNIT, FILE_ERROR])),
-    (wk::F_FILE_RENAME, TypeSpec::Named(StdModule::RESULT, "Result", &[spec::UNIT, FILE_ERROR])),
 ];
 
 /// The type of the value *inside* the `Result` — [`RESULT_TYPES`]' companion for
-/// the three builtins whose payload is itself a box.
-pub const INNER_TYPES: &[(u32, TypeSpec)] = &[
+/// the builtins whose payload is itself a box.
+pub const INNER_TYPES: TypeTable = &[
     (wk::F_STREAM_READ_CHAR, TypeSpec::Named(StdModule::OPTION, "Option", &[spec::CHAR])),
     (wk::F_STREAM_READ_BYTE, TypeSpec::Named(StdModule::OPTION, "Option", &[spec::INT])),
-    (wk::F_FILE_LIST_DIRECTORY, TypeSpec::Named(StdModule::VEC, "Vector", &[spec::STRING])),
-    (wk::F_FILE_OWNER_NAME, TypeSpec::Named(StdModule::OPTION, "Option", &[spec::STRING])),
 ];
 
-pub(crate) fn lookup(table: &[(u32, TypeSpec)], name: SymRef, what: &str) -> TypeId {
-    match table.iter().find(|(n, _)| *n == name.well_known()) {
-        Some((_, ty)) => typelisp_mem::intern_spec(ty),
-        // Not a recoverable condition: a builtin that builds a box without a
-        // row would give that value an identity nothing else spells.
-        None => crate::fatal(&format!("stream_builtin: no {} type for `{}`", what, name)),
-    }
-}
-
-/// `Ok(v)`, matching `result_def`'s variant order (`Ok` = 0, `Err` = 1).
+/// `Ok(v)` under `name`'s row.
 fn result_ok(heap: &mut Heap, name: SymRef, v: Value) -> Value {
-    let key = lookup(RESULT_TYPES, name, "result");
-    heap.alloc_enum(key, 0, vec![v])
+    ok_in(heap, RESULT_TYPES, name.well_known(), v)
 }
 
-/// `Err(FileError(msg))` — the concrete error type every stream and file
-/// operation fails with, wrapped in `Result`'s `Err` variant. `FileError` has
-/// exactly one variant (index 0) carrying the message.
+/// `Err(FileError(msg))` — the concrete error type every stream operation
+/// fails with.
 fn result_err(heap: &mut Heap, name: SymRef, msg: String) -> Value {
-    let msg_val = heap.alloc_string(msg);
-    // `FileError` takes no type arguments, so its key is unchanged by the
-    // instantiation rule and stays the pre-interned constant.
-    let err_val = heap.alloc_enum(TypeId::FILE_ERROR, 0, vec![msg_val]);
-    let key = lookup(RESULT_TYPES, name, "result");
-    heap.alloc_enum(key, 1, vec![err_val])
+    err_in(heap, RESULT_TYPES, name.well_known(), TypeId::FILE_ERROR, msg)
 }
 
-/// `Some(v)`/`None` under the instantiation the inner key spells — the
-/// niche when the payload allows one, else a box in `option_def`'s variant
-/// order (`Heap::alloc_option` decides).
 fn option_value(heap: &mut Heap, name: SymRef, v: Option<Value>) -> Value {
-    heap.alloc_option(lookup(INNER_TYPES, name, "inner"), v)
+    option_in(heap, INNER_TYPES, name.well_known(), v)
 }
 
 /// An argument that isn't the shape its signature promises. Unreachable
@@ -130,28 +79,28 @@ fn option_value(heap: &mut Heap, name: SymRef, v: Option<Value>) -> Value {
 pub type ArgError = String;
 
 /// A stream handle, or `open`'s mode — both plain integers.
-pub(crate) fn int(args: &[Value], i: usize, who: &str) -> Result<i64, ArgError> {
+pub fn int(args: &[Value], i: usize, who: &str) -> Result<i64, ArgError> {
     match args.get(i) {
         Some(Value::Int(n)) => Ok(*n),
         other => Err(format!("{}: argument {} is not an integer, got {:?}", who, i, other)),
     }
 }
 
-pub(crate) fn text(heap: &Heap, args: &[Value], i: usize, who: &str) -> Result<String, ArgError> {
+pub fn text(heap: &Heap, args: &[Value], i: usize, who: &str) -> Result<String, ArgError> {
     match args.get(i) {
         Some(Value::Str(id)) => Ok(heap.string(*id).to_string()),
         other => Err(format!("{}: argument {} is not a string, got {:?}", who, i, other)),
     }
 }
 
-pub(crate) fn character(args: &[Value], i: usize, who: &str) -> Result<char, ArgError> {
+pub fn character(args: &[Value], i: usize, who: &str) -> Result<char, ArgError> {
     match args.get(i) {
         Some(Value::Char(c)) => Ok(*c),
         other => Err(format!("{}: argument {} is not a character, got {:?}", who, i, other)),
     }
 }
 
-/// Every `stream-*`/`file-*` builtin, or `None` if `name` isn't one.
+/// Every `stream-*` builtin, or `None` if `name` isn't one.
 ///
 /// The `Ok`/`Err` of the *return* is about the arguments, not about the
 /// operation: a missing file or a closed stream is an ordinary
@@ -183,7 +132,6 @@ pub fn stream_builtin(heap: &mut Heap, sym: SymRef, args: &[Value]) -> Option<Re
     }
 
     Some(match sym.well_known() {
-        #[cfg(feature = "std")]
         wk::F_STREAM_STDIN => Ok(Value::Int(with_streams(heap, |t| t.stdin()))),
         wk::F_STREAM_STDOUT => Ok(Value::Int(with_streams(heap, |t| t.stdout()))),
         wk::F_STREAM_STDERR => Ok(Value::Int(with_streams(heap, |t| t.stderr()))),
@@ -192,11 +140,6 @@ pub fn stream_builtin(heap: &mut Heap, sym: SymRef, args: &[Value]) -> Option<Re
             Ok(Value::Int(with_streams(heap, |t| t.string_input(&s))))
         }
         wk::F_STREAM_STRING_OUTPUT => Ok(Value::Int(with_streams(heap, |t| t.string_output()))),
-        #[cfg(feature = "std")]
-        wk::F_STREAM_OPEN_FILE => {
-            let (p, mode) = (arg!(text(heap, args, 0, name)), arg!(int(args, 1, name)));
-            wrap!(with_streams(heap, |t| t.open_file(&p, mode)), |v: i64| Value::Int(v))
-        }
         wk::F_STREAM_CLOSE => {
             let h = arg!(int(args, 0, name));
             wrap!(with_streams(heap, |t| t.close(h)), |_v: ()| Value::Empty)
@@ -280,149 +223,6 @@ pub fn stream_builtin(heap: &mut Heap, sym: SymRef, args: &[Value]) -> Option<Re
                     Ok(result_ok(heap, sym, sv))
                 }
                 Err(m) => Ok(result_err(heap, sym, m)),
-            }
-        }
-        #[cfg(feature = "std")]
-        wk::F_FILE_EXISTS_P => {
-            let p = arg!(text(heap, args, 0, name));
-            Ok(Value::Bool(std::path::Path::new(&p).exists()))
-        }
-        #[cfg(feature = "std")]
-        wk::F_FILE_DELETE => {
-            let p = arg!(text(heap, args, 0, name));
-            match std::fs::remove_file(&p) {
-                Ok(()) => Ok(result_ok(heap, sym, Value::Empty)),
-                Err(e) => Ok(result_err(heap, sym, format!("delete-file: {}: {}", p, e))),
-            }
-        }
-        // The queries that only look at the filesystem, no stream involved
-        // (CLHS 20.1). Each is the primitive under a `Pathish` prelude
-        // wrapper that carries the CL name: `truename`, `file-write-date`,
-        // `directory-p`, `directory`, `ensure-directories-exist`.
-        //
-        // They live here rather than in `sys_builtin` because the `file-`
-        // prefix is a *routing rule*, not a naming convention:
-        // `Interp::eval_builtin` sends every name starting `stream-`/`file-`
-        // straight to this dispatch, so a `file-*` builtin implemented
-        // anywhere else would never be reached interpreted.
-        #[cfg(feature = "std")]
-        wk::F_FILE_TRUENAME => {
-            let p = arg!(text(heap, args, 0, name));
-            match std::fs::canonicalize(&p) {
-                Ok(c) => {
-                    let sv = heap.alloc_string(c.to_string_lossy().into_owned());
-                    Ok(result_ok(heap, sym, sv))
-                }
-                Err(e) => Ok(result_err(heap, sym, format!("truename: {}: {}", p, e))),
-            }
-        }
-        // The result is a *universal* time — seconds since 1900-01-01 UTC,
-        // the scale `get-universal-time` counts on — so a file's timestamp
-        // and the clock are directly comparable and either can be handed to
-        // the prelude's `decode-universal-time`.
-        #[cfg(feature = "std")]
-        wk::F_FILE_MODIFIED_DATE => {
-            let p = arg!(text(heap, args, 0, name));
-            const UNIX_TO_CL_EPOCH_SECS: i64 = 2_208_988_800;
-            match std::fs::metadata(&p).and_then(|m| m.modified()) {
-                Ok(t) => match t.duration_since(std::time::UNIX_EPOCH) {
-                    Ok(d) => {
-                        let tv = crate::sys_builtin::universal_time_value(
-                            heap,
-                            d.as_secs() as i64 + UNIX_TO_CL_EPOCH_SECS,
-                        );
-                        Ok(result_ok(heap, sym, tv))
-                    }
-                    Err(e) => Ok(result_err(heap, sym, format!("file-write-date: {}: timestamp precedes the Unix epoch: {}", p, e))),
-                },
-                Err(e) => Ok(result_err(heap, sym, format!("file-write-date: {}: {}", p, e))),
-            }
-        }
-        // CL's `file-author`, under a `file-`-prefixed name because that
-        // prefix is what routes a builtin here at all (see the note above).
-        // Two failures that CL keeps apart stay apart: a missing file is an
-        // `Err`, an owner with no password-database entry is `Ok(None)` —
-        // which is exactly what CL means by "or nil if the author's name
-        // cannot be determined".
-        #[cfg(feature = "std")]
-        wk::F_FILE_OWNER_NAME => {
-            let p = arg!(text(heap, args, 0, name));
-            match crate::os::file_owner(&p) {
-                Ok(who) => {
-                    let inner = who.map(|s| heap.alloc_string(s));
-                    let ov = option_value(heap, sym, inner);
-                    Ok(result_ok(heap, sym, ov))
-                }
-                Err(e) => Ok(result_err(heap, sym, format!("file-author: {}: {}", p, e))),
-            }
-        }
-        // `false` for a plain file *and* for something that isn't there —
-        // the same "a question, not a fallible operation" shape
-        // `file-exists-p` has. A caller that must tell the two apart asks
-        // `file-exists-p` as well.
-        #[cfg(feature = "std")]
-        wk::F_FILE_DIRECTORY_P => {
-            let p = arg!(text(heap, args, 0, name));
-            Ok(Value::Bool(std::path::Path::new(&p).is_dir()))
-        }
-        // Entries as truenames, in whatever order the OS reports them: CL's
-        // `directory` answers with "the truenames of those files", so each
-        // entry is absolute with its symlinks resolved — the same thing
-        // `file-truename` answers for it. A symlink whose target is missing
-        // names no file that is present, so it is not an entry (CL lists
-        // files present in the file system; `probe-file` says `false` for
-        // it too). `readdir` order carries no meaning, so sorting belongs to
-        // the caller that wants a stable listing, not here. `.` and `..` are
-        // not entries — `read_dir` does not yield them.
-        //
-        // Allocating every element before the vector box is safe as written:
-        // `alloc_string` and `alloc_struct` never collect (only `Heap::cons`
-        // does), so nothing can invalidate the `Vec<Value>` in between. A
-        // version of this that consed would need each element rooted.
-        #[cfg(feature = "std")]
-        wk::F_FILE_LIST_DIRECTORY => {
-            let p = arg!(text(heap, args, 0, name));
-            let entries = match std::fs::read_dir(&p) {
-                Ok(rd) => rd,
-                Err(e) => return Some(Ok(result_err(heap, sym, format!("directory: {}: {}", p, e)))),
-            };
-            let mut names: Vec<String> = Vec::new();
-            for entry in entries {
-                match entry {
-                    Ok(e) => match std::fs::canonicalize(e.path()) {
-                        Ok(t) => names.push(t.to_string_lossy().into_owned()),
-                        Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
-                        Err(err) => {
-                            return Some(Ok(result_err(
-                                heap,
-                                sym,
-                                format!("directory: {}: {}", e.path().display(), err),
-                            )))
-                        }
-                    },
-                    Err(e) => return Some(Ok(result_err(heap, sym, format!("directory: {}: {}", p, e)))),
-                }
-            }
-            let elems: Vec<Value> = names.into_iter().map(|n| heap.alloc_string(n)).collect();
-            let vec_val = { let k = lookup(INNER_TYPES, sym, "inner"); heap.alloc_struct(k, elems) };
-            Ok(result_ok(heap, sym, vec_val))
-        }
-        // Succeeds when the directory already exists: `create_dir_all` is
-        // idempotent, which is exactly what "ensure" means in CL's name.
-        #[cfg(feature = "std")]
-        wk::F_FILE_CREATE_DIRECTORIES => {
-            let p = arg!(text(heap, args, 0, name));
-            match std::fs::create_dir_all(&p) {
-                Ok(()) => Ok(result_ok(heap, sym, Value::Empty)),
-                Err(e) => Ok(result_err(heap, sym, format!("ensure-directories-exist: {}: {}", p, e))),
-            }
-        }
-        #[cfg(feature = "std")]
-        wk::F_FILE_RENAME => {
-            let (a, b) = (arg!(text(heap, args, 0, name)), arg!(text(heap, args, 1, name)));
-            match std::fs::rename(&a, &b) {
-                Ok(()) => Ok(result_ok(heap, sym, Value::Empty)),
-                Err(e) => Ok(result_err(heap, sym, format!("rename-file: {}: {}", a, e))),
             }
         }
         _ => return None,

@@ -7,7 +7,7 @@ use core::any::Any;
 use typelisp_mem::collections::HashMap;
 use std::io::ErrorKind;
 use std::sync::{Arc, Mutex};
-use crate::stream::Sock;
+use super::Sock;
 
 /// A connection's TLS state as its stream entry holds it: a
 /// `rustls::Connection` in a box that names no type. Every stream entry is

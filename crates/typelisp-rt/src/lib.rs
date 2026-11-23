@@ -65,6 +65,7 @@ pub mod x509;
 #[cfg(feature = "std")]
 pub mod os;
 pub mod readtable;
+pub mod result_value;
 pub mod sched;
 pub mod shared;
 pub mod stream;
@@ -79,6 +80,16 @@ pub mod sys_builtin;
 /// If `argc >= 1`, `args` must be non-null and point to at least one valid,
 /// readable `i64` — exactly what every compiled-function call site already
 /// guarantees for its own `args` array.
+/// What [`stream_shim!`] names from this crate, so that a crate expanding it
+/// needs nothing else in scope.
+#[doc(hidden)]
+pub mod __shim {
+    pub use alloc::format;
+    pub use alloc::vec::Vec;
+    pub use typelisp_mem::symbols::well_known_symbol;
+    pub use typelisp_mem::Value;
+}
+
 #[no_mangle]
 pub unsafe extern "C" fn rt_ping(args: *const i64, argc: u32) -> i64 {
     if argc >= 1 {

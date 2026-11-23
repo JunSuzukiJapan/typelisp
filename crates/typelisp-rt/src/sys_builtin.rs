@@ -21,53 +21,37 @@
 use typelisp_mem::prelude::*;
 use typelisp_mem::{spec, wk, Heap, StdModule, TypeId, TypeSpec, Value};
 
+use crate::result_value::{err_in, ok_in, option_in, TypeTable};
+use crate::stream_builtin::FILE_ERROR;
+
 // The types these results are built with come from `typelisp_mem`'s
 // pre-interned table — same standing exception (and same guard test) as
 // [`crate::stream_builtin`]: this crate has no `Path` to derive a name from.
 
-const FILE_ERROR: TypeSpec = TypeSpec::Named(StdModule::FS, "FileError", &[]);
 const PARSE_FLOAT_ERROR: TypeSpec = TypeSpec::Named(StdModule::NUM, "ParseFloatError", &[]);
 
 /// The runtime type each of these builtins' results carries — the same
 /// table [`crate::stream_builtin::RESULT_TYPES`] keeps, for the same reason
 /// (a type's identity includes its instantiation, and this crate has no
 /// checker to ask), checked against the registry by the same guard test.
-pub const RESULT_TYPES: &[(u32, TypeSpec)] = &[
+pub const RESULT_TYPES: TypeTable = &[
     (wk::F_PARSE_FLOAT, TypeSpec::Named(StdModule::RESULT, "Result", &[spec::F64, PARSE_FLOAT_ERROR])),
-    (wk::F_COMMAND_LINE_ARGS, TypeSpec::Named(StdModule::VEC, "Vector", &[spec::STRING])),
-    (wk::F_GETENV, TypeSpec::Named(StdModule::OPTION, "Option", &[spec::STRING])),
-    (wk::F_HOME_DIRECTORY, TypeSpec::Named(StdModule::OPTION, "Option", &[spec::STRING])),
     (wk::F_MACHINE_INSTANCE, TypeSpec::Named(StdModule::OPTION, "Option", &[spec::STRING])),
     (wk::F_MACHINE_VERSION, TypeSpec::Named(StdModule::OPTION, "Option", &[spec::STRING])),
     (wk::F_SOFTWARE_VERSION, TypeSpec::Named(StdModule::OPTION, "Option", &[spec::STRING])),
     (wk::F_TIMEZONE_OFFSET_SECONDS, TypeSpec::Named(StdModule::OPTION, "Option", &[spec::INT])),
     (wk::F_TIMEZONE_DAYLIGHT_P, TypeSpec::Named(StdModule::OPTION, "Option", &[spec::BOOL])),
-    (wk::F_DRIBBLE_START, TypeSpec::Named(StdModule::RESULT, "Result", &[spec::UNIT, FILE_ERROR])),
-    (wk::F_DRIBBLE_STOP, TypeSpec::Named(StdModule::RESULT, "Result", &[spec::UNIT, FILE_ERROR])),
     (wk::F_ED_OPEN, TypeSpec::Named(StdModule::RESULT, "Result", &[spec::UNIT, FILE_ERROR])),
 ];
 
-fn type_of(name: u32) -> TypeId {
-    match RESULT_TYPES.iter().find(|(n, _)| *n == name) {
-        Some((_, ty)) => typelisp_mem::intern_spec(ty),
-        None => crate::fatal(&format!("sys_builtin: no result type for `{}`", typelisp_mem::BUILTIN_SYMBOLS[name as usize])),
-    }
-}
-
-/// `Ok(v)`, matching `result_def`'s variant order (`Ok` = 0, `Err` = 1).
+/// `Ok(v)` under `name`'s row ([`crate::result_value`]).
 fn result_ok(heap: &mut Heap, name: u32, v: Value) -> Value {
-    let key = type_of(name);
-    heap.alloc_enum(key, 0, vec![v])
+    ok_in(heap, RESULT_TYPES, name, v)
 }
 
-/// `Err(<ErrType>(msg))`: the concrete single-variant error type of the
-/// failing builtin, wrapped in `Result`'s `Err`. The error types take no type
-/// arguments, so their own keys are unchanged by the instantiation rule.
+/// `Err(<ErrType>(msg))` under `name`'s row.
 fn result_err(heap: &mut Heap, name: u32, err_type_key: TypeId, msg: String) -> Value {
-    let msg_val = heap.alloc_string(msg);
-    let err_val = heap.alloc_enum(err_type_key, 0, vec![msg_val]);
-    let key = type_of(name);
-    heap.alloc_enum(key, 1, vec![err_val])
+    err_in(heap, RESULT_TYPES, name, err_type_key, msg)
 }
 
 /// `(parse-float s)`: an `f64` via `str::parse` (which accepts `inf`/`nan`),
@@ -144,95 +128,8 @@ pub fn get_internal_real_time() -> i64 {
     start.elapsed().as_micros() as i64
 }
 
-/// The process's own command line, or the override `typl` installs.
-///
-/// The two ways a typelisp program runs disagree about what `std::env::args`
-/// means, which is the whole reason this slot exists:
-///
-/// | how it runs | `std::env::args()` | what the program should see |
-/// |---|---|---|
-/// | `./prog a b` (AOT) | `["./prog", "a", "b"]` | the same |
-/// | `typl s.typl a b` | `["typl", "s.typl", "a", "b"]` | `["s.typl", "a", "b"]` |
-///
-/// So `typl` calls [`set_command_line_args`] with the script's own view
-/// before running anything, and an AOT executable — whose `main` is the LLVM
-/// wrapper in `compile::aot::build_main_wrapper`, which takes no `argc`/
-/// `argv` — leaves the slot alone and reads its real argv here. Rust's `std`
-/// captures argv at process start independently of `main`'s signature
-/// (`_NSGetArgv` on macOS, an `.init_array` entry on Linux), so the wrapper's
-/// empty parameter list costs nothing.
-///
-/// Element 0 names the program in both worlds: the script path interpreted,
-/// the executable compiled. That is `sb-ext:*posix-argv*`'s convention and
-/// Rust's, and it is the only choice that lets one source file be run either
-/// way and index its arguments the same.
-#[cfg(feature = "std")]
-static COMMAND_LINE_ARGS: typelisp_mem::sync::OnceLock<Vec<String>> = typelisp_mem::sync::OnceLock::new();
-
-/// Install the command line a typelisp program should see. Called once, by
-/// `typl`'s `main`, before any user code runs; ignored if called twice (the
-/// first caller wins, and there is only ever one).
-#[cfg(feature = "std")]
-pub fn set_command_line_args(args: Vec<String>) {
-    let _ = COMMAND_LINE_ARGS.set(args);
-}
-
-/// `(command-line-args)`: the command line as a `Vector<string>`.
-///
-/// Allocating every element before the vector box is deliberate and safe:
-/// `alloc_string` and `alloc_struct` never collect — only [`Heap::cons`]
-/// does — so the `Vec<Value>` of elements cannot be invalidated between the
-/// first string and the box that finally roots them all. A version of this
-/// that consed would need each element rooted, which is the shape of the
-/// leaks recorded in `checker.rs`'s history.
-#[cfg(feature = "std")]
-pub fn command_line_args(heap: &mut Heap) -> Value {
-    let args: Vec<String> = match COMMAND_LINE_ARGS.get() {
-        Some(installed) => installed.clone(),
-        None => std::env::args().collect(),
-    };
-    let elems: Vec<Value> = args.into_iter().map(|a| heap.alloc_string(a)).collect();
-    {
-        let key = type_of(wk::F_COMMAND_LINE_ARGS);
-        heap.alloc_struct(key, elems)
-    }
-}
-
-/// `(getenv name)`: the environment variable's value, or `None` when it is
-/// unset *or* not valid Unicode. CL has no equivalent at all, so the name is
-/// the one every CL implementation's extension uses (`sb-posix:getenv`,
-/// `ccl:getenv`).
-///
-/// The two failure modes collapse into one `None` on purpose: a `string` in
-/// this language is Rust's, so a variable holding bytes that are not UTF-8
-/// has no value that could be handed back, and "unset" is the only honest
-/// answer a `Option<string>` can give.
-#[cfg(feature = "std")]
-pub fn getenv(heap: &mut Heap, name: &str) -> Value {
-    let v = std::env::var(name).ok().map(|s| heap.alloc_string(s));
-    option_value(heap, wk::F_GETENV, v)
-}
-
-/// `(home-directory)`: `$HOME`, or `None` when it is unset — the primitive
-/// the prelude's `user-homedir-pathname` (CLHS 25.1) is built on.
-///
-/// `None` rather than a guess: CL says `user-homedir-pathname` may return
-/// `NIL` when the home directory cannot be determined, and inventing `"/"` or
-/// the current directory would make an unset `$HOME` indistinguishable from a
-/// real one.
-#[cfg(feature = "std")]
-pub fn home_directory(heap: &mut Heap) -> Value {
-    let v = std::env::var("HOME").ok().map(|s| heap.alloc_string(s));
-    option_value(heap, wk::F_HOME_DIRECTORY, v)
-}
-
-/// `Some(v)`/`None` under the instantiation `name`'s key spells — the
-/// niche when the payload allows one, else a box (`Heap::alloc_option`
-/// decides). Spelled again here rather than shared with
-/// [`crate::stream_builtin`] so neither module has to be linked for the
-/// other's sake (see this module's note on archive-member granularity).
 fn option_value(heap: &mut Heap, name: u32, v: Option<Value>) -> Value {
-    heap.alloc_option(type_of(name), v)
+    option_in(heap, RESULT_TYPES, name, v)
 }
 
 /// `(lisp-implementation-version)` (CLHS 25.1): this build's version, taken
@@ -280,22 +177,18 @@ pub fn thread_current_id() -> i64 {
 /// threads run tasks when `TYPELISP_THREADS` is not set. The operating
 /// system may refuse to say, and that is reported as it is.
 pub fn thread_available_parallelism() -> Result<i64, String> {
-    // Without std there is one core and one thread.
-    #[cfg(not(feature = "std"))]
-    return Ok(1);
-    #[cfg(feature = "std")]
-    std::thread::available_parallelism()
-        .map(|n| n.get() as i64)
+    typelisp_mem::host::available_parallelism()
+        .map(|n| n as i64)
         .map_err(|e| format!("Thread::available-parallelism: the system cannot say ({})", e))
 }
 
 // ---- What only the operating system knows -----------------------------
 //
-// The four below are the ones `std` has no equivalent of, so each is one
-// call into [`crate::os`] — the single module that owns this workspace's
-// direct C calls. Every one may honestly answer `None`; CL says so for
-// `machine-instance`, `machine-version` and `software-version` in as many
-// words ("or nil if no such ... can be determined").
+// The ones `std` has no equivalent of: a call into [`crate::os`], or into
+// `typelisp_mem::host` for what every target answers. Every one may honestly
+// answer `None`; CL says so for `machine-instance`, `machine-version` and
+// `software-version` in as many words ("or nil if no such ... can be
+// determined").
 
 /// `(get-internal-run-time)` (CLHS 25.1): CPU time this process has used,
 /// user plus system, in the same microseconds `get-internal-real-time`
@@ -330,14 +223,10 @@ pub fn machine_instance(heap: &mut Heap) -> Value {
 /// `(machine-version)` (CLHS 25.1): the hardware this is *running* on
 /// (`Apple M1`, `Intel(R) Xeon(R) …`), or `None` where nothing can say.
 ///
-/// Distinct from `machine-type`, which is `std::env::consts::ARCH` — the
+/// Distinct from `machine-type`, which is `typelisp_mem::host::ARCH` — the
 /// architecture this binary was *built* for.
 pub fn machine_version(heap: &mut Heap) -> Value {
-    // Without std there is no operating system to ask, and CL allows `NIL`.
-    #[cfg(not(feature = "std"))]
-    let v = None;
-    #[cfg(feature = "std")]
-    let v = crate::os::machine_version().map(|s| heap.alloc_string(s));
+    let v = typelisp_mem::host::machine_version().map(|s| heap.alloc_string(s));
     option_value(heap, wk::F_MACHINE_VERSION, v)
 }
 
@@ -384,15 +273,7 @@ pub fn timezone_daylight_p(heap: &mut Heap, day: i64, second: i64) -> Value {
 fn local_zone(day: i64, second: i64) -> Option<(i32, bool)> {
     const UNIX_TO_CL_EPOCH_SECS: i64 = 2_208_988_800;
     let unix = day.checked_mul(SECS_PER_DAY)?.checked_add(second)?.checked_sub(UNIX_TO_CL_EPOCH_SECS)?;
-    #[cfg(feature = "std")]
-    return crate::os::timezone_at(unix);
-    // Without std there is no time zone to ask about, as on WASI: the
-    // prelude's `local-zone-west` panics on this `None`.
-    #[cfg(not(feature = "std"))]
-    {
-        let _ = unix;
-        None
-    }
+    typelisp_mem::host::timezone_at(unix)
 }
 
 /// `(heap-info)`: what the collector knows about itself, as the prelude's
@@ -430,31 +311,6 @@ pub fn heap_info(heap: &mut Heap) -> Value {
             Value::Bool(growable),
         ],
     )
-}
-
-/// `(dribble-start path)`: begin copying the session into `path`, truncating
-/// it. The recording itself lives in [`typelisp_abi::dribble`] — see that
-/// module's docs for why it is a crate below this one.
-#[cfg(feature = "std")]
-pub fn dribble_start(heap: &mut Heap, path: &str) -> Value {
-    match typelisp_abi::dribble::start(path) {
-        Ok(()) => result_ok(heap, wk::F_DRIBBLE_START, Value::Empty),
-        Err(e) => result_err(heap, wk::F_DRIBBLE_START, TypeId::FILE_ERROR, format!("dribble: {}: {}", path, e)),
-    }
-}
-
-/// `(dribble-stop)`: close the dribble file. A no-op when none is open, as
-/// CL's argument-less `dribble` is.
-///
-/// `Result`, not `()`, because the close *flushes*: a full disk is discovered
-/// here or nowhere, and discovering it nowhere would mean a truncated
-/// transcript reported as a complete one.
-#[cfg(feature = "std")]
-pub fn dribble_stop(heap: &mut Heap) -> Value {
-    match typelisp_abi::dribble::stop() {
-        Ok(()) => result_ok(heap, wk::F_DRIBBLE_STOP, Value::Empty),
-        Err(e) => result_err(heap, wk::F_DRIBBLE_STOP, TypeId::FILE_ERROR, format!("dribble: {}", e)),
-    }
 }
 
 /// `(ed-open path line)`: run the user's editor on `path`, positioned at
@@ -519,21 +375,10 @@ pub fn ed_open(heap: &mut Heap, path: &str, line: i64) -> Value {
 /// simply evaluate its form, and that is what it does when the answer here is
 /// `false`.
 ///
-/// `isatty` and not a guess from an environment variable: this is the actual
-/// question, and `libc` is already a dependency of this crate.
+/// `isatty` (through `std`'s `IsTerminal`) and not a guess from an
+/// environment variable: this is the actual question.
 pub fn stdin_is_tty() -> bool {
-    // No standard input to be a terminal: `wasm32-unknown-unknown`'s reads as
-    // empty (`typelisp_mem::host`).
-    // Nor without std.
-    #[cfg(any(not(feature = "std"), all(target_family = "wasm", target_os = "unknown")))]
-    return false;
-    // SAFETY: `isatty` reads a file descriptor's type and touches no memory.
-    // 0 is standard input, which every process has (or does not, in which case
-    // `isatty` answers 0 — the same answer, for the same reason).
-    #[cfg(all(feature = "std", not(all(target_family = "wasm", target_os = "unknown"))))]
-    unsafe {
-        libc::isatty(0) == 1
-    }
+    typelisp_mem::host::stdin_is_tty()
 }
 
 // ---- The compiled-code edge -------------------------------------------
@@ -605,38 +450,6 @@ pub unsafe extern "C" fn rt_get_internal_real_time(_args: *const i64, _argc: u32
     encode(v)
 }
 
-/// The one-string argument every filesystem query below takes, decoded at the
-/// calling convention's edge: a compiled `string` arrives as a tagged
-/// `Value::Str`.
-///
-/// # Safety
-///
-/// `argc` must be `>= 1` and `args` must point to a valid `i64` encoding a
-/// `Value::Str`; a `Heap` must be registered on this thread.
-#[cfg(feature = "std")]
-unsafe fn str_arg(args: *const i64, argc: u32, who: &str) -> String {
-    if argc < 1 {
-        fatal(&format!("{}: expected 1 argument", who));
-    }
-    match decode(*args) {
-        Value::Str(id) => active_heap().string(id).to_string(),
-        other => fatal(&format!("{}: argument is not a string, got {:?}", who, other)),
-    }
-}
-
-/// `(command-line-args)` for compiled code — a freshly allocated
-/// `Vector<string>`, as unrooted as every other allocating shim's result.
-///
-/// # Safety
-///
-/// `args`/`argc` are unused (the builtin is nullary). A `Heap` must be
-/// registered on this thread.
-#[cfg(feature = "std")]
-#[no_mangle]
-pub unsafe extern "C" fn rt_command_line_args(_args: *const i64, _argc: u32) -> i64 {
-    encode(command_line_args(active_heap()))
-}
-
 /// `(sleep secs)` — block this thread for `secs` seconds.
 ///
 /// Seconds, as CL's `sleep` takes them, and `f64` because that is the type
@@ -653,30 +466,6 @@ pub fn sleep(heap: &mut Heap, secs: f64) -> Result<(), String> {
     }
     heap.native(|| typelisp_mem::host::sleep(core::time::Duration::from_secs_f64(secs)));
     Ok(())
-}
-
-/// `(getenv name)` for compiled code.
-///
-/// # Safety
-///
-/// Same as [`str_arg`].
-#[cfg(feature = "std")]
-#[no_mangle]
-pub unsafe extern "C" fn rt_getenv(args: *const i64, argc: u32) -> i64 {
-    let name = str_arg(args, argc, "rt_getenv");
-    encode(getenv(active_heap(), &name))
-}
-
-/// `(home-directory)` for compiled code.
-///
-/// # Safety
-///
-/// `args`/`argc` are unused (the builtin is nullary). A `Heap` must be
-/// registered on this thread.
-#[cfg(feature = "std")]
-#[no_mangle]
-pub unsafe extern "C" fn rt_home_directory(_args: *const i64, _argc: u32) -> i64 {
-    encode(home_directory(active_heap()))
 }
 
 /// `(lisp-implementation-version)` for compiled code.
@@ -824,30 +613,6 @@ pub unsafe extern "C-unwind" fn rt_thread_available_parallelism(_args: *const i6
         Ok(n) => n,
         Err(msg) => typelisp_abi::raise(msg).into_word(),
     }
-}
-
-/// `(dribble-start path)` for compiled code.
-///
-/// # Safety
-///
-/// Same as [`str_arg`].
-#[cfg(feature = "std")]
-#[no_mangle]
-pub unsafe extern "C" fn rt_dribble_start(args: *const i64, argc: u32) -> i64 {
-    let path = str_arg(args, argc, "rt_dribble_start");
-    encode(dribble_start(active_heap(), &path))
-}
-
-/// `(dribble-stop)` for compiled code.
-///
-/// # Safety
-///
-/// `args`/`argc` are unused (the builtin is nullary). A `Heap` must be
-/// registered on this thread.
-#[cfg(feature = "std")]
-#[no_mangle]
-pub unsafe extern "C" fn rt_dribble_stop(_args: *const i64, _argc: u32) -> i64 {
-    encode(dribble_stop(active_heap()))
 }
 
 /// `(ed-open path line)` for compiled code: `args[0]` is a tagged `string`,

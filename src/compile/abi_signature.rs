@@ -205,17 +205,10 @@ fn vocabulary(out: &mut String) {
         let id = typelisp_mem::intern_type(typelisp_mem::TypeShape::named(ns.ns(), n, args));
         writeln!(out, "| {} | `{}` |", i, &*typelisp_mem::type_name(id)).unwrap();
     }
-    out.push_str("\n## 実行時が組み立てる値の型 (typelisp_rt)\n\n| 表 | 関数 | 型 |\n|---|---|---|\n");
-    let tables: [(&str, &[(u32, typelisp_mem::TypeSpec)]); 5] = [
-        ("sys_builtin::RESULT_TYPES", typelisp_rt::sys_builtin::RESULT_TYPES),
-        ("stream_builtin::RESULT_TYPES", typelisp_rt::stream_builtin::RESULT_TYPES),
-        ("stream_builtin::INNER_TYPES", typelisp_rt::stream_builtin::INNER_TYPES),
-        ("net_builtin::RESULT_TYPES", typelisp_rt::net_builtin::RESULT_TYPES),
-        ("net_builtin::INNER_TYPES", typelisp_rt::net_builtin::INNER_TYPES),
-    ];
-    for (table, rows) in tables {
-        for (f, spec) in rows {
-            writeln!(out, "| {} | `{}` | `{}` |", table, typelisp_mem::BUILTIN_SYMBOLS[*f as usize], name(spec)).unwrap();
+    out.push_str("\n## 実行時が組み立てる値の型\n\n| 表 | 関数 | 型 |\n|---|---|---|\n");
+    for table in &crate::compile::externs::BUILTIN_TYPE_TABLES {
+        for (f, spec) in table.rows {
+            writeln!(out, "| {} | `{}` | `{}` |", table.name, typelisp_mem::BUILTIN_SYMBOLS[*f as usize], name(spec)).unwrap();
         }
     }
     writeln!(out, "| readtable::READER_MACRO_OPTION_TYPE | | `{}` |", name(&typelisp_rt::readtable::READER_MACRO_OPTION_TYPE)).unwrap();

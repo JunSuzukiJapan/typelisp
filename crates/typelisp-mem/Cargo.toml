@@ -17,7 +17,7 @@ default = ["std"]
 # Everything that needs an operating system: threads, the clock, the process,
 # standard output, growing the stack. Without it the crate is `no_std` +
 # `alloc`, for a microcontroller (`docs/dev/cross-compile-embedded-plan.md`).
-std = ["dep:parking_lot", "dep:stacker", "num-bigint/std", "num-rational/std", "num-traits/std"]
+std = ["dep:parking_lot", "dep:stacker", "dep:libc", "num-bigint/std", "num-rational/std", "num-traits/std"]
 
 [dependencies]
 num-bigint = { version = "0.4", default-features = false }
@@ -40,3 +40,8 @@ hashbrown = { version = "0.15", default-features = false, features = ["default-h
 # The fixed-seed hasher of `collections::FixedHasher`: the one `hashbrown`'s
 # default hasher is built from, so no new code is linked.
 foldhash = { version = "0.1", default-features = false }
+
+# The host's two answers `std` does not give (`host::os`): the local time zone
+# and, on macOS, the CPU's name.
+[target.'cfg(unix)'.dependencies]
+libc = { version = "0.2", optional = true }

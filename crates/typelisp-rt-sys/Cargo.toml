@@ -1,0 +1,23 @@
+[package]
+name = "typelisp-rt-sys"
+description = "The part of typelisp's runtime that needs files and a process environment. Internal crate of typelisp; not meant to be used directly."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+readme = "README.md"
+keywords = ["lisp", "typelisp"]
+categories = ["compilers"]
+
+# What WASI also has, and a microcontroller has not: files and the file
+# system, the environment, the command line, dribble. Linked by a native
+# executable and a wasm32-wasip1 module; `typelisp-rt` is the part every
+# target has (`docs/dev/runtime-split-plan.md`).
+[lib]
+name = "typelisp_rt_sys"
+crate-type = ["rlib"]
+
+[dependencies]
+typelisp-abi = { workspace = true, features = ["std"] }
+typelisp-mem = { workspace = true, features = ["std"] }
+typelisp-rt = { workspace = true, features = ["std"] }

@@ -53,11 +53,14 @@
 //! paragraphs down (outliving any single `Interp`) would otherwise be lost
 //! the moment a fresh `Interp` reset it away.
 //!
-//! TCP sockets live in the same table (`Backend::Tcp`/`Backend::Listener`)
-//! but are never read or written through the operations here: they are
-//! non-blocking, and [`crate::net`] is the half that knows how to say "not
-//! yet". A socket handle reaching `read_char` or `write_str` is refused, not
-//! served with a blocking call that would stop every task.
+//! What only some targets have — a file, a socket — lives in the same table
+//! behind [`ExtBackend`], put there by the runtime crate that brings it
+//! (`typelisp-rt-sys` for files, `typelisp-rt-posix` for sockets). That
+//! crate reaches its own backend again with [`StreamObj::ext_parts`]. A
+//! socket is never read or written through the operations here: it is
+//! non-blocking, and the socket builtins are the half that knows how to say
+//! "not yet"; its backend refuses the operations here rather than serving
+//! them with a blocking call that would stop every task.
 //!
 //! Slots are never reused (see [`StreamTable`]), so the table's one
 //! interpreter-visible behaviour change — it outlives any single `Interp`
@@ -65,15 +68,7 @@
 //! different stream; it names a closed one forever.
 
 use typelisp_mem::prelude::*;
-#[cfg(all(feature = "std", not(target_family = "wasm")))]
-use alloc::collections::VecDeque;
 use core::convert::TryFrom;
-#[cfg(feature = "std")]
-use std::fs::{File, OpenOptions};
-#[cfg(feature = "std")]
-use std::io::{BufRead, BufReader, BufWriter, Read, Write};
-#[cfg(all(feature = "std", not(target_family = "wasm")))]
-use std::net::UdpSocket;
 
 use typelisp_mem::Heap;
 
@@ -106,72 +101,49 @@ pub fn with_streams<T>(heap: &mut Heap, f: impl FnOnce(&mut StreamTable) -> T) -
     })
 }
 
+/// A leaf backend this crate does not know: a file, a socket — what only
+/// some targets have, brought by the runtime crate that implements it.
+///
+/// The table calls these only on a stream that is open, and the reading ones
+/// only on an input stream, the writing ones only on an output stream
+/// ([`StreamTable::readable`]/[`StreamTable::writable`]); character pushback
+/// is the table's, and served before [`Self::read_char`] is asked. Each
+/// answers for itself whether it can do what it is asked — a socket refuses
+/// a blocking character read, a file refuses to be waited on.
+pub trait ExtBackend: core::any::Any + Send {
+    /// One character, or `None` at end of input.
+    fn read_char(&mut self) -> StreamResult<Option<char>>;
+    /// One byte, or `None` at end of input.
+    fn read_byte(&mut self) -> StreamResult<Option<u8>>;
+    fn write_byte(&mut self, b: u8) -> StreamResult<()>;
+    fn write_str(&mut self, text: &str) -> StreamResult<()>;
+    fn finish_output(&mut self) -> StreamResult<()>;
+    /// Whether a character is already here, so that reading one would not
+    /// wait.
+    fn listen(&self) -> bool;
+    /// Flushes and releases what the backend holds, as far as can be done
+    /// without waiting. The table marks the stream closed afterwards.
+    fn close(&mut self) -> StreamResult<()>;
+    /// What the stream is attached to, as the printer shows it inside
+    /// `#<...>` (see [`StreamTable::describe`]).
+    fn describe(&self) -> StreamResult<String>;
+    /// The OS descriptor a task waiting on this stream parks on.
+    fn wait_fd(&self) -> StreamResult<i32>;
+}
+
 /// What a stream is attached to. Only *leaf* backends live here; a composite
 /// stream is a typelisp struct holding other streams (see the module docs).
 pub(crate) enum Backend {
-    #[cfg(feature = "std")]
     Stdin,
     Stdout,
     Stderr,
-    #[cfg(feature = "std")]
-    FileIn(BufReader<File>),
-    #[cfg(feature = "std")]
-    FileOut(BufWriter<File>),
-    /// A connected stream socket — TCP or Unix-domain, see [`Sock`] —
-    /// **non-blocking**, with its own buffers on
-    /// both sides. The character/byte operations above never touch it: a
-    /// socket is read and written through `crate::net`'s `net-*` builtins,
-    /// each of which does only what can be done *now* and reports "not yet"
-    /// as an answer, so that the wait — the scheduler parking the task —
-    /// happens in typelisp. A blocking `read` here would stop every task.
-    ///
-    /// `rbuf` holds what has been received and not yet consumed; `wbuf`
-    /// what has been written and not yet sent. With `tls` present the two
-    /// buffers hold *plaintext* and the connection object between them and
-    /// the socket does the ciphering (`crate::net`'s TLS section) — a client
-    /// connection made by `tls-connect`, or a server one that a `tls-listen`
-    /// listener put on the socket it accepted.
-    ///
-    /// `failed` is set once the *peer* has broken the connection — reset it,
-    /// sent a TLS alert, closed it under a write — and from then on reading
-    /// says end of input and writing is a no-op, the way Go's `bufio.Writer`
-    /// keeps its first error and refuses further writes. The stream traits
-    /// have no error channel (`read-item` is an `Option`), and a peer's
-    /// failure is not the program's, so it must not be a panic: a server
-    /// would die with its first misbehaving client. `net-socket-error`
-    /// reads it back.
-    #[cfg(all(feature = "std", not(target_family = "wasm")))]
-    Tcp {
-        sock: Sock,
-        tls: Option<crate::net::TlsConn>,
-        rbuf: VecDeque<u8>,
-        wbuf: VecDeque<u8>,
-        failed: Option<String>,
-    },
-    /// A listening socket, non-blocking for the same reason. Neither an
-    /// input nor an output stream: it yields connections, not items. With
-    /// `tls` present (`tls-listen`), every connection it accepts gets a
-    /// server-side TLS connection over it, sharing this configuration —
-    /// the certificate and key loaded once when the listener was made,
-    /// plus any added since for other names (`crate::net::TlsServer`).
-    #[cfg(all(feature = "std", not(target_family = "wasm")))]
-    Listener { listen: Listen, tls: Option<crate::net::TlsServer> },
-    /// A UDP socket, non-blocking. Datagrams, not a stream: it is neither an
-    /// input nor an output stream, and `crate::net` speaks to it in whole
-    /// messages. `last_from` is who sent the datagram most recently received.
-    #[cfg(all(feature = "std", not(target_family = "wasm")))]
-    Udp { sock: UdpSocket, last_from: Option<std::net::SocketAddr> },
-    /// A name resolution in flight on a helper thread. What the table holds
-    /// is the read end of a pipe the thread writes one byte to when it is
-    /// done — a descriptor `poll` can wait on like any socket's — and the
-    /// slot the thread leaves its answer in.
-    #[cfg(all(feature = "std", not(target_family = "wasm")))]
-    Resolver { pipe: std::io::PipeReader, answer: ResolverAnswer },
     /// Indexed by *character*, not byte, so reading is O(1) per character and
     /// can never split a multi-byte one.
     StringIn { chars: Vec<char>, pos: usize },
     /// Drained by `get-output-stream-string`.
     StringOut(String),
+    /// A backend of another crate's ([`ExtBackend`]).
+    Ext(Box<dyn ExtBackend>),
     /// A closed stream. The direction flags survive so `input-stream-p` /
     /// `output-stream-p` keep answering what they answered before — CL does
     /// not say those become meaningless after `close`, and a closed output
@@ -179,139 +151,17 @@ pub(crate) enum Backend {
     Closed,
 }
 
-/// A connected stream socket, whichever family. Everything above the
-/// descriptor is the same for the two — the buffers, the TLS layer, the
-/// wait loops in the prelude — which is why they share one `Backend` arm
-/// and one prelude type (`socket-stream`) rather than two of each. What
-/// differs is only how one is made and what its address looks like.
-#[cfg(all(feature = "std", not(target_family = "wasm")))]
-pub(crate) enum Sock {
-    Tcp(std::net::TcpStream),
-    Unix(std::os::unix::net::UnixStream),
-}
-
-#[cfg(all(feature = "std", not(target_family = "wasm")))]
-impl Read for Sock {
-    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
-        match self {
-            Sock::Tcp(s) => s.read(buf),
-            Sock::Unix(s) => s.read(buf),
-        }
-    }
-}
-
-#[cfg(all(feature = "std", not(target_family = "wasm")))]
-impl Write for Sock {
-    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-        match self {
-            Sock::Tcp(s) => s.write(buf),
-            Sock::Unix(s) => s.write(buf),
-        }
-    }
-    fn flush(&mut self) -> std::io::Result<()> {
-        match self {
-            Sock::Tcp(s) => s.flush(),
-            Sock::Unix(s) => s.flush(),
-        }
-    }
-}
-
-#[cfg(all(feature = "std", not(target_family = "wasm")))]
-impl Sock {
-    pub(crate) fn set_nonblocking(&self, on: bool) -> std::io::Result<()> {
-        match self {
-            Sock::Tcp(s) => s.set_nonblocking(on),
-            Sock::Unix(s) => s.set_nonblocking(on),
-        }
-    }
-    pub(crate) fn take_error(&self) -> std::io::Result<Option<std::io::Error>> {
-        match self {
-            Sock::Tcp(s) => s.take_error(),
-            Sock::Unix(s) => s.take_error(),
-        }
-    }
-    pub(crate) fn shutdown(&self, how: std::net::Shutdown) -> std::io::Result<()> {
-        match self {
-            Sock::Tcp(s) => s.shutdown(how),
-            Sock::Unix(s) => s.shutdown(how),
-        }
-    }
-    /// This side's address: `ip:port`, or a Unix socket's path (an unbound
-    /// client end has none and says so).
-    pub(crate) fn local_address(&self) -> std::io::Result<String> {
-        match self {
-            Sock::Tcp(s) => s.local_addr().map(|a| a.to_string()),
-            Sock::Unix(s) => s.local_addr().map(|a| unix_addr_string(&a)),
-        }
-    }
-    pub(crate) fn peer_address(&self) -> std::io::Result<String> {
-        match self {
-            Sock::Tcp(s) => s.peer_addr().map(|a| a.to_string()),
-            Sock::Unix(s) => s.peer_addr().map(|a| unix_addr_string(&a)),
-        }
-    }
-    #[cfg(unix)]
-    pub(crate) fn raw_fd(&self) -> i32 {
-        use std::os::unix::io::AsRawFd;
-        match self {
-            Sock::Tcp(s) => s.as_raw_fd(),
-            Sock::Unix(s) => s.as_raw_fd(),
-        }
-    }
-}
-
-/// A Unix socket address as text: its path, or `(unnamed)` for the client
-/// end of a connection, which has no path of its own.
-#[cfg(all(feature = "std", not(target_family = "wasm")))]
-pub(crate) fn unix_addr_string(a: &std::os::unix::net::SocketAddr) -> String {
-    match a.as_pathname() {
-        Some(p) => p.to_string_lossy().into_owned(),
-        None => "(unnamed)".to_string(),
-    }
-}
-
-/// A listening socket, whichever family. A Unix listener remembers its path
-/// so that closing it can remove the socket file — the file is the address,
-/// and a stale one would refuse the next `bind` (Go's listener does the
-/// same on `Close`).
-#[cfg(all(feature = "std", not(target_family = "wasm")))]
-pub(crate) enum Listen {
-    Tcp(std::net::TcpListener),
-    Unix { listener: std::os::unix::net::UnixListener, path: std::path::PathBuf },
-}
-
-#[cfg(all(feature = "std", not(target_family = "wasm")))]
-impl Listen {
-    #[cfg(unix)]
-    pub(crate) fn raw_fd(&self) -> i32 {
-        use std::os::unix::io::AsRawFd;
-        match self {
-            Listen::Tcp(l) => l.as_raw_fd(),
-            Listen::Unix { listener, .. } => listener.as_raw_fd(),
-        }
-    }
-    pub(crate) fn local_address(&self) -> std::io::Result<String> {
-        match self {
-            Listen::Tcp(l) => l.local_addr().map(|a| a.to_string()),
-            Listen::Unix { listener, .. } => listener.local_addr().map(|a| unix_addr_string(&a)),
-        }
-    }
-}
-
-/// Where a resolver thread leaves what it found: every address the name
-/// has, or why there is none. Shared with the thread, hence the lock.
-#[cfg(all(feature = "std", not(target_family = "wasm")))]
-pub(crate) type ResolverAnswer = alloc::sync::Arc<std::sync::Mutex<Option<Result<Vec<std::net::SocketAddr>, String>>>>;
-
-pub(crate) struct StreamObj {
-    pub(crate) backend: Backend,
+/// One open (or closed) stream: its backend and what every stream keeps
+/// whatever it is attached to.
+pub struct StreamObj {
+    backend: Backend,
     /// Characters pushed back by `unread-char`, most recent last.
-    pub(crate) pushback: Vec<char>,
+    pushback: Vec<char>,
     input: bool,
     output: bool,
     /// The last character written, for `fresh-line`'s "only if not already at
     /// the start of a line" rule.
-    pub(crate) last_written: Option<char>,
+    last_written: Option<char>,
     /// What the stream is attached to, as the printer shows it
     /// ([`StreamTable::describe`]) — recorded where only the opener knows it
     /// (a file's path), and on `close` for a socket, whose addresses go with
@@ -319,47 +169,101 @@ pub(crate) struct StreamObj {
     described: Option<String>,
 }
 
+/// An [`ExtBackend`] of type `T`, with the two per-stream facts its
+/// operations also need.
+pub struct ExtParts<'a, T> {
+    pub backend: &'a mut T,
+    /// Characters pushed back by `unread-char`, most recent last.
+    pub pushback: &'a mut Vec<char>,
+    /// The last character written (`fresh-line`).
+    pub last_written: &'a mut Option<char>,
+}
+
 impl StreamObj {
-    pub(crate) fn new(backend: Backend, input: bool, output: bool) -> StreamObj {
+    fn new(backend: Backend, input: bool, output: bool) -> StreamObj {
         StreamObj { backend, pushback: Vec::new(), input, output, last_written: None, described: None }
+    }
+
+    /// A stream over another crate's backend. `described` is what the
+    /// printer shows it attached to, when only the opener knows (a file's
+    /// path); `None` asks the backend each time.
+    pub fn ext(backend: Box<dyn ExtBackend>, input: bool, output: bool, described: Option<String>) -> StreamObj {
+        StreamObj { described, ..StreamObj::new(Backend::Ext(backend), input, output) }
+    }
+
+    /// Whether the stream has been closed.
+    pub fn is_closed(&self) -> bool {
+        matches!(self.backend, Backend::Closed)
+    }
+
+    /// Closes the stream without asking its backend to flush anything: for
+    /// a backend that is used up (a name resolution once it has answered).
+    pub fn set_closed(&mut self) {
+        self.backend = Backend::Closed;
+        self.pushback.clear();
+    }
+
+    /// The backend, when it is another crate's of type `T`, with the
+    /// stream's pushback and last character.
+    pub fn ext_parts<T: ExtBackend>(&mut self) -> Option<ExtParts<'_, T>> {
+        match &mut self.backend {
+            Backend::Ext(b) => {
+                let any: &mut dyn core::any::Any = b.as_mut();
+                let backend = any.downcast_mut::<T>()?;
+                Some(ExtParts { backend, pushback: &mut self.pushback, last_written: &mut self.last_written })
+            }
+            _ => None,
+        }
     }
 }
 
 /// What a live backend is attached to, the way SBCL names it inside
-/// `#<...>`: `for "file /tmp/a.txt"` for an fd-stream, `for "socket local,
-/// peer: remote"` for a connected socket's stream, `local, fd: N` for a
-/// socket object, and nothing for a string stream. A file's path is not
-/// here — only the opener has it, and records it on the stream.
+/// `#<...>`: `for "standard output"` for a standard stream, nothing for a
+/// string stream, and whatever another crate's backend says for its own.
 fn describe_backend(backend: &Backend) -> StreamResult<String> {
-    #[cfg(all(feature = "std", not(target_family = "wasm")))]
-    let io = |e: std::io::Error| format!("describe: {}", e);
     Ok(match backend {
-        #[cfg(feature = "std")]
         Backend::Stdin => "for \"standard input\"".to_string(),
         Backend::Stdout => "for \"standard output\"".to_string(),
         Backend::Stderr => "for \"standard error\"".to_string(),
-        // A connection whose peer has gone has no peer address any more; it
-        // is described by what it still has.
-        #[cfg(all(feature = "std", not(target_family = "wasm")))]
-        Backend::Tcp { sock, .. } => match sock.peer_address() {
-            Ok(peer) => format!("for \"socket {}, peer: {}\"", sock.local_address().map_err(io)?, peer),
-            Err(_) => format!("for \"socket {}\"", sock.local_address().map_err(io)?),
-        },
-        #[cfg(all(feature = "std", not(target_family = "wasm")))]
-        Backend::Listener { listen, .. } => format!("{}, fd: {}", listen.local_address().map_err(io)?, listen.raw_fd()),
-        #[cfg(all(feature = "std", not(target_family = "wasm")))]
-        Backend::Udp { sock, .. } => {
-            use std::os::unix::io::AsRawFd;
-            format!("{}, fd: {}", sock.local_addr().map_err(io)?, sock.as_raw_fd())
-        }
-        #[cfg(all(feature = "std", not(target_family = "wasm")))]
-        Backend::Resolver { .. } => String::new(),
+        Backend::Ext(b) => b.describe()?,
         Backend::StringIn { .. } | Backend::StringOut(_) | Backend::Closed => String::new(),
-        #[cfg(feature = "std")]
-        Backend::FileIn(_) | Backend::FileOut(_) => {
-            return Err("describe: a file stream was opened without recording its path".to_string())
-        }
     })
+}
+
+/// One byte of standard input, or `None` at its end.
+fn read_stdin_byte(who: &str) -> StreamResult<Option<u8>> {
+    let mut buf = [0u8; 1];
+    let n = typelisp_mem::host::read_stdin(&mut buf).map_err(|e| format!("{}: {}", who, e))?;
+    Ok(if n == 0 { None } else { Some(buf[0]) })
+}
+
+/// Decodes one UTF-8 character from `next_byte`, or `None` if the input
+/// ended before it started.
+///
+/// Byte-at-a-time on purpose: the caller may stop after any character (that
+/// is what reading one character means), so consuming a fixed-size block
+/// would swallow input a later read on the same descriptor must still see.
+pub fn read_utf8_char(mut next_byte: impl FnMut() -> StreamResult<Option<u8>>) -> StreamResult<Option<char>> {
+    let mut buf = [0u8; 4];
+    for i in 0..4 {
+        match next_byte()? {
+            None => {
+                return if i == 0 {
+                    Ok(None)
+                } else {
+                    Err("invalid UTF-8: input ended mid-character".to_string())
+                }
+            }
+            Some(b) => buf[i] = b,
+        }
+        match core::str::from_utf8(&buf[..=i]) {
+            Ok(s) => return Ok(s.chars().next()),
+            // Incomplete but valid so far: take another byte.
+            Err(e) if e.error_len().is_none() => continue,
+            Err(_) => return Err("invalid UTF-8 in input".to_string()),
+        }
+    }
+    Err("invalid UTF-8 in input".to_string())
 }
 
 /// A stream handle as typelisp sees it: an opaque `i64`. Handles start at 1,
@@ -370,7 +274,7 @@ pub type Handle = i64;
 /// `FileError`.
 pub type StreamResult<T> = Result<T, String>;
 
-/// The interpreter-side table of open streams.
+/// The table of open streams.
 ///
 /// Slots are **never reused**: a closed handle stays closed forever rather
 /// than silently becoming a different stream later. Programs open few enough
@@ -382,12 +286,14 @@ pub struct StreamTable {
 }
 
 impl StreamTable {
-    pub(crate) fn insert(&mut self, s: StreamObj) -> Handle {
+    /// Puts `s` in the table, under a handle no stream has had before.
+    pub fn insert(&mut self, s: StreamObj) -> Handle {
         self.slots.push(Some(s));
         self.slots.len() as Handle
     }
 
-    pub(crate) fn get(&mut self, h: Handle) -> StreamResult<&mut StreamObj> {
+    /// The stream under `h`, open or closed.
+    pub fn get(&mut self, h: Handle) -> StreamResult<&mut StreamObj> {
         let i = usize::try_from(h - 1).map_err(|_| format!("invalid stream handle {}", h))?;
         match self.slots.get_mut(i) {
             Some(Some(s)) => Ok(s),
@@ -395,9 +301,9 @@ impl StreamTable {
         }
     }
 
-    pub(crate) fn readable(&mut self, h: Handle) -> StreamResult<&mut StreamObj> {
+    fn readable(&mut self, h: Handle) -> StreamResult<&mut StreamObj> {
         let s = self.get(h)?;
-        if matches!(s.backend, Backend::Closed) {
+        if s.is_closed() {
             return Err("the stream is closed".to_string());
         }
         if !s.input {
@@ -406,9 +312,9 @@ impl StreamTable {
         Ok(s)
     }
 
-    pub(crate) fn writable(&mut self, h: Handle) -> StreamResult<&mut StreamObj> {
+    fn writable(&mut self, h: Handle) -> StreamResult<&mut StreamObj> {
         let s = self.get(h)?;
-        if matches!(s.backend, Backend::Closed) {
+        if s.is_closed() {
             return Err("the stream is closed".to_string());
         }
         if !s.output {
@@ -419,7 +325,6 @@ impl StreamTable {
 
     // ---- construction -----------------------------------------------------
 
-    #[cfg(feature = "std")]
     pub fn stdin(&mut self) -> Handle {
         self.insert(StreamObj::new(Backend::Stdin, true, false))
     }
@@ -452,65 +357,13 @@ impl StreamTable {
         self.insert(StreamObj::new(Backend::StringOut(String::new()), false, true))
     }
 
-    /// `mode`: 0 input, 1 output (truncate), 2 output (append).
-    ///
-    /// An integer rather than a keyword because the CL-shaped
-    /// `:direction`/`:if-exists` surface belongs in the prelude's `open`;
-    /// this layer only needs to know which `OpenOptions` to use.
-    #[cfg(feature = "std")]
-    pub fn open_file(&mut self, path: &str, mode: i64) -> StreamResult<Handle> {
-        let describe = |e: std::io::Error| format!("{}: {}", path, e);
-        let obj = match mode {
-            0 => {
-                let f = File::open(path).map_err(describe)?;
-                StreamObj::new(Backend::FileIn(BufReader::new(f)), true, false)
-            }
-            1 => {
-                let f = File::create(path).map_err(describe)?;
-                StreamObj::new(Backend::FileOut(BufWriter::new(f)), false, true)
-            }
-            2 => {
-                let f = OpenOptions::new().create(true).append(true).open(path).map_err(describe)?;
-                StreamObj::new(Backend::FileOut(BufWriter::new(f)), false, true)
-            }
-            other => return Err(format!("open: unknown mode {}", other)),
-        };
-        let mut obj = obj;
-        obj.described = Some(format!("for \"file {}\"", path));
-        Ok(self.insert(obj))
-    }
-
     // ---- lifetime ---------------------------------------------------------
 
     /// Flush and release the backing resource. Idempotent, as CL's `close` is.
     pub fn close(&mut self, h: Handle) -> StreamResult<()> {
         let s = self.get(h)?;
-        #[cfg(feature = "std")]
-        if let Backend::FileOut(w) = &mut s.backend {
-            w.flush().map_err(|e| format!("close: {}", e))?;
-        }
-        // A socket gets one non-blocking attempt at what is still buffered.
-        // Waiting for the rest is not this layer's to do: the prelude's
-        // `close` calls `finish-output` first, which parks the task until
-        // the buffer is empty, so this attempt is normally a no-op.
-        #[cfg(all(feature = "std", not(target_family = "wasm")))]
-        if let Backend::Tcp { sock, tls: None, wbuf, .. } = &mut s.backend {
-            let (front, _) = wbuf.as_slices();
-            if !front.is_empty() {
-                let _ = sock.write(front);
-            }
-        }
-        // A TLS connection tells the peer it is closing (`close_notify`),
-        // best effort and without waiting, so the peer can tell a clean end
-        // from a cut connection.
-        #[cfg(all(feature = "std", not(target_family = "wasm")))]
-        if let Backend::Tcp { sock, tls: Some(conn), .. } = &mut s.backend {
-            conn.close(sock);
-        }
-        // The socket file is the listener's address: gone with the listener.
-        #[cfg(all(feature = "std", not(target_family = "wasm")))]
-        if let Backend::Listener { listen: Listen::Unix { path, .. }, .. } = &s.backend {
-            let _ = std::fs::remove_file(path);
+        if let Backend::Ext(b) = &mut s.backend {
+            b.close()?;
         }
         // What it was attached to outlives the descriptor, as an SBCL
         // fd-stream's name does.
@@ -526,33 +379,21 @@ impl StreamTable {
         Ok(())
     }
 
-    /// The OS descriptor under a socket stream — what the scheduler hands
-    /// to `poll`. Only a socket has one worth waiting on: a file is always
-    /// ready, and a string stream has no descriptor at all.
-    #[cfg(all(feature = "std", unix))]
+    /// The OS descriptor under a stream a task can wait on — what the
+    /// scheduler hands to `poll`. Only a socket has one worth waiting on: a
+    /// file is always ready, and a string stream has no descriptor at all.
     pub fn raw_fd(&mut self, h: Handle) -> StreamResult<i32> {
-        use std::os::unix::io::AsRawFd;
         match &self.get(h)?.backend {
-            #[cfg(all(feature = "std", not(target_family = "wasm")))]
-            Backend::Tcp { sock, .. } => Ok(sock.raw_fd()),
-            #[cfg(all(feature = "std", not(target_family = "wasm")))]
-            Backend::Listener { listen, .. } => Ok(listen.raw_fd()),
-            #[cfg(all(feature = "std", not(target_family = "wasm")))]
-            Backend::Udp { sock, .. } => Ok(sock.as_raw_fd()),
-            #[cfg(all(feature = "std", not(target_family = "wasm")))]
-            Backend::Resolver { pipe, .. } => Ok(pipe.as_raw_fd()),
+            Backend::Ext(b) => b.wait_fd(),
             Backend::Closed => Err("the stream is closed".to_string()),
-            _ => Err("net-wait: only a socket can be waited on".to_string()),
+            Backend::Stdin | Backend::Stdout | Backend::Stderr | Backend::StringIn { .. } | Backend::StringOut(_) => {
+                Err("net-wait: only a socket can be waited on".to_string())
+            }
         }
     }
 
-    #[cfg(all(feature = "std", not(unix)))]
-    pub fn raw_fd(&mut self, _h: Handle) -> StreamResult<i32> {
-        unimplemented!("socket waits need a raw descriptor, which is POSIX")
-    }
-
     pub fn is_open(&mut self, h: Handle) -> bool {
-        matches!(self.get(h).map(|s| matches!(s.backend, Backend::Closed)), Ok(false))
+        matches!(self.get(h).map(|s| s.is_closed()), Ok(false))
     }
 
     pub fn is_input(&mut self, h: Handle) -> StreamResult<bool> {
@@ -579,25 +420,17 @@ impl StreamTable {
                 }
                 Ok(c)
             }
-            #[cfg(feature = "std")]
-            Backend::FileIn(r) => read_one_char(r),
-            #[cfg(feature = "std")]
-            Backend::Stdin => {
-                let stdin = std::io::stdin();
-                let mut lock = stdin.lock();
-                read_one_char(&mut lock)
+            Backend::Stdin => read_utf8_char(|| read_stdin_byte("read")),
+            Backend::Ext(b) => b.read_char(),
+            Backend::Stdout | Backend::Stderr | Backend::StringOut(_) | Backend::Closed => {
+                Err("the stream is not an input stream".to_string())
             }
-            // Not a fallback to a blocking read: a socket is read through
-            // `net-pop-char`/`net-fill`, which never wait.
-            #[cfg(all(feature = "std", not(target_family = "wasm")))]
-            Backend::Tcp { .. } => Err("read-char: a socket is read through net-pop-char".to_string()),
-            _ => Err("the stream is not an input stream".to_string()),
         }
     }
 
     /// The next byte, or `None` at end of file.
     ///
-    /// Only a *file* stream (and stdin) answers this. A string stream is a
+    /// Only a byte stream (a file, stdin) answers this. A string stream is a
     /// sequence of characters, not of bytes — CL says `read-byte` on a
     /// character stream is an error, and answering with the UTF-8 encoding of
     /// whatever character came next would be inventing a file that is not
@@ -611,26 +444,13 @@ impl StreamTable {
         if !s.pushback.is_empty() {
             return Err("read-byte: the stream has an unread character pending".to_string());
         }
-        #[cfg(not(feature = "std"))]
-        return Err("read-byte: the stream is not a byte input stream".to_string());
-        #[cfg(feature = "std")]
-        let mut buf = [0u8; 1];
-        #[cfg(feature = "std")]
-        let n = match &mut s.backend {
-            #[cfg(feature = "std")]
-            Backend::FileIn(r) => r.read(&mut buf).map_err(|e| format!("read-byte: {}", e))?,
-            #[cfg(feature = "std")]
-            Backend::Stdin => {
-                let stdin = std::io::stdin();
-                let mut lock = stdin.lock();
-                lock.read(&mut buf).map_err(|e| format!("read-byte: {}", e))?
+        match &mut s.backend {
+            Backend::Stdin => read_stdin_byte("read-byte"),
+            Backend::Ext(b) => b.read_byte(),
+            Backend::Stdout | Backend::Stderr | Backend::StringIn { .. } | Backend::StringOut(_) | Backend::Closed => {
+                Err("read-byte: the stream is not a byte input stream".to_string())
             }
-            #[cfg(all(feature = "std", not(target_family = "wasm")))]
-            Backend::Tcp { .. } => return Err("read-byte: a socket is read through net-pop-byte".to_string()),
-            _ => return Err("read-byte: the stream is not a byte input stream".to_string()),
-        };
-        #[cfg(feature = "std")]
-        Ok(if n == 0 { None } else { Some(buf[0]) })
+        }
     }
 
     /// Write one byte. The mirror of [`Self::read_byte`], and refused on a
@@ -642,13 +462,12 @@ impl StreamTable {
         // the only distinction `at_line_start` draws.
         s.last_written = Some(char::from(b));
         match &mut s.backend {
-            #[cfg(feature = "std")]
-            Backend::FileOut(w) => w.write_all(&[b]).map_err(|e| format!("write-byte: {}", e)),
             Backend::Stdout => typelisp_mem::host::write_stdout(&[b]).map_err(|e| format!("write-byte: {}", e)),
             Backend::Stderr => typelisp_mem::host::write_stderr(&[b]).map_err(|e| format!("write-byte: {}", e)),
-            #[cfg(all(feature = "std", not(target_family = "wasm")))]
-            Backend::Tcp { .. } => Err("write-byte: a socket is written through net-push-byte".to_string()),
-            _ => Err("write-byte: the stream is not a byte output stream".to_string()),
+            Backend::Ext(e) => e.write_byte(b),
+            Backend::Stdin | Backend::StringIn { .. } | Backend::StringOut(_) | Backend::Closed => {
+                Err("write-byte: the stream is not a byte output stream".to_string())
+            }
         }
     }
 
@@ -695,10 +514,8 @@ impl StreamTable {
         }
         Ok(match &s.backend {
             Backend::StringIn { chars, pos } => *pos < chars.len(),
-            // Already received and sitting in the buffer: no OS read needed.
-            #[cfg(all(feature = "std", not(target_family = "wasm")))]
-            Backend::Tcp { rbuf, .. } => !rbuf.is_empty(),
-            _ => false,
+            Backend::Ext(b) => b.listen(),
+            Backend::Stdin | Backend::Stdout | Backend::Stderr | Backend::StringOut(_) | Backend::Closed => false,
         })
     }
 
@@ -712,24 +529,22 @@ impl StreamTable {
                 buf.push_str(text);
                 Ok(())
             }
-            #[cfg(feature = "std")]
-            Backend::FileOut(w) => w.write_all(text.as_bytes()).map_err(|e| format!("write: {}", e)),
             Backend::Stdout => {
                 // One of the three doors a session's output leaves by; see
                 // `typelisp_abi::dribble`'s module docs for the other two.
                 // Only the character path is copied: `write-byte` to stdout is
                 // binary output, and a dribble file is text a person reads
                 // back.
-                #[cfg(feature = "std")]
                 typelisp_abi::dribble::note(text);
                 typelisp_mem::host::write_stdout(text.as_bytes()).map_err(|e| format!("write: {}", e))
             }
             Backend::Stderr => {
                 typelisp_mem::host::write_stderr(text.as_bytes()).map_err(|e| format!("write: {}", e))
             }
-            #[cfg(all(feature = "std", not(target_family = "wasm")))]
-            Backend::Tcp { .. } => Err("write: a socket is written through net-push-string".to_string()),
-            _ => Err("the stream is not an output stream".to_string()),
+            Backend::Ext(b) => b.write_str(text),
+            Backend::Stdin | Backend::StringIn { .. } | Backend::Closed => {
+                Err("the stream is not an output stream".to_string())
+            }
         }
     }
 
@@ -742,13 +557,10 @@ impl StreamTable {
     pub fn finish_output(&mut self, h: Handle) -> StreamResult<()> {
         let s = self.writable(h)?;
         match &mut s.backend {
-            #[cfg(feature = "std")]
-            Backend::FileOut(w) => w.flush().map_err(|e| format!("finish-output: {}", e)),
             Backend::Stdout => typelisp_mem::host::flush_stdout().map_err(|e| format!("finish-output: {}", e)),
             Backend::Stderr => typelisp_mem::host::flush_stderr().map_err(|e| format!("finish-output: {}", e)),
-            #[cfg(all(feature = "std", not(target_family = "wasm")))]
-            Backend::Tcp { .. } => Err("finish-output: a socket is flushed through net-flush".to_string()),
-            _ => Ok(()),
+            Backend::Ext(b) => b.finish_output(),
+            Backend::Stdin | Backend::StringIn { .. } | Backend::StringOut(_) | Backend::Closed => Ok(()),
         }
     }
 
@@ -760,34 +572,4 @@ impl StreamTable {
             _ => Err("get-output-stream-string: not a string output stream".to_string()),
         }
     }
-}
-
-/// Decode one UTF-8 character from a byte reader.
-///
-/// Byte-at-a-time on purpose: the caller may stop after any character (that
-/// is what reading one character means), so consuming a fixed-size block
-/// would swallow input a later read on the same descriptor must still see.
-#[cfg(feature = "std")]
-fn read_one_char<R: BufRead>(r: &mut R) -> StreamResult<Option<char>> {
-    let mut buf = [0u8; 4];
-    for i in 0..4 {
-        match r.read(&mut buf[i..=i]) {
-            Ok(0) => {
-                return if i == 0 {
-                    Ok(None)
-                } else {
-                    Err("invalid UTF-8: input ended mid-character".to_string())
-                }
-            }
-            Ok(_) => {}
-            Err(e) => return Err(format!("read: {}", e)),
-        }
-        match core::str::from_utf8(&buf[..=i]) {
-            Ok(s) => return Ok(s.chars().next()),
-            // Incomplete but valid so far: take another byte.
-            Err(e) if e.error_len().is_none() => continue,
-            Err(_) => return Err("invalid UTF-8 in input".to_string()),
-        }
-    }
-    Err("invalid UTF-8 in input".to_string())
 }

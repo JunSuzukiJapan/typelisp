@@ -408,6 +408,38 @@ pub(crate) const CONS_MAKING_SHIMS: [(&str, &str); 9] = [
     ("rt_macroexpand_1", "`macroexpand-1`"),
 ];
 
+/// Which rows of a [`BuiltinTypeTable`] say: the type a builtin answers
+/// with, or the type of the value inside that answer.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum BuiltinTypeRow {
+    Result,
+    Inner,
+}
+
+/// One runtime crate's table of the types its builtins build their values
+/// as (`typelisp_rt::result_value`).
+pub struct BuiltinTypeTable {
+    pub name: &'static str,
+    pub row: BuiltinTypeRow,
+    pub rows: typelisp_rt::result_value::TypeTable,
+}
+
+/// Every table of the types the runtime's builtins build their values as:
+/// what is checked against the registry (`type_identity_guard_test`), what
+/// says which types the runtime makes (`aot::made`), and what the ABI
+/// describes (`abi_signature`).
+pub const BUILTIN_TYPE_TABLES: [BuiltinTypeTable; 9] = [
+    BuiltinTypeTable { name: "typelisp_rt::sys_builtin::RESULT_TYPES", row: BuiltinTypeRow::Result, rows: typelisp_rt::sys_builtin::RESULT_TYPES },
+    BuiltinTypeTable { name: "typelisp_rt::stream_builtin::RESULT_TYPES", row: BuiltinTypeRow::Result, rows: typelisp_rt::stream_builtin::RESULT_TYPES },
+    BuiltinTypeTable { name: "typelisp_rt::stream_builtin::INNER_TYPES", row: BuiltinTypeRow::Inner, rows: typelisp_rt::stream_builtin::INNER_TYPES },
+    BuiltinTypeTable { name: "typelisp_rt::net_builtin::RESULT_TYPES", row: BuiltinTypeRow::Result, rows: typelisp_rt::net_builtin::RESULT_TYPES },
+    BuiltinTypeTable { name: "typelisp_rt::net_builtin::INNER_TYPES", row: BuiltinTypeRow::Inner, rows: typelisp_rt::net_builtin::INNER_TYPES },
+    BuiltinTypeTable { name: "typelisp_rt_sys::fs_builtin::RESULT_TYPES", row: BuiltinTypeRow::Result, rows: typelisp_rt_sys::fs_builtin::RESULT_TYPES },
+    BuiltinTypeTable { name: "typelisp_rt_sys::fs_builtin::INNER_TYPES", row: BuiltinTypeRow::Inner, rows: typelisp_rt_sys::fs_builtin::INNER_TYPES },
+    BuiltinTypeTable { name: "typelisp_rt_sys::env::RESULT_TYPES", row: BuiltinTypeRow::Result, rows: typelisp_rt_sys::env::RESULT_TYPES },
+    BuiltinTypeTable { name: "typelisp_rt_sys::dribble::RESULT_TYPES", row: BuiltinTypeRow::Result, rows: typelisp_rt_sys::dribble::RESULT_TYPES },
+];
+
 /// The shims a WebAssembly executable has not got, each with what a program
 /// reaches it through: what `typl -c --target wasm32-wasip1` refuses a
 /// program for (`compile::aot::reach`), so that it fails to compile rather
@@ -750,10 +782,16 @@ pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 378] {
         rt_suspend_task, rt_suspend_io, rt_suspend_io_for, rt_suspend_main, rt_suspend_sleep, rt_suspend_thread,
         rt_suspend_wait, rt_suspend_yield,
     };
+    use typelisp_rt_sys::{
+        rt_command_line_args, rt_dribble_start, rt_dribble_stop, rt_getenv, rt_home_directory,
+        rt_file_create_directories, rt_file_delete, rt_file_directory_p, rt_file_exists_p,
+        rt_file_list_directory, rt_file_modified_date, rt_file_owner_name, rt_file_rename,
+        rt_file_truename, rt_stream_open_file,
+    };
     use typelisp_rt::sys_builtin::{
-        rt_command_line_args, rt_dribble_start, rt_dribble_stop, rt_ed_open, rt_exit,
+        rt_ed_open, rt_exit,
         rt_get_internal_real_time, rt_get_internal_run_time,
-        rt_get_universal_time, rt_getenv, rt_heap_info, rt_home_directory, rt_lisp_implementation_version,
+        rt_get_universal_time, rt_heap_info, rt_lisp_implementation_version,
         rt_machine_instance, rt_machine_type, rt_machine_version, rt_parse_float,
         rt_software_type, rt_software_version, rt_thread_available_parallelism, rt_thread_current_id,
         rt_timezone_daylight_p, rt_timezone_offset_seconds,
@@ -771,10 +809,6 @@ pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 378] {
     use typelisp_rt::{
         rt_atom, rt_bignum_new,
         rt_make_random_state_fresh, rt_random_state_copy, rt_random_state_next, rt_seed_random_state,
-
-        rt_file_create_directories, rt_file_delete, rt_file_directory_p, rt_file_exists_p,
-        rt_file_list_directory, rt_file_modified_date, rt_file_owner_name, rt_file_rename,
-        rt_file_truename,
         rt_net_accept, rt_net_buffered_p, rt_net_connect_begin, rt_net_connect_finish, rt_net_fill, rt_net_flush,
         rt_net_listen, rt_net_local_address, rt_net_peer_address, rt_net_pop_byte, rt_net_pop_char,
         rt_net_push_byte, rt_net_push_string, rt_net_shutdown_write,
@@ -784,7 +818,7 @@ pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 378] {
         rt_net_udp_bind, rt_net_udp_last_sender, rt_net_udp_recv, rt_net_udp_send_to,
         rt_net_unix_connect, rt_net_unix_listen,
         rt_stream_at_line_start, rt_stream_close,
-        rt_stream_finish_output, rt_stream_input_p, rt_stream_listen, rt_stream_open_file, rt_stream_open_p, rt_stream_describe,
+        rt_stream_finish_output, rt_stream_input_p, rt_stream_listen, rt_stream_open_p, rt_stream_describe,
         rt_stream_output_p, rt_stream_position, rt_stream_read_byte, rt_stream_read_char, rt_stream_stderr, rt_stream_stdin, rt_stream_stdout,
         rt_set_macro_character, rt_get_macro_character, rt_set_dispatch_macro_character, rt_get_dispatch_macro_character,
         rt_stream_string_input, rt_stream_string_output, rt_stream_take_output_string, rt_stream_unread_char,

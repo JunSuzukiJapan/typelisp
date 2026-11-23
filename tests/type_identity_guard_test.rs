@@ -293,11 +293,9 @@ fn the_runtime_result_types_match_the_registry() {
         );
     };
 
-    for (name, spec) in typelisp_rt::stream_builtin::RESULT_TYPES
-        .iter()
-        .chain(typelisp_rt::sys_builtin::RESULT_TYPES)
-        .chain(typelisp_rt::net_builtin::RESULT_TYPES)
-    {
+    use typelisp::compile::externs::{BuiltinTypeRow, BUILTIN_TYPE_TABLES};
+    let rows_of = |row: BuiltinTypeRow| BUILTIN_TYPE_TABLES.iter().filter(move |t| t.row == row).flat_map(|t| t.rows.iter());
+    for (name, spec) in rows_of(BuiltinTypeRow::Result) {
         let name = typelisp_mem::BUILTIN_SYMBOLS[*name as usize];
         check(spec, &sig_of(name).ret, &format!("`{}`'s result", name));
     }
@@ -315,7 +313,7 @@ fn the_runtime_result_types_match_the_registry() {
             other => panic!("`{}` returns {:?}, which has no payload type", name, other),
         }
     };
-    for (name, spec) in typelisp_rt::stream_builtin::INNER_TYPES.iter().chain(typelisp_rt::net_builtin::INNER_TYPES) {
+    for (name, spec) in rows_of(BuiltinTypeRow::Inner) {
         let name = typelisp_mem::BUILTIN_SYMBOLS[*name as usize];
         check(spec, &ok_payload(name), &format!("`{}`'s inner value", name));
     }
@@ -564,10 +562,12 @@ fn the_places_that_make_a_tracked_type_are_the_ones_made_rs_was_read_off() {
         ("crates/typelisp-read/src/shim.rs", "TypeId::READ_ERROR", 2),
         ("crates/typelisp-read/src/shim.rs", "read_builtin_with(", 2),
         ("crates/typelisp-read/src/shim.rs", "read_datum_at_builtin_with(", 2),
+        ("crates/typelisp-rt-sys/src/dribble.rs", "TypeId::FILE_ERROR", 2),
+        ("crates/typelisp-rt-sys/src/fs_builtin.rs", "TypeId::FILE_ERROR", 1),
+        ("crates/typelisp-rt-sys/src/fs_builtin.rs", "universal_time_value(", 1),
         ("crates/typelisp-rt/src/net_builtin.rs", "TypeId::NET_ERROR", 1),
         ("crates/typelisp-rt/src/stream_builtin.rs", "TypeId::FILE_ERROR", 1),
-        ("crates/typelisp-rt/src/stream_builtin.rs", "universal_time_value(", 1),
-        ("crates/typelisp-rt/src/sys_builtin.rs", "TypeId::FILE_ERROR", 3),
+        ("crates/typelisp-rt/src/sys_builtin.rs", "TypeId::FILE_ERROR", 1),
         ("crates/typelisp-rt/src/sys_builtin.rs", "TypeId::HEAP_INFO", 1),
         ("crates/typelisp-rt/src/sys_builtin.rs", "TypeId::INTERNAL_TIME", 1),
         ("crates/typelisp-rt/src/sys_builtin.rs", "TypeId::PARSE_FLOAT_ERROR", 1),

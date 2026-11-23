@@ -1,36 +1,25 @@
-//! The four things the operating system knows and `std` will not tell us.
+//! What the operating system knows and `std` will not tell us, as safe Rust
+//! signatures over one C call each, with the `unsafe` kept inside.
 //!
-//! **This is the only module in the workspace that calls the C library
-//! directly.** Everything else reaches libc the way all Rust does — through a
-//! `std` wrapper that owns the `unsafe`. Here that ownership is ours, so it
-//! is worth having one file to read rather than four scattered `unsafe`
-//! blocks: every function below is a *safe* Rust signature over one C call,
-//! and the `unsafe` never escapes.
+//! CPU time (`getrusage`), the host's name and OS release (`uname`), a file's
+//! owner (`getpwuid_r`), the dynamic linker ([`dl_open`]/[`dl_sym`], which is
+//! how a `(defffi ...)` finds the function it names), the one place a socket
+//! is waited on ([`poll_ready`], the scheduler's, not any stream's), a connect
+//! that returns before the handshake does ([`tcp_connect_begin`]), and how
+//! one thread interrupts another's `poll` ([`SelfPipe`]). The two answers the
+//! host layer needs from the C library (the local time zone and the CPU's
+//! name) are in `typelisp_mem::host` instead.
 //!
-//! What forced it: CPU time (`getrusage`), the host's name and OS release
-//! (`uname`), a file's owner (`getpwuid_r`) and the local time zone
-//! (`localtime_r`). `std` has no equivalent of any of them, deliberately in
-//! the last case — see [`timezone_at`].
+//! Every query returns `Option`, and the `None`s are real: CL says
+//! `machine-instance`, `software-version` and `file-author` may all answer
+//! `NIL`. That is what makes reporting a failure honest rather than a
+//! made-up constant.
 //!
-//! Since the C FFI, one more: the dynamic linker ([`dl_open`]/[`dl_sym`]),
-//! which is how a `(defffi ...)` finds the function it names. Same rule as
-//! the rest — a safe signature over one C call, `unsafe` kept inside.
-//!
-//! Since TCP, two more: [`poll_ready`], the one place a socket is waited on
-//! (the scheduler's, not any stream's), and [`tcp_connect_begin`], a connect
-//! that returns before the handshake does — `std` offers neither.
-//!
-//! Since tasks run on several OS threads, one more: [`SelfPipe`], which is
-//! how one thread interrupts another's `poll`.
-//!
-//! Every one of these returns `Option`, and the `None`s are real: CL says
-//! `machine-instance`, `machine-version`, `software-version` and
-//! `file-author` may all answer `NIL`. That is what makes reporting a failure
-//! honest rather than a made-up constant.
-//!
-//! **Not portable off Unix.** `getrusage`/`uname`/`getpwuid_r`/`tm_gmtoff`
-//! are POSIX, and this workspace's first `#[cfg]` split is here. The non-Unix
-//! arms are `unimplemented!()` rather than a plausible-looking answer.
+//! **Not portable off Unix.** `getrusage`/`uname`/`getpwuid_r` are POSIX. The
+//! non-Unix arms are `unimplemented!()` rather than a plausible-looking
+//! answer.
+
+use typelisp_mem::prelude::*;
 
 /// Whole microseconds of CPU time this process has used — user plus system,
 /// which is what CL's `get-internal-run-time` counts and what
@@ -40,7 +29,6 @@
 /// on an invalid `who` or pointer, neither of which is reachable from here,
 /// so the `None` arm is unreachable in practice — it is still an arm and not
 /// a `.unwrap()`, because the caller has an honest thing to do with it.
-use typelisp_mem::prelude::*;
 #[cfg(unix)]
 pub fn run_time_micros() -> Option<i64> {
     // SAFETY: `ru` is a fully-owned, zeroed `rusage` that outlives the call,
@@ -109,76 +97,6 @@ fn uname_field(field: impl Fn(&libc::utsname) -> *const libc::c_char) -> Option<
     }
 }
 
-/// A human-readable name for the hardware — CL's `machine-version`.
-///
-/// No POSIX call answers this, so each platform is asked its own way and
-/// anything else says `None` (which CL explicitly allows). Note the contrast
-/// with the neighbours above: `machine-type` is `std::env::consts::ARCH`, the
-/// architecture this *binary* was built for; this is the chip it is running
-/// on.
-#[cfg(target_os = "macos")]
-pub fn machine_version() -> Option<String> {
-    sysctl_string("machdep.cpu.brand_string")
-}
-
-#[cfg(target_os = "linux")]
-pub fn machine_version() -> Option<String> {
-    // `/proc/cpuinfo` rather than a syscall: there is no sysctl for this on
-    // Linux, and the file is the source every tool reads. x86 spells the
-    // field `model name`; on ARM the closest is `Model` (the board), so both
-    // are accepted, in that order of preference.
-    let text = std::fs::read_to_string("/proc/cpuinfo").ok()?;
-    let field = |key: &str| {
-        text.lines()
-            .find_map(|l| l.split_once(':').filter(|(k, _)| k.trim() == key).map(|(_, v)| v.trim().to_string()))
-            .filter(|v| !v.is_empty())
-    };
-    field("model name").or_else(|| field("Model"))
-}
-
-#[cfg(not(any(target_os = "macos", target_os = "linux")))]
-pub fn machine_version() -> Option<String> {
-    // CL allows `NIL` here, and this is the honest answer on a platform
-    // nobody has taught this function about — not an `unimplemented!()`,
-    // because "cannot be computed" is a value the specification defines.
-    None
-}
-
-/// A `sysctl` string by name, sized by the two-call protocol `sysctlbyname`
-/// specifies (ask with a null buffer, then read).
-#[cfg(target_os = "macos")]
-fn sysctl_string(name: &str) -> Option<String> {
-    let cname = alloc::ffi::CString::new(name).ok()?;
-    // SAFETY: both calls pass a NUL-terminated name and a `len` that
-    // describes the buffer being written. The first passes a null buffer,
-    // which is how `sysctlbyname` is asked for the size; the second passes a
-    // `Vec` of exactly that size and cannot overrun it. `newp`/`newlen` are
-    // null/0, so nothing is written back into the kernel.
-    unsafe {
-        let mut len: libc::size_t = 0;
-        if libc::sysctlbyname(cname.as_ptr(), core::ptr::null_mut(), &mut len, core::ptr::null_mut(), 0) != 0 {
-            return None;
-        }
-        if len == 0 {
-            return None;
-        }
-        let mut buf = vec![0u8; len];
-        if libc::sysctlbyname(
-            cname.as_ptr(),
-            buf.as_mut_ptr() as *mut libc::c_void,
-            &mut len,
-            core::ptr::null_mut(),
-            0,
-        ) != 0
-        {
-            return None;
-        }
-        // The value is NUL-terminated and `len` counts the NUL.
-        buf.truncate(len.saturating_sub(1));
-        String::from_utf8(buf).ok().filter(|s| !s.is_empty())
-    }
-}
-
 /// The login name that owns user id `uid`, or `None` when the id has no
 /// entry in the password database — CL's `file-author` answering `NIL`.
 #[cfg(unix)]
@@ -240,77 +158,6 @@ pub fn file_owner(path: &str) -> std::io::Result<Option<String>> {
 #[cfg(not(unix))]
 pub fn file_owner(_path: &str) -> std::io::Result<Option<String>> {
     unimplemented!("file-author needs a uid and getpwuid_r, which are POSIX")
-}
-
-/// The local time zone in effect at `unix_secs`, as `(seconds west of
-/// Greenwich, daylight saving in effect)` — the pair SBCL's `get_timezone`
-/// returns from the same call, for the same reason.
-///
-/// **Why the offset takes a time**: it is not a property of the machine but
-/// of the instant. The same host is 5 hours west in January and 4 in July,
-/// and a program decoding a stored timestamp must use the rules that were in
-/// force *then*.
-///
-/// Sign: CL's zone is positive going **west**, `tm_gmtoff` is positive going
-/// **east**, so this negates. Seconds and not hours because the offset is not
-/// always a whole number of them — India is +5:30, Nepal +5:45, Chatham
-/// +12:45 — and rounding here would be a silent lie for a billion people.
-///
-/// **On thread safety.** `localtime_r` reads `TZ` through `getenv`, which
-/// races with any concurrent `setenv`: that is [RUSTSEC-2020-0071], and it is
-/// why Rust made `std::env::set_var` `unsafe` in edition 2024 rather than
-/// blame the C library.
-///
-/// Nothing in this workspace writes an environment variable — there is no
-/// `setenv` builtin and `std::env::set_var` appears nowhere — and that used to
-/// be the whole argument. **The C FFI ended it.** `(defffi (c-setenv "setenv")
-/// (string string i32) i32)` is a line any program may now write, and no
-/// promise this workspace makes about its own code can cover it.
-///
-/// So the obligation moved rather than disappeared: it belongs to whoever
-/// writes that declaration, which is exactly what `(unsafe ...)` is for — the
-/// mark that a premise nothing can check has been taken on. A program that
-/// writes the environment from one thread while another asks for the time zone
-/// has the race, and `docs/ja/reference/syntax.md` §4.1 lists process-global state among the
-/// things `unsafe` accepts responsibility for. Adding a `setenv` *builtin*
-/// — reachable with no `unsafe` at all — is still the thing not to do.
-///
-/// [RUSTSEC-2020-0071]: https://rustsec.org/advisories/RUSTSEC-2020-0071
-#[cfg(unix)]
-pub fn timezone_at(unix_secs: i64) -> Option<(i32, bool)> {
-    // SAFETY: `t` and `tm` are owned locals that outlive the call, and
-    // `localtime_r` writes only through the `tm` pointer (the `_r` form keeps
-    // no static state and returns either that same pointer or null). The
-    // environment race the doc comment describes is ruled out by this
-    // workspace never writing one.
-    unsafe {
-        let t = unix_secs as libc::time_t;
-        let mut tm: libc::tm = core::mem::zeroed();
-        if libc::localtime_r(&t, &mut tm).is_null() {
-            return None;
-        }
-        Some((-(tm.tm_gmtoff as i64) as i32, tm.tm_isdst > 0))
-    }
-}
-
-/// In a `wasm32-unknown-unknown` module the page or program that loaded it
-/// answers, from JavaScript's `Date`.
-#[cfg(all(target_family = "wasm", target_os = "unknown"))]
-pub fn timezone_at(unix_secs: i64) -> Option<(i32, bool)> {
-    typelisp_mem::host::timezone_at(unix_secs)
-}
-
-/// WASI preview 1 has no time zone to ask about, so the local one is unknown
-/// at every instant: the prelude's `local-zone-west` panics on that `None`,
-/// which is where a program that decodes into local time stops.
-#[cfg(target_os = "wasi")]
-pub fn timezone_at(_unix_secs: i64) -> Option<(i32, bool)> {
-    None
-}
-
-#[cfg(all(not(unix), not(target_family = "wasm")))]
-pub fn timezone_at(_unix_secs: i64) -> Option<(i32, bool)> {
-    unimplemented!("the local time zone needs localtime_r and tm_gmtoff, which are POSIX")
 }
 
 /// Open the shared library at `path`, or `None` if it cannot be opened.
@@ -764,37 +611,6 @@ mod tests {
         let uid = unsafe { libc::getuid() };
         let who = super::user_name(uid).expect("the running user has a passwd entry");
         assert!(!who.is_empty() && !who.contains('\0'), "{:?}", who);
-    }
-
-    #[test]
-    fn the_local_zone_is_a_plausible_offset() {
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .expect("the clock is after 1970")
-            .as_secs() as i64;
-        let (west, _dst) = super::timezone_at(now).expect("the host has a local zone");
-        // Real offsets run from +14:00 (Kiritimati, -50400 west) to -12:00
-        // (Baker Island, 43200 west).
-        assert!((-50_400..=43_200).contains(&west), "implausible offset: {}s west", west);
-        // Every zone in use is a whole number of minutes; the seconds-level
-        // offsets are pre-1900 local mean time.
-        assert_eq!(west % 60, 0, "offset is not a whole number of minutes: {}s", west);
-    }
-
-    /// The offset is a property of the instant, not of the machine — which is
-    /// why [`super::timezone_at`] takes one. A zone that observes daylight
-    /// saving reports different offsets in January and July; one that does
-    /// not reports the same. Both are correct, so the assertion is only that
-    /// asking twice does not fail.
-    #[test]
-    fn the_zone_can_be_asked_about_any_instant() {
-        let jan = super::timezone_at(1_704_067_200).expect("2024-01-01");
-        let jul = super::timezone_at(1_720_000_000).expect("2024-07-03");
-        assert!(jan.0 % 60 == 0 && jul.0 % 60 == 0);
-        // A pre-Unix-epoch instant is an ordinary negative `time_t`, and
-        // `decode-universal-time` reaches one for any date before 1970.
-        let pre = super::timezone_at(-2_208_988_800).expect("1900-01-01");
-        assert!((-50_400..=43_200).contains(&pre.0), "1900: {}s west", pre.0);
     }
 
     #[test]
