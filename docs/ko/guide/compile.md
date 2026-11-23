@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ 7622044725db7d28dabb691d82e592367d9284e8 -->
+<!-- translated-from: docs/ja/guide/compile.md @ 849e94e087680155a16df844f633f16017703f95 -->
 # 컴파일
 
 아무것도 하지 않으면 typelisp 프로그램은 인터프리터에서 실행된다. 그 밖에 네이티브 코드로 컴파일하는 방법이 두 가지,
@@ -214,7 +214,47 @@ const code = await run({ write: (fd, text) => { /* 예를 들어 화면에 표�
 - 브라우저에서는 `hello.wasm`을 `hello.mjs`와 같은 위치에서 HTTP로 제공하세요(`file://`에서는 불러올 수 없습니다).
 - `sleep`은 `Atomics.wait`로 기다립니다. 브라우저에서는 이것을 교차 출처 격리된 페이지의 Worker 안에서만 쓸 수 있으므로, `sleep`을 쓰는 프로그램은 Worker에서 실행하세요.
 - 지역 시간(`zone`을 생략한 `decode-universal-time` 등)은 JavaScript의 `Date`가 알려 주는 시간대로 구합니다.
-- 3.6절에서 쓸 수 없는 것에 더해, 파일과 디렉터리 조작이 **컴파일 오류**가 됩니다. 표준 입력은 빈 것으로 읽히고, `(command-line-args)`는 빈 벡터입니다.
+- 3.6절에서 쓸 수 없는 것에 더해, 파일과 디렉터리 조작, 환경 변수, `(command-line-args)`, 홈 디렉터리, `dribble`이 **컴파일 오류**가 됩니다. 표준 입력은 빈 것으로 읽힙니다.
+
+### 3.8 마이크로컨트롤러(Cortex-M)용으로 컴파일하기
+
+`--target thumbv7em-none-eabihf`를 붙이면 OS가 없는 Cortex-M4F・M7 보드용 실행 파일(ELF)을 만듭니다. `-o`를 생략하면 소스의 `.typl`을 `.elf`로 바꾼 이름이 됩니다.
+
+```sh
+$ typl -c hello.typl --target thumbv7em-none-eabihf          # hello.elf가 생긴다
+$ qemu-system-arm -M mps2-an386 -nographic \
+    -semihosting-config enable=on,target=native -kernel hello.elf   # QEMU의 Cortex-M4에서 실행한다
+```
+
+- `install.sh`로 설치한 `typl`은 그대로 쓸 수 있습니다. `cargo install`로 설치할 때는 `rustup target add thumbv7em-none-eabihf`를 실행한 뒤 `--features embedded`를 붙여 설치합니다(wasm과 둘 다라면 `--features wasm,embedded`). 저장소의 디버그 빌드 `typl`에서는 `scripts/build-embedded-runtime.sh`를 실행합니다. 링크에는 rustup 툴체인의 링커를 씁니다.
+- 보드의 메모리 배치는 `--linker-script FILE`로 넘깁니다. 쓰는 법은 `cortex-m-rt`의 `memory.x`와 같고, FLASH와 RAM의 주소와 크기를 씁니다. `_typelisp_stack_size = 32K;`처럼 쓰면 RAM 중 스택이 쓰는 크기가 됩니다(쓰지 않으면 64KiB). RAM의 나머지가 힙입니다. 생략하면 QEMU의 `mps2-an386` 배치가 됩니다.
+
+  ```
+  MEMORY
+  {
+    FLASH : ORIGIN = 0x08000000, LENGTH = 512K
+    RAM : ORIGIN = 0x20000000, LENGTH = 128K
+  }
+  _typelisp_stack_size = 16K;
+  ```
+
+- 출력・입력・종료・시각(보드의 함수)을 누가 제공할지는 `--board-functions`로 고릅니다.
+  - `semihosting`(기본값): semihosting으로 제공합니다. QEMU(`-semihosting-config enable=on`)나 디버거로 실행할 때 씁니다.
+  - `c`: 보드가 C 함수로 제공합니다. 아래 함수를 정의한 오브젝트나 정적 라이브러리를 `--link FILE`로 넘깁니다(`--link`는 여러 번 쓸 수 있습니다. `defffi`로 부르는 벤더의 라이브러리도 같은 방식으로 넘깁니다).
+
+  ```c
+  void     typelisp_host_write(int32_t fd, const uint8_t *p, size_t len); // fd 1은 표준 출력, 2는 표준 오류
+  size_t   typelisp_host_read(int32_t fd, uint8_t *p, size_t len);        // fd 0, 읽은 바이트 수, 끝이면 0
+  void     typelisp_host_exit(int32_t code);                              // 돌아오지 않는다
+  uint64_t typelisp_host_now_us(void);                                    // 거꾸로 가지 않는 시계의 마이크로초
+  int64_t  typelisp_host_unix_us(void);                                   // 1970-01-01부터의 마이크로초
+  void     typelisp_host_sleep_us(uint64_t us);                           // us 마이크로초 기다린다
+  ```
+
+- 기동(벡터 테이블과 RAM 준비)과 메모리 확보는 런타임이 합니다. HardFault나 처리되지 않는 인터럽트가 일어나면 panic과 같은 종료 코드(1)로 끝납니다.
+- `throw`/`catch`/`panic`, bignum・ratio・부동소수, 태스크・채널・`sleep`은 실행 파일과 똑같이 동작합니다. 태스크는 하나의 코어에서 차례로 실행됩니다. C 함수(`defffi`)도 쓸 수 있습니다.
+- 보드에 없는 것을 쓰는 프로그램은 **컴파일 오류**가 됩니다. 3.7절에서 쓸 수 없는 것에 더해 `eval`・`macroexpand`를 쓸 수 없습니다. 지방시는 알 수 없습니다(3.6절과 같음).
+- cons 아레나는 1024셀에서 시작해 모자라면 늘어납니다. `--heap-cells`, `--max-memory`, `--no-cons`, `-O<N>`, `--release`는 그대로 쓸 수 있습니다.
 
 ## 4. 덤프
 

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ 7622044725db7d28dabb691d82e592367d9284e8 -->
+<!-- translated-from: docs/ja/guide/compile.md @ 849e94e087680155a16df844f633f16017703f95 -->
 # Derleme
 
 Başka bir şey yapmazsanız typelisp programları yorumlayıcıda çalışır. Buna ek olarak yerel koda
@@ -222,7 +222,47 @@ const code = await run({ write: (fd, text) => { /* örneğin sayfada göstermek 
 - Tarayıcıda `hello.wasm`'ı `hello.mjs` ile aynı yerden HTTP üzerinden sunun (`file://` üzerinden yüklenemez).
 - `sleep`, `Atomics.wait` ile bekler. Tarayıcı buna yalnızca cross-origin yalıtımlı bir sayfanın Worker'ı içinde izin verir; bu yüzden `sleep` kullanan programı bir Worker'da çalıştırın.
 - Yerel saat (`zone` verilmeden `decode-universal-time` vb.), JavaScript'in `Date` nesnesinin bildirdiği saat dilimiyle hesaplanır.
-- 3.6 bölümünde kullanılamayanlara ek olarak dosya ve dizin işlemleri bir **derleme hatasıdır**. Standart girdi boş okunur ve `(command-line-args)` boş bir vektördür.
+- Bölüm 3.6'da kullanılamayanlara ek olarak dosya ve dizin işlemleri, ortam değişkenleri, `(command-line-args)`, ev dizini ve `dribble` bir **derleme hatasıdır**. Standart girdi boş olarak okunur.
+
+### 3.8 Bir mikrodenetleyici (Cortex-M) için derlemek
+
+`--target thumbv7em-none-eabihf` ile `typl -c`, işletim sistemi olmayan bir Cortex-M4F veya M7 kartı için çalıştırılabilir dosya (ELF) üretir. `-o` verilmezse adı, kaynağın `.typl` uzantısı `.elf` yapılarak verilir.
+
+```sh
+$ typl -c hello.typl --target thumbv7em-none-eabihf          # hello.elf üretir
+$ qemu-system-arm -M mps2-an386 -nographic \
+    -semihosting-config enable=on,target=native -kernel hello.elf   # QEMU'nun Cortex-M4'ünde çalıştırır
+```
+
+- `install.sh` ile kurulan `typl` olduğu gibi kullanılabilir. `cargo install` ile kurmak için önce `rustup target add thumbv7em-none-eabihf` çalıştırın, sonra `--features embedded` ile kurun (ikisi için `--features wasm,embedded`). Depodaki hata ayıklama derlemesi `typl` ile `scripts/build-embedded-runtime.sh` çalıştırın. Bağlama rustup araç zincirinin bağlayıcısını kullanır.
+- Kartın belleğini `--linker-script FILE` ile verin. Dosya `cortex-m-rt`'nin `memory.x`'i gibi yazılır: FLASH ve RAM'in adresleri ve boyutları. `_typelisp_stack_size = 32K;` gibi bir satır RAM'in ne kadarını yığının (stack) alacağını belirler (verilmezse 64KiB); RAM'in geri kalanı heap'tir. Seçenek yoksa düzen QEMU'nun `mps2-an386`'sınınkidir.
+
+  ```
+  MEMORY
+  {
+    FLASH : ORIGIN = 0x08000000, LENGTH = 512K
+    RAM : ORIGIN = 0x20000000, LENGTH = 128K
+  }
+  _typelisp_stack_size = 16K;
+  ```
+
+- `--board-functions`, çıktıyı, girdiyi, bitirmeyi ve saati (kartın işlevlerini) kimin sağlayacağını seçer.
+  - `semihosting` (varsayılan): semihosting ile; QEMU (`-semihosting-config enable=on`) veya bir hata ayıklayıcı altında çalıştırmak için.
+  - `c`: kart bunları C işlevleri olarak sağlar. Aşağıdaki işlevleri tanımlayan bir nesne dosyasını veya statik kitaplığı `--link FILE` ile verin (`--link` tekrarlanabilir; `defffi`'nin çağırdığı bir üretici kitaplığı da aynı şekilde verilir).
+
+  ```c
+  void     typelisp_host_write(int32_t fd, const uint8_t *p, size_t len); // fd 1 standart çıktı, 2 standart hata
+  size_t   typelisp_host_read(int32_t fd, uint8_t *p, size_t len);        // fd 0; okunan bayt, sonda 0
+  void     typelisp_host_exit(int32_t code);                              // geri dönmez
+  uint64_t typelisp_host_now_us(void);                                    // hiç geri gitmeyen bir saatin mikrosaniyesi
+  int64_t  typelisp_host_unix_us(void);                                   // 1970-01-01'den bu yana mikrosaniye
+  void     typelisp_host_sleep_us(uint64_t us);                           // us mikrosaniye bekler
+  ```
+
+- Çalışma zamanı programı başlatır (vektör tablosu ve RAM'in hazırlanması) ve belleği ayırır. Bir HardFault veya işlenmeyen bir kesme, programı bir panic'in çıkış koduyla (1) bitirir.
+- `throw`/`catch`/`panic`, büyük sayılar, kesirler ve kayan noktalı sayılar ile görevler, kanallar ve `sleep` çalıştırılabilir dosyadaki gibi davranır. Görevler tek çekirdekte sırayla çalışır. C işlevleri (`defffi`) kullanılabilir.
+- Kartta olmayan bir şeyi kullanan program bir **derleme hatasıdır**: Bölüm 3.7'de kullanılamayanlara ek olarak `eval` ve `macroexpand`. Yerel saat bilinmez (Bölüm 3.6'daki gibi).
+- Cons arenası 1024 hücreyle başlar ve gerektiğinde büyür. `--heap-cells`, `--max-memory`, `--no-cons`, `-O<N>` ve `--release` olduğu gibi çalışır.
 
 ## 4. Dump'lar
 

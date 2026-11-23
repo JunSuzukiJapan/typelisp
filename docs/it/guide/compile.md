@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ 7622044725db7d28dabb691d82e592367d9284e8 -->
+<!-- translated-from: docs/ja/guide/compile.md @ 849e94e087680155a16df844f633f16017703f95 -->
 # Compilazione
 
 Se non fai altro, i programmi typelisp vengono eseguiti nell'interprete. Inoltre esistono due modi per
@@ -224,7 +224,47 @@ const code = await run({ write: (fd, text) => { /* mostrarlo nella pagina, per e
 - In un browser, servite `hello.wasm` via HTTP dallo stesso posto di `hello.mjs` (non si può caricare da `file://`).
 - `sleep` attende con `Atomics.wait`. Un browser lo consente solo dentro un Worker di una pagina con isolamento cross-origin, quindi eseguite in un Worker i programmi che usano `sleep`.
 - L'ora locale (`decode-universal-time` senza `zone`, ecc.) si calcola con il fuso orario che riporta `Date` di JavaScript.
-- Oltre a ciò che non si può usare nella sezione 3.6, le operazioni su file e directory sono un **errore di compilazione**. L'input standard si legge come vuoto e `(command-line-args)` è un vettore vuoto.
+- Oltre a ciò che non si può usare nella sezione 3.6, le operazioni su file e directory, le variabili d'ambiente, `(command-line-args)`, la directory home e `dribble` sono un **errore di compilazione**. L'input standard viene letto come vuoto.
+
+### 3.8 Compilare per un microcontrollore (Cortex-M)
+
+Con `--target thumbv7em-none-eabihf`, `typl -c` crea un eseguibile (ELF) per una scheda Cortex-M4F o M7 senza sistema operativo. Senza `-o`, prende il nome del sorgente con `.typl` sostituito da `.elf`.
+
+```sh
+$ typl -c hello.typl --target thumbv7em-none-eabihf          # crea hello.elf
+$ qemu-system-arm -M mps2-an386 -nographic \
+    -semihosting-config enable=on,target=native -kernel hello.elf   # eseguilo sul Cortex-M4 di QEMU
+```
+
+- Un `typl` installato con `install.sh` si usa così com'è. Per installare con `cargo install`, esegui `rustup target add thumbv7em-none-eabihf` e poi installa con `--features embedded` (`--features wasm,embedded` per entrambi). Con una build di debug di `typl` nel repository, esegui `scripts/build-embedded-runtime.sh`. Il collegamento usa il linker della toolchain di rustup.
+- Indica la memoria della scheda con `--linker-script FILE`. Si scrive come il `memory.x` di `cortex-m-rt`: indirizzi e dimensioni di FLASH e RAM. Una riga come `_typelisp_stack_size = 32K;` stabilisce quanta RAM occupa lo stack (64KiB se non indicato); il resto della RAM è l'heap. Senza l'opzione, la disposizione è quella del `mps2-an386` di QEMU.
+
+  ```
+  MEMORY
+  {
+    FLASH : ORIGIN = 0x08000000, LENGTH = 512K
+    RAM : ORIGIN = 0x20000000, LENGTH = 128K
+  }
+  _typelisp_stack_size = 16K;
+  ```
+
+- `--board-functions` sceglie chi fornisce output, input, terminazione e orologio (le funzioni della scheda).
+  - `semihosting` (predefinito): tramite semihosting, per eseguire sotto QEMU (`-semihosting-config enable=on`) o un debugger.
+  - `c`: la scheda le fornisce come funzioni C. Passa con `--link FILE` un oggetto o una libreria statica che definisce le funzioni seguenti (`--link` si può ripetere; una libreria del produttore chiamata da `defffi` si passa allo stesso modo).
+
+  ```c
+  void     typelisp_host_write(int32_t fd, const uint8_t *p, size_t len); // fd 1 è l'output standard, 2 l'errore standard
+  size_t   typelisp_host_read(int32_t fd, uint8_t *p, size_t len);        // fd 0; byte letti, 0 alla fine
+  void     typelisp_host_exit(int32_t code);                              // non ritorna
+  uint64_t typelisp_host_now_us(void);                                    // microsecondi di un orologio che non torna mai indietro
+  int64_t  typelisp_host_unix_us(void);                                   // microsecondi dal 1970-01-01
+  void     typelisp_host_sleep_us(uint64_t us);                           // attende us microsecondi
+  ```
+
+- Il runtime avvia il programma (la tabella dei vettori e la preparazione della RAM) e alloca la memoria. Un HardFault o un interrupt non gestito termina il programma con il codice di uscita di un panic (1).
+- `throw`/`catch`/`panic`, bignum, frazioni e numeri in virgola mobile, e task, canali e `sleep` si comportano come nell'eseguibile. I task vengono eseguiti a turno sull'unico core. Si possono usare funzioni C (`defffi`).
+- Un programma che usa ciò che la scheda non ha è un **errore di compilazione**: oltre a ciò che non si può usare nella sezione 3.7, `eval` e `macroexpand`. L'ora locale è sconosciuta (come nella sezione 3.6).
+- L'arena dei cons parte da 1024 celle e cresce quando serve. `--heap-cells`, `--max-memory`, `--no-cons`, `-O<N>` e `--release` funzionano così come sono.
 
 ## 4. Dump
 

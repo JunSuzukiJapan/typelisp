@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ 7622044725db7d28dabb691d82e592367d9284e8 -->
+<!-- translated-from: docs/ja/guide/compile.md @ 849e94e087680155a16df844f633f16017703f95 -->
 # الترجمة
 
 إذا لم تفعل شيئًا آخر فإن برامج typelisp تعمل في المفسِّر (interpreter). وإضافة إلى ذلك توجد طريقتان
@@ -219,7 +219,47 @@ const code = await run({ write: (fd, text) => { /* اعرضه في الصفحة 
 - في المتصفح، قدّم `hello.wasm` عبر HTTP من المكان نفسه الذي فيه `hello.mjs` (لا يمكن تحميله من `file://`).
 - ينتظر `sleep` بواسطة `Atomics.wait`. ولا يسمح المتصفح بذلك إلا داخل Worker في صفحة معزولة عبر الأصول، لذا شغّل البرنامج الذي يستخدم `sleep` في Worker.
 - يُحسب التوقيت المحلي (`decode-universal-time` بدون `zone` ونحوها) بالمنطقة الزمنية التي يُبلغ عنها `Date` في JavaScript.
-- إضافة إلى ما لا يمكن استخدامه في القسم 3.6، تكون عمليات الملفات والمجلدات **خطأ ترجمة**. ويُقرأ الإدخال القياسي فارغًا، و`(command-line-args)` متجه فارغ.
+- بالإضافة إلى ما لا يمكن استخدامه في القسم 3.6، تكون عمليات الملفات والمجلدات ومتغيرات البيئة و`(command-line-args)` والمجلد الرئيسي و`dribble` **خطأ ترجمة**. يُقرأ الإدخال القياسي فارغًا.
+
+### 3.8 الترجمة لمتحكم دقيق (Cortex-M)
+
+مع `--target thumbv7em-none-eabihf` ينشئ `typl -c` ملفًا تنفيذيًا (ELF) للوحة Cortex-M4F أو M7 بلا نظام تشغيل. بدون `-o` يُسمّى باسم المصدر مع استبدال `.typl` بـ`.elf`.
+
+```sh
+$ typl -c hello.typl --target thumbv7em-none-eabihf          # ينشئ hello.elf
+$ qemu-system-arm -M mps2-an386 -nographic \
+    -semihosting-config enable=on,target=native -kernel hello.elf   # شغّله على Cortex-M4 في QEMU
+```
+
+- يمكن استخدام `typl` المثبّت بـ`install.sh` كما هو. للتثبيت بـ`cargo install` شغّل `rustup target add thumbv7em-none-eabihf` ثم ثبّت مع `--features embedded` (و`--features wasm,embedded` للاثنين). مع نسخة التصحيح من `typl` في المستودع شغّل `scripts/build-embedded-runtime.sh`. يستخدم الربط رابط سلسلة أدوات rustup.
+- مرّر ذاكرة اللوحة بـ`--linker-script FILE`. يُكتب الملف مثل `memory.x` في `cortex-m-rt`: عناوين FLASH وRAM وأحجامها. سطر مثل `_typelisp_stack_size = 32K;` يحدد ما يأخذه المكدس من RAM (64KiB إن لم يُذكر)؛ وبقية RAM هي الكومة. بدون الخيار يُستخدم تخطيط `mps2-an386` في QEMU.
+
+  ```
+  MEMORY
+  {
+    FLASH : ORIGIN = 0x08000000, LENGTH = 512K
+    RAM : ORIGIN = 0x20000000, LENGTH = 128K
+  }
+  _typelisp_stack_size = 16K;
+  ```
+
+- يختار `--board-functions` من يوفّر الإخراج والإدخال والإنهاء والساعة (دوال اللوحة).
+  - `semihosting` (الافتراضي): عبر semihosting، للتشغيل تحت QEMU (`-semihosting-config enable=on`) أو مصحّح.
+  - `c`: توفّرها اللوحة كدوال C. مرّر بـ`--link FILE` ملف كائن أو مكتبة ثابتة تعرّف الدوال أدناه (يمكن تكرار `--link`؛ وتُمرَّر مكتبة المصنّع التي يستدعيها `defffi` بالطريقة نفسها).
+
+  ```c
+  void     typelisp_host_write(int32_t fd, const uint8_t *p, size_t len); // fd 1 الإخراج القياسي، 2 الخطأ القياسي
+  size_t   typelisp_host_read(int32_t fd, uint8_t *p, size_t len);        // fd 0؛ عدد البايتات المقروءة، 0 عند النهاية
+  void     typelisp_host_exit(int32_t code);                              // لا تعود
+  uint64_t typelisp_host_now_us(void);                                    // ميكروثوانٍ على ساعة لا ترجع أبدًا
+  int64_t  typelisp_host_unix_us(void);                                   // ميكروثوانٍ منذ 1970-01-01
+  void     typelisp_host_sleep_us(uint64_t us);                           // تنتظر us ميكروثانية
+  ```
+
+- تبدأ بيئة التشغيل البرنامج (جدول المتجهات وتهيئة RAM) وتخصّص الذاكرة. HardFault أو مقاطعة بلا معالج ينهي البرنامج برمز خروج panic (1).
+- يعمل `throw`/`catch`/`panic` والأعداد الكبيرة والكسور والأعداد العشرية والمهام والقنوات و`sleep` كما في الملف التنفيذي. تعمل المهام بالتناوب على النواة الوحيدة. يمكن استخدام دوال C (`defffi`).
+- البرنامج الذي يستخدم ما ليس في اللوحة **خطأ ترجمة**: بالإضافة إلى ما لا يمكن استخدامه في القسم 3.7، `eval` و`macroexpand`. الوقت المحلي غير معروف (كما في القسم 3.6).
+- تبدأ ساحة cons بـ1024 خلية وتكبر عند الحاجة. تعمل `--heap-cells` و`--max-memory` و`--no-cons` و`-O<N>` و`--release` كما هي.
 
 ## 4. ملفات الـ dump
 

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ 7622044725db7d28dabb691d82e592367d9284e8 -->
+<!-- translated-from: docs/ja/guide/compile.md @ 849e94e087680155a16df844f633f16017703f95 -->
 # Compileren
 
 Tenzij je iets anders doet, draaien typelisp-programma's in de interpreter. Daarnaast zijn er twee
@@ -230,7 +230,47 @@ const code = await run({ write: (fd, text) => { /* bijvoorbeeld op de pagina ton
 - Serveer in een browser `hello.wasm` via HTTP vanaf dezelfde plek als `hello.mjs` (vanaf `file://` kan het niet geladen worden).
 - `sleep` wacht met `Atomics.wait`. Een browser staat dat alleen toe in een Worker van een cross-origin-geïsoleerde pagina; voer een programma dat `sleep` gebruikt dus uit in een Worker.
 - De lokale tijd (`decode-universal-time` zonder `zone` enzovoort) wordt berekend met de tijdzone die `Date` van JavaScript meldt.
-- Naast wat in paragraaf 3.6 niet kan, zijn bestands- en mapbewerkingen een **compileerfout**. Standaardinvoer leest als leeg en `(command-line-args)` is een lege vector.
+- Naast wat in paragraaf 3.6 niet kan, zijn bestands- en mapbewerkingen, omgevingsvariabelen, `(command-line-args)`, de thuismap en `dribble` een **compileerfout**. Standaardinvoer wordt als leeg gelezen.
+
+### 3.8 Compileren voor een microcontroller (Cortex-M)
+
+Met `--target thumbv7em-none-eabihf` maakt `typl -c` een uitvoerbaar bestand (ELF) voor een Cortex-M4F- of M7-bord zonder besturingssysteem. Zonder `-o` krijgt het de naam van de bron met `.typl` vervangen door `.elf`.
+
+```sh
+$ typl -c hello.typl --target thumbv7em-none-eabihf          # maakt hello.elf
+$ qemu-system-arm -M mps2-an386 -nographic \
+    -semihosting-config enable=on,target=native -kernel hello.elf   # draai het op de Cortex-M4 van QEMU
+```
+
+- Een met `install.sh` geïnstalleerde `typl` kan direct worden gebruikt. Voor `cargo install` voer je eerst `rustup target add thumbv7em-none-eabihf` uit en installeer je met `--features embedded` (`--features wasm,embedded` voor beide). Met een debugbuild van `typl` in de repository voer je `scripts/build-embedded-runtime.sh` uit. Het linken gebruikt de linker van de rustup-toolchain.
+- Geef het geheugen van het bord op met `--linker-script FILE`. Het heeft de vorm van de `memory.x` van `cortex-m-rt`: de adressen en groottes van FLASH en RAM. Een regel als `_typelisp_stack_size = 32K;` bepaalt hoeveel RAM de stack inneemt (zonder opgave 64KiB); de rest van het RAM is de heap. Zonder de optie geldt de indeling van QEMU's `mps2-an386`.
+
+  ```
+  MEMORY
+  {
+    FLASH : ORIGIN = 0x08000000, LENGTH = 512K
+    RAM : ORIGIN = 0x20000000, LENGTH = 128K
+  }
+  _typelisp_stack_size = 16K;
+  ```
+
+- `--board-functions` kiest wie uitvoer, invoer, afsluiten en de klok (de functies van het bord) levert.
+  - `semihosting` (standaard): via semihosting, om onder QEMU (`-semihosting-config enable=on`) of een debugger te draaien.
+  - `c`: het bord levert ze als C-functies. Geef met `--link FILE` een object of statische bibliotheek door die de functies hieronder definieert (`--link` mag herhaald worden; een bibliotheek van de fabrikant die `defffi` aanroept geef je op dezelfde manier door).
+
+  ```c
+  void     typelisp_host_write(int32_t fd, const uint8_t *p, size_t len); // fd 1 is standaarduitvoer, 2 standaardfout
+  size_t   typelisp_host_read(int32_t fd, uint8_t *p, size_t len);        // fd 0; gelezen bytes, 0 aan het eind
+  void     typelisp_host_exit(int32_t code);                              // keert niet terug
+  uint64_t typelisp_host_now_us(void);                                    // microseconden van een klok die nooit teruggaat
+  int64_t  typelisp_host_unix_us(void);                                   // microseconden sinds 1970-01-01
+  void     typelisp_host_sleep_us(uint64_t us);                           // wacht us microseconden
+  ```
+
+- De runtime start het programma (de vectortabel en het klaarmaken van het RAM) en wijst geheugen toe. Een HardFault of een onafgehandelde interrupt beëindigt het programma met de exitcode van een panic (1).
+- `throw`/`catch`/`panic`, bignums, breuken en drijvende-kommagetallen, en taken, kanalen en `sleep` gedragen zich zoals in het uitvoerbare bestand. Taken draaien om de beurt op de ene kern. C-functies (`defffi`) kunnen worden gebruikt.
+- Een programma dat iets gebruikt wat het bord niet heeft, is een **compileerfout**: naast wat in paragraaf 3.7 niet kan, `eval` en `macroexpand`. De lokale tijd is onbekend (zoals in paragraaf 3.6).
+- De cons-arena begint met 1024 cellen en groeit wanneer nodig. `--heap-cells`, `--max-memory`, `--no-cons`, `-O<N>` en `--release` werken zoals ze zijn.
 
 ## 4. Dumps
 

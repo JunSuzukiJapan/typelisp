@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ 7622044725db7d28dabb691d82e592367d9284e8 -->
+<!-- translated-from: docs/ja/guide/compile.md @ 849e94e087680155a16df844f633f16017703f95 -->
 # การคอมไพล์
 
 หากไม่ทำอะไรเพิ่ม โปรแกรม typelisp จะรันในอินเทอร์พรีเตอร์ นอกจากนี้ยังมีวิธีคอมไพล์เป็นโค้ดเนทีฟ
@@ -221,7 +221,47 @@ const code = await run({ write: (fd, text) => { /* เช่น แสดงบ�
 - ในเบราว์เซอร์ ให้เสิร์ฟ `hello.wasm` ผ่าน HTTP จากที่เดียวกับ `hello.mjs` (โหลดจาก `file://` ไม่ได้)
 - `sleep` รอด้วย `Atomics.wait` ซึ่งเบราว์เซอร์อนุญาตเฉพาะภายใน Worker ของหน้าที่แยก cross-origin เท่านั้น จึงควรรันโปรแกรมที่ใช้ `sleep` ใน Worker
 - เวลาท้องถิ่น (`decode-universal-time` ที่ละ `zone` เป็นต้น) คำนวณจากเขตเวลาที่ `Date` ของ JavaScript รายงาน
-- นอกจากสิ่งที่ใช้ไม่ได้ในหัวข้อ 3.6 แล้ว การทำงานกับไฟล์และไดเรกทอรีจะเป็น**ข้อผิดพลาดตอนคอมไพล์** อินพุตมาตรฐานจะอ่านได้ว่าว่าง และ `(command-line-args)` เป็นเวกเตอร์ว่าง
+- นอกจากสิ่งที่ใช้ไม่ได้ในหัวข้อ 3.6 แล้ว การจัดการไฟล์และไดเรกทอรี ตัวแปรสภาพแวดล้อม `(command-line-args)` ไดเรกทอรีหลัก และ `dribble` เป็น**ข้อผิดพลาดตอนคอมไพล์** อินพุตมาตรฐานถูกอ่านเป็นว่าง
+
+### 3.8 คอมไพล์สำหรับไมโครคอนโทรลเลอร์ (Cortex-M)
+
+เมื่อใส่ `--target thumbv7em-none-eabihf` คำสั่ง `typl -c` จะสร้างไฟล์ปฏิบัติการ (ELF) สำหรับบอร์ด Cortex-M4F หรือ M7 ที่ไม่มีระบบปฏิบัติการ ถ้าไม่ใส่ `-o` ชื่อจะเป็นชื่อซอร์สที่เปลี่ยน `.typl` เป็น `.elf`
+
+```sh
+$ typl -c hello.typl --target thumbv7em-none-eabihf          # สร้าง hello.elf
+$ qemu-system-arm -M mps2-an386 -nographic \
+    -semihosting-config enable=on,target=native -kernel hello.elf   # รันบน Cortex-M4 ของ QEMU
+```
+
+- `typl` ที่ติดตั้งด้วย `install.sh` ใช้ได้ทันที ถ้าติดตั้งด้วย `cargo install` ให้รัน `rustup target add thumbv7em-none-eabihf` แล้วติดตั้งพร้อม `--features embedded` (ทั้งสองอย่างใช้ `--features wasm,embedded`) ถ้าใช้ `typl` ที่เป็นบิลด์ดีบักในรีโพสิทอรี ให้รัน `scripts/build-embedded-runtime.sh` การลิงก์ใช้ลิงเกอร์ของ toolchain ของ rustup
+- ระบุหน่วยความจำของบอร์ดด้วย `--linker-script FILE` เขียนแบบเดียวกับ `memory.x` ของ `cortex-m-rt` คือที่อยู่และขนาดของ FLASH และ RAM บรรทัดอย่าง `_typelisp_stack_size = 32K;` กำหนดว่าสแตกใช้ RAM เท่าใด (ถ้าไม่เขียนคือ 64KiB) ส่วนที่เหลือของ RAM คือฮีป ถ้าไม่ใส่ตัวเลือกนี้จะใช้การจัดวางของ `mps2-an386` ใน QEMU
+
+  ```
+  MEMORY
+  {
+    FLASH : ORIGIN = 0x08000000, LENGTH = 512K
+    RAM : ORIGIN = 0x20000000, LENGTH = 128K
+  }
+  _typelisp_stack_size = 16K;
+  ```
+
+- `--board-functions` เลือกว่าใครให้เอาต์พุต อินพุต การจบโปรแกรม และนาฬิกา (ฟังก์ชันของบอร์ด)
+  - `semihosting` (ค่าเริ่มต้น): ให้ผ่าน semihosting สำหรับรันใน QEMU (`-semihosting-config enable=on`) หรือดีบักเกอร์
+  - `c`: บอร์ดให้เป็นฟังก์ชัน C ส่งออบเจ็กต์หรือไลบรารีแบบสแตติกที่นิยามฟังก์ชันด้านล่างด้วย `--link FILE` (`--link` ใส่ซ้ำได้ ไลบรารีของผู้ผลิตที่ `defffi` เรียกก็ส่งแบบเดียวกัน)
+
+  ```c
+  void     typelisp_host_write(int32_t fd, const uint8_t *p, size_t len); // fd 1 คือเอาต์พุตมาตรฐาน 2 คือข้อผิดพลาดมาตรฐาน
+  size_t   typelisp_host_read(int32_t fd, uint8_t *p, size_t len);        // fd 0 จำนวนไบต์ที่อ่าน 0 เมื่อจบ
+  void     typelisp_host_exit(int32_t code);                              // ไม่กลับมา
+  uint64_t typelisp_host_now_us(void);                                    // ไมโครวินาทีของนาฬิกาที่ไม่ย้อนกลับ
+  int64_t  typelisp_host_unix_us(void);                                   // ไมโครวินาทีตั้งแต่ 1970-01-01
+  void     typelisp_host_sleep_us(uint64_t us);                           // รอ us ไมโครวินาที
+  ```
+
+- รันไทม์เริ่มโปรแกรม (ตารางเวกเตอร์และการเตรียม RAM) และจัดสรรหน่วยความจำ เมื่อเกิด HardFault หรืออินเทอร์รัปต์ที่ไม่มีตัวจัดการ โปรแกรมจะจบด้วยรหัสออกเดียวกับ panic (1)
+- `throw`/`catch`/`panic` จำนวนเต็มขนาดใหญ่ เศษส่วน และทศนิยม รวมถึงงาน แชนเนล และ `sleep` ทำงานเหมือนในไฟล์ปฏิบัติการ งานรันสลับกันบนคอร์เดียว ใช้ฟังก์ชัน C (`defffi`) ได้
+- โปรแกรมที่ใช้สิ่งที่บอร์ดไม่มีเป็น**ข้อผิดพลาดตอนคอมไพล์** นอกจากสิ่งที่ใช้ไม่ได้ในหัวข้อ 3.7 แล้วยังมี `eval` และ `macroexpand` เวลาท้องถิ่นไม่ทราบ (เหมือนหัวข้อ 3.6)
+- อารีนาของ cons เริ่มที่ 1024 เซลล์และขยายเมื่อไม่พอ `--heap-cells`, `--max-memory`, `--no-cons`, `-O<N>` และ `--release` ใช้ได้ตามเดิม
 
 ## 4. Dump
 

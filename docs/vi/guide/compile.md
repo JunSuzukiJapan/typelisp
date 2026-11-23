@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ 7622044725db7d28dabb691d82e592367d9284e8 -->
+<!-- translated-from: docs/ja/guide/compile.md @ 849e94e087680155a16df844f633f16017703f95 -->
 # Biên dịch
 
 Nếu bạn không làm gì thêm, chương trình typelisp chạy trong trình thông dịch. Ngoài ra còn có hai
@@ -219,7 +219,47 @@ const code = await run({ write: (fd, text) => { /* ví dụ hiển thị lên tr
 - Trong trình duyệt, hãy phục vụ `hello.wasm` qua HTTP từ cùng chỗ với `hello.mjs` (không nạp được từ `file://`).
 - `sleep` chờ bằng `Atomics.wait`. Trình duyệt chỉ cho phép việc này trong Worker của trang được cô lập cross-origin, nên hãy chạy chương trình dùng `sleep` trong Worker.
 - Giờ địa phương (`decode-universal-time` khi bỏ `zone`, v.v.) được tính theo múi giờ mà `Date` của JavaScript báo.
-- Ngoài những thứ không dùng được ở mục 3.6, các thao tác với tệp và thư mục là **lỗi biên dịch**. Đầu vào chuẩn được đọc là rỗng, và `(command-line-args)` là một vector rỗng.
+- Ngoài những gì không dùng được ở mục 3.6, các thao tác với tệp và thư mục, biến môi trường, `(command-line-args)`, thư mục home và `dribble` là **lỗi biên dịch**. Đầu vào chuẩn được đọc là rỗng.
+
+### 3.8 Biên dịch cho vi điều khiển (Cortex-M)
+
+Với `--target thumbv7em-none-eabihf`, `typl -c` tạo tệp thực thi (ELF) cho bo mạch Cortex-M4F hoặc M7 không có hệ điều hành. Nếu không có `-o`, tên là tên mã nguồn với `.typl` đổi thành `.elf`.
+
+```sh
+$ typl -c hello.typl --target thumbv7em-none-eabihf          # tạo hello.elf
+$ qemu-system-arm -M mps2-an386 -nographic \
+    -semihosting-config enable=on,target=native -kernel hello.elf   # chạy trên Cortex-M4 của QEMU
+```
+
+- `typl` cài bằng `install.sh` dùng được ngay. Để cài bằng `cargo install`, chạy `rustup target add thumbv7em-none-eabihf` rồi cài với `--features embedded` (`--features wasm,embedded` cho cả hai). Với bản build gỡ lỗi của `typl` trong kho mã, chạy `scripts/build-embedded-runtime.sh`. Việc liên kết dùng trình liên kết của toolchain rustup.
+- Cho biết bộ nhớ của bo mạch bằng `--linker-script FILE`. Tệp được viết như `memory.x` của `cortex-m-rt`: địa chỉ và kích thước của FLASH và RAM. Một dòng như `_typelisp_stack_size = 32K;` đặt phần RAM mà ngăn xếp dùng (mặc định 64KiB); phần RAM còn lại là heap. Không có tùy chọn này thì dùng bố trí của `mps2-an386` trong QEMU.
+
+  ```
+  MEMORY
+  {
+    FLASH : ORIGIN = 0x08000000, LENGTH = 512K
+    RAM : ORIGIN = 0x20000000, LENGTH = 128K
+  }
+  _typelisp_stack_size = 16K;
+  ```
+
+- `--board-functions` chọn ai cung cấp đầu ra, đầu vào, kết thúc và đồng hồ (các hàm của bo mạch).
+  - `semihosting` (mặc định): qua semihosting, để chạy trong QEMU (`-semihosting-config enable=on`) hoặc trình gỡ lỗi.
+  - `c`: bo mạch cung cấp chúng dưới dạng hàm C. Truyền bằng `--link FILE` một tệp đối tượng hoặc thư viện tĩnh định nghĩa các hàm dưới đây (`--link` có thể lặp lại; thư viện của nhà sản xuất mà `defffi` gọi cũng truyền như vậy).
+
+  ```c
+  void     typelisp_host_write(int32_t fd, const uint8_t *p, size_t len); // fd 1 là đầu ra chuẩn, 2 là lỗi chuẩn
+  size_t   typelisp_host_read(int32_t fd, uint8_t *p, size_t len);        // fd 0; số byte đã đọc, 0 khi hết
+  void     typelisp_host_exit(int32_t code);                              // không trở về
+  uint64_t typelisp_host_now_us(void);                                    // micro giây của đồng hồ không bao giờ lùi
+  int64_t  typelisp_host_unix_us(void);                                   // micro giây kể từ 1970-01-01
+  void     typelisp_host_sleep_us(uint64_t us);                           // chờ us micro giây
+  ```
+
+- Runtime khởi động chương trình (bảng vector và chuẩn bị RAM) và cấp phát bộ nhớ. Một HardFault hoặc ngắt không được xử lý kết thúc chương trình với mã thoát của panic (1).
+- `throw`/`catch`/`panic`, số lớn, phân số và số thực dấu phẩy động, cùng tác vụ, kênh và `sleep` hoạt động như trong tệp thực thi. Các tác vụ chạy lần lượt trên lõi duy nhất. Có thể dùng hàm C (`defffi`).
+- Chương trình dùng thứ bo mạch không có là **lỗi biên dịch**: ngoài những gì không dùng được ở mục 3.7, còn `eval` và `macroexpand`. Giờ địa phương không xác định (như ở mục 3.6).
+- Vùng cons bắt đầu với 1024 ô và lớn lên khi cần. `--heap-cells`, `--max-memory`, `--no-cons`, `-O<N>` và `--release` dùng như bình thường.
 
 ## 4. Dump
 

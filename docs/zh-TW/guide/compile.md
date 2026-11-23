@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ 7622044725db7d28dabb691d82e592367d9284e8 -->
+<!-- translated-from: docs/ja/guide/compile.md @ 849e94e087680155a16df844f633f16017703f95 -->
 # 編譯
 
 不做任何處理的話，typelisp 程式由直譯器執行。此外還有兩種編譯為原生碼的方法，以及一種保存環境的方法。規格的詳情見
@@ -206,7 +206,47 @@ const code = await run({ write: (fd, text) => { /* 例如顯示在頁面上 */ }
 - 在瀏覽器中，請透過 HTTP 從與 `hello.mjs` 相同的位置提供 `hello.wasm`（無法從 `file://` 載入）。
 - `sleep` 用 `Atomics.wait` 等待。瀏覽器只允許在跨來源隔離頁面的 Worker 中使用它，因此使用 `sleep` 的程式請在 Worker 中執行。
 - 本地時間（省略 `zone` 的 `decode-universal-time` 等）依 JavaScript 的 `Date` 回報的時區求得。
-- 除 3.6 節中不能使用的之外，檔案和目錄操作也是**編譯錯誤**。標準輸入讀作空，`(command-line-args)` 是空向量。
+- 除了 3.6 節中不能使用的東西，檔案和目錄操作、環境變數、`(command-line-args)`、家目錄和 `dribble` 也是**編譯錯誤**。標準輸入讀作空。
+
+### 3.8 為微控制器（Cortex-M）編譯
+
+加上 `--target thumbv7em-none-eabihf`，`typl -c` 會為沒有作業系統的 Cortex-M4F、M7 開發板產生可執行檔（ELF）。省略 `-o` 時，名稱是把原始檔的 `.typl` 換成 `.elf`。
+
+```sh
+$ typl -c hello.typl --target thumbv7em-none-eabihf          # 產生 hello.elf
+$ qemu-system-arm -M mps2-an386 -nographic \
+    -semihosting-config enable=on,target=native -kernel hello.elf   # 在 QEMU 的 Cortex-M4 上執行
+```
+
+- 用 `install.sh` 安裝的 `typl` 可以直接使用。用 `cargo install` 安裝時，先執行 `rustup target add thumbv7em-none-eabihf`，再加上 `--features embedded` 安裝（與 wasm 兩者都要則用 `--features wasm,embedded`）。使用儲存庫的除錯建置 `typl` 時，執行 `scripts/build-embedded-runtime.sh`。連結使用 rustup 工具鏈的連結器。
+- 用 `--linker-script FILE` 給出開發板的記憶體配置。寫法與 `cortex-m-rt` 的 `memory.x` 相同，寫 FLASH 和 RAM 的位址與大小。寫 `_typelisp_stack_size = 32K;` 這樣的一行，就是 RAM 中堆疊佔用的大小（不寫則為 64KiB）。RAM 的其餘部分是堆積。省略時使用 QEMU 的 `mps2-an386` 的配置。
+
+  ```
+  MEMORY
+  {
+    FLASH : ORIGIN = 0x08000000, LENGTH = 512K
+    RAM : ORIGIN = 0x20000000, LENGTH = 128K
+  }
+  _typelisp_stack_size = 16K;
+  ```
+
+- 由誰提供輸出、輸入、結束和時鐘（開發板的函式），用 `--board-functions` 選擇。
+  - `semihosting`（預設）：透過 semihosting 提供。在 QEMU（`-semihosting-config enable=on`）或除錯器下執行時使用。
+  - `c`：由開發板以 C 函式提供。用 `--link FILE` 傳入定義了下列函式的目的檔或靜態函式庫（`--link` 可以寫多次；`defffi` 呼叫的廠商函式庫也同樣傳入）。
+
+  ```c
+  void     typelisp_host_write(int32_t fd, const uint8_t *p, size_t len); // fd 1 是標準輸出，2 是標準錯誤
+  size_t   typelisp_host_read(int32_t fd, uint8_t *p, size_t len);        // fd 0；讀到的位元組數，結束時為 0
+  void     typelisp_host_exit(int32_t code);                              // 不返回
+  uint64_t typelisp_host_now_us(void);                                    // 不會倒退的時鐘的微秒數
+  int64_t  typelisp_host_unix_us(void);                                   // 自 1970-01-01 起的微秒數
+  void     typelisp_host_sleep_us(uint64_t us);                           // 等待 us 微秒
+  ```
+
+- 啟動（向量表和 RAM 的準備）和記憶體配置由執行環境完成。發生 HardFault 或未處理的中斷時，以與 panic 相同的結束碼（1）結束。
+- `throw`/`catch`/`panic`、bignum、ratio、浮點數，以及任務、通道和 `sleep` 的行為與可執行檔相同。任務在唯一的核心上依序執行。也可以使用 C 函式（`defffi`）。
+- 使用開發板沒有的東西的程式是**編譯錯誤**。除了 3.7 節中不能使用的東西，還不能使用 `eval` 和 `macroexpand`。本地時間未知（與 3.6 節相同）。
+- cons 區域從 1024 個單元開始，不夠時會成長。`--heap-cells`、`--max-memory`、`--no-cons`、`-O<N>`、`--release` 可以照常使用。
 
 ## 4. 傾印
 

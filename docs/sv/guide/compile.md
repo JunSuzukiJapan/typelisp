@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ 7622044725db7d28dabb691d82e592367d9284e8 -->
+<!-- translated-from: docs/ja/guide/compile.md @ 849e94e087680155a16df844f633f16017703f95 -->
 # Kompilering
 
 Om du inte gör något annat körs typelisp-program i tolken. Dessutom finns två sätt att kompilera till
@@ -223,7 +223,47 @@ const code = await run({ write: (fd, text) => { /* visa den på sidan, till exem
 - I en webbläsare ska `hello.wasm` serveras över HTTP från samma ställe som `hello.mjs` (den kan inte laddas från `file://`).
 - `sleep` väntar med `Atomics.wait`. En webbläsare tillåter det bara i en Worker på en cross-origin-isolerad sida, så kör ett program som använder `sleep` i en Worker.
 - Lokal tid (`decode-universal-time` utan `zone` och så vidare) beräknas med den tidszon som JavaScripts `Date` rapporterar.
-- Utöver det som inte kan användas i avsnitt 3.6 är fil- och katalogoperationer ett **kompileringsfel**. Standard in läses som tom, och `(command-line-args)` är en tom vektor.
+- Utöver det som inte kan användas i avsnitt 3.6 är fil- och katalogoperationer, miljövariabler, `(command-line-args)`, hemkatalogen och `dribble` ett **kompileringsfel**. Standardindata läses som tom.
+
+### 3.8 Kompilera för en mikrokontroller (Cortex-M)
+
+Med `--target thumbv7em-none-eabihf` skapar `typl -c` en körbar fil (ELF) för ett Cortex-M4F- eller M7-kort utan operativsystem. Utan `-o` får den källans namn med `.typl` utbytt mot `.elf`.
+
+```sh
+$ typl -c hello.typl --target thumbv7em-none-eabihf          # skapar hello.elf
+$ qemu-system-arm -M mps2-an386 -nographic \
+    -semihosting-config enable=on,target=native -kernel hello.elf   # kör den på QEMU:s Cortex-M4
+```
+
+- En `typl` installerad med `install.sh` kan användas som den är. För att installera med `cargo install`, kör `rustup target add thumbv7em-none-eabihf` och installera sedan med `--features embedded` (`--features wasm,embedded` för båda). Med en debugbygge av `typl` i förrådet, kör `scripts/build-embedded-runtime.sh`. Länkningen använder länkaren i rustup-verktygskedjan.
+- Ange kortets minne med `--linker-script FILE`. Den skrivs som `cortex-m-rt`:s `memory.x`: adresser och storlekar för FLASH och RAM. En rad som `_typelisp_stack_size = 32K;` anger hur mycket av RAM som stacken tar (64KiB om inget anges); resten av RAM är heapen. Utan flaggan används layouten för QEMU:s `mps2-an386`.
+
+  ```
+  MEMORY
+  {
+    FLASH : ORIGIN = 0x08000000, LENGTH = 512K
+    RAM : ORIGIN = 0x20000000, LENGTH = 128K
+  }
+  _typelisp_stack_size = 16K;
+  ```
+
+- `--board-functions` väljer vem som ger utdata, indata, avslut och klockan (kortets funktioner).
+  - `semihosting` (standard): via semihosting, för körning under QEMU (`-semihosting-config enable=on`) eller en debugger.
+  - `c`: kortet ger dem som C-funktioner. Skicka med `--link FILE` ett objekt eller statiskt bibliotek som definierar funktionerna nedan (`--link` kan upprepas; ett leverantörsbibliotek som `defffi` anropar skickas på samma sätt).
+
+  ```c
+  void     typelisp_host_write(int32_t fd, const uint8_t *p, size_t len); // fd 1 är standardutdata, 2 standardfel
+  size_t   typelisp_host_read(int32_t fd, uint8_t *p, size_t len);        // fd 0; lästa byte, 0 vid slutet
+  void     typelisp_host_exit(int32_t code);                              // återvänder inte
+  uint64_t typelisp_host_now_us(void);                                    // mikrosekunder på en klocka som aldrig går bakåt
+  int64_t  typelisp_host_unix_us(void);                                   // mikrosekunder sedan 1970-01-01
+  void     typelisp_host_sleep_us(uint64_t us);                           // väntar us mikrosekunder
+  ```
+
+- Körmiljön startar programmet (vektortabellen och förberedelsen av RAM) och allokerar minne. Ett HardFault eller ett obehandlat avbrott avslutar programmet med en panics slutkod (1).
+- `throw`/`catch`/`panic`, bignums, bråk och flyttal samt uppgifter, kanaler och `sleep` beter sig som i den körbara filen. Uppgifter körs i tur och ordning på den enda kärnan. C-funktioner (`defffi`) kan användas.
+- Ett program som använder det kortet inte har är ett **kompileringsfel**: utöver det som inte kan användas i avsnitt 3.7, `eval` och `macroexpand`. Lokal tid är okänd (som i avsnitt 3.6).
+- Cons-arenan börjar med 1024 celler och växer vid behov. `--heap-cells`, `--max-memory`, `--no-cons`, `-O<N>` och `--release` fungerar som de är.
 
 ## 4. Dumpar
 

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ 7622044725db7d28dabb691d82e592367d9284e8 -->
+<!-- translated-from: docs/ja/guide/compile.md @ 849e94e087680155a16df844f633f16017703f95 -->
 # Compiling
 
 Unless you do anything else, typelisp programs run in the interpreter. In addition there are two
@@ -229,7 +229,47 @@ const code = await run({ write: (fd, text) => { /* show it on the page, for exam
 - In a browser, serve `hello.wasm` over HTTP from the same place as `hello.mjs` (it cannot be loaded from `file://`).
 - `sleep` waits with `Atomics.wait`. A browser allows that only inside a Worker of a cross-origin isolated page, so run a program that uses `sleep` in a Worker.
 - Local time (`decode-universal-time` without `zone`, and so on) uses the time zone JavaScript's `Date` reports.
-- Besides what section 3.6 cannot use, file and directory operations are a **compile error**. Standard input reads as empty, and `(command-line-args)` is an empty vector.
+- Besides what section 3.6 cannot use, file and directory operations, environment variables, `(command-line-args)`, the home directory and `dribble` are a **compile error**. Standard input reads as empty.
+
+### 3.8 Compiling for a microcontroller (Cortex-M)
+
+With `--target thumbv7em-none-eabihf`, `typl -c` makes an executable (ELF) for a Cortex-M4F or M7 board without an operating system. Without `-o`, it is named after the source with `.typl` replaced by `.elf`.
+
+```sh
+$ typl -c hello.typl --target thumbv7em-none-eabihf          # makes hello.elf
+$ qemu-system-arm -M mps2-an386 -nographic \
+    -semihosting-config enable=on,target=native -kernel hello.elf   # run it on QEMU's Cortex-M4
+```
+
+- A `typl` installed with `install.sh` can be used as it is. To install with `cargo install`, run `rustup target add thumbv7em-none-eabihf`, then install with `--features embedded` (`--features wasm,embedded` for both). With a debug build of `typl` in the repository, run `scripts/build-embedded-runtime.sh`. Linking uses the linker of the rustup toolchain.
+- Give the board's memory with `--linker-script FILE`. It is written as `cortex-m-rt`'s `memory.x` is: the addresses and sizes of FLASH and RAM. A line like `_typelisp_stack_size = 32K;` sets how much of the RAM the stack takes (64KiB if not given); the rest of the RAM is the heap. Without the option, the layout is that of QEMU's `mps2-an386`.
+
+  ```
+  MEMORY
+  {
+    FLASH : ORIGIN = 0x08000000, LENGTH = 512K
+    RAM : ORIGIN = 0x20000000, LENGTH = 128K
+  }
+  _typelisp_stack_size = 16K;
+  ```
+
+- `--board-functions` chooses who gives output, input, exiting and the clock (the board's functions).
+  - `semihosting` (the default): given over semihosting, for running under QEMU (`-semihosting-config enable=on`) or a debugger.
+  - `c`: the board gives them as C functions. Pass an object or static library that defines the functions below with `--link FILE` (`--link` can be repeated; a vendor's library that `defffi` calls is passed the same way).
+
+  ```c
+  void     typelisp_host_write(int32_t fd, const uint8_t *p, size_t len); // fd 1 is standard output, 2 standard error
+  size_t   typelisp_host_read(int32_t fd, uint8_t *p, size_t len);        // fd 0; the bytes read, 0 at the end
+  void     typelisp_host_exit(int32_t code);                              // does not return
+  uint64_t typelisp_host_now_us(void);                                    // microseconds on a clock that never goes back
+  int64_t  typelisp_host_unix_us(void);                                   // microseconds since 1970-01-01
+  void     typelisp_host_sleep_us(uint64_t us);                           // waits us microseconds
+  ```
+
+- The runtime starts the program (the vector table and getting RAM ready) and allocates memory. A HardFault or an interrupt nothing handles ends the program with the exit code of a panic (1).
+- `throw`/`catch`/`panic`, bignums, ratios and floats, and tasks, channels and `sleep` behave as in the executable. Tasks run in turn on the one core. C functions (`defffi`) can be used.
+- A program that uses what the board does not have is a **compile error**: besides what section 3.7 cannot use, `eval` and `macroexpand`. Local time is unknown (as in section 3.6).
+- The cons arena starts at 1024 cells and grows when it needs more. `--heap-cells`, `--max-memory`, `--no-cons`, `-O<N>` and `--release` work as they are.
 
 ## 4. Dumps
 

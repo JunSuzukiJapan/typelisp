@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ 7622044725db7d28dabb691d82e592367d9284e8 -->
+<!-- translated-from: docs/ja/guide/compile.md @ 849e94e087680155a16df844f633f16017703f95 -->
 # Kompilierung
 
 Ohne weiteres Zutun laufen typelisp-Programme im Interpreter. Darüber hinaus gibt es zwei Wege, in nativen
@@ -226,7 +226,47 @@ const code = await run({ write: (fd, text) => { /* zum Beispiel auf der Seite an
 - Im Browser liefern Sie `hello.wasm` per HTTP vom selben Ort wie `hello.mjs` aus (von `file://` lässt es sich nicht laden).
 - `sleep` wartet mit `Atomics.wait`. Ein Browser erlaubt das nur in einem Worker einer cross-origin-isolierten Seite; führen Sie ein Programm, das `sleep` benutzt, daher in einem Worker aus.
 - Die Ortszeit (`decode-universal-time` ohne `zone` usw.) wird mit der Zeitzone berechnet, die JavaScripts `Date` meldet.
-- Zusätzlich zu dem, was in Abschnitt 3.6 nicht verfügbar ist, sind Datei- und Verzeichnisoperationen ein **Kompilierfehler**. Die Standardeingabe liest sich als leer, und `(command-line-args)` ist ein leerer Vektor.
+- Zusätzlich zu dem, was in Abschnitt 3.6 nicht nutzbar ist, sind Datei- und Verzeichnisoperationen, Umgebungsvariablen, `(command-line-args)`, das Home-Verzeichnis und `dribble` ein **Kompilierfehler**. Die Standardeingabe wird als leer gelesen.
+
+### 3.8 Für einen Mikrocontroller (Cortex-M) kompilieren
+
+Mit `--target thumbv7em-none-eabihf` erzeugt `typl -c` eine ausführbare Datei (ELF) für eine Cortex-M4F- oder M7-Platine ohne Betriebssystem. Ohne `-o` wird sie nach der Quelle benannt, wobei `.typl` durch `.elf` ersetzt wird.
+
+```sh
+$ typl -c hello.typl --target thumbv7em-none-eabihf          # erzeugt hello.elf
+$ qemu-system-arm -M mps2-an386 -nographic \
+    -semihosting-config enable=on,target=native -kernel hello.elf   # auf dem Cortex-M4 von QEMU ausführen
+```
+
+- Ein mit `install.sh` installiertes `typl` kann direkt verwendet werden. Für `cargo install` zuerst `rustup target add thumbv7em-none-eabihf` ausführen und dann mit `--features embedded` installieren (`--features wasm,embedded` für beides). Mit einem Debug-Build von `typl` im Repository `scripts/build-embedded-runtime.sh` ausführen. Gelinkt wird mit dem Linker der rustup-Toolchain.
+- Den Speicher der Platine mit `--linker-script FILE` angeben. Die Datei hat die Form von `memory.x` aus `cortex-m-rt`: Adressen und Größen von FLASH und RAM. Eine Zeile wie `_typelisp_stack_size = 32K;` legt fest, wie viel des RAM der Stack belegt (ohne Angabe 64KiB); der Rest des RAM ist der Heap. Ohne die Option gilt die Aufteilung von QEMUs `mps2-an386`.
+
+  ```
+  MEMORY
+  {
+    FLASH : ORIGIN = 0x08000000, LENGTH = 512K
+    RAM : ORIGIN = 0x20000000, LENGTH = 128K
+  }
+  _typelisp_stack_size = 16K;
+  ```
+
+- `--board-functions` wählt, wer Ausgabe, Eingabe, Beenden und die Uhr (die Funktionen der Platine) bereitstellt.
+  - `semihosting` (Standard): über Semihosting, zum Ausführen unter QEMU (`-semihosting-config enable=on`) oder einem Debugger.
+  - `c`: Die Platine stellt sie als C-Funktionen bereit. Ein Objekt oder eine statische Bibliothek, die die folgenden Funktionen definiert, mit `--link FILE` übergeben (`--link` kann mehrfach angegeben werden; eine Herstellerbibliothek, die `defffi` aufruft, wird ebenso übergeben).
+
+  ```c
+  void     typelisp_host_write(int32_t fd, const uint8_t *p, size_t len); // fd 1 ist die Standardausgabe, 2 die Standardfehlerausgabe
+  size_t   typelisp_host_read(int32_t fd, uint8_t *p, size_t len);        // fd 0; gelesene Bytes, 0 am Ende
+  void     typelisp_host_exit(int32_t code);                              // kehrt nicht zurück
+  uint64_t typelisp_host_now_us(void);                                    // Mikrosekunden einer Uhr, die nie zurückläuft
+  int64_t  typelisp_host_unix_us(void);                                   // Mikrosekunden seit 1970-01-01
+  void     typelisp_host_sleep_us(uint64_t us);                           // wartet us Mikrosekunden
+  ```
+
+- Die Laufzeitumgebung startet das Programm (Vektortabelle und Vorbereitung des RAM) und verwaltet den Speicher. Ein HardFault oder ein unbehandelter Interrupt beendet das Programm mit dem Exit-Code eines Panic (1).
+- `throw`/`catch`/`panic`, Bignums, Brüche und Gleitkommazahlen sowie Tasks, Kanäle und `sleep` verhalten sich wie in der ausführbaren Datei. Tasks laufen nacheinander auf dem einen Kern. C-Funktionen (`defffi`) können verwendet werden.
+- Ein Programm, das etwas verwendet, das die Platine nicht hat, ist ein **Kompilierfehler**: zusätzlich zu dem, was in Abschnitt 3.7 nicht nutzbar ist, `eval` und `macroexpand`. Die Ortszeit ist unbekannt (wie in Abschnitt 3.6).
+- Die Cons-Arena beginnt mit 1024 Zellen und wächst bei Bedarf. `--heap-cells`, `--max-memory`, `--no-cons`, `-O<N>` und `--release` funktionieren unverändert.
 
 ## 4. Dumps
 

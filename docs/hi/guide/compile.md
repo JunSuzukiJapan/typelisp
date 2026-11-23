@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ 7622044725db7d28dabb691d82e592367d9284e8 -->
+<!-- translated-from: docs/ja/guide/compile.md @ 849e94e087680155a16df844f633f16017703f95 -->
 # कंपाइल करना
 
 यदि आप और कुछ न करें, तो typelisp प्रोग्राम इंटरप्रेटर में चलते हैं। इसके अलावा नेटिव कोड में कंपाइल करने के दो तरीके हैं, और एक पर्यावरण को सहेजने का तरीका है। विनिर्देश का विवरण [सिंटैक्स संदर्भ अध्याय 10](../reference/syntax.md#10-कंपाइलेशन) में है।
@@ -195,7 +195,47 @@ const code = await run({ write: (fd, text) => { /* उदाहरण के ल
 - ब्राउज़र में `hello.wasm` को `hello.mjs` वाली जगह से ही HTTP पर दें (`file://` से लोड नहीं हो सकता)।
 - `sleep` `Atomics.wait` से प्रतीक्षा करता है। ब्राउज़र इसकी अनुमति केवल cross-origin अलग किए गए पेज के Worker में देता है, इसलिए `sleep` इस्तेमाल करने वाला प्रोग्राम Worker में चलाएँ।
 - स्थानीय समय (`zone` के बिना `decode-universal-time` आदि) JavaScript का `Date` जो समय क्षेत्र बताता है उससे निकाला जाता है।
-- खंड 3.6 में जो इस्तेमाल नहीं हो सकता उसके अलावा, फ़ाइल और डायरेक्टरी के काम **कंपाइल त्रुटि** हैं। मानक इनपुट खाली पढ़ा जाता है, और `(command-line-args)` एक खाली वेक्टर है।
+- खंड 3.6 में जो उपयोग नहीं हो सकता उसके अलावा, फ़ाइल और डायरेक्टरी के संचालन, एनवायरनमेंट वेरिएबल, `(command-line-args)`, होम डायरेक्टरी और `dribble` **कंपाइल त्रुटि** हैं। मानक इनपुट खाली पढ़ा जाता है।
+
+### 3.8 माइक्रोकंट्रोलर (Cortex-M) के लिए कंपाइल करना
+
+`--target thumbv7em-none-eabihf` के साथ `typl -c` बिना ऑपरेटिंग सिस्टम वाले Cortex-M4F या M7 बोर्ड के लिए एक्ज़ीक्यूटेबल (ELF) बनाता है। `-o` न देने पर नाम स्रोत का होता है, `.typl` की जगह `.elf`।
+
+```sh
+$ typl -c hello.typl --target thumbv7em-none-eabihf          # hello.elf बनाता है
+$ qemu-system-arm -M mps2-an386 -nographic \
+    -semihosting-config enable=on,target=native -kernel hello.elf   # QEMU के Cortex-M4 पर चलाएँ
+```
+
+- `install.sh` से इंस्टॉल किया गया `typl` वैसे ही उपयोग किया जा सकता है। `cargo install` से इंस्टॉल करने के लिए `rustup target add thumbv7em-none-eabihf` चलाएँ, फिर `--features embedded` के साथ इंस्टॉल करें (दोनों के लिए `--features wasm,embedded`)। रिपॉज़िटरी के डीबग बिल्ड वाले `typl` के साथ `scripts/build-embedded-runtime.sh` चलाएँ। लिंक करने में rustup टूलचेन का लिंकर उपयोग होता है।
+- बोर्ड की मेमोरी `--linker-script FILE` से दें। यह `cortex-m-rt` के `memory.x` जैसा लिखा जाता है: FLASH और RAM के पते और आकार। `_typelisp_stack_size = 32K;` जैसी पंक्ति तय करती है कि RAM का कितना हिस्सा स्टैक लेता है (न देने पर 64KiB); बाकी RAM हीप है। विकल्प न होने पर QEMU के `mps2-an386` का लेआउट होता है।
+
+  ```
+  MEMORY
+  {
+    FLASH : ORIGIN = 0x08000000, LENGTH = 512K
+    RAM : ORIGIN = 0x20000000, LENGTH = 128K
+  }
+  _typelisp_stack_size = 16K;
+  ```
+
+- `--board-functions` चुनता है कि आउटपुट, इनपुट, समाप्ति और घड़ी (बोर्ड के फ़ंक्शन) कौन देगा।
+  - `semihosting` (डिफ़ॉल्ट): semihosting से, QEMU (`-semihosting-config enable=on`) या डीबगर के तहत चलाने के लिए।
+  - `c`: बोर्ड उन्हें C फ़ंक्शन के रूप में देता है। नीचे के फ़ंक्शन परिभाषित करने वाली ऑब्जेक्ट फ़ाइल या स्टैटिक लाइब्रेरी `--link FILE` से दें (`--link` दोहराया जा सकता है; `defffi` से बुलाई जाने वाली विक्रेता की लाइब्रेरी भी इसी तरह दी जाती है)।
+
+  ```c
+  void     typelisp_host_write(int32_t fd, const uint8_t *p, size_t len); // fd 1 मानक आउटपुट, 2 मानक त्रुटि
+  size_t   typelisp_host_read(int32_t fd, uint8_t *p, size_t len);        // fd 0; पढ़े गए बाइट, अंत में 0
+  void     typelisp_host_exit(int32_t code);                              // वापस नहीं लौटता
+  uint64_t typelisp_host_now_us(void);                                    // कभी पीछे न जाने वाली घड़ी के माइक्रोसेकंड
+  int64_t  typelisp_host_unix_us(void);                                   // 1970-01-01 से माइक्रोसेकंड
+  void     typelisp_host_sleep_us(uint64_t us);                           // us माइक्रोसेकंड प्रतीक्षा करता है
+  ```
+
+- रनटाइम प्रोग्राम शुरू करता है (वेक्टर टेबल और RAM की तैयारी) और मेमोरी आवंटित करता है। HardFault या बिना हैंडलर का इंटरप्ट प्रोग्राम को panic के निकास कोड (1) से समाप्त करता है।
+- `throw`/`catch`/`panic`, बड़े पूर्णांक, भिन्न और फ़्लोटिंग पॉइंट, तथा टास्क, चैनल और `sleep` एक्ज़ीक्यूटेबल की तरह ही व्यवहार करते हैं। टास्क एक कोर पर बारी-बारी से चलते हैं। C फ़ंक्शन (`defffi`) उपयोग किए जा सकते हैं।
+- जो प्रोग्राम बोर्ड में न होने वाली चीज़ उपयोग करे वह **कंपाइल त्रुटि** है: खंड 3.7 में जो उपयोग नहीं हो सकता उसके अलावा `eval` और `macroexpand`। स्थानीय समय अज्ञात है (खंड 3.6 की तरह)।
+- cons एरीना 1024 सेल से शुरू होता है और ज़रूरत पड़ने पर बढ़ता है। `--heap-cells`, `--max-memory`, `--no-cons`, `-O<N>` और `--release` वैसे ही काम करते हैं।
 
 ## 4. डंप
 
