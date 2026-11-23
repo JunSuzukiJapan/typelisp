@@ -20,7 +20,8 @@ runs:
   using: composite
   steps:
     # coreutils for `timeout`, which scripts/test-serial.sh will not run
-    # without and macOS does not ship.
+    # without and macOS does not ship. QEMU for the tests of executables for
+    # a board (`qemu-system-arm`).
     - name: Install LLVM 22 (Homebrew)
       if: runner.os == 'macOS'
       shell: bash
@@ -35,7 +36,7 @@ runs:
         for f in $(brew list --formula | grep -E '^llvm(@[0-9]+)?$'); do
           if [ "$f" != llvm@22 ]; then brew uninstall --ignore-dependencies "$f"; fi
         done
-        retry brew install llvm@22 coreutils
+        retry brew install llvm@22 coreutils qemu
 
     - name: Install build dependencies (apt)
       if: runner.os == 'Linux' && inputs.apt-suite != ''
@@ -49,7 +50,7 @@ runs:
         retry apt-get update
         retry apt-get install -y --no-install-recommends \
           ca-certificates curl gnupg build-essential pkg-config \
-          zlib1g-dev libzstd-dev libxml2-dev
+          zlib1g-dev libzstd-dev libxml2-dev qemu-system-arm
         retry curl -fsSL -o /tmp/llvm-snapshot.gpg.key https://apt.llvm.org/llvm-snapshot.gpg.key
         gpg --dearmor -o /usr/share/keyrings/llvm.gpg /tmp/llvm-snapshot.gpg.key
         echo "deb [signed-by=/usr/share/keyrings/llvm.gpg] http://apt.llvm.org/${{ inputs.apt-suite }}/ llvm-toolchain-${{ inputs.apt-suite }}-22 main" \
@@ -66,7 +67,7 @@ runs:
         retry() { for i in 1 2 3; do "$@" && return 0; if [ "$i" -lt 3 ]; then echo "retrying in $((i * 20))s: $*" >&2; sleep $((i * 20)); fi; done; return 1; }
         retry dnf install -y gcc gcc-c++ make pkgconf which diffutils \
           zlib-devel libzstd-devel libxml2-devel libffi-devel \
-          llvm-devel llvm-static
+          llvm-devel llvm-static qemu-system-arm
 
     # The macOS runners come with rustup; the containers do not.
     - name: Install Rust

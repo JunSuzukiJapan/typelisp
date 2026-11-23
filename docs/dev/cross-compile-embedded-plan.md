@@ -110,16 +110,26 @@ release のランタイムでの測定（上と同じ hello）: `__text` 1,040,3
 - リンク: rustup の `rust-lld`（`ld.lld` として起動）とリンカスクリプト。
 - ランタイムは `scripts/build-embedded-runtime.sh` がターゲットごとにビルドする（wasm と同じ形）。
 
+済（段階 3 の QEMU の分と段階 4 も）。決めたこと:
+
+- `typl -c --target thumbv7em-none-eabihf [--linker-script FILE]`。出力の既定はソースの `.typl` を `.elf` に変えた名前。`--linker-script` は `cortex-m-rt` の `memory.x` の形（FLASH と RAM）で、省略すると QEMU の `mps2-an386`（0 から 4MiB、`0x20000000` から 4MiB、スタック 1MiB）。スタックの大きさは `_typelisp_stack_size` で、書かなければ 64KiB。
+- 起動は `cortex-m-rt`（ベクタテーブル、`Reset`、`link.x`）。入口（`typelisp-rt-embedded` の `start`）がヒープ（`.bss` の後ろからスタックまで、`embedded-alloc` の LLFF）を用意して、生成した `main` を `typelisp_main` の名前で呼ぶ。HardFault と未処理の割り込みは、パニックと同じ終了コードで終える。
+- コード生成: triple は正規化してから使う（`thumbv7em-unknown-none-eabihf`）。書いたままだと `eabihf` が OS の位置に読まれ、浮動小数の補助関数を GNU の名前（`__divdf3`）と基本の呼び出し規約で呼び、ハードフロートの規約で作られたランタイムの実装と引数のレジスタが食い違った。関数と大域変数はそれぞれ専用のセクション（`.text.<名前>` など）に置き、`--gc-sections` で使わないものを落とす。置かないと、使わない関数から届くソケットなどの shim が未定義になる。セクション名は inkwell の `set_section` を使わずに付ける（macOS のホストでは先頭にカンマを足す）。
+- リンクは rustup の `rust-lld`（`ld.lld` の名前で起動）。`link.x` と `ld.lld` は `scripts/build-embedded-runtime.sh` がランタイムの横に置く。インストールした `typl` はまだ組み込みのランタイムを持たず、`--target` はエラーになる（`build.rs` で持たせるのは後で）。
+- cons のアリーナの初期値は 1024 セル（本体の既定の 65536 セルは 3MiB）。足りなければ伸びる。
+- 断るもの: C1、C2、`eval`（`RuntimeCrate::Front`）。C FFI は使える。ボードの C 関数はホストに無いので、ボード向けのコンパイル中は `defffi` が記号を探さない。コンパイル中に呼ばれたら（マクロなど）、理由を言って `typl` を終える。
+- 測定（debug のランタイム、`(println "hello from a board")`）: text 601,020 バイト、data 1,196、bss 452。
+
 ### 段階 3: ホスト関数
 
 `typelisp_mem::host` の write/exit/now/unix_time/sleep を、組み込みでは外から与える関数にする。
 
-- QEMU では semihosting（出力と終了）で与える。テストはこれを使う。
+- QEMU では semihosting（出力と終了）で与える。テストはこれを使う。済: `typelisp-rt-embedded` の feature `semihosting`。出力と入力は `:tt` を開いた handle、終了は `SYS_EXIT_EXTENDED`（終了コードが渡る）、時刻は `SYS_ELAPSED`/`SYS_TICKFREQ`、Unix 時刻は `SYS_TIME` の秒に経過時間を足す、sleep は経過時間を待つ。ヒープの確保はボードによらず `typelisp-rt-embedded` が与える。
 - 実機では、ボードに合わせた実装（UART への出力、SysTick による時刻）を、利用者が `defffi` で渡す C の関数か typelisp の関数で与える。どちらにするかは段階 3 で決める。
 
 ### 段階 4: テスト
 
-`qemu-system-arm`（Cortex-M4 のボード、`-semihosting`）で実行し、出力と終了コードを比べる。wasm で node を使ったのと同じ役。
+`qemu-system-arm`（Cortex-M4 のボード、`-semihosting`）で実行し、出力と終了コードを比べる。wasm で node を使ったのと同じ役。済: `tests/aot_embedded_test.rs`（本体の実行ファイルと標準出力・標準エラー・終了コードを比べる、断るものの検査、`--linker-script`）。CI は QEMU を入れる。
 
 ### 段階 5: volatile の読み書き
 

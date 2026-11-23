@@ -75,7 +75,9 @@ pub(super) fn write_module(
     let (llvm_triple, entry_name) = match target {
         super::Target::Wasip1 => ("wasm32-unknown-wasip1", WASI_MAIN),
         super::Target::Wasm32Unknown => ("wasm32-unknown-unknown", JS_MAIN),
-        super::Target::Host => return Err("internal error: write_module called for the host".to_string()),
+        super::Target::Host | super::Target::Thumbv7em => {
+            return Err(format!("internal error: write_module called for {}", target.name()))
+        }
     };
     let loader = match target {
         super::Target::Wasm32Unknown => Some(loader_path(output_path)?),
@@ -156,15 +158,15 @@ fn loader_path(output_path: &str) -> Result<(std::path::PathBuf, String), String
 /// Rewrites every table of words whose initialiser holds an address
 /// (`ptrtoint (ptr @g to i64)`) so that the address is a pointer of its own.
 ///
-/// A word is 64 bits and an address on this target 32, and the object format
-/// has no relocation that writes a 32-bit address into a 64-bit slot — the
+/// A word is 64 bits and an address on a 32-bit target (WebAssembly, a
+/// Cortex-M) 32, and the object format has no relocation that writes a 32-bit address into a 64-bit slot — the
 /// backend refuses such an initialiser. Each such word becomes
 /// `<{ ptr @g, i32 0 }>` in a packed struct standing in for the array: the
 /// same eight bytes, little-endian, as the address widened to a word, so
 /// what reads the table reads the same words. The tables are the type and
 /// shape tables and the frame layouts' (`compile::type_table`); anything
 /// else in such an initialiser is not something this knows how to lay out.
-fn split_address_words(module: &Module<'static>) -> Result<(), String> {
+pub(super) fn split_address_words(module: &Module<'static>) -> Result<(), String> {
     let ctx = crate::compile::llvm_context();
     let ctx_ref = ctx.raw();
     let module_ref = module.as_mut_ptr();

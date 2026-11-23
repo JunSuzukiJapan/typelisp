@@ -453,6 +453,9 @@ pub(crate) enum RuntimeCrate {
     /// `typelisp-rt-posix`: sockets, OS threads and what else only an
     /// operating system answers, which WASI has not.
     Posix,
+    /// `typelisp-front`'s: `eval`, which needs the checker and the
+    /// interpreter, which a board without std has not.
+    Front,
 }
 
 impl RuntimeCrate {
@@ -468,6 +471,10 @@ impl RuntimeCrate {
                 static SHIMS: std::sync::OnceLock<[(&str, usize, &str); 40]> = std::sync::OnceLock::new();
                 SHIMS.get_or_init(posix_shims)
             }
+            RuntimeCrate::Front => {
+                static SHIMS: std::sync::OnceLock<[(&str, usize, &str); 5]> = std::sync::OnceLock::new();
+                SHIMS.get_or_init(front_shims)
+            }
         }
     }
 }
@@ -475,6 +482,23 @@ impl RuntimeCrate {
 /// What `name` is, when it is a shim of one of `missing`.
 pub(crate) fn unavailable_in(missing: &[RuntimeCrate], name: &str) -> Option<&'static str> {
     missing.iter().flat_map(|runtime| runtime.shims()).find(|(shim, _, _)| *shim == name).map(|(_, _, what)| *what)
+}
+
+/// `typelisp-front`'s shims: `eval` and the two startup calls an AOT
+/// executable makes to give it an environment (`aot::build_main_wrapper`).
+/// The two are useless under JIT — there is already an interpreter — but they
+/// are declared in every module all the same, because this table is both the
+/// forward-declaration list and the JIT address map, and the wrapper looks
+/// them up by name.
+fn front_shims() -> [(&'static str, usize, &'static str); 5] {
+    use typelisp_front::shim::{rt_eval, rt_eval_init, rt_eval_state, rt_macroexpand, rt_macroexpand_1};
+    [
+        ("rt_eval", rt_eval as *const () as usize, "`eval`"),
+        ("rt_macroexpand_1", rt_macroexpand_1 as *const () as usize, "`macroexpand-1`"),
+        ("rt_macroexpand", rt_macroexpand as *const () as usize, "`macroexpand`"),
+        ("rt_eval_state", rt_eval_state as *const () as usize, "`eval`"),
+        ("rt_eval_init", rt_eval_init as *const () as usize, "`eval`"),
+    ]
 }
 
 /// `typelisp-rt-sys`'s shims.
@@ -820,15 +844,15 @@ pub(crate) fn native_lowered_primitive_methods(ty: u32) -> &'static [u32] {
 /// `setf` mutate the very same object.
 pub(crate) fn rt_extern_functions() -> Vec<(&'static str, usize)> {
     let mut shims = rt_shims().to_vec();
-    for runtime in [RuntimeCrate::Sys, RuntimeCrate::Posix] {
+    for runtime in [RuntimeCrate::Sys, RuntimeCrate::Posix, RuntimeCrate::Front] {
         shims.extend(runtime.shims().iter().map(|(name, addr, _)| (*name, *addr)));
     }
     shims
 }
 
-/// The shims every target has: `typelisp-rt`'s, the printer's, the reader's,
-/// `eval`'s and `rt_llvm_call`.
-fn rt_shims() -> [(&'static str, usize); 324] {
+/// The shims every target has: `typelisp-rt`'s, the printer's, the reader's
+/// and `rt_llvm_call`.
+fn rt_shims() -> [(&'static str, usize); 319] {
     use typelisp_rt::c_mem::{
         rt_c_alloc, rt_c_arena_close, rt_c_arena_open, rt_c_index, rt_c_load, rt_c_offset, rt_c_ptr_check, rt_c_store,
     };
@@ -851,7 +875,6 @@ fn rt_shims() -> [(&'static str, usize); 324] {
         rt_print_enum_variant, rt_print_field_name, rt_print_field_template, rt_print_global,
         rt_print_name_import, rt_print_name_module, rt_print_object_method,
     };
-    use typelisp_front::shim::{rt_eval, rt_eval_init, rt_eval_state, rt_macroexpand, rt_macroexpand_1};
     use typelisp_read::shim::{rt_read, rt_read_datum_at};
     use typelisp_rt::coroutine::{
         rt_loop_safepoint, rt_suspend_chan_cap, rt_suspend_chan_close, rt_suspend_chan_len,
@@ -960,17 +983,6 @@ fn rt_shims() -> [(&'static str, usize); 324] {
         ("rt_exit", rt_exit as *const () as usize),
         ("rt_read", rt_read as *const () as usize),
         ("rt_read_datum_at", rt_read_datum_at as *const () as usize),
-        // `eval` and the two startup calls an AOT executable makes to give it
-        // an environment (`aot::build_main_wrapper`). The two are useless under
-        // JIT — there is already an interpreter — but they are declared in
-        // every module all the same, because this table is both the
-        // forward-declaration list and the JIT address map, and the wrapper
-        // looks them up by name.
-        ("rt_eval", rt_eval as *const () as usize),
-        ("rt_macroexpand_1", rt_macroexpand_1 as *const () as usize),
-        ("rt_macroexpand", rt_macroexpand as *const () as usize),
-        ("rt_eval_state", rt_eval_state as *const () as usize),
-        ("rt_eval_init", rt_eval_init as *const () as usize),
         // The printing family (`typelisp_print::shim`). `format`/`print`/
         // `println`/`pprint` and `pprint-logical-block` are special forms, so
         // what reaches here are the `*-rt` names the checker lowered them to;

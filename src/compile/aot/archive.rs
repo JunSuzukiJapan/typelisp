@@ -296,6 +296,45 @@ pub(super) fn wasm_runtime_dir(triple: &str) -> Result<std::path::PathBuf, Strin
     }
 }
 
+/// The folder `typl -c --target <triple>` links an executable for a board
+/// from: the runtime built for the triple (`libtypelisp_rt_embedded.a`),
+/// `cortex-m-rt`'s linker script (`link.x`), and the linker (`ld.lld`).
+///
+/// A debug build links the ones `scripts/build-embedded-runtime.sh` built in
+/// its tree, `<target dir>/embedded-runtime/<profile>/<triple>/`. A release
+/// build carries none, and `--target` is refused.
+pub(super) fn embedded_runtime_dir(triple: &str) -> Result<std::path::PathBuf, String> {
+    #[cfg(typelisp_bundled_runtime)]
+    {
+        let _ = triple;
+        Err("this typl carries no runtime for a board: --target thumbv7em-none-eabihf needs a typl built in its \
+             source tree, with scripts/build-embedded-runtime.sh run"
+            .to_string())
+    }
+    #[cfg(not(typelisp_bundled_runtime))]
+    {
+        let profile_dir = std::path::Path::new(env!("TYPELISP_PROFILE_DIR"));
+        let (Some(target_dir), Some(profile)) = (profile_dir.parent(), profile_dir.file_name()) else {
+            return Err(format!("internal error: {} is not <target dir>/<profile>", profile_dir.display()));
+        };
+        let dir = target_dir.join("embedded-runtime").join(profile).join(triple);
+        for file in [EMBEDDED_STATICLIB_NAME, "link.x", "ld.lld"] {
+            if !dir.join(file).exists() {
+                return Err(format!(
+                    "{} has no {}; build the runtime for a board with scripts/build-embedded-runtime.sh {}",
+                    dir.display(),
+                    file,
+                    profile.to_string_lossy()
+                ));
+            }
+        }
+        Ok(dir)
+    }
+}
+
+/// The runtime archive in [`embedded_runtime_dir`].
+pub(super) const EMBEDDED_STATICLIB_NAME: &str = "libtypelisp_rt_embedded.a";
+
 /// The linker for a WebAssembly module whose runtime is in `runtime`
 /// ([`wasm_runtime_dir`]), run with `-flavor wasm`.
 ///

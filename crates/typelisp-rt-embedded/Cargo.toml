@@ -26,3 +26,19 @@ typelisp-mem.workspace = true
 typelisp-print.workspace = true
 typelisp-read.workspace = true
 typelisp-rt.workspace = true
+# The start of the program (the vector table, `Reset`, the linker script
+# `link.x`), the memory the runtime allocates from, and the one core's
+# critical section the allocator takes.
+cortex-m-rt = "0.7.7"
+cortex-m = { version = "0.7.10", features = ["critical-section-single-core"] }
+embedded-alloc = { version = "0.7.0", default-features = false, features = ["llff"] }
+# The host functions over semihosting, which QEMU answers (feature
+# `semihosting`).
+cortex-m-semihosting = { version = "0.6.0", optional = true }
+
+[features]
+# The board's functions (`typelisp_host_*` but the allocator's) over
+# semihosting: what the tests run under QEMU with. Without it the executable
+# gives them itself.
+semihosting = ["dep:cortex-m-semihosting"]
+

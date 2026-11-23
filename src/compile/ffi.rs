@@ -576,8 +576,58 @@ fn add_attribute(f: FunctionValue<'static>, loc: inkwell::attributes::AttributeL
 /// emptied: see [`typelisp_rt_posix::os::dl_open`] for why nothing is ever closed.
 static OPEN_LIBS: Mutex<Option<HashMap<String, usize>>> = Mutex::new(None);
 
+thread_local! {
+    /// Whether the C functions `defffi` names are the compiled program's
+    /// target's and not this process's: set while a program for a board
+    /// compiles on this thread ([`CFunctionsOn::target`]).
+    static C_FUNCTIONS_ON_TARGET: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// While it lives, `defffi` on this thread does not look its C function up
+/// in this process: the function is the board's, which only the executable's
+/// link finds. The interpreter's thunk then calls [`not_here`] instead.
+pub(crate) struct CFunctionsOn {
+    before: bool,
+}
+
+impl CFunctionsOn {
+    /// `on_target`: the C functions are the target's.
+    pub(crate) fn target(on_target: bool) -> CFunctionsOn {
+        CFunctionsOn { before: C_FUNCTIONS_ON_TARGET.with(|c| c.replace(on_target)) }
+    }
+}
+
+impl Drop for CFunctionsOn {
+    fn drop(&mut self) {
+        C_FUNCTIONS_ON_TARGET.with(|c| c.set(self.before));
+    }
+}
+
+/// The names of the C functions [`not_here`] stands in for, for its message:
+/// it is one function for all of them, so it cannot tell which was called.
+static NOT_HERE_NAMES: Mutex<Vec<String>> = Mutex::new(Vec::new());
+
+/// What the interpreter's thunk calls in place of a board's C function while
+/// the board's program compiles: running it here, at compile time (from a
+/// macro, say), cannot be done, and nothing it could answer would be the
+/// board's. Ends `typl` with the reason; called with whatever the C
+/// signature passes, which it reads none of.
+extern "C" fn not_here() {
+    let names = NOT_HERE_NAMES.lock().unwrap_or_else(|e| e.into_inner()).join("`, `");
+    eprintln!(
+        "error: one of the board's C functions (`{}`) was called while typl compiled the program for the \
+         board; they run only on the board",
+        names
+    );
+    std::process::exit(1)
+}
+
 /// The address `decl` names, or an error saying what was looked for and where.
 fn resolve(decl: &FfiDecl) -> Result<usize, String> {
+    if C_FUNCTIONS_ON_TARGET.with(|c| c.get()) {
+        NOT_HERE_NAMES.lock().unwrap_or_else(|e| e.into_inner()).push(decl.c_symbol.clone());
+        return Ok(not_here as *const () as usize);
+    }
     let handle = match &decl.library {
         None => 0,
         Some(lib) => open_library(lib)?,

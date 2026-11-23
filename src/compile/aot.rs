@@ -73,6 +73,7 @@ mod archive;
 mod made;
 mod native;
 mod reach;
+mod embedded;
 mod wasm;
 
 pub use archive::*;
@@ -286,7 +287,8 @@ pub struct BuildOptions {
     /// The cons arena's capacity, in cells (`--heap-cells`); the arena is
     /// fixed at it. `None` is the program's default: an arena of
     /// [`typelisp_rt::DEFAULT_AOT_HEAP_CAPACITY`] cells, or
-    /// [`EVAL_HEAP_CAPACITY`] for a program that calls `eval`, that grows as
+    /// [`EVAL_HEAP_CAPACITY`] for a program that calls `eval`, or
+    /// [`BOARD_HEAP_CAPACITY`] for a board, that grows as
     /// `Heap::with_capacity` lets it.
     pub heap_cells: Option<usize>,
     /// The bound on the bytes the running executable allocates
@@ -298,6 +300,10 @@ pub struct BuildOptions {
     pub no_cons: bool,
     /// What the executable runs on (`--target`).
     pub target: Target,
+    /// For a board ([`Target::Thumbv7em`]): the file that says where its
+    /// flash and RAM are (`--linker-script`), in the form of `cortex-m-rt`'s
+    /// `memory.x`. `None` is the board QEMU's `mps2-an386` is.
+    pub linker_script: Option<std::path::PathBuf>,
 }
 
 /// What an executable is built to run on.
@@ -311,6 +317,9 @@ pub enum Target {
     /// `wasm32-unknown-unknown`: a WebAssembly module that imports what it
     /// needs of its host from JavaScript, with the JavaScript that loads it.
     Wasm32Unknown,
+    /// `thumbv7em-none-eabihf`: an ELF executable for a Cortex-M4F or M7
+    /// board without an operating system.
+    Thumbv7em,
 }
 
 impl Target {
@@ -319,8 +328,9 @@ impl Target {
         match name {
             "wasm32-wasip1" => Ok(Target::Wasip1),
             "wasm32-unknown-unknown" => Ok(Target::Wasm32Unknown),
+            "thumbv7em-none-eabihf" => Ok(Target::Thumbv7em),
             _ => Err(format!(
-                "--target: unknown target `{}` (the ones there are: wasm32-wasip1, wasm32-unknown-unknown)",
+                "--target: unknown target `{}` (the ones there are: wasm32-wasip1, wasm32-unknown-unknown, thumbv7em-none-eabihf)",
                 name
             )),
         }
@@ -334,6 +344,7 @@ impl Target {
             Target::Host => &[],
             Target::Wasip1 => &[RuntimeCrate::Posix],
             Target::Wasm32Unknown => &[RuntimeCrate::Sys, RuntimeCrate::Posix],
+            Target::Thumbv7em => &[RuntimeCrate::Sys, RuntimeCrate::Posix, RuntimeCrate::Front],
         }
     }
 
@@ -343,6 +354,7 @@ impl Target {
             Target::Host => "host",
             Target::Wasip1 => "wasm32-wasip1",
             Target::Wasm32Unknown => "wasm32-unknown-unknown",
+            Target::Thumbv7em => "thumbv7em-none-eabihf",
         }
     }
 }
@@ -353,6 +365,9 @@ pub fn compile_file_with(source_path: &str, output_path: &str, options: &BuildOp
         return Err("--no-cons and --heap-cells cannot be combined: without cons cells there is no arena to size".to_string());
     }
     crate::compile::driver::emitted_layout_is_runnable()?;
+    // A board's C functions are the board's: while its program compiles,
+    // `defffi` does not look for them here.
+    let _c_functions = crate::compile::ffi::CFunctionsOn::target(options.target == Target::Thumbv7em);
     let source =
         fs::read_to_string(source_path).map_err(|e| format!("failed to read \"{}\": {}", source_path, e))?;
 
@@ -725,6 +740,7 @@ pub fn compile_file_with(source_path: &str, output_path: &str, options: &BuildOp
                     Some(cells) => cells,
                     None if options.no_cons => 0,
                     None if eval_env.is_some() => EVAL_HEAP_CAPACITY,
+                    None if options.target == Target::Thumbv7em => BOARD_HEAP_CAPACITY,
                     None => typelisp_rt::DEFAULT_AOT_HEAP_CAPACITY,
                 },
                 fixed: options.heap_cells.is_some() || options.no_cons,
@@ -744,20 +760,27 @@ pub fn compile_file_with(source_path: &str, output_path: &str, options: &BuildOp
             })
             .and_then(|()| match options.target {
                 Target::Host => write_executable(&m, output_path, &link_libraries, &items),
-                Target::Wasip1 | Target::Wasm32Unknown => {
+                Target::Wasip1 | Target::Wasm32Unknown | Target::Thumbv7em => {
                     let missing = options.target.missing_runtimes();
+                    // A board calls its vendor's C functions; a WebAssembly
+                    // module has no C library to find them in.
+                    let c_functions = options.target != Target::Thumbv7em;
                     let entry = m.get_function(ENTRY_POINT_NAME).expect("build_main_wrapper defined `main`");
                     let uses = reach::uses(&m, entry, |name| {
                         if let Some(what) = crate::compile::externs::unavailable_in(missing, name) {
                             return Some(what.to_string());
                         }
-                        ffi_decls.iter().any(|d| d.c_symbol == name).then(|| format!("the C function `{}`", name))
+                        (c_functions && ffi_decls.iter().any(|d| d.c_symbol == name)).then(|| format!("the C function `{}`", name))
                     });
                     if !uses.is_empty() {
                         let header = format!("--target {}: the program uses what the target does not have:", options.target.name());
                         return Err(reach::report(&header, &uses));
                     }
-                    wasm::write_module(&m, output_path, &items, options.target)
+                    if options.target == Target::Thumbv7em {
+                        embedded::write_executable(&m, output_path, &items, options.linker_script.as_deref())
+                    } else {
+                        wasm::write_module(&m, output_path, &items, options.target)
+                    }
                 }
             })
     };
@@ -1408,6 +1431,11 @@ struct HeapInit {
     fixed: bool,
     max_memory: Option<usize>,
 }
+
+/// The cons-cell arena a board's executable starts with, which grows as the
+/// heap lets it: the native default (`1 << 16` cells) is 3 MiB, more than
+/// most boards have RAM.
+const BOARD_HEAP_CAPACITY: usize = 1 << 10;
 
 /// The cons-cell arena an `eval`-carrying executable asks `rt_heap_init` for.
 /// Its startup reads, checks and runs the whole prelude plus the program's own
