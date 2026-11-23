@@ -12,13 +12,20 @@ categories = ["compilers"]
 # What every target has (`typelisp-rt` and the crates below it), as one
 # static library, without std: the board gives memory, output and time
 # through the `typelisp_host_*` C functions (`typelisp_mem::host::board`).
+# This library gives the allocator's and the start of the program; the rest
+# the board gives as C functions, or `typelisp-rt-semihosting`, which is this
+# library with them over semihosting.
+#
 # Only for a target without an operating system does it have dependencies or
-# anything in it; elsewhere (the host, when the whole workspace is built) it is
-# an empty library. A member of the workspace but not a default member; built
-# for each embedded target by scripts/build-embedded-runtime.sh.
+# anything in it; elsewhere (the host, when the whole workspace is built) it
+# is an empty library. A member of the workspace but not a default member;
+# built for each embedded target by scripts/build-embedded-runtime.sh, and by
+# build.rs for a `typl` with the feature `embedded`. An `rlib` as well, so
+# that `typelisp` can depend on it, which is what lets that build name it
+# with `-p`.
 [lib]
 name = "typelisp_rt_embedded"
-crate-type = ["staticlib"]
+crate-type = ["staticlib", "rlib"]
 
 [target.'cfg(target_os = "none")'.dependencies]
 typelisp-abi.workspace = true
@@ -32,13 +39,3 @@ typelisp-rt.workspace = true
 cortex-m-rt = "0.7.7"
 cortex-m = { version = "0.7.10", features = ["critical-section-single-core"] }
 embedded-alloc = { version = "0.7.0", default-features = false, features = ["llff"] }
-# The host functions over semihosting, which QEMU answers (feature
-# `semihosting`).
-cortex-m-semihosting = { version = "0.6.0", optional = true }
-
-[features]
-# The board's functions (`typelisp_host_*` but the allocator's) over
-# semihosting: what the tests run under QEMU with. Without it the executable
-# gives them itself.
-semihosting = ["dep:cortex-m-semihosting"]
-

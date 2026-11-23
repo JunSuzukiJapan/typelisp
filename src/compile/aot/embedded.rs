@@ -12,7 +12,10 @@
 //! entry, which gives the heap its memory and calls the module's `main`
 //! under the name [`BOARD_MAIN`]. Where flash and RAM are is the linker
 //! script `memory.x`, which `link.x` includes: the user's
-//! (`--linker-script`), or [`QEMU_MEMORY`].
+//! (`--linker-script`), or [`QEMU_MEMORY`]. The rest of what the runtime asks
+//! of the board (`typelisp_host_*`) the runtime gives over semihosting, or
+//! the board as C functions in the objects and libraries the link is given
+//! (`--board-functions`, `--link`).
 
 use std::fs;
 use std::process::Command;
@@ -21,7 +24,7 @@ use inkwell::module::Module;
 use inkwell::values::AsValueRef;
 use inkwell::targets::{CodeModel, FileType, InitializationConfig, RelocMode, Target, TargetMachine, TargetTriple};
 
-use super::{embedded_runtime_dir, EMBEDDED_STATICLIB_NAME, ENTRY_POINT_NAME};
+use super::{embedded_linker, embedded_runtime_dir, BuildOptions, ENTRY_POINT_NAME};
 use crate::CompileTarget;
 
 /// What the runtime's entry calls: `main` taking nothing and answering the
@@ -111,18 +114,24 @@ fn set_section(value: inkwell::llvm_sys::prelude::LLVMValueRef, name: &str) {
     unsafe { inkwell::llvm_sys::core::LLVMSetSection(value, name.as_ptr()) }
 }
 
-/// Emits `module` as an ARM object and links it, with the board's runtime,
-/// into an ELF executable at `output_path`; `memory` is the user's
-/// `memory.x`. Must be called with [`crate::compile::COMPILE_LOCK`] held.
+/// Emits `module` as an ARM object and links it, with the board's runtime
+/// and what `options` say, into an ELF executable at `output_path`. Must be
+/// called with [`crate::compile::COMPILE_LOCK`] held.
 pub(super) fn write_executable(
     module: &Module<'static>,
     output_path: &str,
     items: &[CompileTarget],
-    memory: Option<&std::path::Path>,
+    options: &BuildOptions,
 ) -> Result<(), String> {
     let triple = super::Target::Thumbv7em.name();
     let runtime = embedded_runtime_dir(triple)?;
-    let memory_x = match memory {
+    let linker = embedded_linker(&runtime)?;
+    for file in &options.link {
+        if !file.is_file() {
+            return Err(format!("--link: {}: no such file", file.display()));
+        }
+    }
+    let memory_x = match options.linker_script.as_deref() {
         Some(path) => fs::read_to_string(path).map_err(|e| format!("--linker-script: {}: {}", path.display(), e))?,
         None => QEMU_MEMORY.to_string(),
     };
@@ -151,8 +160,8 @@ pub(super) fn write_executable(
         for warning in crate::compile::codegen_prep::take_frame_warnings(items) {
             eprintln!("{}", warning);
         }
-        let linker = runtime.join("ld.lld");
         let status = Command::new(&linker)
+            .args(["-flavor", "gnu"])
             .arg("--gc-sections")
             // `link.x` includes `memory.x`, which is found on the search path.
             .arg("-L")
@@ -162,7 +171,11 @@ pub(super) fn write_executable(
             .arg("-T")
             .arg(scripts.join("typelisp.x"))
             .arg(&object_path)
-            .arg(runtime.join(EMBEDDED_STATICLIB_NAME))
+            // lld takes a symbol from an archive wherever on the line the
+            // archive is, so the runtime calling the board's functions finds
+            // them whatever the order.
+            .args(&options.link)
+            .arg(runtime.join(options.board_functions.archive()))
             .arg("-o")
             .arg(output_path)
             .status()

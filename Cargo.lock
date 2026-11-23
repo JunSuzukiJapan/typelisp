@@ -994,7 +994,9 @@ dependencies = [
  "typelisp-print",
  "typelisp-read",
  "typelisp-rt",
+ "typelisp-rt-embedded",
  "typelisp-rt-posix",
+ "typelisp-rt-semihosting",
  "typelisp-rt-sys",
 ]
 
@@ -1079,7 +1081,6 @@ version = "0.3.7"
 dependencies = [
  "cortex-m",
  "cortex-m-rt",
- "cortex-m-semihosting",
  "embedded-alloc",
  "typelisp-abi",
  "typelisp-mem",
@@ -1100,6 +1101,15 @@ dependencies = [
  "typelisp-print",
  "typelisp-rt",
  "webpki-roots",
+]
+
+[[package]]
+name = "typelisp-rt-semihosting"
+version = "0.3.7"
+dependencies = [
+ "cortex-m",
+ "cortex-m-semihosting",
+ "typelisp-rt-embedded",
 ]
 
 [[package]]

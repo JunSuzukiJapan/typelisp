@@ -115,7 +115,7 @@ release のランタイムでの測定（上と同じ hello）: `__text` 1,040,3
 - `typl -c --target thumbv7em-none-eabihf [--linker-script FILE]`。出力の既定はソースの `.typl` を `.elf` に変えた名前。`--linker-script` は `cortex-m-rt` の `memory.x` の形（FLASH と RAM）で、省略すると QEMU の `mps2-an386`（0 から 4MiB、`0x20000000` から 4MiB、スタック 1MiB）。スタックの大きさは `_typelisp_stack_size` で、書かなければ 64KiB。
 - 起動は `cortex-m-rt`（ベクタテーブル、`Reset`、`link.x`）。入口（`typelisp-rt-embedded` の `start`）がヒープ（`.bss` の後ろからスタックまで、`embedded-alloc` の LLFF）を用意して、生成した `main` を `typelisp_main` の名前で呼ぶ。HardFault と未処理の割り込みは、パニックと同じ終了コードで終える。
 - コード生成: triple は正規化してから使う（`thumbv7em-unknown-none-eabihf`）。書いたままだと `eabihf` が OS の位置に読まれ、浮動小数の補助関数を GNU の名前（`__divdf3`）と基本の呼び出し規約で呼び、ハードフロートの規約で作られたランタイムの実装と引数のレジスタが食い違った。関数と大域変数はそれぞれ専用のセクション（`.text.<名前>` など）に置き、`--gc-sections` で使わないものを落とす。置かないと、使わない関数から届くソケットなどの shim が未定義になる。セクション名は inkwell の `set_section` を使わずに付ける（macOS のホストでは先頭にカンマを足す）。
-- リンクは rustup の `rust-lld`（`ld.lld` の名前で起動）。`link.x` と `ld.lld` は `scripts/build-embedded-runtime.sh` がランタイムの横に置く。インストールした `typl` はまだ組み込みのランタイムを持たず、`--target` はエラーになる（`build.rs` で持たせるのは後で）。
+- リンクは rustup の `rust-lld`（`-flavor gnu`）。デバッグビルドでは `scripts/build-embedded-runtime.sh` がランタイムの横に `link.x` と `ld.lld` を置く。release の `typl` は `--features embedded` のときランタイム 2 つと `link.x` を持つ（`build.rs` の `bundled_embedded`、リンカは wasm と同じく rustup のもの）。配布物（`scripts/dist/build.sh`）は `--features wasm,embedded` で作り、QEMU で動くことを確かめる。
 - cons のアリーナの初期値は 1024 セル（本体の既定の 65536 セルは 3MiB）。足りなければ伸びる。
 - 断るもの: C1、C2、`eval`（`RuntimeCrate::Front`）。C FFI は使える。ボードの C 関数はホストに無いので、ボード向けのコンパイル中は `defffi` が記号を探さない。コンパイル中に呼ばれたら（マクロなど）、理由を言って `typl` を終える。
 - 測定（debug のランタイム、`(println "hello from a board")`）: text 601,020 バイト、data 1,196、bss 452。
@@ -124,7 +124,8 @@ release のランタイムでの測定（上と同じ hello）: `__text` 1,040,3
 
 `typelisp_mem::host` の write/exit/now/unix_time/sleep を、組み込みでは外から与える関数にする。
 
-- QEMU では semihosting（出力と終了）で与える。テストはこれを使う。済: `typelisp-rt-embedded` の feature `semihosting`。出力と入力は `:tt` を開いた handle、終了は `SYS_EXIT_EXTENDED`（終了コードが渡る）、時刻は `SYS_ELAPSED`/`SYS_TICKFREQ`、Unix 時刻は `SYS_TIME` の秒に経過時間を足す、sleep は経過時間を待つ。ヒープの確保はボードによらず `typelisp-rt-embedded` が与える。
+- 2026-11-23 決定: 実機では C の関数で与える。`--board-functions c` で、ボードが `typelisp_host_write`/`read`/`exit`/`now_us`/`unix_us`/`sleep_us` を定義したオブジェクトか静的ライブラリを `--link FILE` で渡す（ヒープの確保は `typelisp-rt-embedded` が与える）。既定は `--board-functions semihosting`。ランタイムは 2 つの静的ライブラリ: `typelisp-rt-embedded`（C の関数の分）と `typelisp-rt-semihosting`（それに semihosting の実装を足したもの）。feature にしなかったのは、crates.io から入れたビルドでは依存先のクレートを `-p` で選ぶことになり、cargo がそれに feature を付けられないため（`cannot specify features for packages outside of workspace`）。2 つの Rust の静的ライブラリはどちらも `core` を持つので、1 つの実行ファイルに両方はリンクできない。テストはボードの関数を LLVM IR で書き（QEMU のボードの UART に出力）、`llc` でオブジェクトにする。
+- QEMU では semihosting（出力と終了）で与える。テストはこれを使う。済: `typelisp-rt-semihosting`。出力と入力は `:tt` を開いた handle、終了は `SYS_EXIT_EXTENDED`（終了コードが渡る）、時刻は `SYS_ELAPSED`/`SYS_TICKFREQ`、Unix 時刻は `SYS_TIME` の秒に経過時間を足す、sleep は経過時間を待つ。ヒープの確保はボードによらず `typelisp-rt-embedded` が与える。
 - 実機では、ボードに合わせた実装（UART への出力、SysTick による時刻）を、利用者が `defffi` で渡す C の関数か typelisp の関数で与える。どちらにするかは段階 3 で決める。
 
 ### 段階 4: テスト

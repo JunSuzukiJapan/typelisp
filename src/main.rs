@@ -38,6 +38,7 @@ Usage:
   typl [OPTIONS] FILE [ARGS...]                  run FILE; ARGS are its (command-line-args)
   typl [--lib-dir DIR] [-O<N>] -c SOURCE [-o OUTPUT] [--heap-cells N]
        [--max-memory SIZE] [--no-cons] [--target TARGET] [--linker-script FILE]
+       [--board-functions WHO] [--link FILE]
                                                  compile SOURCE to an executable
   typl [OPTIONS] test [FILE.typl] [FILTER]       run the #[test] functions of the
                                                  project here (or of FILE) whose
@@ -71,6 +72,12 @@ Options:
   --linker-script FILE   after --target thumbv7em-none-eabihf: the board's
                          flash and RAM, as a memory.x (default: QEMU's
                          mps2-an386)
+  --board-functions WHO  after --target thumbv7em-none-eabihf: who gives the
+                         board's output, input, exit and clock: semihosting
+                         (QEMU or a debugger; the default) or c (the board's
+                         typelisp_host_* C functions, given with --link)
+  --link FILE            after --target thumbv7em-none-eabihf: an object or
+                         static library to link with (repeatable)
   --feature NAME         add a feature for #+/#- (repeatable)
   --on-redefine=POLICY   on redefinition: warn (default), error or silent
   --remove-lib           remove the library this typl wrote for compiled
@@ -236,6 +243,8 @@ fn compile_command(flag: &str, args: &[String], heap_cells: Option<usize>) -> i3
     let mut source = None;
     let mut output = None;
     let mut options = typelisp::compile::aot::BuildOptions { heap_cells, ..Default::default() };
+    // The last flag given that only a board takes.
+    let mut board_only = None;
     let mut it = args.iter();
     while let Some(a) = it.next() {
         if a == "--no-cons" {
@@ -252,12 +261,35 @@ fn compile_command(flag: &str, args: &[String], heap_cells: Option<usize>) -> i3
                     return 1;
                 }
             }
+        } else if let Some(v) = flag_value(a, "--board-functions", &mut it) {
+            let Some(v) = v else {
+                eprintln!("--board-functions: needs semihosting or c");
+                return 1;
+            };
+            match typelisp::compile::aot::BoardFunctions::parse(v) {
+                Ok(who) => {
+                    options.board_functions = who;
+                    board_only = Some("--board-functions");
+                }
+                Err(e) => {
+                    eprintln!("{}", e);
+                    return 1;
+                }
+            }
+        } else if let Some(v) = flag_value(a, "--link", &mut it) {
+            let Some(v) = v else {
+                eprintln!("--link: needs an object or static library");
+                return 1;
+            };
+            options.link.push(PathBuf::from(v));
+            board_only = Some("--link");
         } else if let Some(v) = flag_value(a, "--linker-script", &mut it) {
             let Some(v) = v else {
                 eprintln!("--linker-script: needs the board's memory.x");
                 return 1;
             };
             options.linker_script = Some(PathBuf::from(v));
+            board_only = Some("--linker-script");
         } else if let Some(v) = flag_value(a, "--max-memory", &mut it) {
             let Some(v) = v else {
                 eprintln!("--max-memory: needs a size in bytes (K, M or G may follow)");
@@ -291,16 +323,16 @@ fn compile_command(flag: &str, args: &[String], heap_cells: Option<usize>) -> i3
         } else if source.is_none() && !a.starts_with('-') {
             source = Some(PathBuf::from(a));
         } else {
-            eprintln!("{}: unexpected argument `{}` (usage: typl {} SOURCE [-o OUTPUT] [--release] [-O<N>] [--max-memory SIZE] [--no-cons] [--target TARGET] [--linker-script FILE])", flag, a, flag);
+            eprintln!("{}: unexpected argument `{}` (usage: typl {} SOURCE [-o OUTPUT] [--release] [-O<N>] [--max-memory SIZE] [--no-cons] [--target TARGET] [--linker-script FILE] [--board-functions WHO] [--link FILE])", flag, a, flag);
             return 1;
         }
     }
-    if options.linker_script.is_some() && options.target != typelisp::compile::aot::Target::Thumbv7em {
-        eprintln!("--linker-script: only for a board (--target thumbv7em-none-eabihf)");
+    if let Some(flag) = board_only.filter(|_| options.target != typelisp::compile::aot::Target::Thumbv7em) {
+        eprintln!("{}: only for a board (--target thumbv7em-none-eabihf)", flag);
         return 1;
     }
     let Some(source) = source else {
-        eprintln!("{}: needs a source file (usage: typl {} SOURCE [-o OUTPUT] [--release] [-O<N>] [--max-memory SIZE] [--no-cons] [--target TARGET] [--linker-script FILE])", flag, flag);
+        eprintln!("{}: needs a source file (usage: typl {} SOURCE [-o OUTPUT] [--release] [-O<N>] [--max-memory SIZE] [--no-cons] [--target TARGET] [--linker-script FILE] [--board-functions WHO] [--link FILE])", flag, flag);
         return 1;
     };
     let output = match output {

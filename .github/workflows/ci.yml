@@ -72,7 +72,7 @@ jobs:
       - name: Check the thumbv7em-none-eabihf runtime (warnings are errors)
         run: |
           cargo check -p typelisp-rt-embedded --target thumbv7em-none-eabihf --locked
-          cargo check -p typelisp-rt-embedded --target thumbv7em-none-eabihf --features semihosting --locked
+          cargo check -p typelisp-rt-semihosting --target thumbv7em-none-eabihf --locked
         env:
           RUSTFLAGS: -D warnings
       - name: Build
@@ -136,7 +136,7 @@ jobs:
       - name: Check the thumbv7em-none-eabihf runtime (warnings are errors)
         run: |
           cargo check -p typelisp-rt-embedded --target thumbv7em-none-eabihf --locked
-          cargo check -p typelisp-rt-embedded --target thumbv7em-none-eabihf --features semihosting --locked
+          cargo check -p typelisp-rt-semihosting --target thumbv7em-none-eabihf --locked
         env:
           RUSTFLAGS: -D warnings
       - name: Build

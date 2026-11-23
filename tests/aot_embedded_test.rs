@@ -272,6 +272,128 @@ fn a_c_function_the_board_has_is_called() {
     assert_eq!(out.status.code(), Some(5));
 }
 
+/// The board's functions (`typelisp_host_*`) as a board gives them, written
+/// in LLVM IR for want of a C compiler for the board in every environment the
+/// tests run in: output to the UART of QEMU's board (CMSDK APB UART 0 at
+/// `0x40004000`, which `-nographic` shows on standard output), a clock that
+/// advances by itself, and the end of the program through semihosting, for
+/// the exit code to reach the test.
+const BOARD_FUNCTIONS_IR: &str = r#"
+target triple = "thumbv7em-unknown-none-eabihf"
+
+@clock = internal global i64 0
+
+define void @typelisp_host_write(i32 %fd, ptr %p, i32 %len) {
+entry:
+  store volatile i32 1, ptr inttoptr (i32 1073758216 to ptr)
+  br label %next
+next:
+  %i = phi i32 [0, %entry], [%i1, %sent]
+  %done = icmp eq i32 %i, %len
+  br i1 %done, label %out, label %wait
+wait:
+  %state = load volatile i32, ptr inttoptr (i32 1073758212 to ptr)
+  %full = and i32 %state, 1
+  %busy = icmp ne i32 %full, 0
+  br i1 %busy, label %wait, label %send
+send:
+  %a = getelementptr i8, ptr %p, i32 %i
+  %c = load i8, ptr %a
+  %w = zext i8 %c to i32
+  store volatile i32 %w, ptr inttoptr (i32 1073758208 to ptr)
+  br label %sent
+sent:
+  %i1 = add i32 %i, 1
+  br label %next
+out:
+  ret void
+}
+
+define i32 @typelisp_host_read(i32 %fd, ptr %p, i32 %len) {
+  ret i32 0
+}
+
+define void @typelisp_host_exit(i32 %code) noreturn {
+  %block = alloca [2 x i32]
+  store i32 131110, ptr %block
+  %second = getelementptr i32, ptr %block, i32 1
+  store i32 %code, ptr %second
+  call void asm sideeffect "movs r0, #0x20\0Abkpt #0xab", "{r1},~{r0},~{memory}"(ptr %block)
+  br label %stay
+stay:
+  br label %stay
+}
+
+define i64 @typelisp_host_now_us() {
+  %t = load i64, ptr @clock
+  %t1 = add i64 %t, 1000
+  store i64 %t1, ptr @clock
+  ret i64 %t1
+}
+
+define i64 @typelisp_host_unix_us() {
+  %t = call i64 @typelisp_host_now_us()
+  ret i64 %t
+}
+
+define void @typelisp_host_sleep_us(i64 %us) {
+  %t = load i64, ptr @clock
+  %t1 = add i64 %t, %us
+  store i64 %t1, ptr @clock
+  ret void
+}
+"#;
+
+/// The object [`BOARD_FUNCTIONS_IR`] compiles to, by the `llc` of the LLVM
+/// typl is built with.
+fn board_functions_object(dir: &Path) -> PathBuf {
+    let prefix = std::env::var("LLVM_SYS_221_PREFIX").expect("LLVM_SYS_221_PREFIX names the LLVM typl is built with");
+    let ir = dir.join("board.ll");
+    let object = dir.join("board.o");
+    std::fs::write(&ir, BOARD_FUNCTIONS_IR).unwrap();
+    let out = Command::new(Path::new(&prefix).join("bin").join("llc"))
+        .args(["-mcpu=cortex-m4", "-filetype=obj", "-o"])
+        .arg(&object)
+        .arg(&ir)
+        .output()
+        .expect("failed to start llc");
+    assert!(out.status.success(), "llc failed: {}", text(&out.stderr));
+    object
+}
+
+/// The board's functions given as C functions (`--board-functions c`,
+/// `--link`) instead of over semihosting: the program's output goes out
+/// through them.
+#[test]
+fn the_board_gives_its_functions_as_c_functions() {
+    let dir = scratch("board_c_functions");
+    let object = board_functions_object(&dir);
+    let elf = built(
+        "board_c_functions",
+        r#"(defun main () int (println "through the UART ~a" 7) (sleep 0.5) 4)"#,
+        "prog.elf",
+        &board_flags(&["--board-functions", "c", "--link", object.to_str().unwrap()]),
+    );
+    let out = run_board(&elf);
+    assert_eq!(text(&out.stdout), "through the UART 7\n", "stderr: {}", text(&out.stderr));
+    assert_eq!(out.status.code(), Some(4));
+}
+
+/// Without them, the link says which are missing.
+#[test]
+fn board_functions_left_out_are_a_link_error() {
+    let (out, _) = build("board_c_missing", r#"(defun main () () (println "x"))"#, "prog.elf", &board_flags(&["--board-functions", "c"]));
+    assert_eq!(out.status.code(), Some(1));
+    assert!(text(&out.stderr).contains("typelisp_host_write"), "{}", text(&out.stderr));
+}
+
+#[test]
+fn a_missing_link_file_is_an_error() {
+    let (out, _) = build("board_missing_link", "(defun main () int 0)", "prog.elf", &board_flags(&["--link", "no-such.o"]));
+    assert_eq!(out.status.code(), Some(1));
+    assert!(text(&out.stderr).contains("--link: no-such.o: no such file"), "{}", text(&out.stderr));
+}
+
 /// The board's memory from `--linker-script`: a smaller RAM, and a stack the
 /// file sizes, still runs the program.
 #[test]
@@ -307,10 +429,13 @@ fn a_missing_linker_script_is_an_error() {
 }
 
 #[test]
-fn a_linker_script_is_only_for_a_board() {
-    let (out, _) = build("board_linker_script_host", "(defun main () int 0)", "prog", &["--linker-script", "memory.x"]);
-    assert_eq!(out.status.code(), Some(1));
-    assert!(text(&out.stderr).contains("--linker-script: only for a board"), "{}", text(&out.stderr));
+fn the_board_s_flags_are_only_for_a_board() {
+    for flags in [["--linker-script", "memory.x"], ["--board-functions", "c"], ["--link", "board.o"]] {
+        let (out, _) = build("board_flags_host", "(defun main () int 0)", "prog", &flags);
+        assert_eq!(out.status.code(), Some(1));
+        let expected = format!("{}: only for a board", flags[0]);
+        assert!(text(&out.stderr).contains(&expected), "{}", text(&out.stderr));
+    }
 }
 
 #[test]

@@ -304,6 +304,44 @@ pub struct BuildOptions {
     /// flash and RAM are (`--linker-script`), in the form of `cortex-m-rt`'s
     /// `memory.x`. `None` is the board QEMU's `mps2-an386` is.
     pub linker_script: Option<std::path::PathBuf>,
+    /// For a board: who gives the board's functions (`--board-functions`).
+    pub board_functions: BoardFunctions,
+    /// For a board: objects and static libraries to link the program with
+    /// (`--link`) — the board's functions when it gives them as C
+    /// functions, a vendor's library the program calls through `defffi`.
+    pub link: Vec<std::path::PathBuf>,
+}
+
+/// Who gives a board's executable the functions it asks of the board
+/// (`typelisp_host_*`: writing, reading, ending, the clock, waiting).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum BoardFunctions {
+    /// The runtime, over semihosting: what QEMU (`-semihosting`) and a
+    /// debugger answer.
+    #[default]
+    Semihosting,
+    /// The board, as C functions the link is given (`--link`).
+    C,
+}
+
+impl BoardFunctions {
+    /// The choice `--board-functions` names.
+    pub fn parse(name: &str) -> Result<BoardFunctions, String> {
+        match name {
+            "semihosting" => Ok(BoardFunctions::Semihosting),
+            "c" => Ok(BoardFunctions::C),
+            _ => Err(format!("--board-functions: unknown `{}` (semihosting or c)", name)),
+        }
+    }
+
+    /// The runtime built for it, in `embedded_runtime_dir`: the static
+    /// library of `typelisp-rt-semihosting` or of `typelisp-rt-embedded`.
+    pub(crate) fn archive(self) -> &'static str {
+        match self {
+            BoardFunctions::Semihosting => "libtypelisp_rt_semihosting.a",
+            BoardFunctions::C => "libtypelisp_rt_embedded.a",
+        }
+    }
 }
 
 /// What an executable is built to run on.
@@ -777,7 +815,7 @@ pub fn compile_file_with(source_path: &str, output_path: &str, options: &BuildOp
                         return Err(reach::report(&header, &uses));
                     }
                     if options.target == Target::Thumbv7em {
-                        embedded::write_executable(&m, output_path, &items, options.linker_script.as_deref())
+                        embedded::write_executable(&m, output_path, &items, options)
                     } else {
                         wasm::write_module(&m, output_path, &items, options.target)
                     }

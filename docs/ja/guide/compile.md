@@ -256,8 +256,60 @@ const code = await run({ write: (fd, text) => { /* 画面に出すなど */ } })
   ページの Worker の中だけなので、`sleep` を使うプログラムは Worker で実行してください。
 - 地方時（`zone` を省いた `decode-universal-time` など）は、JavaScript の `Date` が報告する
   時間帯で求めます。
-- 3.6 節で使えないものに加えて、ファイルとディレクトリの操作が**コンパイルエラー**になります。
-  標準入力は空として読まれ、`(command-line-args)` は空のベクタです。
+- 3.6 節で使えないものに加えて、ファイルとディレクトリの操作、環境変数、`(command-line-args)`、
+  ホームディレクトリ、`dribble` が**コンパイルエラー**になります。標準入力は空として読まれます。
+
+### 3.8 マイコン（Cortex-M）向けにコンパイルする
+
+`--target thumbv7em-none-eabihf` を付けると、OS の無い Cortex-M4F・M7 のボード向けの実行ファイル
+（ELF）を作ります。`-o` を省くと、ソースの `.typl` を `.elf` に変えた名前になります。
+
+```sh
+$ typl -c hello.typl --target thumbv7em-none-eabihf          # hello.elf ができる
+$ qemu-system-arm -M mps2-an386 -nographic \
+    -semihosting-config enable=on,target=native -kernel hello.elf   # QEMU の Cortex-M4 で実行する
+```
+
+- `install.sh` で入れた `typl` はそのまま使えます。`cargo install` で入れるときは、
+  `rustup target add thumbv7em-none-eabihf` を実行してから `--features embedded` を付けてインストールします
+  （wasm と両方なら `--features wasm,embedded`）。リポジトリのデバッグビルドの `typl` では
+  `scripts/build-embedded-runtime.sh` を実行します。リンクには rustup の toolchain のリンカを使います。
+- ボードのメモリの配置は `--linker-script FILE` で渡します。書き方は `cortex-m-rt` の `memory.x` と同じで、
+  FLASH と RAM の番地と大きさを書きます。`_typelisp_stack_size = 32K;` のように書くと、RAM のうちスタックに
+  使う大きさになります（書かなければ 64KiB）。RAM の残りがヒープです。省いたときは QEMU の `mps2-an386`
+  の配置になります。
+
+  ```
+  MEMORY
+  {
+    FLASH : ORIGIN = 0x08000000, LENGTH = 512K
+    RAM : ORIGIN = 0x20000000, LENGTH = 128K
+  }
+  _typelisp_stack_size = 16K;
+  ```
+
+- 出力・入力・終了・時刻（ボードの関数）を誰が与えるかは `--board-functions` で選びます。
+  - `semihosting`（既定）: semihosting で与えます。QEMU（`-semihosting-config enable=on`）やデバッガで動かすときに使います。
+  - `c`: ボードが C の関数で与えます。次の関数を定義したオブジェクトか静的ライブラリを `--link FILE` で渡します
+    （`--link` は何度でも書けます。`defffi` で呼ぶベンダーのライブラリも同じように渡します）。
+
+  ```c
+  void     typelisp_host_write(int32_t fd, const uint8_t *p, size_t len); // fd 1 は標準出力、2 は標準エラー
+  size_t   typelisp_host_read(int32_t fd, uint8_t *p, size_t len);        // fd 0、読んだバイト数、終わりなら 0
+  void     typelisp_host_exit(int32_t code);                              // 戻らない
+  uint64_t typelisp_host_now_us(void);                                    // 逆戻りしない時計のマイクロ秒
+  int64_t  typelisp_host_unix_us(void);                                   // 1970-01-01 からのマイクロ秒
+  void     typelisp_host_sleep_us(uint64_t us);                           // us マイクロ秒待つ
+  ```
+
+- 起動（ベクタテーブルと、RAM の準備）とメモリの確保はランタイムが行います。HardFault や処理されない
+  割り込みが起きると、panic と同じ終了コード（1）で終わります。
+- `throw`/`catch`/`panic`、bignum・ratio・浮動小数、タスク・チャネル・`sleep` は実行ファイルと同じに
+  振る舞います。タスクは 1 つのコアで順に実行されます。C の関数（`defffi`）も使えます。
+- ボードにないものを使うプログラムは**コンパイルエラー**になります。3.7 節で使えないものに加えて、
+  `eval`・`macroexpand` が使えません。地方時は分かりません（3.6 節と同じ）。
+- cons アリーナは 1024 セルから始まり、足りなければ伸びます。`--heap-cells`、`--max-memory`、`--no-cons`、
+  `-O<N>`、`--release` はそのまま使えます。
 
 ## 4. ダンプ
 
