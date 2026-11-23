@@ -31,9 +31,12 @@
 //! widened to `f64` bits, a `bool` as 0/1, a pointer as its address. The
 //! interpreter converts its values to and from those words around the call.
 
-use std::alloc::Layout;
-use std::collections::{BTreeMap, HashMap};
-use std::sync::{Arc, Mutex};
+use typelisp_mem::prelude::*;
+use alloc::alloc::Layout;
+use alloc::collections::BTreeMap;
+use alloc::sync::Arc;
+use typelisp_mem::collections::HashMap;
+use typelisp_mem::sync::Mutex;
 
 use typelisp_abi::{fatal, raise};
 use typelisp_mem::TypeId;
@@ -73,7 +76,7 @@ struct State {
 static STATE: Mutex<Option<State>> = Mutex::new(None);
 
 fn with_state<R>(f: impl FnOnce(&mut State) -> R) -> R {
-    let mut guard = STATE.lock().unwrap_or_else(|e| e.into_inner());
+    let mut guard = STATE.lock();
     f(guard.get_or_insert_with(State::default))
 }
 
@@ -94,7 +97,7 @@ pub fn arena_close(arena: u64) -> Result<(), String> {
         let bases = s.arenas.remove(&arena).ok_or_else(|| format!("c-arena-close: arena {} is not open", arena))?;
         for base in bases {
             let blk = s.blocks.remove(&base).ok_or_else(|| format!("c-arena-close: block {:#x} of arena {} is not live", base, arena))?;
-            unsafe { std::alloc::dealloc(base as *mut u8, blk.layout) };
+            unsafe { alloc::alloc::dealloc(base as *mut u8, blk.layout) };
         }
         Ok(())
     })
@@ -112,13 +115,13 @@ pub fn alloc(arena: u64, count: i64, elem_size: usize, align: usize, positions: 
         .ok_or_else(|| format!("c-alloc: {} elements of {} bytes do not fit in memory", count, elem_size))?;
     let layout = Layout::from_size_align(len, align)
         .map_err(|_| format!("c-alloc: {} elements of {} bytes do not fit in memory", count, elem_size))?;
-    let base = unsafe { std::alloc::alloc_zeroed(layout) } as usize;
+    let base = unsafe { alloc::alloc::alloc_zeroed(layout) } as usize;
     if base == 0 {
         return Err(format!("c-alloc: out of memory allocating {} bytes", len));
     }
     with_state(|s| {
         let Some(owned) = s.arenas.get_mut(&arena) else {
-            unsafe { std::alloc::dealloc(base as *mut u8, layout) };
+            unsafe { alloc::alloc::dealloc(base as *mut u8, layout) };
             return Err("c-alloc: the `unsafe` that owns this allocation has already been left".to_string());
         };
         owned.push(base);
@@ -233,7 +236,7 @@ unsafe fn args_of<'a>(args: *const i64, argc: u32, want: u32, who: &str) -> &'a 
     if argc < want {
         fatal(&format!("{}: expected {} arguments", who, want));
     }
-    std::slice::from_raw_parts(args, argc as usize)
+    core::slice::from_raw_parts(args, argc as usize)
 }
 
 /// `(" c-arena-open")`.

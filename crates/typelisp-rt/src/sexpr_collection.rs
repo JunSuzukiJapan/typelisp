@@ -1,5 +1,6 @@
 //! Building `Sexpr` vectors, tuples and arrays from lists.
 
+use typelisp_mem::prelude::*;
 use typelisp_abi::{active_heap, decode, encode, fatal, raise, Raised};
 use typelisp_mem::{Heap, TypeId, Value};
 

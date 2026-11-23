@@ -1,6 +1,7 @@
 //! The coroutine frame protocol: opening a frame, reading the pending call's
 //! arguments, and naming a call to the driver.
 
+use typelisp_mem::prelude::*;
 use typelisp_abi::fatal;
 use typelisp_abi::call_state::{Pending, State};
 
@@ -139,7 +140,7 @@ pub unsafe extern "C" fn rt_frame_call(args: *const i64, argc: u32) -> i64 {
 ///
 /// `args` must point to `argc >= from` valid `i64`s.
 unsafe fn name_call(args: *const i64, argc: u32, from: usize, make: impl FnOnce(Vec<i64>) -> Pending) {
-    let words = std::slice::from_raw_parts(args.add(from), argc as usize - from);
+    let words = core::slice::from_raw_parts(args.add(from), argc as usize - from);
     typelisp_abi::call_state::with(|s| {
         let mut passed = s.args_buffer(words.len());
         passed.extend_from_slice(words);

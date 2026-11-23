@@ -22,8 +22,8 @@
 
 use num_bigint::BigInt;
 use num_rational::BigRational;
-use std::collections::hash_map::DefaultHasher;
-use std::hash::{Hash, Hasher};
+use typelisp_mem::collections::{fixed_hasher, FixedHasher};
+use core::hash::{Hash, Hasher};
 use typelisp_mem::{FloatBox, Heap, Value};
 
 /// The concrete value inside a trait object, or `v` unchanged. Comparison
@@ -197,7 +197,7 @@ fn equalp_val_here(heap: &Heap, a: Value, b: Value) -> bool {
 const SXHASH_MASK: u64 = (1 << 30) - 1;
 
 /// The hash of `v`'s identity: what `eq` compares.
-fn identity_hash(v: Value, h: &mut DefaultHasher) {
+fn identity_hash(v: Value, h: &mut FixedHasher) {
     match v {
         Value::Empty => 0u8.hash(h),
         Value::Int(n) => (1u8, n).hash(h),
@@ -213,7 +213,7 @@ fn identity_hash(v: Value, h: &mut DefaultHasher) {
 
 /// A hash that agrees with [`eq_val`].
 pub fn sxhash_eq_val(heap: &Heap, v: Value) -> i64 {
-    let mut h = DefaultHasher::new();
+    let mut h = fixed_hasher();
     identity_hash(strip_dyn(heap, v), &mut h);
     (h.finish() & SXHASH_MASK) as i64
 }
@@ -222,7 +222,7 @@ pub fn sxhash_eq_val(heap: &Heap, v: Value) -> i64 {
 /// value, everything else by identity.
 pub fn sxhash_eql_val(heap: &Heap, v: Value) -> i64 {
     let v = strip_dyn(heap, v);
-    let mut h = DefaultHasher::new();
+    let mut h = fixed_hasher();
     match v {
         Value::Boxed(id) => match heap.float_box(id) {
             Some(FloatBox::F32(f)) => (9u8, f.to_bits()).hash(&mut h),
@@ -244,14 +244,14 @@ pub fn sxhash_eql_val(heap: &Heap, v: Value) -> i64 {
 /// enum's value by their parts down to a fixed depth, everything else by
 /// identity.
 pub fn sxhash_equalp_val(heap: &Heap, v: Value) -> i64 {
-    let mut h = DefaultHasher::new();
+    let mut h = fixed_hasher();
     equalp_hash(heap, v, 4, &mut h);
     (h.finish() & SXHASH_MASK) as i64
 }
 
 /// [`sxhash_equalp_val`]'s walk. Below `depth` a part adds nothing, which
 /// keeps two `equalp` values hashing alike however deep they are.
-fn equalp_hash(heap: &Heap, v: Value, depth: u32, h: &mut DefaultHasher) {
+fn equalp_hash(heap: &Heap, v: Value, depth: u32, h: &mut FixedHasher) {
     if depth == 0 {
         return;
     }

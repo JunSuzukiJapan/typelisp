@@ -27,11 +27,12 @@
 //! that opened it), so replacing the whole `Arc` on every fresh `Interp`
 //! would have thrown it away by accident.
 
-use std::cell::RefCell;
-use std::collections::HashMap;
-use std::sync::Arc;
+use typelisp_mem::prelude::*;
+use core::cell::RefCell;
+use typelisp_mem::collections::HashMap;
+use alloc::sync::Arc;
 
-use parking_lot::{Mutex, RwLock};
+use typelisp_mem::sync::{Mutex, RwLock};
 
 use crate::stream::StreamTable;
 
@@ -55,7 +56,7 @@ pub struct RtShared {
     pub(crate) streams: Mutex<StreamTable>,
 }
 
-thread_local! {
+typelisp_mem::thread_local! {
     /// This thread's `RtShared` handle — `None` until [`rt_shared`] first
     /// creates one.
     static RT_SHARED: RefCell<Option<Arc<RtShared>>> = const { RefCell::new(None) };

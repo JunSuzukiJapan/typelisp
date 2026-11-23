@@ -18,6 +18,7 @@
 //! `std::time` machinery in with it — see this crate's own module docs on how
 //! archive-member granularity decides what an AOT binary pays for.
 
+use typelisp_mem::prelude::*;
 use typelisp_mem::{spec, wk, Heap, StdModule, TypeId, TypeSpec, Value};
 
 // The types these results are built with come from `typelisp_mem`'s
@@ -138,7 +139,7 @@ pub fn get_universal_time() -> i64 {
 /// and a compiled call comparable: `(time ...)` around a compiled body still
 /// subtracts two readings off one clock.
 pub fn get_internal_real_time() -> i64 {
-    static START: std::sync::OnceLock<typelisp_mem::host::Instant> = std::sync::OnceLock::new();
+    static START: typelisp_mem::sync::OnceLock<typelisp_mem::host::Instant> = typelisp_mem::sync::OnceLock::new();
     let start = START.get_or_init(typelisp_mem::host::Instant::now);
     start.elapsed().as_micros() as i64
 }
@@ -165,11 +166,13 @@ pub fn get_internal_real_time() -> i64 {
 /// the executable compiled. That is `sb-ext:*posix-argv*`'s convention and
 /// Rust's, and it is the only choice that lets one source file be run either
 /// way and index its arguments the same.
-static COMMAND_LINE_ARGS: std::sync::OnceLock<Vec<String>> = std::sync::OnceLock::new();
+#[cfg(feature = "std")]
+static COMMAND_LINE_ARGS: typelisp_mem::sync::OnceLock<Vec<String>> = typelisp_mem::sync::OnceLock::new();
 
 /// Install the command line a typelisp program should see. Called once, by
 /// `typl`'s `main`, before any user code runs; ignored if called twice (the
 /// first caller wins, and there is only ever one).
+#[cfg(feature = "std")]
 pub fn set_command_line_args(args: Vec<String>) {
     let _ = COMMAND_LINE_ARGS.set(args);
 }
@@ -182,6 +185,7 @@ pub fn set_command_line_args(args: Vec<String>) {
 /// first string and the box that finally roots them all. A version of this
 /// that consed would need each element rooted, which is the shape of the
 /// leaks recorded in `checker.rs`'s history.
+#[cfg(feature = "std")]
 pub fn command_line_args(heap: &mut Heap) -> Value {
     let args: Vec<String> = match COMMAND_LINE_ARGS.get() {
         Some(installed) => installed.clone(),
@@ -203,6 +207,7 @@ pub fn command_line_args(heap: &mut Heap) -> Value {
 /// this language is Rust's, so a variable holding bytes that are not UTF-8
 /// has no value that could be handed back, and "unset" is the only honest
 /// answer a `Option<string>` can give.
+#[cfg(feature = "std")]
 pub fn getenv(heap: &mut Heap, name: &str) -> Value {
     let v = std::env::var(name).ok().map(|s| heap.alloc_string(s));
     option_value(heap, wk::F_GETENV, v)
@@ -215,6 +220,7 @@ pub fn getenv(heap: &mut Heap, name: &str) -> Value {
 /// `NIL` when the home directory cannot be determined, and inventing `"/"` or
 /// the current directory would make an unset `$HOME` indistinguishable from a
 /// real one.
+#[cfg(feature = "std")]
 pub fn home_directory(heap: &mut Heap) -> Value {
     let v = std::env::var("HOME").ok().map(|s| heap.alloc_string(s));
     option_value(heap, wk::F_HOME_DIRECTORY, v)
@@ -238,24 +244,24 @@ pub fn lisp_implementation_version(heap: &mut Heap) -> Value {
 /// `(machine-type)` (CLHS 25.1): the CPU architecture (`aarch64`, `x86_64`,
 /// …) — `std::env::consts::ARCH`, resolved at compile time.
 pub fn machine_type(heap: &mut Heap) -> Value {
-    heap.alloc_string(std::env::consts::ARCH.to_string())
+    heap.alloc_string(typelisp_mem::host::ARCH.to_string())
 }
 
 /// `(software-type)` (CLHS 25.1): the operating system (`macos`, `linux`,
 /// …) — `std::env::consts::OS`, resolved at compile time.
 pub fn software_type(heap: &mut Heap) -> Value {
-    heap.alloc_string(std::env::consts::OS.to_string())
+    heap.alloc_string(typelisp_mem::host::OS.to_string())
 }
 
 // ---- Which OS thread ----------------------------------------------------
 
 /// The next number [`thread_current_id`] hands out. Process-wide: two threads
 /// must never share one, whichever heap they run on.
-static NEXT_THREAD_ID: std::sync::atomic::AtomicI64 = std::sync::atomic::AtomicI64::new(1);
+static NEXT_THREAD_ID: typelisp_mem::sync::AtomicCount = typelisp_mem::sync::AtomicCount::new(1);
 
-thread_local! {
+typelisp_mem::thread_local! {
     /// This thread's number, taken the first time it is asked for.
-    static THREAD_ID: i64 = NEXT_THREAD_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    static THREAD_ID: i64 = NEXT_THREAD_ID.fetch_add(1, core::sync::atomic::Ordering::Relaxed) as i64;
 }
 
 /// `(Thread::current-id)`: a number naming the OS thread running the caller,
@@ -274,6 +280,10 @@ pub fn thread_current_id() -> i64 {
 /// threads run tasks when `TYPELISP_THREADS` is not set. The operating
 /// system may refuse to say, and that is reported as it is.
 pub fn thread_available_parallelism() -> Result<i64, String> {
+    // Without std there is one core and one thread.
+    #[cfg(not(feature = "std"))]
+    return Ok(1);
+    #[cfg(feature = "std")]
     std::thread::available_parallelism()
         .map(|n| n.get() as i64)
         .map_err(|e| format!("Thread::available-parallelism: the system cannot say ({})", e))
@@ -296,6 +306,7 @@ pub fn thread_available_parallelism() -> Result<i64, String> {
 /// shows a large difference. Substituting one for the other — which is what
 /// this returned before there was a `getrusage` to call — is a lie precisely
 /// when the number is interesting.
+#[cfg(feature = "std")]
 pub fn get_internal_run_time() -> i64 {
     match crate::os::run_time_micros() {
         Some(us) => us,
@@ -307,6 +318,10 @@ pub fn get_internal_run_time() -> i64 {
 }
 
 /// `(machine-instance)` (CLHS 25.1): the host's name, or `None`.
+///
+/// Only with std: without an operating system there is no host to name, and
+/// a compiled program that calls this is refused before it is built.
+#[cfg(feature = "std")]
 pub fn machine_instance(heap: &mut Heap) -> Value {
     let v = crate::os::host_name().map(|s| heap.alloc_string(s));
     option_value(heap, wk::F_MACHINE_INSTANCE, v)
@@ -318,6 +333,10 @@ pub fn machine_instance(heap: &mut Heap) -> Value {
 /// Distinct from `machine-type`, which is `std::env::consts::ARCH` — the
 /// architecture this binary was *built* for.
 pub fn machine_version(heap: &mut Heap) -> Value {
+    // Without std there is no operating system to ask, and CL allows `NIL`.
+    #[cfg(not(feature = "std"))]
+    let v = None;
+    #[cfg(feature = "std")]
     let v = crate::os::machine_version().map(|s| heap.alloc_string(s));
     option_value(heap, wk::F_MACHINE_VERSION, v)
 }
@@ -325,6 +344,9 @@ pub fn machine_version(heap: &mut Heap) -> Value {
 /// `(software-version)` (CLHS 25.1): the OS release string (`uname -r`,
 /// e.g. `24.6.0`), or `None`. Its companion `software-type` is a
 /// compile-time constant and needs no call.
+///
+/// Only with std, for the reason `machine_instance` gives.
+#[cfg(feature = "std")]
 pub fn software_version(heap: &mut Heap) -> Value {
     let v = crate::os::os_release().map(|s| heap.alloc_string(s));
     option_value(heap, wk::F_SOFTWARE_VERSION, v)
@@ -362,7 +384,15 @@ pub fn timezone_daylight_p(heap: &mut Heap, day: i64, second: i64) -> Value {
 fn local_zone(day: i64, second: i64) -> Option<(i32, bool)> {
     const UNIX_TO_CL_EPOCH_SECS: i64 = 2_208_988_800;
     let unix = day.checked_mul(SECS_PER_DAY)?.checked_add(second)?.checked_sub(UNIX_TO_CL_EPOCH_SECS)?;
-    crate::os::timezone_at(unix)
+    #[cfg(feature = "std")]
+    return crate::os::timezone_at(unix);
+    // Without std there is no time zone to ask about, as on WASI: the
+    // prelude's `local-zone-west` panics on this `None`.
+    #[cfg(not(feature = "std"))]
+    {
+        let _ = unix;
+        None
+    }
 }
 
 /// `(heap-info)`: what the collector knows about itself, as the prelude's
@@ -405,6 +435,7 @@ pub fn heap_info(heap: &mut Heap) -> Value {
 /// `(dribble-start path)`: begin copying the session into `path`, truncating
 /// it. The recording itself lives in [`typelisp_abi::dribble`] — see that
 /// module's docs for why it is a crate below this one.
+#[cfg(feature = "std")]
 pub fn dribble_start(heap: &mut Heap, path: &str) -> Value {
     match typelisp_abi::dribble::start(path) {
         Ok(()) => result_ok(heap, wk::F_DRIBBLE_START, Value::Empty),
@@ -418,6 +449,7 @@ pub fn dribble_start(heap: &mut Heap, path: &str) -> Value {
 /// `Result`, not `()`, because the close *flushes*: a full disk is discovered
 /// here or nowhere, and discovering it nowhere would mean a truncated
 /// transcript reported as a complete one.
+#[cfg(feature = "std")]
 pub fn dribble_stop(heap: &mut Heap) -> Value {
     match typelisp_abi::dribble::stop() {
         Ok(()) => result_ok(heap, wk::F_DRIBBLE_STOP, Value::Empty),
@@ -447,6 +479,7 @@ pub fn dribble_stop(heap: &mut Heap) -> Value {
 ///
 /// Waits for the editor to exit (CL's `ed` returns when editing is done), and
 /// reports a non-zero exit rather than swallowing it.
+#[cfg(feature = "std")]
 pub fn ed_open(heap: &mut Heap, path: &str, line: i64) -> Value {
     let err = |heap: &mut Heap, msg: String| result_err(heap, wk::F_ED_OPEN, TypeId::FILE_ERROR, msg);
     let spec = match std::env::var("VISUAL").ok().filter(|s| !s.trim().is_empty()) {
@@ -491,12 +524,13 @@ pub fn ed_open(heap: &mut Heap, path: &str, line: i64) -> Value {
 pub fn stdin_is_tty() -> bool {
     // No standard input to be a terminal: `wasm32-unknown-unknown`'s reads as
     // empty (`typelisp_mem::host`).
-    #[cfg(all(target_family = "wasm", target_os = "unknown"))]
+    // Nor without std.
+    #[cfg(any(not(feature = "std"), all(target_family = "wasm", target_os = "unknown")))]
     return false;
     // SAFETY: `isatty` reads a file descriptor's type and touches no memory.
     // 0 is standard input, which every process has (or does not, in which case
     // `isatty` answers 0 — the same answer, for the same reason).
-    #[cfg(not(all(target_family = "wasm", target_os = "unknown")))]
+    #[cfg(all(feature = "std", not(all(target_family = "wasm", target_os = "unknown"))))]
     unsafe {
         libc::isatty(0) == 1
     }
@@ -579,6 +613,7 @@ pub unsafe extern "C" fn rt_get_internal_real_time(_args: *const i64, _argc: u32
 ///
 /// `argc` must be `>= 1` and `args` must point to a valid `i64` encoding a
 /// `Value::Str`; a `Heap` must be registered on this thread.
+#[cfg(feature = "std")]
 unsafe fn str_arg(args: *const i64, argc: u32, who: &str) -> String {
     if argc < 1 {
         fatal(&format!("{}: expected 1 argument", who));
@@ -596,6 +631,7 @@ unsafe fn str_arg(args: *const i64, argc: u32, who: &str) -> String {
 ///
 /// `args`/`argc` are unused (the builtin is nullary). A `Heap` must be
 /// registered on this thread.
+#[cfg(feature = "std")]
 #[no_mangle]
 pub unsafe extern "C" fn rt_command_line_args(_args: *const i64, _argc: u32) -> i64 {
     encode(command_line_args(active_heap()))
@@ -615,7 +651,7 @@ pub fn sleep(heap: &mut Heap, secs: f64) -> Result<(), String> {
     if !(secs >= 0.0) {
         return Err(format!("sleep: {} is not a non-negative number of seconds", secs));
     }
-    heap.native(|| typelisp_mem::host::sleep(std::time::Duration::from_secs_f64(secs)));
+    heap.native(|| typelisp_mem::host::sleep(core::time::Duration::from_secs_f64(secs)));
     Ok(())
 }
 
@@ -624,6 +660,7 @@ pub fn sleep(heap: &mut Heap, secs: f64) -> Result<(), String> {
 /// # Safety
 ///
 /// Same as [`str_arg`].
+#[cfg(feature = "std")]
 #[no_mangle]
 pub unsafe extern "C" fn rt_getenv(args: *const i64, argc: u32) -> i64 {
     let name = str_arg(args, argc, "rt_getenv");
@@ -636,6 +673,7 @@ pub unsafe extern "C" fn rt_getenv(args: *const i64, argc: u32) -> i64 {
 ///
 /// `args`/`argc` are unused (the builtin is nullary). A `Heap` must be
 /// registered on this thread.
+#[cfg(feature = "std")]
 #[no_mangle]
 pub unsafe extern "C" fn rt_home_directory(_args: *const i64, _argc: u32) -> i64 {
     encode(home_directory(active_heap()))
@@ -681,6 +719,7 @@ pub unsafe extern "C" fn rt_software_type(_args: *const i64, _argc: u32) -> i64 
 ///
 /// `args`/`argc` are unused (the builtin is nullary). A `Heap` must be
 /// registered on this thread.
+#[cfg(feature = "std")]
 #[no_mangle]
 pub unsafe extern "C" fn rt_get_internal_run_time(_args: *const i64, _argc: u32) -> i64 {
     let v = internal_time_value(active_heap(), get_internal_run_time());
@@ -693,6 +732,7 @@ pub unsafe extern "C" fn rt_get_internal_run_time(_args: *const i64, _argc: u32)
 ///
 /// `args`/`argc` are unused (the builtin is nullary). A `Heap` must be
 /// registered on this thread.
+#[cfg(feature = "std")]
 #[no_mangle]
 pub unsafe extern "C" fn rt_machine_instance(_args: *const i64, _argc: u32) -> i64 {
     encode(machine_instance(active_heap()))
@@ -715,6 +755,7 @@ pub unsafe extern "C" fn rt_machine_version(_args: *const i64, _argc: u32) -> i6
 ///
 /// `args`/`argc` are unused (the builtin is nullary). A `Heap` must be
 /// registered on this thread.
+#[cfg(feature = "std")]
 #[no_mangle]
 pub unsafe extern "C" fn rt_software_version(_args: *const i64, _argc: u32) -> i64 {
     encode(software_version(active_heap()))
@@ -790,6 +831,7 @@ pub unsafe extern "C-unwind" fn rt_thread_available_parallelism(_args: *const i6
 /// # Safety
 ///
 /// Same as [`str_arg`].
+#[cfg(feature = "std")]
 #[no_mangle]
 pub unsafe extern "C" fn rt_dribble_start(args: *const i64, argc: u32) -> i64 {
     let path = str_arg(args, argc, "rt_dribble_start");
@@ -802,6 +844,7 @@ pub unsafe extern "C" fn rt_dribble_start(args: *const i64, argc: u32) -> i64 {
 ///
 /// `args`/`argc` are unused (the builtin is nullary). A `Heap` must be
 /// registered on this thread.
+#[cfg(feature = "std")]
 #[no_mangle]
 pub unsafe extern "C" fn rt_dribble_stop(_args: *const i64, _argc: u32) -> i64 {
     encode(dribble_stop(active_heap()))
@@ -814,6 +857,7 @@ pub unsafe extern "C" fn rt_dribble_stop(_args: *const i64, _argc: u32) -> i64 {
 ///
 /// `argc` must be `>= 2` and `args` must point to 2 valid `i64`s, the first
 /// encoding a `Value::Str`; a `Heap` must be registered on this thread.
+#[cfg(feature = "std")]
 #[no_mangle]
 pub unsafe extern "C" fn rt_ed_open(args: *const i64, argc: u32) -> i64 {
     if argc < 2 {

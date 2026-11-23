@@ -19,17 +19,14 @@ name = "typelisp_rt"
 crate-type = ["rlib"]
 
 [dependencies]
-typelisp-abi = { workspace = true, features = ["std"] }
-typelisp-mem = { workspace = true, features = ["std"] }
-typelisp-print = { workspace = true, features = ["std"] }
-typelisp-read = { workspace = true, features = ["std"] }
-# `RtShared`'s locks (`docs/dev/os-threads-design.md` §5/Phase 1d) —
-# non-poisoning, same as `typelisp-mem`'s `HeapShared` already uses.
-parking_lot = "0.12"
-num-bigint = "0.4"
-num-rational = "0.4"
-num-traits = "0.2"
-num-integer = "0.1"
+typelisp-abi.workspace = true
+typelisp-mem.workspace = true
+typelisp-print.workspace = true
+typelisp-read.workspace = true
+num-bigint = { version = "0.4", default-features = false }
+num-rational = { version = "0.4", default-features = false, features = ["num-bigint"] }
+num-traits = { version = "0.2", default-features = false, features = ["libm"] }
+num-integer = { version = "0.1", default-features = false }
 # The one dependency that is not pure Rust: the C library's own declarations.
 # `libc` is (almost) not a library at all — it is `extern "C"` blocks plus the
 # per-platform `struct`/constant definitions — and the code behind them is the
@@ -39,7 +36,7 @@ num-integer = "0.1"
 # has no equivalent of, all in `sys_builtin`/`stream_builtin`: CPU time
 # (`getrusage`), the host's name and OS release (`uname`), a file's owner
 # (`getpwuid_r`) and the local time zone (`localtime_r`).
-libc = "0.2"
+libc = { version = "0.2", optional = true }
 # TLS for `tls-connect`. A TLS implementation is the one thing in the network
 # layer that cannot be written in typelisp (the language has no ciphers) and
 # should not be written here either. `rustls` is sans-IO — it never touches
@@ -51,8 +48,19 @@ libc = "0.2"
 # Not on wasm: `ring` builds C, and a wasm program has no sockets to put TLS
 # on (`net` is not compiled there either).
 [target.'cfg(not(target_family = "wasm"))'.dependencies]
-rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
-webpki-roots = "1"
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"], optional = true }
+webpki-roots = { version = "1", optional = true }
+
+# `std` (on by default) is what every host build has: the OS threads, the
+# network, files, the environment and the process. Without it (a
+# microcontroller) the crate is `no_std` + `alloc` and has none of them.
+[features]
+default = ["std"]
+std = [
+    "typelisp-abi/std", "typelisp-mem/std", "typelisp-print/std", "typelisp-read/std",
+    "num-bigint/std", "num-rational/std", "num-traits/std", "num-integer/std",
+    "dep:libc", "dep:rustls", "dep:webpki-roots",
+]
 
 # The tests need a certificate a TLS client will trust; `rcgen` makes one
 # in memory (a CA and a leaf for `localhost`), so no fixture file can expire

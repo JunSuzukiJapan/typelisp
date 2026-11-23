@@ -1,6 +1,7 @@
 //! Starting and finishing a compiled program: the AOT heap, the entry points an
 //! executable's `main` calls, and driving a compiled body from a machine frame.
 
+use typelisp_mem::prelude::*;
 use typelisp_abi::{active_heap, fatal, set_active_heap, CompiledPanic, CompiledThrow};
 use typelisp_mem::{Heap, Value};
 use crate::{global_perm_idx, take_throw};
@@ -97,11 +98,11 @@ pub const EXIT_CODE_SUCCESS: i64 = 0;
 /// registered on this thread (`rt_heap_init` runs first).
 #[no_mangle]
 pub unsafe extern "C" fn rt_run_entry(entry: i64) -> i64 {
-    let f: unsafe extern "C-unwind" fn(*const i64, u32) -> i64 = std::mem::transmute(entry as usize);
+    let f: unsafe extern "C-unwind" fn(*const i64, u32) -> i64 = core::mem::transmute(entry as usize);
     // Only a `()`-returning `main` reaches this shim (`compile::aot` refuses
     // an `int` one under this ABI), and a `main` that returns normally exits
     // 0 — whatever word its `()` happens to be.
-    f(std::ptr::null(), 0);
+    f(core::ptr::null(), 0);
     exit_code(EXIT_CODE_SUCCESS)
 }
 
@@ -189,8 +190,8 @@ pub unsafe fn read_program(args: *const i64, argc: u32, what: &str) -> Program {
         fatal(&format!("{}: expected 3 arguments (the initialiser array, its count and the entry point)", what));
     }
     let words = collect_words(*args as usize as *const i64, *args.add(1));
-    let inits = words.into_iter().map(|w| std::mem::transmute::<usize, crate::coroutine::CoroutineFn>(w as usize)).collect();
-    let entry: crate::coroutine::CoroutineFn = std::mem::transmute(*args.add(2) as usize);
+    let inits = words.into_iter().map(|w| core::mem::transmute::<usize, crate::coroutine::CoroutineFn>(w as usize)).collect();
+    let entry: crate::coroutine::CoroutineFn = core::mem::transmute(*args.add(2) as usize);
     Program { inits, entry }
 }
 
@@ -217,30 +218,34 @@ pub unsafe fn read_program(args: *const i64, argc: u32, what: &str) -> Program {
 /// [`rt_run_program`]'s.
 unsafe fn run_program(program: &Program) -> Result<Value, i64> {
     let heap = active_heap();
-    let threads = match crate::sched::thread_count() {
-        Ok(n) => n,
-        Err(m) => {
-            typelisp_mem::host::eprintln(format_args!("error: {}", m));
-            return Err(EXIT_CODE_PANIC);
-        }
-    };
     let sched = match crate::sched::SchedShared::<crate::sched::CompiledTask>::new() {
-        Ok(s) => std::sync::Arc::new(s),
+        Ok(s) => alloc::sync::Arc::new(s),
         Err(e) => fatal(&format!("the scheduler could not be set up: {}", e)),
     };
     // The printer reads the prelude's control variables from their compiled
     // slots, and the id -> slot table is this crate's.
     typelisp_print::aot::set_global_slots(global_perm_idx);
-    let rt = crate::shared::rt_shared();
-    let print = typelisp_print::shared::print_shared();
-    let hooks = typelisp_print::runtime::print_hooks();
-    let started = crate::sched::start_workers(&sched, heap, threads - 1, &(), move || {
-        crate::shared::set_rt_shared(std::sync::Arc::clone(&rt));
-        typelisp_print::shared::set_print_shared(std::sync::Arc::clone(&print));
-        typelisp_print::runtime::set_print_hooks(Some(hooks));
-    });
-    if let Err(e) = started {
-        fatal(&format!("a scheduler worker thread could not be started: {}", e));
+    // Without std this thread is the only one.
+    #[cfg(feature = "std")]
+    {
+        let threads = match crate::sched::thread_count() {
+            Ok(n) => n,
+            Err(m) => {
+                typelisp_mem::host::eprintln(format_args!("error: {}", m));
+                return Err(EXIT_CODE_PANIC);
+            }
+        };
+        let rt = crate::shared::rt_shared();
+        let print = typelisp_print::shared::print_shared();
+        let hooks = typelisp_print::runtime::print_hooks();
+        let started = crate::sched::start_workers(&sched, heap, threads - 1, &(), move || {
+            crate::shared::set_rt_shared(alloc::sync::Arc::clone(&rt));
+            typelisp_print::shared::set_print_shared(alloc::sync::Arc::clone(&print));
+            typelisp_print::runtime::set_print_hooks(Some(hooks));
+        });
+        if let Err(e) = started {
+            fatal(&format!("a scheduler worker thread could not be started: {}", e));
+        }
     }
     // Built inside `admit`, on the task's own root stack — `entry` pushes
     // the task's state slots, and they belong there and not on this frame's.
@@ -292,7 +297,7 @@ pub unsafe extern "C-unwind" fn rt_drive_body(args: *const i64, argc: u32) -> i6
     if argc < 3 {
         fatal("rt_drive_body: expected 3 arguments (the address, the argument array and its count)");
     }
-    let f: crate::coroutine::CoroutineFn = std::mem::transmute(*args as usize);
+    let f: crate::coroutine::CoroutineFn = core::mem::transmute(*args as usize);
     let callee_args = *args.add(1) as usize as *const i64;
     let callee_argc = *args.add(2);
     let words = collect_words(callee_args, callee_argc);

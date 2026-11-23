@@ -40,13 +40,14 @@
 /// on an invalid `who` or pointer, neither of which is reachable from here,
 /// so the `None` arm is unreachable in practice — it is still an arm and not
 /// a `.unwrap()`, because the caller has an honest thing to do with it.
+use typelisp_mem::prelude::*;
 #[cfg(unix)]
 pub fn run_time_micros() -> Option<i64> {
     // SAFETY: `ru` is a fully-owned, zeroed `rusage` that outlives the call,
     // and `RUSAGE_SELF` is the constant libc defines for it. `getrusage`
     // writes only through the pointer we pass and touches no global state.
     let ru = unsafe {
-        let mut ru: libc::rusage = std::mem::zeroed();
+        let mut ru: libc::rusage = core::mem::zeroed();
         if libc::getrusage(libc::RUSAGE_SELF, &mut ru) != 0 {
             return None;
         }
@@ -99,11 +100,11 @@ fn uname_field(field: impl Fn(&libc::utsname) -> *const libc::c_char) -> Option<
     // it is valid for the `CStr` read below, and every `utsname` field is
     // NUL-terminated by contract.
     unsafe {
-        let mut u: libc::utsname = std::mem::zeroed();
+        let mut u: libc::utsname = core::mem::zeroed();
         if libc::uname(&mut u) != 0 {
             return None;
         }
-        let s = std::ffi::CStr::from_ptr(field(&u));
+        let s = core::ffi::CStr::from_ptr(field(&u));
         s.to_str().ok().filter(|s| !s.is_empty()).map(|s| s.to_string())
     }
 }
@@ -147,7 +148,7 @@ pub fn machine_version() -> Option<String> {
 /// specifies (ask with a null buffer, then read).
 #[cfg(target_os = "macos")]
 fn sysctl_string(name: &str) -> Option<String> {
-    let cname = std::ffi::CString::new(name).ok()?;
+    let cname = alloc::ffi::CString::new(name).ok()?;
     // SAFETY: both calls pass a NUL-terminated name and a `len` that
     // describes the buffer being written. The first passes a null buffer,
     // which is how `sysctlbyname` is asked for the size; the second passes a
@@ -155,7 +156,7 @@ fn sysctl_string(name: &str) -> Option<String> {
     // null/0, so nothing is written back into the kernel.
     unsafe {
         let mut len: libc::size_t = 0;
-        if libc::sysctlbyname(cname.as_ptr(), std::ptr::null_mut(), &mut len, std::ptr::null_mut(), 0) != 0 {
+        if libc::sysctlbyname(cname.as_ptr(), core::ptr::null_mut(), &mut len, core::ptr::null_mut(), 0) != 0 {
             return None;
         }
         if len == 0 {
@@ -166,7 +167,7 @@ fn sysctl_string(name: &str) -> Option<String> {
             cname.as_ptr(),
             buf.as_mut_ptr() as *mut libc::c_void,
             &mut len,
-            std::ptr::null_mut(),
+            core::ptr::null_mut(),
             0,
         ) != 0
         {
@@ -195,12 +196,12 @@ pub fn user_name(uid: u32) -> Option<String> {
         // pointer into shared state. `pwd.pw_name` points into `buf` and so
         // is read before either is dropped.
         let (rc, found, name) = unsafe {
-            let mut pwd: libc::passwd = std::mem::zeroed();
-            let mut result: *mut libc::passwd = std::ptr::null_mut();
+            let mut pwd: libc::passwd = core::mem::zeroed();
+            let mut result: *mut libc::passwd = core::ptr::null_mut();
             let rc = libc::getpwuid_r(uid as libc::uid_t, &mut pwd, buf.as_mut_ptr(), buf.len(), &mut result);
             let found = !result.is_null();
             let name = if rc == 0 && found && !pwd.pw_name.is_null() {
-                std::ffi::CStr::from_ptr(pwd.pw_name).to_str().ok().map(|s| s.to_string())
+                core::ffi::CStr::from_ptr(pwd.pw_name).to_str().ok().map(|s| s.to_string())
             } else {
                 None
             };
@@ -284,7 +285,7 @@ pub fn timezone_at(unix_secs: i64) -> Option<(i32, bool)> {
     // workspace never writing one.
     unsafe {
         let t = unix_secs as libc::time_t;
-        let mut tm: libc::tm = std::mem::zeroed();
+        let mut tm: libc::tm = core::mem::zeroed();
         if libc::localtime_r(&t, &mut tm).is_null() {
             return None;
         }
@@ -324,7 +325,7 @@ pub fn timezone_at(_unix_secs: i64) -> Option<(i32, bool)> {
 /// this one — the ordinary way a set of related libraries is loaded.
 #[cfg(unix)]
 pub fn dl_open(path: &str) -> Option<usize> {
-    let c = std::ffi::CString::new(path).ok()?;
+    let c = alloc::ffi::CString::new(path).ok()?;
     // SAFETY: `c` is a NUL-terminated string that outlives the call, and the
     // flags are the constants libc defines. `dlopen` reads the name and
     // returns either a handle or null; it writes nothing through our pointer.
@@ -346,7 +347,7 @@ pub fn dl_open(path: &str) -> Option<usize> {
 /// absence. No such symbol is callable, which is all this is used for.
 #[cfg(unix)]
 pub fn dl_sym(handle: usize, symbol: &str) -> Option<usize> {
-    let c = std::ffi::CString::new(symbol).ok()?;
+    let c = alloc::ffi::CString::new(symbol).ok()?;
     let h = if handle == 0 { libc::RTLD_DEFAULT } else { handle as *mut libc::c_void };
     // SAFETY: `c` outlives the call. `handle` is either `RTLD_DEFAULT` or a
     // value `dl_open` returned from `dlopen` and never closed, so it is still
@@ -414,7 +415,7 @@ impl Interest {
 ///
 /// `EINTR` is retried with the remaining timeout: a signal is not an answer.
 #[cfg(unix)]
-pub fn poll_ready(fds: &[(i32, Interest)], timeout: Option<std::time::Duration>) -> std::io::Result<Vec<(i32, bool)>> {
+pub fn poll_ready(fds: &[(i32, Interest)], timeout: Option<core::time::Duration>) -> std::io::Result<Vec<(i32, bool)>> {
     let mut polls: Vec<libc::pollfd> = fds
         .iter()
         .map(|(fd, interest)| libc::pollfd {
@@ -426,14 +427,14 @@ pub fn poll_ready(fds: &[(i32, Interest)], timeout: Option<std::time::Duration>)
             revents: 0,
         })
         .collect();
-    let deadline = timeout.map(|t| std::time::Instant::now() + t);
+    let deadline = timeout.map(|t| typelisp_mem::host::Instant::now() + t);
     loop {
         // Milliseconds, rounded *up*: rounding down would turn a 0.5ms wait
         // into a busy loop. `-1` is "no timeout".
         let ms: libc::c_int = match deadline {
             None => -1,
             Some(d) => {
-                let left = d.saturating_duration_since(std::time::Instant::now());
+                let left = d.saturating_duration_since(typelisp_mem::host::Instant::now());
                 let ms = left.as_millis() + u128::from(left.subsec_nanos() % 1_000_000 != 0);
                 libc::c_int::try_from(ms).unwrap_or(libc::c_int::MAX)
             }
@@ -459,7 +460,7 @@ pub fn poll_ready(fds: &[(i32, Interest)], timeout: Option<std::time::Duration>)
 }
 
 #[cfg(not(unix))]
-pub fn poll_ready(_fds: &[(i32, Interest)], _timeout: Option<std::time::Duration>) -> std::io::Result<Vec<(i32, bool)>> {
+pub fn poll_ready(_fds: &[(i32, Interest)], _timeout: Option<core::time::Duration>) -> std::io::Result<Vec<(i32, bool)>> {
     unimplemented!("socket waits need poll, which is POSIX")
 }
 
@@ -614,7 +615,7 @@ pub fn tcp_connect_begin(addr: std::net::SocketAddr) -> std::io::Result<std::net
     stream.set_nonblocking(true)?;
     // The address as the kernel wants it. `sockaddr_storage` is large enough
     // for either family; only the family's own prefix is written.
-    let mut storage: libc::sockaddr_storage = unsafe { std::mem::zeroed() };
+    let mut storage: libc::sockaddr_storage = unsafe { core::mem::zeroed() };
     let len: libc::socklen_t = match addr {
         std::net::SocketAddr::V4(a) => {
             let sin = libc::sockaddr_in {
@@ -623,12 +624,12 @@ pub fn tcp_connect_begin(addr: std::net::SocketAddr) -> std::io::Result<std::net
                 sin_addr: libc::in_addr { s_addr: u32::from_ne_bytes(a.ip().octets()) },
                 sin_zero: [0; 8],
                 #[cfg(any(target_os = "macos", target_os = "ios", target_os = "freebsd", target_os = "netbsd", target_os = "openbsd"))]
-                sin_len: std::mem::size_of::<libc::sockaddr_in>() as u8,
+                sin_len: core::mem::size_of::<libc::sockaddr_in>() as u8,
             };
             // SAFETY: `storage` is at least as large as `sockaddr_in`, and both
             // are plain-old-data.
-            unsafe { std::ptr::write(&mut storage as *mut _ as *mut libc::sockaddr_in, sin) };
-            std::mem::size_of::<libc::sockaddr_in>() as libc::socklen_t
+            unsafe { core::ptr::write(&mut storage as *mut _ as *mut libc::sockaddr_in, sin) };
+            core::mem::size_of::<libc::sockaddr_in>() as libc::socklen_t
         }
         std::net::SocketAddr::V6(a) => {
             let sin6 = libc::sockaddr_in6 {
@@ -638,11 +639,11 @@ pub fn tcp_connect_begin(addr: std::net::SocketAddr) -> std::io::Result<std::net
                 sin6_addr: libc::in6_addr { s6_addr: a.ip().octets() },
                 sin6_scope_id: a.scope_id(),
                 #[cfg(any(target_os = "macos", target_os = "ios", target_os = "freebsd", target_os = "netbsd", target_os = "openbsd"))]
-                sin6_len: std::mem::size_of::<libc::sockaddr_in6>() as u8,
+                sin6_len: core::mem::size_of::<libc::sockaddr_in6>() as u8,
             };
             // SAFETY: as above, for `sockaddr_in6`.
-            unsafe { std::ptr::write(&mut storage as *mut _ as *mut libc::sockaddr_in6, sin6) };
-            std::mem::size_of::<libc::sockaddr_in6>() as libc::socklen_t
+            unsafe { core::ptr::write(&mut storage as *mut _ as *mut libc::sockaddr_in6, sin6) };
+            core::mem::size_of::<libc::sockaddr_in6>() as libc::socklen_t
         }
     };
     // SAFETY: `fd` is the live descriptor `stream` owns, `storage` holds a
@@ -701,7 +702,7 @@ fn setsockopt_int(fd: i32, level: i32, name: i32, value: i32) -> std::io::Result
             level,
             name,
             &value as *const i32 as *const libc::c_void,
-            std::mem::size_of::<i32>() as libc::socklen_t,
+            core::mem::size_of::<i32>() as libc::socklen_t,
         )
     };
     if rc == 0 {

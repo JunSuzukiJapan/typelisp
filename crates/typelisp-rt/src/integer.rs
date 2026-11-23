@@ -17,6 +17,7 @@
 //! the shims are written for correctness over the whole domain rather than
 //! for the fixnum case in particular.
 
+use typelisp_mem::prelude::*;
 use num_bigint::{BigInt, Sign};
 use num_integer::Integer;
 use num_rational::BigRational;

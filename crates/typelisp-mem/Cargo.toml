@@ -37,3 +37,6 @@ parking_lot = { version = "0.12", optional = true }
 stacker = { version = "0.1", optional = true }
 # The hash tables (`collections`), with std and without.
 hashbrown = { version = "0.15", default-features = false, features = ["default-hasher"] }
+# The fixed-seed hasher of `collections::FixedHasher`: the one `hashbrown`'s
+# default hasher is built from, so no new code is linked.
+foldhash = { version = "0.1", default-features = false }

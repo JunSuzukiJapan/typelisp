@@ -37,6 +37,7 @@
 //! indirect call — a closure, a `:dyn` method — would have to know which it
 //! was making.
 
+use typelisp_mem::prelude::*;
 use typelisp_abi::call_state;
 use typelisp_abi::call_state::Pending;
 use typelisp_abi::{STATUS_CALL, STATUS_RETURN, STATUS_SUSPEND, STATUS_UNWIND};
@@ -106,17 +107,17 @@ pub struct FrameStack {
 /// freed memory. The compiler asks this ([`live_chains`]) and keeps what it
 /// retired while it is not zero. Counted per chain rather than per frame so
 /// that a call costs nothing: the count moves only when a drive ends.
-static LIVE_CHAINS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+static LIVE_CHAINS: core::sync::atomic::AtomicUsize = core::sync::atomic::AtomicUsize::new(0);
 
 /// See [`LIVE_CHAINS`].
 pub fn live_chains() -> usize {
-    LIVE_CHAINS.load(std::sync::atomic::Ordering::SeqCst)
+    LIVE_CHAINS.load(core::sync::atomic::Ordering::SeqCst)
 }
 
 impl Drop for FrameStack {
     fn drop(&mut self) {
         if self.counted {
-            LIVE_CHAINS.fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
+            LIVE_CHAINS.fetch_sub(1, core::sync::atomic::Ordering::SeqCst);
         }
     }
 }
@@ -441,9 +442,9 @@ impl FrameStack {
         if standing != self.counted {
             self.counted = standing;
             if standing {
-                LIVE_CHAINS.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                LIVE_CHAINS.fetch_add(1, core::sync::atomic::Ordering::SeqCst);
             } else {
-                LIVE_CHAINS.fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
+                LIVE_CHAINS.fetch_sub(1, core::sync::atomic::Ordering::SeqCst);
             }
         }
     }
@@ -480,7 +481,7 @@ impl FrameStack {
                         // over a function declared under the coroutine ABI,
                         // the provenance every indirect compiled call relies
                         // on.
-                        let f: CoroutineFn = unsafe { std::mem::transmute::<usize, CoroutineFn>(target) };
+                        let f: CoroutineFn = unsafe { core::mem::transmute::<usize, CoroutineFn>(target) };
                         status = self.begin(heap, f, args, env);
                     }
                     // SAFETY: the word came from a compiled `apply` site,
@@ -516,12 +517,12 @@ impl FrameStack {
                             // address of a body declared under
                             // `coroutine_fn_type`, which is what the slot's
                             // recorded ABI says.
-                            let f: CoroutineFn = unsafe { std::mem::transmute::<usize, CoroutineFn>(ptr) };
+                            let f: CoroutineFn = unsafe { core::mem::transmute::<usize, CoroutineFn>(ptr) };
                             status = self.begin(heap, f, args, Vec::new());
                         } else {
                             // SAFETY: as above, under the plain
                             // `compiled_fn_type` signature.
-                            let f: crate::ClassicMethodFn = unsafe { std::mem::transmute(ptr) };
+                            let f: crate::ClassicMethodFn = unsafe { core::mem::transmute(ptr) };
                             let v = unsafe { f(args.as_ptr(), args.len() as u32) };
                             status = match typelisp_abi::is_raised() {
                                 true => taken_raise(true, STATUS_UNWIND, "a classic-ABI method body"),
@@ -738,10 +739,10 @@ pub unsafe extern "C" fn rt_suspend_yield(_args: *const i64, _argc: u32) -> i64 
     0
 }
 
-thread_local! {
+typelisp_mem::thread_local! {
     /// Iterations left before the next compiled loop back edge offers the
     /// driver a turn. See [`rt_loop_safepoint`].
-    static SAFEPOINT_COUNTDOWN: std::cell::Cell<u32> = const { std::cell::Cell::new(SAFEPOINT_PERIOD) };
+    static SAFEPOINT_COUNTDOWN: core::cell::Cell<u32> = const { core::cell::Cell::new(SAFEPOINT_PERIOD) };
 }
 
 /// How many back-edge polls pass between offers.
@@ -974,7 +975,7 @@ pub unsafe extern "C" fn rt_suspend_chan_select(args: *const i64, argc: u32) -> 
     if argc < 2 {
         crate::fatal("rt_suspend_chan_select: expected at least 2 words");
     }
-    let words = std::slice::from_raw_parts(args, argc as usize);
+    let words = core::slice::from_raw_parts(args, argc as usize);
     call_state::set_pending_select(words);
     call_state::set_pending_suspend(call_state::SUSPEND_CHAN_SELECT, 0);
     0

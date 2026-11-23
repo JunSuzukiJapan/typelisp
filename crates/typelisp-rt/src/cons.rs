@@ -1,5 +1,6 @@
 //! Cons cells and the `Sexpr` leaf accessors (`sexpr-int`, `sexpr-str`, ...).
 
+use typelisp_mem::prelude::*;
 use typelisp_abi::{active_heap, decode, encode, fatal, raise};
 use typelisp_mem::{Heap, Value};
 use crate::sexpr_narrow_value;

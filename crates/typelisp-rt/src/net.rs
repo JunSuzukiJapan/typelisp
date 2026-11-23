@@ -53,7 +53,8 @@
 //! input and a write is a no-op, and [`StreamTable::net_socket_error`] says
 //! what happened. Go's `bufio.Writer` keeps its first error the same way.
 
-use std::collections::VecDeque;
+use typelisp_mem::prelude::*;
+use alloc::collections::VecDeque;
 use std::io::{ErrorKind, Read, Write};
 use std::net::{SocketAddr, TcpListener, ToSocketAddrs, UdpSocket};
 use std::sync::{Arc, Mutex};
@@ -554,7 +555,7 @@ impl StreamTable {
             return Ok(None);
         }
         let bytes: Vec<u8> = rbuf.iter().take(need).copied().collect();
-        let c = std::str::from_utf8(&bytes)
+        let c = core::str::from_utf8(&bytes)
             .map_err(|_| "invalid UTF-8 in input".to_string())?
             .chars()
             .next()
@@ -796,10 +797,10 @@ mod tests {
         let addr = t.net_local_address(l).unwrap();
         let c = t.net_connect_begin(&addr).unwrap();
         let cfd = t.raw_fd(c).unwrap();
-        crate::os::poll_ready(&[(cfd, crate::os::Interest::Writable)], Some(std::time::Duration::from_secs(5))).unwrap();
+        crate::os::poll_ready(&[(cfd, crate::os::Interest::Writable)], Some(core::time::Duration::from_secs(5))).unwrap();
         t.net_connect_finish(c).unwrap();
         let lfd = t.raw_fd(l).unwrap();
-        crate::os::poll_ready(&[(lfd, crate::os::Interest::Readable)], Some(std::time::Duration::from_secs(5))).unwrap();
+        crate::os::poll_ready(&[(lfd, crate::os::Interest::Readable)], Some(core::time::Duration::from_secs(5))).unwrap();
         let s = t.net_accept(l).unwrap().expect("a connection was waiting");
         (c, s)
     }
@@ -810,7 +811,7 @@ mod tests {
             if let Some(n) = t.net_fill(h).unwrap() {
                 return n;
             }
-            crate::os::poll_ready(&[(fd, crate::os::Interest::Readable)], Some(std::time::Duration::from_secs(5))).unwrap();
+            crate::os::poll_ready(&[(fd, crate::os::Interest::Readable)], Some(core::time::Duration::from_secs(5))).unwrap();
         }
     }
 
@@ -871,7 +872,7 @@ mod tests {
             Err(e) => Err(e),
             Ok(c) => {
                 let fd = t.raw_fd(c).unwrap();
-                crate::os::poll_ready(&[(fd, crate::os::Interest::Writable)], Some(std::time::Duration::from_secs(5))).unwrap();
+                crate::os::poll_ready(&[(fd, crate::os::Interest::Writable)], Some(core::time::Duration::from_secs(5))).unwrap();
                 t.net_connect_finish(c)
             }
         };
@@ -890,7 +891,7 @@ mod tests {
         let r = t.net_resolve_begin(host, port)?;
         let fd = t.raw_fd(r).unwrap();
         loop {
-            crate::os::poll_ready(&[(fd, crate::os::Interest::Readable)], Some(std::time::Duration::from_secs(10))).unwrap();
+            crate::os::poll_ready(&[(fd, crate::os::Interest::Readable)], Some(core::time::Duration::from_secs(10))).unwrap();
             if let Some(a) = t.net_resolve_finish(r)? {
                 return Ok(a);
             }
@@ -915,7 +916,7 @@ mod tests {
         let to = t.net_local_address(b).unwrap();
         assert!(t.net_udp_send_to(a, &to, b"ping").unwrap());
         let fd = t.raw_fd(b).unwrap();
-        crate::os::poll_ready(&[(fd, crate::os::Interest::Readable)], Some(std::time::Duration::from_secs(5))).unwrap();
+        crate::os::poll_ready(&[(fd, crate::os::Interest::Readable)], Some(core::time::Duration::from_secs(5))).unwrap();
         assert_eq!(t.net_udp_recv(b).unwrap(), Some(b"ping".to_vec()));
         assert_eq!(t.net_udp_last_sender(b).unwrap(), t.net_local_address(a).unwrap());
         assert_eq!(t.net_udp_recv(b).unwrap(), None);
@@ -932,7 +933,7 @@ mod tests {
         assert!(t.net_unix_listen(&path).is_err(), "a second bind on a live socket file succeeded");
         let c = t.net_unix_connect(&path).unwrap();
         let lfd = t.raw_fd(l).unwrap();
-        crate::os::poll_ready(&[(lfd, crate::os::Interest::Readable)], Some(std::time::Duration::from_secs(5))).unwrap();
+        crate::os::poll_ready(&[(lfd, crate::os::Interest::Readable)], Some(core::time::Duration::from_secs(5))).unwrap();
         let s = t.net_accept(l).unwrap().expect("a connection was waiting");
         assert_eq!(t.net_peer_address(s).unwrap(), "(unnamed)");
         t.net_push_string(c, "over unix\n").unwrap();
@@ -1033,11 +1034,11 @@ mod tests {
         let addr = t.net_local_address(l).unwrap();
         let c = t.net_connect_begin(&addr).unwrap();
         let cfd = t.raw_fd(c).unwrap();
-        crate::os::poll_ready(&[(cfd, crate::os::Interest::Writable)], Some(std::time::Duration::from_secs(5))).unwrap();
+        crate::os::poll_ready(&[(cfd, crate::os::Interest::Writable)], Some(core::time::Duration::from_secs(5))).unwrap();
         t.net_connect_finish(c).unwrap();
         t.net_tls_start(c, server_name, trust, identity.map(|i| i.0), identity.map(|i| i.1)).unwrap();
         let lfd = t.raw_fd(l).unwrap();
-        crate::os::poll_ready(&[(lfd, crate::os::Interest::Readable)], Some(std::time::Duration::from_secs(5))).unwrap();
+        crate::os::poll_ready(&[(lfd, crate::os::Interest::Readable)], Some(core::time::Duration::from_secs(5))).unwrap();
         let s = t.net_accept(l).unwrap().expect("a connection was waiting");
         let sfd = t.raw_fd(s).unwrap();
         let client = loop {
@@ -1046,12 +1047,12 @@ mod tests {
                 Err(e) => break Err(e),
                 Ok(Some(i)) => {
                     let interest = if i == 1 { crate::os::Interest::Writable } else { crate::os::Interest::Readable };
-                    crate::os::poll_ready(&[(cfd, interest)], Some(std::time::Duration::from_millis(200))).unwrap();
+                    crate::os::poll_ready(&[(cfd, interest)], Some(core::time::Duration::from_millis(200))).unwrap();
                 }
             }
             // The server's turn, the way its task would take it: a read
             // that finds a handshake record answers "again", not data.
-            crate::os::poll_ready(&[(sfd, crate::os::Interest::Readable)], Some(std::time::Duration::from_millis(200))).unwrap();
+            crate::os::poll_ready(&[(sfd, crate::os::Interest::Readable)], Some(core::time::Duration::from_millis(200))).unwrap();
             let _ = t.net_fill(s).unwrap();
         };
         (client, s)
@@ -1096,11 +1097,11 @@ mod tests {
         let addr = t.net_local_address(l).unwrap();
         let c = t.net_connect_begin(&addr).unwrap();
         let cfd = t.raw_fd(c).unwrap();
-        crate::os::poll_ready(&[(cfd, crate::os::Interest::Writable)], Some(std::time::Duration::from_secs(5))).unwrap();
+        crate::os::poll_ready(&[(cfd, crate::os::Interest::Writable)], Some(core::time::Duration::from_secs(5))).unwrap();
         t.net_connect_finish(c).unwrap();
         t.net_tls_start(c, "localhost", Some(&pki.ca), None, None).unwrap();
         let lfd = t.raw_fd(l).unwrap();
-        crate::os::poll_ready(&[(lfd, crate::os::Interest::Readable)], Some(std::time::Duration::from_secs(5))).unwrap();
+        crate::os::poll_ready(&[(lfd, crate::os::Interest::Readable)], Some(core::time::Duration::from_secs(5))).unwrap();
         let s = t.net_accept(l).unwrap().unwrap();
         let sfd = t.raw_fd(s).unwrap();
         t.net_push_string(s, "220 hello\n").unwrap();
@@ -1111,10 +1112,10 @@ mod tests {
                 None => break,
                 Some(0) => {
                     asked_readable = true;
-                    crate::os::poll_ready(&[(sfd, crate::os::Interest::Readable)], Some(std::time::Duration::from_millis(200))).unwrap();
+                    crate::os::poll_ready(&[(sfd, crate::os::Interest::Readable)], Some(core::time::Duration::from_millis(200))).unwrap();
                 }
                 Some(_) => {
-                    crate::os::poll_ready(&[(sfd, crate::os::Interest::Writable)], Some(std::time::Duration::from_millis(200))).unwrap();
+                    crate::os::poll_ready(&[(sfd, crate::os::Interest::Writable)], Some(core::time::Duration::from_millis(200))).unwrap();
                 }
             }
             if !client_done {
@@ -1122,7 +1123,7 @@ mod tests {
                     None => client_done = true,
                     Some(i) => {
                         let interest = if i == 1 { crate::os::Interest::Writable } else { crate::os::Interest::Readable };
-                        crate::os::poll_ready(&[(cfd, interest)], Some(std::time::Duration::from_millis(200))).unwrap();
+                        crate::os::poll_ready(&[(cfd, interest)], Some(core::time::Duration::from_millis(200))).unwrap();
                     }
                 }
             }
@@ -1169,14 +1170,14 @@ mod tests {
         // until a deadline rather than a fixed number of times — and sleeps
         // between writes: waiting for the socket to be writable does not
         // wait at all, since it is.
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        let deadline = typelisp_mem::host::Instant::now() + core::time::Duration::from_secs(5);
         let mut failed = None;
-        while failed.is_none() && std::time::Instant::now() < deadline {
+        while failed.is_none() && typelisp_mem::host::Instant::now() < deadline {
             t.net_push_string(s, "into the void\n").unwrap();
             let _ = t.net_flush(s).unwrap();
             failed = t.net_socket_error(s).unwrap();
             if failed.is_none() {
-                std::thread::sleep(std::time::Duration::from_millis(10));
+                std::thread::sleep(core::time::Duration::from_millis(10));
             }
         }
         let why = failed.expect("writing to a closed peer was never noticed");
@@ -1305,11 +1306,11 @@ mod tests {
                 Err(e) => break Err(e),
                 Ok(Some(i)) => {
                     let interest = if i == 1 { crate::os::Interest::Writable } else { crate::os::Interest::Readable };
-                    crate::os::poll_ready(&[(cfd, interest)], Some(std::time::Duration::from_millis(200))).unwrap();
+                    crate::os::poll_ready(&[(cfd, interest)], Some(core::time::Duration::from_millis(200))).unwrap();
                 }
             }
             // The peer echoes whatever it got.
-            crate::os::poll_ready(&[(sfd, crate::os::Interest::Readable)], Some(std::time::Duration::from_millis(200))).unwrap();
+            crate::os::poll_ready(&[(sfd, crate::os::Interest::Readable)], Some(core::time::Duration::from_millis(200))).unwrap();
             if let Some(n) = t.net_fill(s).unwrap() {
                 if n == 0 {
                     break Err("peer closed".to_string());

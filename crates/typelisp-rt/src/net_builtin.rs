@@ -17,6 +17,7 @@
 //! signature still lives in the registry with the others, since the checker
 //! needs it.
 
+use typelisp_mem::prelude::*;
 use typelisp_mem::{spec, wk, Heap, StdModule, SymRef, TypeId, TypeSpec, Value};
 
 use crate::stream::with_streams;

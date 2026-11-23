@@ -2,8 +2,9 @@
 //! configurations from PEM files, and moving a connection's handshake and
 //! records over its socket.
 
-use std::any::Any;
-use std::collections::HashMap;
+use typelisp_mem::prelude::*;
+use core::any::Any;
+use typelisp_mem::collections::HashMap;
 use std::io::ErrorKind;
 use std::sync::{Arc, Mutex};
 use crate::stream::Sock;
@@ -187,7 +188,7 @@ fn pem_roots(file: &str) -> Result<rustls::RootCertStore, String> {
 /// certificate — is built once; anything with a private CA or an identity
 /// is built per connect, since those are rare and their files may change.
 pub(super) fn tls_client_config(ca_file: Option<&str>, identity: Option<(&str, &str)>) -> Result<Arc<rustls::ClientConfig>, String> {
-    static DEFAULT: std::sync::OnceLock<Arc<rustls::ClientConfig>> = std::sync::OnceLock::new();
+    static DEFAULT: typelisp_mem::sync::OnceLock<Arc<rustls::ClientConfig>> = typelisp_mem::sync::OnceLock::new();
     if ca_file.is_none() && identity.is_none() {
         return Ok(Arc::clone(DEFAULT.get_or_init(|| {
             let mut roots = rustls::RootCertStore::empty();
@@ -219,7 +220,7 @@ pub(super) fn tls_client_config(ca_file: Option<&str>, identity: Option<(&str, &
 /// The chain in `cert_file` with the key in `key_file`, checked to match.
 pub(super) fn certified_key(cert_file: &str, key_file: &str) -> Result<rustls::sign::CertifiedKey, String> {
     use rustls::pki_types::pem::PemObject;
-    static PROVIDER: std::sync::OnceLock<rustls::crypto::CryptoProvider> = std::sync::OnceLock::new();
+    static PROVIDER: typelisp_mem::sync::OnceLock<rustls::crypto::CryptoProvider> = typelisp_mem::sync::OnceLock::new();
     let provider = PROVIDER.get_or_init(rustls::crypto::ring::default_provider);
     let certs = pem_certificates(cert_file)?;
     let key = rustls::pki_types::PrivateKeyDer::from_pem_file(key_file).map_err(|e| format!("{}: {}", key_file, e))?;

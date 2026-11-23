@@ -23,10 +23,11 @@
 //! again the moment the C function returns ([`resume_pending`], from
 //! `rt_ffi_leave_native`).
 
-use std::any::Any;
-use std::cell::RefCell;
-use std::collections::HashMap;
-use std::sync::{Mutex, OnceLock};
+use typelisp_mem::prelude::*;
+use core::any::Any;
+use core::cell::RefCell;
+use typelisp_mem::collections::HashMap;
+use typelisp_mem::sync::{Mutex, OnceLock};
 
 use typelisp_abi::{active_heap, fatal, raise, Raised};
 use typelisp_mem::{NsId, SymRef, TypeId, Value};
@@ -49,7 +50,7 @@ static ENTRIES: Mutex<Option<HashMap<Callback, usize>>> = Mutex::new(None);
 /// at startup.
 static FACTORY: OnceLock<fn(Callback) -> Result<usize, String>> = OnceLock::new();
 
-thread_local! {
+typelisp_mem::thread_local! {
     /// A callback's failure, waiting for the C call around it to return —
     /// see the module comment.
     static PENDING: RefCell<Option<Box<dyn Any + Send>>> = const { RefCell::new(None) };
@@ -57,13 +58,13 @@ thread_local! {
 
 /// The entry registered for `callback`, if any.
 pub fn lookup(callback: Callback) -> Option<usize> {
-    let guard = ENTRIES.lock().unwrap_or_else(|e| e.into_inner());
+    let guard = ENTRIES.lock();
     guard.as_ref().and_then(|m| m.get(&callback).copied())
 }
 
 /// Records the entry for `callback` — an executable's, at startup.
 pub fn register(callback: Callback, addr: usize) {
-    let mut guard = ENTRIES.lock().unwrap_or_else(|e| e.into_inner());
+    let mut guard = ENTRIES.lock();
     guard.get_or_insert_with(HashMap::new).insert(callback, addr);
 }
 
@@ -134,7 +135,7 @@ pub unsafe extern "C" fn rt_ffi_callback_register(args: *const i64, argc: u32) -
     }
     let ty = TypeId::from_word(*args.add(1))
         .unwrap_or_else(|| fatal("rt_ffi_callback_register: the function type is not a type"));
-    let words = std::slice::from_raw_parts(*args.add(2) as usize as *const i64, *args.add(3) as usize);
+    let words = core::slice::from_raw_parts(*args.add(2) as usize as *const i64, *args.add(3) as usize);
     let (ns, sym) = typelisp_mem::type_words::read_definition(words);
     register((ns, sym, ty), *args as usize);
     0
@@ -209,7 +210,7 @@ pub unsafe extern "C" fn rt_ffi_callback_invoke(args: *const i64, argc: u32) -> 
     if PENDING.with(|p| p.borrow().is_some()) {
         return 0;
     }
-    let f: crate::coroutine::CoroutineFn = std::mem::transmute(*args as usize);
+    let f: crate::coroutine::CoroutineFn = core::mem::transmute(*args as usize);
     let n = *args.add(1) as usize;
     if argc as usize != 2 + 3 * n {
         fatal("rt_ffi_callback_invoke: the argument count does not match the words given");
@@ -260,8 +261,8 @@ unsafe fn callback_string(p: i64) -> Result<i64, Raised> {
                 .to_string(),
         ));
     }
-    let bytes = std::ffi::CStr::from_ptr(p as usize as *const std::ffi::c_char).to_bytes();
-    match std::str::from_utf8(bytes) {
+    let bytes = core::ffi::CStr::from_ptr(p as usize as *const core::ffi::c_char).to_bytes();
+    match core::str::from_utf8(bytes) {
         Ok(s) => {
             let s = s.to_string();
             Ok(crate::encode(active_heap().alloc_string(s)))

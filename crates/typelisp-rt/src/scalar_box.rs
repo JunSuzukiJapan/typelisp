@@ -1,6 +1,7 @@
 //! Boxed scalars inside a `Sexpr`: `f64`/`f32` and the narrow integer widths,
 //! and the box-kind discriminator over them.
 
+use typelisp_mem::prelude::*;
 use typelisp_abi::{active_heap, decode, encode, fatal, raise};
 use typelisp_mem::{TypeId, Value};
 use crate::wsig;

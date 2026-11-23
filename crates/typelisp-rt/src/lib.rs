@@ -41,6 +41,10 @@
 // with it). These two re-exports are that reference. They generate no code and
 // have no callers on purpose — deleting them as dead would make every
 // `println` and every `read` in a compiled program fail to link.
+#![cfg_attr(not(feature = "std"), no_std)]
+
+extern crate alloc;
+
 pub use typelisp_print;
 pub use typelisp_read;
 
@@ -51,13 +55,14 @@ pub mod mem_limit;
 pub mod c_mem;
 pub mod ffi_callback;
 pub mod integer;
-#[cfg(not(target_family = "wasm"))]
+#[cfg(all(feature = "std", not(target_family = "wasm")))]
 pub mod net;
 pub mod rational;
-#[cfg(not(target_family = "wasm"))]
+#[cfg(all(feature = "std", not(target_family = "wasm")))]
 pub mod net_builtin;
-#[cfg(not(target_family = "wasm"))]
+#[cfg(all(feature = "std", not(target_family = "wasm")))]
 pub mod x509;
+#[cfg(feature = "std")]
 pub mod os;
 pub mod readtable;
 pub mod sched;
@@ -158,14 +163,14 @@ mod tests {
 
     #[test]
     fn rt_ping_returns_zero_with_no_arguments() {
-        assert_eq!(unsafe { rt_ping(std::ptr::null(), 0) }, 0);
+        assert_eq!(unsafe { rt_ping(core::ptr::null(), 0) }, 0);
     }
 
     #[test]
     fn rt_heap_live_count_reflects_the_registered_heaps_real_state() {
         let mut heap = Heap::with_capacity(8);
         set_active_heap(&mut heap as *mut Heap);
-        assert_eq!(unsafe { rt_heap_live_count(std::ptr::null(), 0) }, 0);
+        assert_eq!(unsafe { rt_heap_live_count(core::ptr::null(), 0) }, 0);
 
         // Goes through `rt_cons`, not `heap.cons(...)` directly: once `heap`
         // has been registered as the active `Heap` via a raw pointer, every
@@ -177,14 +182,14 @@ mod tests {
         // `rt_heap_live_count`'s own `active_heap()` call below then trips.
         let cons_args = [encode(Value::Int(1)), encode(Value::Empty)];
         unsafe { rt_cons(cons_args.as_ptr(), 2) };
-        assert_eq!(unsafe { rt_heap_live_count(std::ptr::null(), 0) }, 1);
+        assert_eq!(unsafe { rt_heap_live_count(core::ptr::null(), 0) }, 1);
     }
 
     #[test]
     fn rt_heap_init_registers_a_freshly_created_heap() {
         let args = [4i64];
         assert_eq!(unsafe { rt_heap_init(args.as_ptr(), 1) }, 0);
-        assert_eq!(unsafe { rt_heap_live_count(std::ptr::null(), 0) }, 0);
+        assert_eq!(unsafe { rt_heap_live_count(core::ptr::null(), 0) }, 0);
 
         // `rt_heap_init` deliberately never frees the `Heap` it allocates
         // (see its own doc comment — it must outlive every compiled function
@@ -198,7 +203,7 @@ mod tests {
             let heap_ptr = active_heap() as *mut Heap;
             drop(Box::from_raw(heap_ptr));
         }
-        set_active_heap(std::ptr::null_mut());
+        set_active_heap(core::ptr::null_mut());
     }
 
     #[test]
@@ -283,7 +288,7 @@ mod tests {
             unsafe { rt_cons(args.as_ptr(), 2) };
         }
 
-        let popped = unsafe { rt_pop_sexpr_root(std::ptr::null(), 0) };
+        let popped = unsafe { rt_pop_sexpr_root(core::ptr::null(), 0) };
         assert_eq!(popped, precious, "the popped root is the same value that was pushed");
 
         let one_arg = [precious];
@@ -363,7 +368,7 @@ mod tests {
         let permanent = unsafe { rt_cons(permanent_args.as_ptr(), 2) };
         unsafe { rt_push_permanent_sexpr_root(&permanent as *const i64, 1) };
 
-        let popped = unsafe { rt_pop_sexpr_root(std::ptr::null(), 0) };
+        let popped = unsafe { rt_pop_sexpr_root(core::ptr::null(), 0) };
         assert_eq!(popped, ordinary, "the ordinary root pops, unaffected by the permanent push");
     }
 
@@ -424,7 +429,7 @@ mod tests {
         let mut heap = Heap::with_capacity(4);
         set_active_heap(&mut heap as *mut Heap);
 
-        let idx = unsafe { rt_root_count(std::ptr::null(), 0) };
+        let idx = unsafe { rt_root_count(core::ptr::null(), 0) };
         let original_args = [encode(Value::Int(1)), encode(Value::Int(1))];
         let original = unsafe { rt_cons(original_args.as_ptr(), 2) };
         unsafe { rt_push_sexpr_root(&original as *const i64, 1) };
@@ -444,7 +449,7 @@ mod tests {
         assert_eq!(decode(unsafe { rt_car(one_arg.as_ptr(), 1) }), Value::Int(111));
         assert_eq!(decode(unsafe { rt_cdr(one_arg.as_ptr(), 1) }), Value::Int(222));
 
-        let popped = unsafe { rt_pop_sexpr_root(std::ptr::null(), 0) };
+        let popped = unsafe { rt_pop_sexpr_root(core::ptr::null(), 0) };
         assert_eq!(popped, reassigned, "popping the binding's root now yields the reassigned value, not the original");
     }
 
@@ -491,7 +496,7 @@ mod tests {
         let mut heap = Heap::with_capacity(8);
         set_active_heap(&mut heap as *mut Heap);
 
-        let tagged = unsafe { rt_str_new(std::ptr::null(), 0) };
+        let tagged = unsafe { rt_str_new(core::ptr::null(), 0) };
         match decode(tagged) {
             Value::Str(id) => assert_eq!(&*unsafe { active_heap() }.string(id), ""),
             other => panic!("expected a Str, got {:?}", other),

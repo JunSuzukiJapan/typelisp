@@ -1,5 +1,6 @@
 //! A task that is a compiled chain and nothing else.
 
+use typelisp_mem::prelude::*;
 use typelisp_mem::{Heap, Value};
 use super::{pending_wait, wake_word, ChanOp, Progress, SchedError, TaskBody, Waiting, Wake};
 
@@ -28,10 +29,10 @@ impl From<SchedError> for TaskFailure {
     }
 }
 
-impl std::fmt::Display for TaskFailure {
+impl core::fmt::Display for TaskFailure {
     /// The line an executable prints on the way out — the same wording
     /// `EvalError`'s `Display` uses for the same failures.
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
             TaskFailure::Panic(m) => write!(f, "panic: {}", m),
             TaskFailure::Throw(tag) => write!(f, "throw: no enclosing (catch '{}) for this throw", tag.spelling()),
@@ -330,7 +331,7 @@ impl CompiledTask {
 /// # Safety
 ///
 /// A `Heap` must be registered on this thread (a throw's value lives there).
-unsafe fn unwind_failure(payload: Box<dyn std::any::Any + Send>) -> TaskFailure {
+unsafe fn unwind_failure(payload: Box<dyn core::any::Any + Send>) -> TaskFailure {
     let payload = match payload.downcast::<typelisp_abi::CompiledPanic>() {
         Ok(p) => return TaskFailure::Panic(p.message),
         Err(other) => other,
@@ -377,10 +378,10 @@ impl TaskBody for CompiledTask {
         // own throw through these same thread-locals since then, so nothing
         // here may be assumed left over from last time except what this call
         // installs.
-        crate::restore_parked_unwind(std::mem::take(&mut self.parked_unwind));
+        crate::restore_parked_unwind(core::mem::take(&mut self.parked_unwind));
         // Taken out to be consumed; every path below either puts the next
         // state back or reports `Done`, after which nothing reads it.
-        let state = std::mem::replace(&mut self.state, CompiledState::Resume(0));
+        let state = core::mem::replace(&mut self.state, CompiledState::Resume(0));
         let outcome = match state {
             CompiledState::Entry(f) => self.chain.run(heap, f, &[]),
             CompiledState::Start(closure) => self.chain.run_closure(heap, typelisp_abi::encode(closure), &[]),

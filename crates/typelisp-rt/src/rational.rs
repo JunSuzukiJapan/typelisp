@@ -12,6 +12,7 @@
 //! `rational` word as it stands, which is how `int`'s own `/` (whose result
 //! is a `rational`) uses [`rt_rational_div`] directly.
 
+use typelisp_mem::prelude::*;
 use num_bigint::Sign;
 use num_rational::BigRational;
 use num_traits::ToPrimitive;
@@ -134,9 +135,9 @@ pub unsafe extern "C-unwind" fn rt_rational_div(args: *const i64, argc: u32) -> 
 pub unsafe extern "C" fn rt_rational_cmp(args: *const i64, argc: u32) -> i64 {
     let (a, b) = rational_pair(args, argc, "rt_rational_cmp");
     match a.cmp(&b) {
-        std::cmp::Ordering::Less => -1,
-        std::cmp::Ordering::Equal => 0,
-        std::cmp::Ordering::Greater => 1,
+        core::cmp::Ordering::Less => -1,
+        core::cmp::Ordering::Equal => 0,
+        core::cmp::Ordering::Greater => 1,
     }
 }
 

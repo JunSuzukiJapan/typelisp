@@ -1,6 +1,7 @@
 //! Trait objects and vtables.
 
-use std::cell::Cell;
+use typelisp_mem::prelude::*;
+use core::cell::Cell;
 use typelisp_abi::{active_heap, decode, encode, fatal};
 use typelisp_mem::Value;
 use crate::shared;
@@ -151,7 +152,7 @@ pub(crate) unsafe fn reify_dyn_slot(vtable: u32, slot: u32, what: &str) -> Resul
 /// interpreted closure value`.
 pub type DynSlotClosureFn = unsafe extern "C-unwind" fn(u32, u32) -> i64;
 
-thread_local! {
+typelisp_mem::thread_local! {
     static DYN_SLOT_CLOSURE: Cell<Option<DynSlotClosureFn>> = const { Cell::new(None) };
 }
 
@@ -222,12 +223,12 @@ pub(crate) unsafe fn resolve_closure(closure: i64) -> Callee {
         // SAFETY: `build-make-closure` only ever names a function it declared
         // under `coroutine_fn_type`, which is what `rt_coroutine_closure_new`
         // records by being the entry point that was called.
-        Callee::Coroutine { f: std::mem::transmute(fn_ptr), env }
+        Callee::Coroutine { f: core::mem::transmute(fn_ptr), env }
     } else {
         // SAFETY: `rt_closure_new` is the only producer of a classic-ABI
         // `BoxedObj::CompiledClosure`, and `build-make-closure` only ever
         // hands it a function compiled under `compiled_fn_type_with_env`.
-        Callee::Classic { f: std::mem::transmute(fn_ptr), env }
+        Callee::Classic { f: core::mem::transmute(fn_ptr), env }
     }
 }
 
@@ -292,7 +293,7 @@ pub unsafe extern "C" fn rt_types_define(args: *const i64, argc: u32) -> i64 {
     if argc < 3 {
         fatal("rt_types_define: expected 3 arguments");
     }
-    let words = std::slice::from_raw_parts(*args as usize as *const i64, *args.add(1) as usize);
+    let words = core::slice::from_raw_parts(*args as usize as *const i64, *args.add(1) as usize);
     let table = *args.add(2) as usize as *mut i64;
     for (i, id) in typelisp_mem::type_words::define(words).into_iter().enumerate() {
         *table.add(i) = id.word();

@@ -43,12 +43,6 @@ use typelisp_mem::{spec, symbols, wk, Error, Heap, Loc, NsId, StdModule, SymRef,
 #[derive(Clone, Debug, Default)]
 pub struct Features(HashSet<SymRef>);
 
-/// `std::env::consts::ARCH` for the targets built without std.
-#[cfg(all(not(feature = "std"), target_arch = "arm"))]
-const NO_STD_ARCH: &str = "arm";
-
-#[cfg(all(not(feature = "std"), not(target_arch = "arm")))]
-compile_error!("the reader's `#+`/`#-` features do not name this architecture yet");
 
 impl Features {
     /// The default set: `:typelisp`, the host architecture, and the host OS
@@ -58,23 +52,18 @@ impl Features {
         let mut set = HashSet::new();
         let mut add = |name: &str| set.insert(symbols::intern_keyword(name));
         add("typelisp");
-        #[cfg(feature = "std")]
-        {
-            add(std::env::consts::ARCH);
-            match std::env::consts::OS {
-                "macos" => {
-                    add("darwin");
-                    add("macos");
-                }
-                other => {
-                    add(other);
-                }
+        add(typelisp_mem::host::ARCH);
+        match typelisp_mem::host::OS {
+            "macos" => {
+                add("darwin");
+                add("macos");
+            }
+            // A target with no operating system has none to name.
+            "none" => {}
+            other => {
+                add(other);
             }
         }
-        // Without std there is no operating system to name, and the
-        // architecture is the target's, spelled as std spells it.
-        #[cfg(not(feature = "std"))]
-        add(NO_STD_ARCH);
         if cfg!(unix) {
             add("unix");
         }

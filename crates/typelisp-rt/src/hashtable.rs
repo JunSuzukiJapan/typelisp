@@ -1,5 +1,6 @@
 //! `HashTable<K,V>` primitives.
 
+use typelisp_mem::prelude::*;
 use typelisp_abi::{active_heap, decode, encode, fatal};
 use typelisp_mem::{BoxId, Value};
 use crate::type_arg;

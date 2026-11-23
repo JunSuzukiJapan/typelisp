@@ -58,8 +58,52 @@ pub mod board {
         pub fn typelisp_host_unix_us() -> i64;
         /// Waits `us` microseconds.
         pub fn typelisp_host_sleep_us(us: u64);
+        /// `size` bytes aligned to `align` (a power of two), or null when
+        /// there are none left.
+        pub fn typelisp_host_alloc(size: usize, align: usize) -> *mut u8;
+        /// Gives back what [`typelisp_host_alloc`] returned for the same
+        /// `size` and `align`.
+        pub fn typelisp_host_dealloc(ptr: *mut u8, size: usize, align: usize);
+    }
+
+    /// The memory the board hands out, as an allocator: what `std`'s
+    /// `System` is where there is an operating system.
+    pub struct BoardAlloc;
+
+    // SAFETY: the board's functions keep `GlobalAlloc`'s contract, which is
+    // what a board that provides them promises.
+    unsafe impl core::alloc::GlobalAlloc for BoardAlloc {
+        unsafe fn alloc(&self, layout: core::alloc::Layout) -> *mut u8 {
+            typelisp_host_alloc(layout.size(), layout.align())
+        }
+
+        unsafe fn dealloc(&self, ptr: *mut u8, layout: core::alloc::Layout) {
+            typelisp_host_dealloc(ptr, layout.size(), layout.align())
+        }
     }
 }
+
+/// The architecture this build is for, spelled as `std::env::consts::ARCH`
+/// spells it.
+#[cfg(feature = "std")]
+pub const ARCH: &str = std::env::consts::ARCH;
+
+#[cfg(all(not(feature = "std"), target_arch = "arm"))]
+pub const ARCH: &str = "arm";
+
+#[cfg(all(not(feature = "std"), not(target_arch = "arm")))]
+compile_error!("typelisp_mem::host::ARCH does not name this architecture yet");
+
+/// The operating system this build is for, spelled as
+/// `std::env::consts::OS` spells it: `"none"` for a target with none.
+#[cfg(feature = "std")]
+pub const OS: &str = std::env::consts::OS;
+
+#[cfg(all(not(feature = "std"), target_os = "none"))]
+pub const OS: &str = "none";
+
+#[cfg(all(not(feature = "std"), not(target_os = "none")))]
+compile_error!("typelisp_mem::host::OS does not name this operating system yet");
 
 /// Why writing to standard output or error failed.
 #[cfg(feature = "std")]

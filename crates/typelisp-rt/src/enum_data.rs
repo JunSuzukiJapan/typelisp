@@ -1,5 +1,6 @@
 //! Enum values (`Option`/`Result`/`defenum`) and the `Sexpr` downcast test.
 
+use typelisp_mem::prelude::*;
 use typelisp_abi::{active_heap, decode, encode, fatal};
 use typelisp_mem::Value;
 use crate::type_arg;

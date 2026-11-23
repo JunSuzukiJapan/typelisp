@@ -1,6 +1,7 @@
 //! Non-local exits: match failure, `panic`, and `catch`/`throw`.
 
-use std::cell::RefCell;
+use typelisp_mem::prelude::*;
+use core::cell::RefCell;
 use typelisp_abi::{active_heap, decode, encode, fatal, raise, CompiledPanic, CompiledThrow, InterpretedUnwind};
 use typelisp_mem::Value;
 
@@ -68,7 +69,7 @@ pub unsafe extern "C" fn rt_unwinding(_args: *const i64, _argc: u32) -> i64 {
 // innermost first, whether it declares a handler
 // (`typelisp_abi::FRAME_HANDLER_SLOT`), and resumes the first that does.
 
-thread_local! {
+typelisp_mem::thread_local! {
     /// The tag of the throw currently in flight *for whichever task's `step`
     /// is running on this thread right now*. Its *value* lives in
     /// `Heap::set_in_flight_throw` instead, where the collector can see it —
@@ -91,7 +92,7 @@ thread_local! {
     ///
     /// Saved and restored around each `step` exactly like `IN_FLIGHT_TAG`,
     /// for the same reason.
-    static CAUGHT_UNWIND: RefCell<Option<Box<dyn std::any::Any + Send>>> = const { RefCell::new(None) };
+    static CAUGHT_UNWIND: RefCell<Option<Box<dyn core::any::Any + Send>>> = const { RefCell::new(None) };
 }
 
 /// What [`IN_FLIGHT_TAG`]/[`CAUGHT_UNWIND`] hold for one task, moved off the
@@ -107,7 +108,7 @@ thread_local! {
 #[derive(Default)]
 pub struct ParkedUnwind {
     tag: Option<typelisp_mem::SymRef>,
-    caught: Option<Box<dyn std::any::Any + Send>>,
+    caught: Option<Box<dyn core::any::Any + Send>>,
 }
 
 impl ParkedUnwind {
@@ -351,7 +352,7 @@ pub unsafe extern "C" fn rt_throw_take_value(_args: *const i64, _argc: u32) -> i
 /// # Safety
 ///
 /// A `Heap` must be registered on this thread.
-pub(crate) unsafe fn park_activation_unwind(payload: Box<dyn std::any::Any + Send>) {
+pub(crate) unsafe fn park_activation_unwind(payload: Box<dyn core::any::Any + Send>) {
     let ours = payload.is::<CompiledThrow>() || payload.is::<CompiledPanic>() || payload.is::<InterpretedUnwind>();
     if !ours {
         fatal("an unwind was raised whose payload the runtime does not raise");
@@ -366,7 +367,7 @@ pub(crate) unsafe fn park_activation_unwind(payload: Box<dyn std::any::Any + Sen
 /// payload itself rather than a re-raise — the interpreter's task driver,
 /// which turns it into an `EvalError` and unwinds its own continuation stack
 /// through it instead of the machine stack.
-pub fn take_activation_unwind() -> Option<Box<dyn std::any::Any + Send>> {
+pub fn take_activation_unwind() -> Option<Box<dyn core::any::Any + Send>> {
     CAUGHT_UNWIND.with(|cell| cell.borrow_mut().take())
 }
 

@@ -93,6 +93,16 @@ release のランタイムでの測定（上と同じ hello）: `__text` 1,040,3
 4. `typelisp-rt`: ネットワーク、ファイル、環境変数、プロセス、OS スレッドを std の下へ。
 5. 組み込みのランタイムのクレートと、使えない shim の拒否の表。
 
+1〜4 は済。5 つのクレートとも `cargo check -p <クレート> --lib --target thumbv7em-none-eabihf --no-default-features` が警告 0。決めたこと:
+
+- 依存の書き方: ワークスペースの依存表では 5 つを `default-features = false` で宣言し、std が要る側（ルート、`typelisp-front`）が `features = ["std"]` を書く。各クレートの `std` は依存先の `std` を有効にする。
+- ハッシュ: `sxhash` は std の有無にかかわらず種を固定した `typelisp_mem::collections::FixedHasher`（foldhash）で数える。std の `DefaultHasher` とは値が違う。
+- 浮動小数: `trunc`/`powi` は `num_traits::float::FloatCore`、三角関数などは `num_traits::Float`（std なしでは libm）。std があれば std の関数に渡る。
+- メモリ: std なしの大域アロケータは、ボードが与える `typelisp_host_alloc`/`typelisp_host_dealloc` の上の `typelisp_mem::host::board::BoardAlloc`。メモリの上限（`mem_limit`）はその上に重なる。
+- アーキテクチャと OS の名前は `typelisp_mem::host::ARCH`/`OS` の 1 か所（`machine-type`、`software-type`、リーダーの `*features*`）。std なしで知っているのは arm と none だけで、他は `compile_error!`。
+- std なしで外したもの: ソケットとその待ち（`Waiting::Io`）、OS スレッド、ファイル、標準入力、環境変数、コマンド行引数、CPU 時間、エディタ、dribble、`machine-instance`、`software-version`。これらの shim は std なしのビルドに無い。
+- std なしで値を返すもの: スレッドは 1 つ（スケジューラの `thread_count` と `thread-available-parallelism` は 1、期限の無い待ちで全てのタスクが止まれば fatal）、ローカルのタイムゾーンは不明（WASI と同じ）、`machine-version` は `None`、標準入力は端末でない。
+
 ### 段階 2: ターゲットの追加とリンク
 
 - コード生成: wasm と同じく、結合したモジュールにターゲットの triple と datalayout を設定してから passes を流す。prelude のビットコードはポインタを `ptrtoint`/`inttoptr` で i64 と行き来するだけなので、32bit のターゲットでも成り立つ見込み。

@@ -1,5 +1,6 @@
 //! The C FFI's string conversions and native-section markers.
 
+use typelisp_mem::prelude::*;
 use typelisp_abi::{active_heap, decode, encode, fatal, raise};
 use typelisp_mem::Value;
 use crate::ffi_callback;
@@ -38,7 +39,7 @@ pub unsafe extern "C-unwind" fn rt_ffi_cstring_new(args: *const i64, argc: u32) 
     // A NUL inside the string is a real value here and cannot be one there:
     // C would read the prefix and call it the whole string. Raised, not
     // aborted — the program handed over a string it is allowed to hold.
-    match std::ffi::CString::new(s) {
+    match alloc::ffi::CString::new(s) {
         Ok(c) => c.into_raw() as i64,
         Err(_) => raise(
             "ffi: a string argument contains a NUL character, which cannot be passed to C — \
@@ -95,7 +96,7 @@ pub unsafe extern "C" fn rt_ffi_cstring_free(args: *const i64, argc: u32) -> i64
     }
     let p = *args as usize;
     if p != 0 {
-        drop(std::ffi::CString::from_raw(p as *mut std::ffi::c_char));
+        drop(alloc::ffi::CString::from_raw(p as *mut core::ffi::c_char));
     }
     0
 }
@@ -127,8 +128,8 @@ pub unsafe extern "C-unwind" fn rt_ffi_string_from_cstr(args: *const i64, argc: 
                 .to_string(),
         ).into_word();
     }
-    let bytes = std::ffi::CStr::from_ptr(p as *const std::ffi::c_char).to_bytes();
-    match std::str::from_utf8(bytes) {
+    let bytes = core::ffi::CStr::from_ptr(p as *const core::ffi::c_char).to_bytes();
+    match core::str::from_utf8(bytes) {
         Ok(s) => {
             let s = s.to_string();
             encode(active_heap().alloc_string(s))

@@ -1,5 +1,6 @@
 //! Construction, arithmetic and conversion of boxed bignums and ratios.
 
+use typelisp_mem::prelude::*;
 use typelisp_abi::{active_heap, decode, encode, fatal, raise};
 use typelisp_mem::Value;
 
@@ -270,9 +271,9 @@ pub unsafe extern "C-unwind" fn rt_ratio_div(args: *const i64, argc: u32) -> i64
 pub unsafe extern "C" fn rt_ratio_cmp(args: *const i64, argc: u32) -> i64 {
     let (a, b) = ratio_pair(args, argc, "rt_ratio_cmp");
     match a.cmp(&b) {
-        std::cmp::Ordering::Less => -1,
-        std::cmp::Ordering::Equal => 0,
-        std::cmp::Ordering::Greater => 1,
+        core::cmp::Ordering::Less => -1,
+        core::cmp::Ordering::Equal => 0,
+        core::cmp::Ordering::Greater => 1,
     }
 }
 

@@ -1,5 +1,6 @@
 //! Symbols and symbol paths.
 
+use typelisp_mem::prelude::*;
 use typelisp_abi::{active_heap, decode, encode, fatal, raise};
 use typelisp_mem::Value;
 

@@ -1,6 +1,7 @@
 //! Compiled closures and binding cells.
 
-use std::cell::Cell;
+use typelisp_mem::prelude::*;
+use core::cell::Cell;
 use typelisp_abi::{active_heap, decode, encode, fatal};
 use typelisp_mem::Value;
 
@@ -168,7 +169,7 @@ pub unsafe extern "C" fn rt_closure_env_get(args: *const i64, argc: u32) -> i64 
 /// no interpreter to install and leaves it unset.
 pub type ApplyInterpretedFn = unsafe extern "C-unwind" fn(closure: i64, args: *const i64, argc: u32) -> i64;
 
-thread_local! {
+typelisp_mem::thread_local! {
     pub(crate) static APPLY_INTERPRETED: Cell<Option<ApplyInterpretedFn>> = const { Cell::new(None) };
 }
 

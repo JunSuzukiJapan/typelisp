@@ -1,6 +1,9 @@
 //! Turning a compiled task's suspension back into the `Waiting` it parks on.
 
-use typelisp_mem::{Heap, TypeId, Value};
+use typelisp_mem::prelude::*;
+use typelisp_mem::{Heap, TypeId};
+#[cfg(feature = "std")]
+use typelisp_mem::Value;
 use super::{chan_id_of, task_id_of, ChanOp, SchedError, SelectOp, Waiting, Wake};
 
 // ---- turning a compiled suspension back into a wait ------------------------
@@ -13,6 +16,7 @@ use super::{chan_id_of, task_id_of, ChanOp, SchedError, SelectOp, Waiting, Wake}
 /// two refuse the same handles in the same words. A closed or non-socket
 /// handle is a program error — the stream was closed and then waited on —
 /// and panics rather than parking a task nothing will ever wake.
+#[cfg(feature = "std")]
 pub fn io_wait(heap: &mut Heap, argv: &[Value], deadline: Option<typelisp_mem::host::Instant>) -> Result<Waiting, SchedError> {
     let handle = match argv.first() {
         Some(Value::Int(h)) => *h,
@@ -30,11 +34,12 @@ pub fn io_wait(heap: &mut Heap, argv: &[Value], deadline: Option<typelisp_mem::h
 
 /// `secs` from now, with `sleep`'s refusals: negative or NaN is not a
 /// duration, and neither is one the clock cannot hold.
+#[cfg(feature = "std")]
 pub fn io_deadline(secs: f64) -> Result<typelisp_mem::host::Instant, SchedError> {
     if !(secs >= 0.0) {
         return Err(SchedError::Panic(format!("net-wait-for: {} is not a non-negative number of seconds", secs)));
     }
-    let d = std::time::Duration::try_from_secs_f64(secs)
+    let d = core::time::Duration::try_from_secs_f64(secs)
         .map_err(|_| SchedError::Panic(format!("net-wait-for: {} is longer than this can wait", secs)))?;
     Ok(typelisp_mem::host::Instant::now() + d)
 }
@@ -47,7 +52,7 @@ pub fn sleep_wait(secs: f64) -> Result<Waiting, SchedError> {
     if !(secs >= 0.0) {
         return Err(SchedError::Panic(format!("sleep: {} is not a non-negative number of seconds", secs)));
     }
-    let d = std::time::Duration::try_from_secs_f64(secs)
+    let d = core::time::Duration::try_from_secs_f64(secs)
         .map_err(|_| SchedError::Panic(format!("sleep: {} is longer than this can wait", secs)))?;
     Ok(Waiting::Until(typelisp_mem::host::Instant::now() + d))
 }
@@ -97,6 +102,7 @@ pub fn pending_wait(heap: &mut Heap) -> Result<(Waiting, Wake), SchedError> {
         // Both words raw: a stream handle and an interest code are plain
         // integers in compiled code (`sleep`'s bits cross the same way), and
         // this is the same resolution the interpreted `net-wait` makes.
+        #[cfg(feature = "std")]
         cs::SUSPEND_IO => {
             let w = io_wait(heap, &[Value::Int(payload), Value::Int(second)], None)?;
             Ok((w, Wake::Unit))
@@ -105,6 +111,7 @@ pub fn pending_wait(heap: &mut Heap) -> Result<(Waiting, Wake), SchedError> {
         // packs them: handle above, interest in the low bit) so the seconds'
         // bits can have the second. The answer is a `bool`, tagged like
         // every typed wake value.
+        #[cfg(feature = "std")]
         cs::SUSPEND_IO_FOR => {
             let d = io_deadline(f64::from_bits(second as u64))?;
             let w = io_wait(heap, &[Value::Int(payload >> 1), Value::Int(payload & 1)], Some(d))?;

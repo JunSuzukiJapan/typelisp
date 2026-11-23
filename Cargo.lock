@@ -878,6 +878,7 @@ dependencies = [
 name = "typelisp-mem"
 version = "0.3.7"
 dependencies = [
+ "foldhash",
  "hashbrown",
  "lock_api",
  "num-bigint",
@@ -915,7 +916,6 @@ dependencies = [
  "num-integer",
  "num-rational",
  "num-traits",
- "parking_lot",
  "rcgen",
  "rustls",
  "typelisp-abi",

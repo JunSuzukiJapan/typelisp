@@ -1,5 +1,6 @@
 //! Fixed-width integer arithmetic and `f64` math.
 
+use typelisp_mem::prelude::*;
 use typelisp_abi::{fatal, raise};
 
 /// The receiver type's width and signedness, as the extra raw operand every
@@ -276,7 +277,7 @@ macro_rules! rt_f64_unary_exports {
     ($($export:ident => $method:ident,)*) => {$(
         #[no_mangle]
         pub unsafe extern "C" fn $export(args: *const i64, argc: u32) -> i64 {
-            rt_f64_unary(args, argc, stringify!($export), f64::$method)
+            rt_f64_unary(args, argc, stringify!($export), <f64 as num_traits::Float>::$method)
         }
     )*};
 }

@@ -1,5 +1,6 @@
 //! Boxed structs (`defstruct`, `Vector<T>`): construction and field access.
 
+use typelisp_mem::prelude::*;
 use typelisp_abi::{active_heap, decode, encode, fatal, raise, Raised};
 use typelisp_mem::{BoxId, TypeId, Value};
 

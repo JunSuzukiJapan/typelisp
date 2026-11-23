@@ -23,6 +23,7 @@
 //! register_stream_builtins`). That conversion is deliberately *not* here:
 //! it belongs to the calling convention, not to the operation.
 
+use typelisp_mem::prelude::*;
 use typelisp_mem::{spec, wk, Heap, StdModule, SymRef, TypeId, TypeSpec, Value};
 
 use crate::stream::with_streams;
@@ -182,6 +183,7 @@ pub fn stream_builtin(heap: &mut Heap, sym: SymRef, args: &[Value]) -> Option<Re
     }
 
     Some(match sym.well_known() {
+        #[cfg(feature = "std")]
         wk::F_STREAM_STDIN => Ok(Value::Int(with_streams(heap, |t| t.stdin()))),
         wk::F_STREAM_STDOUT => Ok(Value::Int(with_streams(heap, |t| t.stdout()))),
         wk::F_STREAM_STDERR => Ok(Value::Int(with_streams(heap, |t| t.stderr()))),
@@ -190,6 +192,7 @@ pub fn stream_builtin(heap: &mut Heap, sym: SymRef, args: &[Value]) -> Option<Re
             Ok(Value::Int(with_streams(heap, |t| t.string_input(&s))))
         }
         wk::F_STREAM_STRING_OUTPUT => Ok(Value::Int(with_streams(heap, |t| t.string_output()))),
+        #[cfg(feature = "std")]
         wk::F_STREAM_OPEN_FILE => {
             let (p, mode) = (arg!(text(heap, args, 0, name)), arg!(int(args, 1, name)));
             wrap!(with_streams(heap, |t| t.open_file(&p, mode)), |v: i64| Value::Int(v))
@@ -279,10 +282,12 @@ pub fn stream_builtin(heap: &mut Heap, sym: SymRef, args: &[Value]) -> Option<Re
                 Err(m) => Ok(result_err(heap, sym, m)),
             }
         }
+        #[cfg(feature = "std")]
         wk::F_FILE_EXISTS_P => {
             let p = arg!(text(heap, args, 0, name));
             Ok(Value::Bool(std::path::Path::new(&p).exists()))
         }
+        #[cfg(feature = "std")]
         wk::F_FILE_DELETE => {
             let p = arg!(text(heap, args, 0, name));
             match std::fs::remove_file(&p) {
@@ -300,6 +305,7 @@ pub fn stream_builtin(heap: &mut Heap, sym: SymRef, args: &[Value]) -> Option<Re
         // `Interp::eval_builtin` sends every name starting `stream-`/`file-`
         // straight to this dispatch, so a `file-*` builtin implemented
         // anywhere else would never be reached interpreted.
+        #[cfg(feature = "std")]
         wk::F_FILE_TRUENAME => {
             let p = arg!(text(heap, args, 0, name));
             match std::fs::canonicalize(&p) {
@@ -314,6 +320,7 @@ pub fn stream_builtin(heap: &mut Heap, sym: SymRef, args: &[Value]) -> Option<Re
         // the scale `get-universal-time` counts on — so a file's timestamp
         // and the clock are directly comparable and either can be handed to
         // the prelude's `decode-universal-time`.
+        #[cfg(feature = "std")]
         wk::F_FILE_MODIFIED_DATE => {
             let p = arg!(text(heap, args, 0, name));
             const UNIX_TO_CL_EPOCH_SECS: i64 = 2_208_988_800;
@@ -337,6 +344,7 @@ pub fn stream_builtin(heap: &mut Heap, sym: SymRef, args: &[Value]) -> Option<Re
         // `Err`, an owner with no password-database entry is `Ok(None)` —
         // which is exactly what CL means by "or nil if the author's name
         // cannot be determined".
+        #[cfg(feature = "std")]
         wk::F_FILE_OWNER_NAME => {
             let p = arg!(text(heap, args, 0, name));
             match crate::os::file_owner(&p) {
@@ -352,6 +360,7 @@ pub fn stream_builtin(heap: &mut Heap, sym: SymRef, args: &[Value]) -> Option<Re
         // the same "a question, not a fallible operation" shape
         // `file-exists-p` has. A caller that must tell the two apart asks
         // `file-exists-p` as well.
+        #[cfg(feature = "std")]
         wk::F_FILE_DIRECTORY_P => {
             let p = arg!(text(heap, args, 0, name));
             Ok(Value::Bool(std::path::Path::new(&p).is_dir()))
@@ -370,6 +379,7 @@ pub fn stream_builtin(heap: &mut Heap, sym: SymRef, args: &[Value]) -> Option<Re
         // `alloc_string` and `alloc_struct` never collect (only `Heap::cons`
         // does), so nothing can invalidate the `Vec<Value>` in between. A
         // version of this that consed would need each element rooted.
+        #[cfg(feature = "std")]
         wk::F_FILE_LIST_DIRECTORY => {
             let p = arg!(text(heap, args, 0, name));
             let entries = match std::fs::read_dir(&p) {
@@ -399,6 +409,7 @@ pub fn stream_builtin(heap: &mut Heap, sym: SymRef, args: &[Value]) -> Option<Re
         }
         // Succeeds when the directory already exists: `create_dir_all` is
         // idempotent, which is exactly what "ensure" means in CL's name.
+        #[cfg(feature = "std")]
         wk::F_FILE_CREATE_DIRECTORIES => {
             let p = arg!(text(heap, args, 0, name));
             match std::fs::create_dir_all(&p) {
@@ -406,6 +417,7 @@ pub fn stream_builtin(heap: &mut Heap, sym: SymRef, args: &[Value]) -> Option<Re
                 Err(e) => Ok(result_err(heap, sym, format!("ensure-directories-exist: {}: {}", p, e))),
             }
         }
+        #[cfg(feature = "std")]
         wk::F_FILE_RENAME => {
             let (a, b) = (arg!(text(heap, args, 0, name)), arg!(text(heap, args, 1, name)));
             match std::fs::rename(&a, &b) {
