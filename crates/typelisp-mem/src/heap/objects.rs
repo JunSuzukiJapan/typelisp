@@ -256,7 +256,28 @@ impl Heap {
     /// exists for the tests of that invariant, which need the one shape
     /// nothing else may make.
     pub fn alloc_bignum_unchecked(&mut self, n: num_bigint::BigInt) -> Value {
+        self.box_bignum(n)
+    }
+
+    /// Stores `n` in a bignum box: every bignum is made here, and the first
+    /// one made installs how a bignum is written in a message
+    /// ([`bignum_text`](Self::bignum_text)).
+    fn box_bignum(&mut self, n: num_bigint::BigInt) -> Value {
+        TYPELISP_BIGNUM_TEXT.store(decimal as fn(&num_bigint::BigInt) -> String as *mut (), core::sync::atomic::Ordering::Relaxed);
         self.alloc_boxed(BoxedObj::Bignum(n))
+    }
+
+    /// The bignum in `id` in decimal, for a message. Through what the
+    /// bignum's maker installed: writing a `BigInt` is linked into an
+    /// executable only when the program can make one.
+    pub fn bignum_text(&self, id: BoxId) -> String {
+        let text = TYPELISP_BIGNUM_TEXT.load(core::sync::atomic::Ordering::Relaxed);
+        if text.is_null() {
+            panic!("internal error: a bignum box exists and nothing made one");
+        }
+        // SAFETY: only ever `decimal`'s address, stored by `box_bignum`.
+        let text: fn(&num_bigint::BigInt) -> String = unsafe { core::mem::transmute(text) };
+        text(&self.bignum_value(id))
     }
 
     /// An `int` from a machine-wide result: a fixnum when the value fits
@@ -272,7 +293,7 @@ impl Heap {
         if n >= i128::from(crate::tagged::FIXNUM_MIN) && n <= i128::from(crate::tagged::FIXNUM_MAX) {
             Value::Int(n as i64)
         } else {
-            self.alloc_boxed(BoxedObj::Bignum(num_bigint::BigInt::from(n)))
+            self.box_bignum(num_bigint::BigInt::from(n))
         }
     }
 
@@ -282,7 +303,7 @@ impl Heap {
     pub fn int_from_bigint(&mut self, n: num_bigint::BigInt) -> Value {
         match i64::try_from(&n) {
             Ok(v) if crate::tagged::fixnum_fits(v) => Value::Int(v),
-            _ => self.alloc_boxed(BoxedObj::Bignum(n)),
+            _ => self.box_bignum(n),
         }
     }
 
@@ -792,4 +813,15 @@ impl Heap {
             _ => panic!("BoxId does not hold a CompiledClosure"),
         }
     }
+}
+
+/// How [`Heap::bignum_text`] writes a bignum, installed by
+/// [`Heap::box_bignum`]. An exported symbol, so that the optimizer does not
+/// take the one value ever stored for the only one it can hold and call
+/// `decimal` directly.
+#[no_mangle]
+static TYPELISP_BIGNUM_TEXT: core::sync::atomic::AtomicPtr<()> = core::sync::atomic::AtomicPtr::new(core::ptr::null_mut());
+
+fn decimal(n: &num_bigint::BigInt) -> String {
+    n.to_string()
 }

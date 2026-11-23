@@ -138,7 +138,7 @@ pub unsafe extern "C" fn rt_run_entry(entry: i64) -> i64 {
 /// first).
 #[no_mangle]
 pub unsafe extern "C" fn rt_run_program(args: *const i64, argc: u32) -> i64 {
-    run_entry(args, argc, "rt_run_program", false, None)
+    run_entry(args, argc, "rt_run_program", false, |program| run_program(program, None))
 }
 
 /// [`rt_run_program`] for a `main` declared to return `int`: the answer is
@@ -154,7 +154,32 @@ pub unsafe extern "C" fn rt_run_program(args: *const i64, argc: u32) -> i64 {
 /// [`rt_run_program`]'s.
 #[no_mangle]
 pub unsafe extern "C" fn rt_run_program_int(args: *const i64, argc: u32) -> i64 {
-    run_entry(args, argc, "rt_run_program_int", true, None)
+    run_entry(args, argc, "rt_run_program_int", true, |program| run_program(program, None))
+}
+
+/// [`rt_run_program`] for a program that needs no scheduler: the compiler
+/// found that nothing the executable can run starts a task or a thread,
+/// uses a channel, sleeps or waits on a socket (`compile::aot`), so the
+/// initialisers and `main` run one after another on this frame
+/// ([`run_alone`]) and the scheduler is not linked in.
+///
+/// # Safety
+///
+/// [`rt_run_program`]'s.
+#[no_mangle]
+pub unsafe extern "C" fn rt_run_program_alone(args: *const i64, argc: u32) -> i64 {
+    run_entry(args, argc, "rt_run_program_alone", false, |program| run_alone(program))
+}
+
+/// [`rt_run_program_alone`] for a `main` declared to return `int`, read as
+/// [`rt_run_program_int`] reads it.
+///
+/// # Safety
+///
+/// [`rt_run_program`]'s.
+#[no_mangle]
+pub unsafe extern "C" fn rt_run_program_alone_int(args: *const i64, argc: u32) -> i64 {
+    run_entry(args, argc, "rt_run_program_alone_int", true, |program| run_alone(program))
 }
 
 /// What starts the OS threads that step tasks alongside the one running the
@@ -163,16 +188,23 @@ pub unsafe extern "C" fn rt_run_program_int(args: *const i64, argc: u32) -> i64 
 /// with, reported as `error: <message>`.
 pub type StartThreads = fn(&alloc::sync::Arc<crate::sched::SchedShared<crate::sched::CompiledTask>>, &mut Heap) -> Result<(), String>;
 
-/// The body of every program entry: [`rt_run_program`]'s, and with
-/// `returns_int` [`rt_run_program_int`]'s, with `start` for the entries of a
-/// target that has OS threads.
+/// The body of every program entry: reads the program, runs it with `run`
+/// ([`run_program`] under a scheduler, [`run_alone`] without one), and
+/// turns what it answered into the exit code — with `returns_int`, `main`'s
+/// `int`.
 ///
 /// # Safety
 ///
 /// [`rt_run_program`]'s.
-pub unsafe fn run_entry(args: *const i64, argc: u32, what: &str, returns_int: bool, start: Option<StartThreads>) -> i64 {
+pub unsafe fn run_entry(
+    args: *const i64,
+    argc: u32,
+    what: &str,
+    returns_int: bool,
+    run: impl FnOnce(&Program) -> Result<Value, i64>,
+) -> i64 {
     let program = read_program(args, argc, what);
-    let result = run_program(&program, start);
+    let result = run(&program);
     if !returns_int {
         // A `()`-returning `main` that returns normally exits 0; the word its
         // `()` is encoded as is not an exit code.
@@ -184,7 +216,7 @@ pub unsafe fn run_entry(args: *const i64, argc: u32, what: &str, returns_int: bo
     let code = match result {
         Ok(Value::Int(n)) => n,
         Ok(Value::Boxed(id)) if active_heap().is_bignum(id) => {
-            fatal(&format!("main returned {}, which is not a process exit code", active_heap().bignum_value(id)))
+            fatal(&format!("main returned {}, which is not a process exit code", active_heap().bignum_text(id)))
         }
         Ok(other) => fatal(&format!("main declared to return int answered {:?}", other)),
         Err(code) => code,
@@ -233,7 +265,7 @@ pub unsafe fn read_program(args: *const i64, argc: u32, what: &str) -> Program {
 /// # Safety
 ///
 /// [`rt_run_program`]'s.
-unsafe fn run_program(program: &Program, start: Option<StartThreads>) -> Result<Value, i64> {
+pub unsafe fn run_program(program: &Program, start: Option<StartThreads>) -> Result<Value, i64> {
     let heap = active_heap();
     let sched = alloc::sync::Arc::new(crate::sched::SchedShared::<crate::sched::CompiledTask>::new());
     // The printer reads the prelude's control variables from their compiled
@@ -272,6 +304,35 @@ unsafe fn run_program(program: &Program, start: Option<StartThreads>) -> Result<
         run(heap, *init, true)?;
     }
     run(heap, program.entry, false)
+}
+
+/// [`run_program`] without a scheduler: each initialiser and then `main`
+/// run to their end on this frame, on the chain a task would have
+/// ([`crate::coroutine::FrameStack::for_task`], which a board's interrupt
+/// handler may break into). A failure is left raised for [`exit_code`] to
+/// report, in the words a task's failure is reported in.
+///
+/// # Safety
+///
+/// [`rt_run_program`]'s.
+unsafe fn run_alone(program: &Program) -> Result<Value, i64> {
+    typelisp_print::aot::set_global_slots(global_perm_idx);
+    let run = |f: crate::coroutine::CoroutineFn| {
+        let mut chain = crate::coroutine::FrameStack::for_task();
+        chain
+            .run_to_end_alone(active_heap(), f, &[], &[])
+            .map_err(|paused| {
+                // The raise stays on the thread for `exit_code`.
+                let _raised = pause_on_a_machine_frame(paused, "the program");
+                EXIT_CODE_PANIC
+            })
+    };
+    for init in &program.inits {
+        // An initialiser's value is the global's storage id, already stored
+        // by the body itself (`compile-global-init`); nothing here reads it.
+        run(*init)?;
+    }
+    run(program.entry).map(typelisp_abi::decode)
 }
 
 /// A classic-signature door onto a coroutine body: `args` is

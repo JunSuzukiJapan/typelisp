@@ -313,7 +313,7 @@ unsafe fn run_program_result(
         Ok(v) if main_returns_int => match v {
             typelisp_mem::Value::Int(n) => Ok(n),
             typelisp_mem::Value::Boxed(id) if heap.is_bignum(id) => {
-                fatal(&format!("main returned {}, which is not a process exit code", heap.bignum_value(id)))
+                fatal(&format!("main returned {}, which is not a process exit code", heap.bignum_text(id)))
             }
             other => fatal(&format!("main declared to return int answered {:?}", other)),
         },

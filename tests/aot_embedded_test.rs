@@ -213,6 +213,63 @@ fn tasks_channels_and_sleep_run_on_one_core() {
     assert_eq!(out, "7\n");
 }
 
+/// The demangled names of the symbols the executable at `elf` defines, by
+/// the `llvm-nm` of the LLVM typl is built with.
+fn symbols(elf: &Path) -> Vec<String> {
+    let prefix = std::env::var("LLVM_SYS_221_PREFIX").expect("LLVM_SYS_221_PREFIX names the LLVM typl is built with");
+    let out = Command::new(Path::new(&prefix).join("bin").join("llvm-nm"))
+        .args(["--defined-only", "--demangle", "--format=just-symbols"])
+        .arg(elf)
+        .output()
+        .expect("failed to start llvm-nm");
+    assert!(out.status.success(), "llvm-nm failed: {}", text(&out.stderr));
+    text(&out.stdout).lines().map(str::to_string).collect()
+}
+
+/// The parts of the runtime a program reaches only through what it does: the
+/// scheduler (a task, a channel, `sleep`), writing through the printer, and
+/// arbitrary-precision integers.
+const USED_ONLY_WHEN_USED: [&str; 4] = ["typelisp_rt::sched::", "typelisp_print::format::", "typelisp_print::pprint::", "num_bigint::"];
+
+/// Whether the symbol `name` is code of the module `part`: a function of it,
+/// or a method of one of its types. A type of it named among the type
+/// arguments of somebody else's code (dropping a `BigInt`) is not.
+fn of_module(name: &str, part: &str) -> bool {
+    name.starts_with(part) || name.strip_prefix('<').is_some_and(|n| n.starts_with(part))
+}
+
+/// A program that starts no task, writes nothing and makes no bignum has
+/// none of them in its executable; one that does has them all.
+#[test]
+fn what_a_program_does_not_use_is_left_out() {
+    let elf = built("board_left_out", "(defun main () int 42)", "prog.elf", &board_flags(&[]));
+    assert_eq!(run_board(&elf).status.code(), Some(42));
+    let names = symbols(&elf);
+    for part in USED_ONLY_WHEN_USED {
+        let found: Vec<&String> = names.iter().filter(|n| of_module(n, part)).collect();
+        assert!(found.is_empty(), "{} is linked in: {:?}", part, &found[..found.len().min(5)]);
+    }
+    let elf = built(
+        "board_left_in",
+        r#"
+(use std::sync::Chan)
+(defun fill ((ch Chan<int>)) () (send ch (* 4611686018427387903 4)) ())
+(defun main () ()
+  (let ((ch (the Chan<int> (Chan::new 0))))
+    (task (fill ch))
+    (println "~a" (unwrap (recv ch)))))
+"#,
+        "prog.elf",
+        &board_flags(&[]),
+    );
+    let out = run_board(&elf);
+    assert_eq!(text(&out.stdout), "18446744073709551612\n", "stderr: {}", text(&out.stderr));
+    let names = symbols(&elf);
+    for part in USED_ONLY_WHEN_USED {
+        assert!(names.iter().any(|n| of_module(n, part)), "{} is not linked in", part);
+    }
+}
+
 /// The arena grows from the small one a board starts with, and an
 /// executable without one runs what needs none.
 #[test]

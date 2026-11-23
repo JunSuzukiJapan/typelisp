@@ -49,7 +49,7 @@ wasm32-unknown-unknown では、strip しても 2,042,594 バイトあった。
   - 済: 基本型の `print-object` は登録しない。実行ファイルの印字器が登録を引くのは構造体と enum の値だけで、基本型の値はどちらでもない。
   - 測定（release のランタイム、hello）: `__text` 970,336 → 845,680（ここまでの 2 つ）。
   - 外せないもの: std のバックトレース（gimli、addr2line、rustc_demangle、約 75KB）。std のメモリ確保の失敗とパニックの処理から届く。std を作り直さない限り外せない。組み込み（段階 1 で `no_std`）では入らない。
-  - 見送り: stream の組み込みは全て `stream_builtin` の名前による振り分けを通るので、shim を 1 つ使うと全ての操作が残る（約 12KB）。組み込みでは段階 1 でファイルとネットワークが外れる。
+  - 済（段階 8）: stream の組み込みは全て `stream_builtin` の名前による振り分けを通っていたので、shim を 1 つ使うと全ての操作が残った。今は操作ごとの関数を shim が直接呼ぶ。ファイルとネットワーク（`fs_builtin`、`net_builtin`）は OS の上でしか使わないので、振り分けのまま。
   - 済: ランタイムが一部の組み込みでだけ値を作る型（ファイル・ソケット・読み取り・`parse-float` のエラー、`ParseIntError`、時刻の 2 つ、`heap-info`）は、作る組み込みの shim に届くときだけ生きているとする（`aot/made.rs`）。作る組み込みの表は、言語サーバー（rust-analyzer）で型の定数を参照する関数と、その呼び出し元を shim まで引いて作り、マクロが書く呼び出し（`stream_shim!` の短い形）は手で補った。stream、socket、system の組み込みが作る値は、組み込みごとの結果の型の表の行に必ず書かれている（行の無い組み込みは止まる）ので、その表から読む。作る箇所が増減すると `type_identity_guard_test` が落ちる。
   - 測定（release のランタイム、hello）: `__text` 845,680 → 817,280。hello が登録する `print-object` は `standard-stream` の 1 つだけになった。
 ### 書式の展開（段階 0e）
@@ -180,3 +180,44 @@ LLVM 22 には AVR のバックエンドがある。判断の材料は次の 3 �
 | fib | 379,656 | 332 | 2,444 |
 
 `--no-cons` でも変わらない。プログラムによらず約 37 万バイトがランタイムで、大きいのは bignum（`num-bigint`）、浮動小数の印字（`flt2dec`）、印字器（`typelisp_print`）、スケジューラ、記号表・型表の初期化、ハッシュ表の型ごとの実体化。どれも 1 つは 14KB 以下で、長い尾になっている。ATmega328P（32KB/2KB）にも ATmega2560（256KB/8KB）にも、ランタイムだけで入らない（bss だけで Uno の RAM を超える）。AVR のコードは i64 の語の演算が多くの命令になるので、Thumb より大きくなる。今の設計のまま AVR に対応することはできず、対応するなら、bignum・浮動小数の印字・スケジューラを持たない別の小さなランタイムと、16bit の語の表現が要る。
+
+### 段階 8: 使わない機能をリンクしない（2026-11-23〜）
+
+段階 7 の測定のあと、ユーザーの指示で進める。Uno は「Lチカ程度の最小限が動くだけでも楽しい」（ユーザー）ので、最小のプログラムをどこまで小さくできるかが目標。
+
+調べ方: `typl -c` のリンクの入力（`program.o` とスクリプト）を写し取り、release のランタイムで `--emit-relocs` を付けてリンクし直す。再配置から関数の参照のグラフを作り、根ごとに「その参照を切ったら何バイト減るか」を計算する。lld の `--why-live` は経路を 1 本しか出さないので、全体の見積もりには足りない。
+
+最初に分かったこと（`(defun main () int 42)`、thumbv7em）: コード 373,304 バイトのうち約 24 万バイトが、プログラムが使わないのに次の根から必ず参照されていた。
+
+- `run_program` が必ずスケジューラを通す。割り込みの入口（`DefaultHandler`）からも `drive_to_completion` 経由で届く。
+- 印字器の登録が、モジュール全体（prelude を含む）が印字の shim を呼ぶかで決まっていたので、常に出ていた。そこで登録される `standard-stream` の `print-object` から、書式エンジンと pretty printer に届く。
+- `main` が `int` を返すときの多倍長の検査が、エラー文のために `BigInt` を 10 進で書く。
+- prelude の大域変数の初期化（`*standard-output*` など）が `rt_stream_stdout` を呼び、それが `stream_builtin` の振り分けを通ってストリーム操作を全部引き込む。
+
+済:
+
+- スケジューラ: `rt_suspend_yield` と `rt_suspend_main` 以外の `rt_suspend_*` に、できあがった `main` から届かない（`externs::needs_scheduler`）なら、入口を `rt_run_program_alone[_int]` に差し替える（`build_main_wrapper` の最後）。初期化と `main` をタスクと同じ鎖（`FrameStack::for_task`）でこのフレームの上で走らせ、yield、safepoint、インタプリタのスレッドへの移動はその場で続ける（`FrameStack::run_to_end_alone`）。`run_to_end` は答え方を引数に取るループ（`run_to_end_answering`）の上に置き直した。
+- 割り込み: ハンドラを走らせる関数は、`rt_interrupt_register` が登録する関数ポインタ（`TYPELISP_INTERRUPT_RUN`）で呼ぶ。外から見える記号にしてあるのは、書き込まれる値が 1 つだけの内部の static だと、LLVM が間接呼び出しを直接呼び出しに戻すため（実際に戻った）。
+- 印字器の登録: 名前の書き方（モジュールと import）は常に登録する（実行時エラーの文も使う）。印字器の制御変数は、できあがった `main` から `rt_fmt_*` か `rt_pprint*` に届くときだけ。`print-object`、列挙子の名前、フィールドは、値を書く shim（`PRINT_SHIMS`）に届くときだけ。
+- 多倍長: 多倍長の箱を作るのは `Heap::box_bignum` の 1 か所にし、そこで 10 進で書く関数を登録する（`TYPELISP_BIGNUM_TEXT`）。`Heap::bignum_text` はそれを呼ぶ。多倍長を作れないプログラムには、10 進で書くコードが入らない。
+- ストリーム: 上の段階 0 の項。
+
+測定（thumbv7em、release のランタイム、コード）:
+
+| 時点 | `(defun main () int 42)` |
+|---|---|
+| 前 | 373,304 |
+| スケジューラ | 328,704 |
+| 印字器の登録 | 227,204 |
+| 多倍長のエラー文 | 182,824 |
+| ストリームの振り分け | 150,084 |
+
+振る舞いの変わったところ:
+
+- WebAssembly のモジュールは、スケジューラの無いプログラムでは `typelisp.now` と `typelisp.sleep` を import しない（`aot_wasm_js_test`）。
+- ネイティブの実行ファイルは、タスクの無いプログラムでは `TYPELISP_THREADS` を読まない（ワーカーのスレッドを持たないので）。不正な値を断るのはタスクのあるプログラムだけ（`os_threads_test`）。
+
+番人: `aot_embedded_test` の `what_a_program_does_not_use_is_left_out`。`int` を返すだけのプログラムにスケジューラ・書式エンジン・pretty printer・`num_bigint` のコードが無く、それらを使うプログラムには有ることを、実行ファイルの記号で確かめる。
+
+残り（150,084 バイトの時点、単独で切ったときの減り方）: 記号表の初期化（`SymTable::new`、約 22KB）、名前の登録（約 14KB）、prelude の大域変数の初期化（約 13KB）、型表の初期化（約 11KB）。あとは記号表・型表・ヒープ・ハッシュ表の土台が細かく並ぶ。
+

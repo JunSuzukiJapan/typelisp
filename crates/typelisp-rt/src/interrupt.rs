@@ -71,6 +71,26 @@ static ENABLED: [AtomicU32; VECTORS / 32] = [const { AtomicU32::new(0) }; VECTOR
 /// Each entry's handler: the address of a coroutine-ABI body taking
 /// nothing, or 0.
 static HANDLERS: [AtomicUsize; VECTORS] = [const { AtomicUsize::new(0) }; VECTORS];
+/// What runs a handler ([`run`]), stored by [`rt_interrupt_register`]: the
+/// board's runtime reaches [`arrived`] whether or not the program has a
+/// handler, and through this, what drives one is linked into an executable
+/// only when its `main` registers one.
+///
+/// An exported symbol, so that the optimizer does not take `run` for the
+/// only value it can hold and call `run` directly from [`arrived`].
+#[no_mangle]
+static TYPELISP_INTERRUPT_RUN: AtomicPtr<()> = AtomicPtr::new(core::ptr::null_mut());
+
+/// Runs `vector`'s handler with what [`TYPELISP_INTERRUPT_RUN`] holds.
+fn run_registered(vector: usize) {
+    let run = TYPELISP_INTERRUPT_RUN.load(SeqCst);
+    if run.is_null() {
+        typelisp_abi::fatal("internal error: an interrupt handler is registered and nothing runs it");
+    }
+    // SAFETY: only ever `run`'s address, stored by `rt_interrupt_register`.
+    let run: fn(usize) = unsafe { core::mem::transmute(run) };
+    run(vector)
+}
 
 /// Installs the board's [`Controller`]. Done once, before the program runs.
 pub fn set_controller(controller: &'static Controller) {
@@ -128,7 +148,7 @@ pub fn arrived(vector: usize) -> bool {
         pend(vector);
         return true;
     }
-    run(vector);
+    run_registered(vector);
     drain();
     RUNNING.store(false, SeqCst);
     run_pending();
@@ -172,7 +192,7 @@ fn drain() {
             let low = bits & bits.wrapping_neg();
             pending.fetch_and(!low, SeqCst);
             let vector = word * 32 + low.trailing_zeros() as usize;
-            run(vector);
+            run_registered(vector);
             if vector >= FIRST_INTERRUPT && ENABLED[word].load(SeqCst) & low != 0 {
                 if let Some(c) = controller() {
                     (c.unmask)((vector - FIRST_INTERRUPT) as u16);
@@ -256,6 +276,7 @@ pub unsafe extern "C" fn rt_interrupt_register(args: *const i64, argc: u32) -> i
     if vector >= VECTORS {
         typelisp_abi::fatal(&format!("rt_interrupt_register: there is no vector-table entry {}", vector));
     }
+    TYPELISP_INTERRUPT_RUN.store(run as fn(usize) as *mut (), SeqCst);
     HANDLERS[vector].store(*args.add(1) as usize, SeqCst);
     0
 }

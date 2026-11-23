@@ -1226,6 +1226,9 @@ fn build_main_wrapper(
         init_addrs.push(f.as_global_value().as_pointer_value().const_to_int(i64_ty));
     }
     let entry_addr = tl_main.as_global_value().as_pointer_value().const_to_int(i64_ty);
+    // The entry shim, and the one without a scheduler that takes its place
+    // when the program turns out to need none (below).
+    let mut entry: Option<(inkwell::values::FunctionValue<'static>, &str)> = None;
     let call: CallSiteValue = if tl_main.get_type() == coroutine_fn_ty {
         // A native executable's tasks run on OS threads too; a WebAssembly
         // module has none.
@@ -1239,6 +1242,9 @@ fn build_main_wrapper(
             (false, false, false) => "rt_run_program",
         };
         let rt_run_program = module.add_function(entry_shim, fn_ty, None);
+        if eval_env.is_none() {
+            entry = Some((rt_run_program, if main_returns_int { "rt_run_program_alone_int" } else { "rt_run_program_alone" }));
+        }
         let inits = module.add_global(i64_ty.array_type(init_addrs.len() as u32), None, "tl_global_inits");
         inits.set_initializer(&i64_ty.const_array(&init_addrs));
         inits.set_constant(true);
@@ -1282,8 +1288,22 @@ fn build_main_wrapper(
     builder.build_return(Some(&exit_code)).map_err(|e| format!("failed to build entry-point return: {}", e))?;
 
     if let Some(register) = print_register {
-        let live = live_types(module, main_fn, print_objects, eval_env.is_some())?;
-        emit_print_registration(ctx, module, register, enum_variants, field_templates, field_names, print_objects, &live, printer_globals)?;
+        // What the printer needs to write a value, only when the executable
+        // can write one: asked of the finished `main`, whose registration
+        // has no body yet and is not walked. Without it, the registered
+        // `print-object` methods would bring the printer in after all.
+        let reaches = |shim: fn(&str) -> bool| {
+            eval_env.is_some() || !reach::uses(module, main_fn, |name| shim(name).then(String::new)).is_empty()
+        };
+        let live = if reaches(|name| PRINT_SHIMS.contains(&name)) {
+            Some(live_types(module, main_fn, print_objects, eval_env.is_some())?)
+        } else {
+            None
+        };
+        let writes = reaches(writes_through_the_printer);
+        emit_print_registration(
+            ctx, module, register, enum_variants, field_templates, field_names, print_objects, live.as_ref(), writes, printer_globals,
+        )?;
     }
 
     // The types the executable's code reads, the prelude's included: interned
@@ -1294,6 +1314,22 @@ fn build_main_wrapper(
     for init in crate::compile::type_table::init_functions(module) {
         let f = module.get_function(&init).expect("an init function the module defines");
         builder.build_call(f, &[], "").map_err(|e| format!("failed to build the call to `{}`: {}", init, e))?;
+    }
+
+    // A program that nothing it can run makes wait — no task, thread,
+    // channel, `sleep` or socket — runs without a scheduler, and the
+    // scheduler is not linked into it. Asked of the finished `main`, which
+    // refers to everything that can run: the initialisers, `tl_main`, the
+    // registered `print-object` methods, the interrupt handlers and C
+    // callbacks.
+    if let Some((scheduled, alone)) = entry {
+        let waits = reach::uses(module, main_fn, |name| crate::compile::externs::needs_scheduler(name).then(String::new));
+        if waits.is_empty() {
+            let alone = module.add_function(alone, fn_ty, None);
+            scheduled.as_global_value().as_pointer_value().replace_all_uses_with(alone.as_global_value().as_pointer_value());
+            // SAFETY: a declaration with no uses left.
+            unsafe { scheduled.delete() };
+        }
     }
     Ok(())
 }
@@ -1426,7 +1462,11 @@ fn with_arguments(types: &std::collections::HashSet<typelisp_mem::TypeId>) -> st
 /// variant names, the fields' types and names, each type's `print-object`
 /// and the printer control variables, none of which a standalone executable
 /// can look up the way the interpreter does. Only for what `live` says a
-/// value of can exist ([`live_types`]): the rest is never printed.
+/// value of can exist ([`live_types`]): the rest is never printed. Without
+/// `live` the executable writes no value; unless it `writes`, it does not
+/// write through the printer at all and the printer control variables are
+/// left out too. How type names are written is always registered: a
+/// runtime error message uses it as well.
 fn emit_print_registration(
     ctx: &'static Context,
     module: &Module<'static>,
@@ -1435,7 +1475,8 @@ fn emit_print_registration(
     field_templates: &[(Path, i64, i64, crate::TypeId)],
     field_names: &[(Path, i64, String)],
     print_objects: &[(typelisp_mem::TypeId, String)],
-    live: &Live,
+    live: Option<&Live>,
+    writes: bool,
     printer_globals: &[(&str, usize)],
 ) -> Result<(), String> {
     let builder = ctx.create_builder();
@@ -1477,38 +1518,42 @@ fn emit_print_registration(
     // so the executable carries the shapes and its startup interns them.
     let ty = |ty: crate::TypeId| crate::compile::type_table::load(&builder, module, ty);
     let definition = |path: &Path| ty(typelisp_front::type_key::type_key_id(path, Vec::new()));
-    for (path, variant, name) in enum_variants.iter().filter(|(path, ..)| live.has_definition(path)) {
-        let (name_ptr, name_len) = literal(&builder, name)?;
-        call(&builder, "rt_print_enum_variant", &[definition(path)?, i64_ty.const_int(*variant as u64, false), name_ptr, name_len])?;
+    if let Some(live) = live {
+        for (path, variant, name) in enum_variants.iter().filter(|(path, ..)| live.has_definition(path)) {
+            let (name_ptr, name_len) = literal(&builder, name)?;
+            call(&builder, "rt_print_enum_variant", &[definition(path)?, i64_ty.const_int(*variant as u64, false), name_ptr, name_len])?;
+        }
+        for (path, variant, index, template) in field_templates.iter().filter(|(path, ..)| live.has_definition(path)) {
+            call(
+                &builder,
+                "rt_print_field_template",
+                &[definition(path)?, i64_ty.const_int(*variant as u64, true), i64_ty.const_int(*index as u64, true), ty(*template)?],
+            )?;
+        }
+        for (path, index, name) in field_names.iter().filter(|(path, ..)| live.has_definition(path)) {
+            let (name_ptr, name_len) = literal(&builder, name)?;
+            call(&builder, "rt_print_field_name", &[definition(path)?, i64_ty.const_int(*index as u64, true), name_ptr, name_len])?;
+        }
+        for ((receiver, symbol), live) in print_objects.iter().zip(&live.print_objects) {
+            // A type no value of can exist is registered with no method, so
+            // that printing one after all is a loud error rather than the
+            // default rendering.
+            let fn_ptr = if *live {
+                let target = module.get_function(symbol).ok_or_else(|| {
+                    format!("compile-file: `print-object` implementation `{}` was not compiled into this file", symbol)
+                })?;
+                classic_door(ctx, module, target)?
+            } else {
+                i64_ty.const_zero()
+            };
+            call(&builder, "rt_print_object_method", &[ty(*receiver)?, fn_ptr])?;
+        }
     }
-    for (path, variant, index, template) in field_templates.iter().filter(|(path, ..)| live.has_definition(path)) {
-        call(
-            &builder,
-            "rt_print_field_template",
-            &[definition(path)?, i64_ty.const_int(*variant as u64, true), i64_ty.const_int(*index as u64, true), ty(*template)?],
-        )?;
-    }
-    for (path, index, name) in field_names.iter().filter(|(path, ..)| live.has_definition(path)) {
-        let (name_ptr, name_len) = literal(&builder, name)?;
-        call(&builder, "rt_print_field_name", &[definition(path)?, i64_ty.const_int(*index as u64, true), name_ptr, name_len])?;
-    }
-    for ((receiver, symbol), live) in print_objects.iter().zip(&live.print_objects) {
-        // A type no value of can exist is registered with no method, so
-        // that printing one after all is a loud error rather than the
-        // default rendering.
-        let fn_ptr = if *live {
-            let target = module.get_function(symbol).ok_or_else(|| {
-                format!("compile-file: `print-object` implementation `{}` was not compiled into this file", symbol)
-            })?;
-            classic_door(ctx, module, target)?
-        } else {
-            i64_ty.const_zero()
-        };
-        call(&builder, "rt_print_object_method", &[ty(*receiver)?, fn_ptr])?;
-    }
-    for (name, id) in printer_globals {
-        let (name_ptr, name_len) = literal(&builder, name)?;
-        call(&builder, "rt_print_global", &[name_ptr, name_len, i64_ty.const_int(*id as u64, false)])?;
+    if writes {
+        for (name, id) in printer_globals {
+            let (name_ptr, name_len) = literal(&builder, name)?;
+            call(&builder, "rt_print_global", &[name_ptr, name_len, i64_ty.const_int(*id as u64, false)])?;
+        }
     }
     // Type names are written for the module the program was checked in,
     // as the interpreter writes them — the view the checker left behind.
@@ -1614,6 +1659,13 @@ const PRINT_SHIMS: [&str; 10] = [
     "rt_pprint_pop",
     "rt_pprint_list_exhausted",
 ];
+
+/// Whether the shim `name` writes through the printer (`typelisp_print::shim`:
+/// an expanded `format`'s pieces and the pretty printer's), which reads the
+/// printer control variables whatever it writes.
+fn writes_through_the_printer(name: &str) -> bool {
+    name.starts_with("rt_fmt_") || name.starts_with("rt_pprint")
+}
 
 /// Whether any compiled body in `module` calls one of `names`.
 ///

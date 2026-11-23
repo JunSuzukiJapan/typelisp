@@ -225,7 +225,7 @@ pub(crate) fn rt_builtin_symbol(name: SymRef) -> Option<&'static str> {
         wk::F_SLEEP => "rt_suspend_sleep",
         wk::F_ENABLE_INTERRUPT => "rt_interrupt_enable",
         wk::F_DISABLE_INTERRUPT => "rt_interrupt_disable",
-        wk::F_YIELD => "rt_suspend_yield",
+        wk::F_YIELD => RT_SUSPEND_YIELD,
         // `(net-wait h interest)` parks the task on a socket: the third of
         // the free builtins that suspend, and the reason the prelude's
         // `socket-stream` methods can wait without any of them blocking.
@@ -601,6 +601,20 @@ pub(crate) const RT_SUSPEND_MAIN: &str = "rt_suspend_main";
 /// would wait.
 pub(crate) const ALWAYS_WAITING_SHIMS: &[(&str, &str)] =
     &[("rt_suspend_sleep", "`sleep`"), ("rt_suspend_io", "waiting on a socket"), ("rt_suspend_io_for", "waiting on a socket")];
+
+/// Whether a program that reaches the shim `name` needs a scheduler: it
+/// suspends for something a scheduler answers — a task, a thread, a
+/// channel, a `sleep`, a socket. The two other suspensions go on at once
+/// with nobody else to run: `(yield)` offers a turn, and the move to the
+/// interpreter's thread ([`RT_SUSPEND_MAIN`]) has nowhere to go in an
+/// executable without an interpreter. A program that reaches none of these
+/// runs without a scheduler (`typelisp_rt::rt_run_program_alone`).
+pub(crate) fn needs_scheduler(name: &str) -> bool {
+    name.starts_with(RT_SUSPEND_PREFIX) && name != RT_SUSPEND_YIELD && name != RT_SUSPEND_MAIN
+}
+
+/// `(yield)`'s shim.
+pub(crate) const RT_SUSPEND_YIELD: &str = "rt_suspend_yield";
 
 /// The shims of what only a board has, which a program for any other target
 /// cannot reach, with what each is in a message.

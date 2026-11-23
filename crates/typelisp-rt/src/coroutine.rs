@@ -279,6 +279,60 @@ impl FrameStack {
         env: &[i64],
         apply: impl Fn(i64, &[i64]) -> Result<i64, typelisp_abi::Raised>,
     ) -> Result<i64, Paused> {
+        self.run_to_end_answering(heap, f, args, env, apply, |heap| match crate::sched::pending_wait(heap) {
+            // Nothing to wait for and nobody to switch to: a loop's back edge
+            // offering a turn (C7), or a `(yield)`. Declining and resuming is
+            // the whole of honouring either. The value slot is set because a
+            // resume block reads it like any other, and the island discards
+            // this one.
+            //
+            // A call that needs the interpreter's thread is the same: a Rust
+            // caller waits on this frame, so there is no thread to move to,
+            // and the call goes on where it is — as a macro body the checker
+            // runs makes its `macroexpand` (the call itself says when no
+            // interpreter is here).
+            Ok((crate::sched::Waiting::Yield | crate::sched::Waiting::Main, _)) => Ok(0),
+            Ok((w, wake)) => crate::sched::answer_now(heap, &w)
+                .unwrap_or_else(|| Err(crate::sched::SchedError::Panic(crate::sched::cannot_block_message(&w))))
+                .map(|v| crate::sched::wake_word(wake, v)),
+            Err(e) => Err(e),
+        })
+    }
+
+    /// [`Self::run_to_end`] for a program with no scheduler at all
+    /// (`program::run_alone`): the compiler found that nothing it can run
+    /// suspends for anything but a turn — a loop's back edge or a `(yield)` —
+    /// or a move to the interpreter's thread, which an executable without an
+    /// interpreter does not have. Each of those simply goes on, as
+    /// [`Self::run_to_end`] goes on, and the scheduler's code is not part of
+    /// the executable. Any other suspension is the compiler's mistake.
+    pub fn run_to_end_alone(&mut self, heap: &mut Heap, f: CoroutineFn, args: &[i64], env: &[i64]) -> Result<i64, Paused> {
+        let apply = |closure: i64, argv: &[i64]| unsafe { crate::program::apply_on_this_frame(closure, argv, "the program") };
+        self.run_to_end_answering(heap, f, args, env, apply, |_| {
+            use typelisp_abi::call_state as cs;
+            match cs::take_pending_suspend() {
+                Some((cs::SUSPEND_YIELD | cs::SUSPEND_SAFEPOINT | cs::SUSPEND_MAIN, _, _)) => Ok(0),
+                Some((kind, _, _)) => crate::fatal(&format!(
+                    "internal error: compiled code suspended (kind {}) in a program built without a scheduler",
+                    kind
+                )),
+                None => crate::fatal("internal error: a compiled frame suspended without recording what it was waiting for"),
+            }
+        })
+    }
+
+    /// The loop of [`Self::run_to_end`] and [`Self::run_to_end_alone`]:
+    /// `suspended` answers a suspension of the chain with the word its
+    /// frame resumes with, or refuses it.
+    fn run_to_end_answering(
+        &mut self,
+        heap: &mut Heap,
+        f: CoroutineFn,
+        args: &[i64],
+        env: &[i64],
+        apply: impl Fn(i64, &[i64]) -> Result<i64, typelisp_abi::Raised>,
+        mut suspended: impl FnMut(&mut Heap) -> Result<i64, crate::sched::SchedError>,
+    ) -> Result<i64, Paused> {
         let base = self.frames.len();
         let mut outcome = self.run_with_env(heap, f, args, env);
         loop {
@@ -294,37 +348,13 @@ impl FrameStack {
                     outcome = self.answer_apply(heap, base, answer);
                 }
                 Err(Paused::Suspended) => {
-                    outcome = match crate::sched::pending_wait(heap) {
-                        // Nothing to wait for and nobody to switch to: a loop's
-                        // back edge offering a turn (C7), or a `(yield)`.
-                        // Declining and resuming is the whole of honouring
-                        // either. The value slot is set because a resume block
-                        // reads it like any other, and the island discards
-                        // this one.
-                        //
-                        // A call that needs the interpreter's thread is the
-                        // same: a Rust caller waits on this frame, so there is
-                        // no thread to move to, and the call goes on where it
-                        // is — as a macro body the checker runs makes its
-                        // `macroexpand` (the call itself says when no
-                        // interpreter is here).
-                        Ok((crate::sched::Waiting::Yield | crate::sched::Waiting::Main, _)) => {
-                            self.set_top_value(heap, 0);
+                    outcome = match suspended(heap) {
+                        // Written into the frame's slot at once — nothing
+                        // allocates between the answer and the store, so no
+                        // root is needed.
+                        Ok(word) => {
+                            self.set_top_value(heap, word);
                             self.resume(heap, base)
-                        }
-                        Ok((w, wake)) => {
-                            let answer = crate::sched::answer_now(heap, &w)
-                                .unwrap_or_else(|| Err(crate::sched::SchedError::Panic(crate::sched::cannot_block_message(&w))));
-                            match answer {
-                                Ok(v) => {
-                                    // Written into the frame's slot at once —
-                                    // nothing allocates between the answer
-                                    // and the store, so no root is needed.
-                                    self.set_top_value(heap, crate::sched::wake_word(wake, v));
-                                    self.resume(heap, base)
-                                }
-                                Err(e) => self.raise_scheduler_error(heap, base, e),
-                            }
                         }
                         Err(e) => self.raise_scheduler_error(heap, base, e),
                     };
