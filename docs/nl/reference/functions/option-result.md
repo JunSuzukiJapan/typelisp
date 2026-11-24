@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/option-result.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
+<!-- translated-from: docs/ja/reference/functions/option-result.md @ dff3b51792f6d9c49bb8802bd3d3fb6e168edd92 -->
 # Option, Result en foutentypes
 
 ## 1. `Option<T>` / `Result<T,E>`
@@ -67,7 +67,7 @@ worden onderscheiden:
 |---|---|---|
 | `Option<U>` (genest) | Box | De binnenste `None` zou dezelfde waarde zijn als de buitenste `None` |
 | `()` | Box | De waarde van `()` is zelf de waarde van de lege lijst |
-| `ptr` / `c-long` / `c-ulong` | Box | Alle 64 bits zijn waarde, zodat er geen ruimte is om ze te onderscheiden |
+| `ptr` / `c-long` / `c-ulong` | Box | Alle bits zijn waarde, zodat er geen ruimte is om ze te onderscheiden |
 | Al het andere | Geen box | — |
 
 De representatie wordt door het type alleen bepaald en kan niet uit een waarde worden gelezen. Bij het

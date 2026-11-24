@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 0af7d052ede61d9b74e6590bb00955c0c9c3b9a4 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ dff3b51792f6d9c49bb8802bd3d3fb6e168edd92 -->
 # typelisp 語法參考
 
 typelisp 是一種靜態型別的 Lisp，語法採用 S 運算式。內建函式與方法的一覽見[內建函式](functions/README.md)，型別一覽見 [types.md](types.md)，
@@ -254,8 +254,7 @@ C 的符號名稱。
 
 #### ptr / c-long / c-ulong —— 原始機器字
 
-`ptr` 是不透明指標（`void *`、`FILE *`，或者宣告所指的任何東西）。`c-long` / `c-ulong` 是 C 的 `long` / `unsigned long`（`size_t`、
-`int64_t`、`intptr_t` 也一樣）。
+`ptr` 是不透明指標（`void *`、`FILE *`，或者宣告所指的任何東西）。`c-long` / `c-ulong` 是 C 的 `long` / `unsigned long`（`size_t`、`intptr_t` 也一樣）。
 
 ```lisp
 (defffi (c-malloc "malloc") (c-ulong) ptr)
@@ -266,14 +265,14 @@ C 的符號名稱。
 ```
 
 **不叫 `i64` / `u64` 是刻意的。** 這個語言沒有 64 位元整數型別——帶標籤的立即值只有 63 位元（[第 2 章](#2-型別的寫法)）。`c-long` 這個名稱在
-說「這是跨越與 C 邊界的字，不是這個語言的整數」。
+說「這是跨越與 C 邊界的字，不是這個語言的整數」。寬度與編譯目標的 C 的 `long` 相同（64 位元的 macOS 與 Linux 上為 64 位元，wasm32 與 Cortex-M 上為 32 位元）。
 
 **沒有算術。** 不能寫 `(+ x 1)`。能提供卻沒有提供，是為了不讓無處保存、寬度與其他所有數都不同的值參與計算——與去掉 64 位元整數型別的理由相同。
 有的**只是轉換**：
 
 ```lisp
 (as i32 (unsafe (c-strlen "hello")))         ; 讀取回傳的東西
-(as int (unsafe (c-strlen s)))               ; 要精確讀取用這個（int 不會失去 64 位元）
+(as int (unsafe (c-strlen s)))               ; 要精確讀取用這個（int 不會失去值）
 (try-as i32 (unsafe (c-strlen s)))           ; 詢問能否放下
 (as c-ulong n)                               ; 從其他整數建立
 ```
@@ -377,7 +376,7 @@ C 函式的呼叫只能寫在 `unsafe` 中，所以只有在 `unsafe` 中才能�
 宣告與 C 配置相同的結構。只能寫在頂層的 `unsafe` 中（那個 `unsafe` 中只能寫 `def-c-struct`）。可以在名稱之後放置文件字串。
 
 欄位可以寫的型別是 `i8` `i16` `i32` `u8` `u16` `u32` `c-long` `c-ulong` `f32` `f64` `bool` `ptr`、型別化指標 `(ptr T)`，以及其他
-`def-c-struct`（以值嵌入）。配置（各欄位的位移、結構的大小與對齊）依 C 的規則計算（以 LP64 為前提）。可以寫指向自己的欄位，但不能嵌入自己。
+`def-c-struct`（以值嵌入）。配置（各欄位的位移、結構的大小與對齊）依 C 的規則計算（`c-long` 與指標的寬度以及 `f64` 的對齊遵循編譯目標的 C）。可以寫指向自己的欄位，但不能嵌入自己。
 
 ```lisp
 (unsafe

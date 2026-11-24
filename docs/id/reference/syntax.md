@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 0af7d052ede61d9b74e6590bb00955c0c9c3b9a4 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ dff3b51792f6d9c49bb8802bd3d3fb6e168edd92 -->
 # Referensi Sintaks typelisp
 
 typelisp adalah Lisp dengan tipe statis, ditulis dalam S-expression. Untuk daftar fungsi bawaan dan
@@ -382,7 +382,7 @@ terus berjalan, sehingga satu-satunya masa hidup yang benar adalah masa hidup pr
 #### ptr / c-long / c-ulong — word mesin mentah
 
 `ptr` adalah pointer buram (`void *`, `FILE *`, apa pun maksud deklarasinya). `c-long` / `c-ulong`
-adalah `long` / `unsigned long` pada C (juga `size_t`, `int64_t`, dan `intptr_t`).
+adalah `long` / `unsigned long` pada C (juga `size_t`, dan `intptr_t`).
 
 ```lisp
 (defffi (c-malloc "malloc") (c-ulong) ptr)
@@ -394,7 +394,7 @@ adalah `long` / `unsigned long` pada C (juga `size_t`, `int64_t`, dan `intptr_t`
 
 **Tidak menamainya `i64` / `u64` adalah disengaja.** Bahasa ini tidak memiliki tipe bilangan bulat 64
 bit, karena nilai langsung bertag hanya memiliki 63 bit ([bab 2](#2-menulis-tipe)). Nama `c-long`
-mengatakan "ini adalah word yang menyeberangi batas dengan C, bukan bilangan bulat bahasa ini".
+mengatakan "ini adalah word yang menyeberangi batas dengan C, bukan bilangan bulat bahasa ini". Lebarnya sama dengan `long` C pada target (64 bit pada macOS dan Linux 64 bit, 32 bit pada wasm32 dan Cortex-M).
 
 **Tipe ini tidak memiliki aritmetika.** `(+ x 1)` tidak dapat ditulis. Ia dapat disediakan tetapi
 tidak, agar tidak ada komputasi yang berjalan pada nilai yang tidak dapat disimpan di mana pun dan
@@ -403,7 +403,7 @@ ditiadakan. Yang ada **hanya konversi**:
 
 ```lisp
 (as i32 (unsafe (c-strlen "hello")))         ; read what came back
-(as int (unsafe (c-strlen s)))               ; this one to read it exactly (int does not lose 64 bits)
+(as int (unsafe (c-strlen s)))               ; this one to read it exactly (int loses none of the value)
 (try-as i32 (unsafe (c-strlen s)))           ; ask whether it fits
 (as c-ulong n)                               ; make one from another integer
 ```
@@ -543,8 +543,7 @@ ditaruh tepat setelah nama.
 
 Tipe yang dapat ditulis untuk field adalah `i8` `i16` `i32` `u8` `u16` `u32` `c-long` `c-ulong` `f32`
 `f64` `bool` `ptr`, pointer bertipe `(ptr T)`, dan `def-c-struct` lain (disematkan secara nilai).
-Tata letak (offset tiap field, serta ukuran dan alignment struct) dihitung dengan aturan C (dengan
-asumsi LP64). Field yang menunjuk struct itu sendiri dapat ditulis, tetapi struct tidak dapat
+Tata letak (offset tiap field, serta ukuran dan alignment struct) dihitung dengan aturan C (lebar `c-long` dan pointer serta perataan `f64` mengikuti C pada target). Field yang menunjuk struct itu sendiri dapat ditulis, tetapi struct tidak dapat
 menyematkan dirinya sendiri.
 
 ```lisp

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/option-result.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
+<!-- translated-from: docs/ja/reference/functions/option-result.md @ dff3b51792f6d9c49bb8802bd3d3fb6e168edd92 -->
 # Option, Result ve Hata Türleri
 
 ## 1. `Option<T>` / `Result<T,E>`
@@ -65,7 +65,7 @@ Kutu yalnızca `T` türündeki bir değer boş liste değerinden ayırt edilemed
 |---|---|---|
 | `Option<U>` (iç içe) | Kutu | İçteki `None`, dıştaki `None` ile aynı değer olurdu |
 | `()` | Kutu | `()`'nin değeri boş liste değerinin kendisidir |
-| `ptr` / `c-long` / `c-ulong` | Kutu | 64 bitin hepsi değerdir; ayırt etmek için yer kalmaz |
+| `ptr` / `c-long` / `c-ulong` | Kutu | Bitlerin hepsi değerdir; ayırt etmek için yer kalmaz |
 | Diğer her şey | Kutu yok | — |
 
 Gösterim yalnızca tür tarafından belirlenir ve bir değerden okunamaz. Yazdırırken `(Some ...)`/`None`

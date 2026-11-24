@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/option-result.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
+<!-- translated-from: docs/ja/reference/functions/option-result.md @ dff3b51792f6d9c49bb8802bd3d3fb6e168edd92 -->
 # Option, Result i typy błędów
 
 ## 1. `Option<T>` / `Result<T,E>`
@@ -66,7 +66,7 @@ Pudełko jest używane tylko wtedy, gdy wartości typu `T` nie da się odróżni
 |---|---|---|
 | `Option<U>` (zagnieżdżone) | Pudełko | Wewnętrzne `None` byłoby tą samą wartością co zewnętrzne `None` |
 | `()` | Pudełko | Wartość `()` jest samą wartością pustej listy |
-| `ptr` / `c-long` / `c-ulong` | Pudełko | Wszystkie 64 bity to wartość, nie zostaje miejsca na odróżnienie |
+| `ptr` / `c-long` / `c-ulong` | Pudełko | Wszystkie bity to wartość, nie zostaje miejsca na odróżnienie |
 | Cokolwiek innego | Bez pudełka | — |
 
 Reprezentacja jest określana wyłącznie przez typ i nie da się jej odczytać z wartości. Przy wypisywaniu

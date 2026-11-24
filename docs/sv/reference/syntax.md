@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 0af7d052ede61d9b74e6590bb00955c0c9c3b9a4 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ dff3b51792f6d9c49bb8802bd3d3fb6e168edd92 -->
 # Syntaxreferens för typelisp
 
 typelisp är ett statiskt typat Lisp, skrivet med S-uttryck. För listan över inbyggda funktioner och
@@ -367,7 +367,7 @@ korrekta livslängden är processens.
 #### ptr / c-long / c-ulong — råa maskinord
 
 `ptr` är en ogenomskinlig pekare (`void *`, `FILE *`, vad deklarationen än avsåg). `c-long` / `c-ulong` är
-C:s `long` / `unsigned long` (även `size_t`, `int64_t` och `intptr_t`).
+C:s `long` / `unsigned long` (även `size_t` och `intptr_t`).
 
 ```lisp
 (defffi (c-malloc "malloc") (c-ulong) ptr)
@@ -379,7 +379,7 @@ C:s `long` / `unsigned long` (även `size_t`, `int64_t` och `intptr_t`).
 
 **Att inte kalla dem `i64` / `u64` är avsiktligt.** Det här språket har ingen 64-bitars heltalstyp, eftersom
 ett taggat omedelbart värde bara har 63 bitar ([kapitel 2](#2-hur-typer-skrivs)). Namnet `c-long` säger "det
-här är ett ord som korsar gränsen mot C, inte ett heltal i det här språket".
+här är ett ord som korsar gränsen mot C, inte ett heltal i det här språket". Bredden är densamma som för C:s `long` på målet (64 bitar på 64-bitars macOS och Linux, 32 bitar på wasm32 och Cortex-M).
 
 **De har ingen aritmetik.** `(+ x 1)` kan inte skrivas. Det kunde tillhandahållas men gör det inte, så att
 ingen beräkning körs på ett värde som inte kan lagras någonstans och har en annan bredd än alla andra tal,
@@ -387,7 +387,7 @@ av samma skäl som 64-bitars heltalstypen utelämnades. Det finns **bara konvert
 
 ```lisp
 (as i32 (unsafe (c-strlen "hello")))         ; läs det som kom tillbaka
-(as int (unsafe (c-strlen s)))               ; den här för att läsa det exakt (int förlorar inte 64 bitar)
+(as int (unsafe (c-strlen s)))               ; den här för att läsa det exakt (int förlorar ingenting av värdet)
 (try-as i32 (unsafe (c-strlen s)))           ; fråga om det ryms
 (as c-ulong n)                               ; gör ett av ett annat heltal
 ```
@@ -520,8 +520,7 @@ inte kan innehålla något annat än `def-c-struct`). En dokumentationssträng k
 
 De typer som kan skrivas för fält är `i8` `i16` `i32` `u8` `u16` `u32` `c-long` `c-ulong` `f32`
 `f64` `bool` `ptr`, typade pekare `(ptr T)` och andra `def-c-struct` (inbäddade per värde). Layouten
-(varje fälts offset, samt structens storlek och justering) beräknas enligt C:s regler (under antagande av
-LP64). Ett fält som pekar på structen själv kan skrivas, men structen kan inte bädda in sig själv.
+(varje fälts offset, samt structens storlek och justering) beräknas enligt C:s regler (bredderna för `c-long` och pekare och justeringen av `f64` följer målets C). Ett fält som pekar på structen själv kan skrivas, men structen kan inte bädda in sig själv.
 
 ```lisp
 (unsafe

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/option-result.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
+<!-- translated-from: docs/ja/reference/functions/option-result.md @ dff3b51792f6d9c49bb8802bd3d3fb6e168edd92 -->
 # Option, Result e tipos de erro
 
 ## 1. `Option<T>` / `Result<T,E>`
@@ -65,7 +65,7 @@ Uma caixa só é usada quando um valor de `T` não pode ser distinguido do valor
 |---|---|---|
 | `Option<U>` (aninhado) | Caixa | O `None` interno seria o mesmo valor que o `None` externo |
 | `()` | Caixa | O valor de `()` é o próprio valor da lista vazia |
-| `ptr` / `c-long` / `c-ulong` | Caixa | Todos os 64 bits são valor, sem espaço para distingui-los |
+| `ptr` / `c-long` / `c-ulong` | Caixa | Todos os bits são valor, sem espaço para distingui-los |
 | Qualquer outro | Sem caixa | — |
 
 A representação é decidida só pelo tipo e não pode ser lida a partir de um valor. Ao imprimir,

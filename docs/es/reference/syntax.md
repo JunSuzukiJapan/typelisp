@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 0af7d052ede61d9b74e6590bb00955c0c9c3b9a4 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ dff3b51792f6d9c49bb8802bd3d3fb6e168edd92 -->
 # Referencia de sintaxis de typelisp
 
 typelisp es un Lisp con tipado estático que se escribe en expresiones S. Para la lista de funciones y métodos
@@ -370,7 +370,7 @@ bibliotecas abiertas nunca se cierran: el código que apunta a sus funciones sig
 #### ptr / c-long / c-ulong — palabras de máquina en bruto
 
 `ptr` es un puntero opaco (`void *`, `FILE *`, lo que sea que quisiera decir la declaración). `c-long` /
-`c-ulong` son el `long` / `unsigned long` de C (también `size_t`, `int64_t` e `intptr_t`).
+`c-ulong` son el `long` / `unsigned long` de C (también `size_t` e `intptr_t`).
 
 ```lisp
 (defffi (c-malloc "malloc") (c-ulong) ptr)
@@ -382,7 +382,7 @@ bibliotecas abiertas nunca se cierran: el código que apunta a sus funciones sig
 
 **No llamarlos `i64` / `u64` es deliberado.** Este lenguaje no tiene tipo entero de 64 bits, porque un
 inmediato etiquetado solo tiene 63 bits ([capítulo 2](#2-escritura-de-tipos)). El nombre `c-long` dice "esto
-es una palabra que cruza la frontera con C, no un entero de este lenguaje".
+es una palabra que cruza la frontera con C, no un entero de este lenguaje". Su ancho es el del `long` de C en el destino (64 bits en macOS y Linux de 64 bits, 32 bits en wasm32 y Cortex-M).
 
 **No tienen aritmética.** No se puede escribir `(+ x 1)`. Se podría ofrecer pero no se ofrece, para que no se
 haga ningún cálculo sobre un valor que no se puede almacenar en ningún sitio y que tiene un ancho distinto de
@@ -391,7 +391,7 @@ todos los demás números, por el mismo motivo por el que se dejó fuera el tipo
 
 ```lisp
 (as i32 (unsafe (c-strlen "hello")))         ; leer lo que se devolvió
-(as int (unsafe (c-strlen s)))               ; esta para leerlo exactamente (int no pierde 64 bits)
+(as int (unsafe (c-strlen s)))               ; esta para leerlo exactamente (int no pierde nada del valor)
 (try-as i32 (unsafe (c-strlen s)))           ; preguntar si cabe
 (as c-ulong n)                               ; crear uno a partir de otro entero
 ```
@@ -527,7 +527,7 @@ nombre.
 Los tipos que se pueden escribir para los campos son `i8` `i16` `i32` `u8` `u16` `u32` `c-long` `c-ulong`
 `f32` `f64` `bool` `ptr`, los punteros tipados `(ptr T)` y otros `def-c-struct` (incrustados por valor). La
 disposición (el desplazamiento de cada campo, y el tamaño y la alineación del struct) se calcula con las
-reglas de C (suponiendo LP64). Se puede escribir un campo que apunta al propio struct, pero el struct no se
+reglas de C (los anchos de `c-long` y de los punteros y la alineación de `f64` siguen al C del destino). Se puede escribir un campo que apunta al propio struct, pero el struct no se
 puede incrustar a sí mismo.
 
 ```lisp

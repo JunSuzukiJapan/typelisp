@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 0af7d052ede61d9b74e6590bb00955c0c9c3b9a4 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ dff3b51792f6d9c49bb8802bd3d3fb6e168edd92 -->
 # typelisp Syntax Reference
 
 typelisp is a statically typed Lisp, written in S-expressions. For the list of built-in functions and
@@ -363,7 +363,7 @@ running, so the only correct lifetime is that of the process.
 #### ptr / c-long / c-ulong — raw machine words
 
 `ptr` is an opaque pointer (`void *`, `FILE *`, whatever the declaration meant). `c-long` / `c-ulong` are
-C's `long` / `unsigned long` (also `size_t`, `int64_t` and `intptr_t`).
+C's `long` / `unsigned long` (also `size_t` and `intptr_t`).
 
 ```lisp
 (defffi (c-malloc "malloc") (c-ulong) ptr)
@@ -375,7 +375,7 @@ C's `long` / `unsigned long` (also `size_t`, `int64_t` and `intptr_t`).
 
 **Not calling them `i64` / `u64` is deliberate.** This language has no 64-bit integer type, because a
 tagged immediate has only 63 bits ([chapter 2](#2-writing-types)). The name `c-long` says "this is a
-word crossing the boundary with C, not an integer of this language".
+word crossing the boundary with C, not an integer of this language". Its width is that of C's `long` on the target (64 bits on 64-bit macOS and Linux, 32 bits on wasm32 and Cortex-M).
 
 **They have no arithmetic.** `(+ x 1)` cannot be written. It could be provided but is not, so that no
 computation runs on a value that cannot be stored anywhere and has a different width from every other
@@ -383,7 +383,7 @@ number, for the same reason the 64-bit integer type was left out. There are **on
 
 ```lisp
 (as i32 (unsafe (c-strlen "hello")))         ; read what came back
-(as int (unsafe (c-strlen s)))               ; this one to read it exactly (int does not lose 64 bits)
+(as int (unsafe (c-strlen s)))               ; this one to read it exactly (int loses none of the value)
 (try-as i32 (unsafe (c-strlen s)))           ; ask whether it fits
 (as c-ulong n)                               ; make one from another integer
 ```
@@ -517,8 +517,7 @@ Declares a struct with the same layout as in C. It can be written only inside a 
 
 The types that can be written for fields are `i8` `i16` `i32` `u8` `u16` `u32` `c-long` `c-ulong` `f32`
 `f64` `bool` `ptr`, typed pointers `(ptr T)`, and other `def-c-struct`s (embedded by value). The layout
-(the offset of each field, and the size and alignment of the struct) is computed by C's rules (assuming
-LP64). A field pointing to the struct itself can be written, but the struct cannot embed itself.
+(the offset of each field, and the size and alignment of the struct) is computed by C's rules (the widths of `c-long` and pointers and the alignment of `f64` follow the target's C). A field pointing to the struct itself can be written, but the struct cannot embed itself.
 
 ```lisp
 (unsafe

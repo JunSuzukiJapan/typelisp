@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 0af7d052ede61d9b74e6590bb00955c0c9c3b9a4 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ dff3b51792f6d9c49bb8802bd3d3fb6e168edd92 -->
 # typelisp 문법 레퍼런스
 
 typelisp는 S 식으로 쓰는 정적 타입 Lisp이다. 내장 함수와 메서드의 목록은 [내장 함수](functions/README.md), 타입 목록은
@@ -298,7 +298,7 @@ typelisp 쪽 이름과 C의 심볼 이름을 따로 쓸 수 있는 것은 typeli
 #### ptr / c-long / c-ulong — 원시 워드
 
 `ptr`은 불투명 포인터(`void *`, `FILE *`, 또는 선언이 뜻한 무엇이든)이다. `c-long` / `c-ulong`은 C의 `long` /
-`unsigned long`이다(`size_t`, `int64_t`, `intptr_t`도).
+`unsigned long`이다(`size_t`, `intptr_t`도).
 
 ```lisp
 (defffi (c-malloc "malloc") (c-ulong) ptr)
@@ -309,14 +309,14 @@ typelisp 쪽 이름과 C의 심볼 이름을 따로 쓸 수 있는 것은 typeli
 ```
 
 **`i64` / `u64`라고 부르지 않는 것은 의도된 것이다.** 이 언어에는 64비트 정수 타입이 없다. 태그 붙은 즉시값은 63비트뿐이기
-때문이다([2장](#2-타입-표기)). `c-long`이라는 이름은 "이것은 이 언어의 정수가 아니라 C와의 경계를 넘는 워드"라고 말한다.
+때문이다([2장](#2-타입-표기)). `c-long`이라는 이름은 "이것은 이 언어의 정수가 아니라 C와의 경계를 넘는 워드"라고 말한다. 폭은 컴파일 대상의 C `long`과 같다(64bit macOS와 Linux에서는 64bit, wasm32와 Cortex-M에서는 32bit).
 
 **산술은 없다.** `(+ x 1)`은 쓸 수 없다. 제공할 수 있지만 제공하지 않는 것은, 어디에도 저장할 수 없고 폭이 다른 모든 수와
 다른 값에 계산이 돌지 않게 하기 위해서이다. 64비트 정수 타입을 뺀 것과 같은 이유이다. 있는 것은 **변환뿐이다**.
 
 ```lisp
 (as i32 (unsafe (c-strlen "hello")))         ; 반환된 것을 읽는다
-(as int (unsafe (c-strlen s)))               ; 정확히 읽으려면 이것(int는 64비트를 잃지 않는다)
+(as int (unsafe (c-strlen s)))               ; 정확히 읽으려면 이것(int는 값을 잃지 않는다)
 (try-as i32 (unsafe (c-strlen s)))           ; 들어가는지 묻는다
 (as c-ulong n)                               ; 다른 정수에서 만든다
 ```
@@ -431,7 +431,7 @@ C와 같은 배치의 구조체를 선언한다. 최상위의 `unsafe` 안에만
 
 필드에 쓸 수 있는 타입은 `i8` `i16` `i32` `u8` `u16` `u32` `c-long` `c-ulong` `f32` `f64` `bool` `ptr`, 타입 있는 포인터
 `(ptr T)`, 그리고 다른 `def-c-struct`(값으로 포함)이다. 배치(각 필드의 오프셋, 구조체의 크기와 정렬)는 C의 규칙으로
-계산된다(LP64를 전제로 한다). 자기 자신을 가리키는 필드는 쓸 수 있지만 자기 자신을 포함할 수는 없다.
+계산된다(`c-long`과 포인터의 폭, `f64`의 정렬은 컴파일 대상의 C에 맞춘다). 자기 자신을 가리키는 필드는 쓸 수 있지만 자기 자신을 포함할 수는 없다.
 
 ```lisp
 (unsafe

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/ffi.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
+<!-- translated-from: docs/ja/guide/ffi.md @ dff3b51792f6d9c49bb8802bd3d3fb6e168edd92 -->
 # FFI do C (defffi)
 
 Ten przewodnik wyjaśnia, jak wywoływać funkcje C z typelisp. Lista typów, które można deklarować, oraz
@@ -46,7 +46,7 @@ Zamierzone użycie polega na ograniczeniu `unsafe` do jednego miejsca i przedsta
 | `bool` | `bool` (`_Bool`) |
 | `()` | `void` |
 | `string` | `const char *` |
-| `c-long` / `c-ulong` | `long` / `unsigned long` (także `size_t`, `int64_t` i tak dalej) |
+| `c-long` / `c-ulong` | `long` / `unsigned long` (także `size_t` i tak dalej) |
 | `ptr` | Dowolny wskaźnik (`void *`, `FILE *` i tak dalej) |
 | `(ptr T)` | Wskaźnik na `T` ([sekcja 7](#7-struktury-c)) |
 
@@ -63,10 +63,10 @@ Zamierzone użycie polega na ograniczeniu `unsafe` do jednego miejsca i przedsta
 ### `c-long` / `c-ulong` / `ptr`
 
 Te typy istnieją wyłącznie do przekazywania wartości przez granicę z C i **nie obsługują arytmetyki**. Aby
-użyć któregoś jako liczby całkowitej typelisp, przekonwertuj go za pomocą `as`.
+użyć któregoś jako liczby całkowitej typelisp, przekonwertuj go za pomocą `as`. Ich szerokość jest taka jak w C na maszynie, na której działa program (64 bity zarówno dla `c-long`, jak i wskaźników na 64-bitowym macOS i Linuksie, 32 bity, gdy `--target` wskazuje wasm32 lub Cortex-M).
 
 ```lisp
-(as int (unsafe (c-strlen s)))      ; int nie traci żadnej części 64-bitowej wartości
+(as int (unsafe (c-strlen s)))      ; int nie traci żadnej części wartości
 (try-as i32 (unsafe (c-strlen s)))  ; None, jeśli nie mieści się w i32
 (unsafe (c-malloc 16))              ; literały całkowite można przekazywać wprost
 ```

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 0af7d052ede61d9b74e6590bb00955c0c9c3b9a4 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ dff3b51792f6d9c49bb8802bd3d3fb6e168edd92 -->
 # Riferimento della sintassi di typelisp
 
 typelisp è un Lisp a tipizzazione statica, scritto in S-expression. Per l'elenco delle funzioni e dei
@@ -383,7 +383,7 @@ processo.
 #### ptr / c-long / c-ulong — parole macchina grezze
 
 `ptr` è un puntatore opaco (`void *`, `FILE *`, qualunque cosa intendesse la dichiarazione).
-`c-long` / `c-ulong` sono i `long` / `unsigned long` di C (anche `size_t`, `int64_t` e `intptr_t`).
+`c-long` / `c-ulong` sono i `long` / `unsigned long` di C (anche `size_t` e `intptr_t`).
 
 ```lisp
 (defffi (c-malloc "malloc") (c-ulong) ptr)
@@ -395,7 +395,7 @@ processo.
 
 **Non chiamarli `i64` / `u64` è una scelta deliberata.** Questo linguaggio non ha un tipo intero a 64 bit,
 perché un immediato con tag ha solo 63 bit ([capitolo 2](#2-scrittura-dei-tipi)). Il nome `c-long` dice
-"questa è una parola che attraversa il confine con C, non un intero di questo linguaggio".
+"questa è una parola che attraversa il confine con C, non un intero di questo linguaggio". La sua larghezza è quella del `long` del C della destinazione (64 bit su macOS e Linux a 64 bit, 32 bit su wasm32 e Cortex-M).
 
 **Non hanno aritmetica.** `(+ x 1)` non si può scrivere. Si potrebbe fornire ma non lo si fa, in modo che
 nessun calcolo venga eseguito su un valore che non può essere memorizzato da nessuna parte e che ha una
@@ -404,7 +404,7 @@ escluso. Ci sono **solo conversioni**:
 
 ```lisp
 (as i32 (unsafe (c-strlen "hello")))         ; read what came back
-(as int (unsafe (c-strlen s)))               ; this one to read it exactly (int does not lose 64 bits)
+(as int (unsafe (c-strlen s)))               ; this one to read it exactly (int loses none of the value)
 (try-as i32 (unsafe (c-strlen s)))           ; ask whether it fits
 (as c-ulong n)                               ; make one from another integer
 ```
@@ -544,7 +544,7 @@ il nome.
 I tipi che si possono scrivere per i campi sono `i8` `i16` `i32` `u8` `u16` `u32` `c-long` `c-ulong` `f32`
 `f64` `bool` `ptr`, i puntatori tipizzati `(ptr T)` e altre `def-c-struct` (incorporate per valore). Il
 layout (l'offset di ciascun campo, e la dimensione e l'allineamento della struttura) viene calcolato con
-le regole di C (assumendo LP64). Si può scrivere un campo che punta alla struttura stessa, ma la
+le regole di C (le larghezze di `c-long` e dei puntatori e l'allineamento di `f64` seguono il C della destinazione). Si può scrivere un campo che punta alla struttura stessa, ma la
 struttura non può incorporare se stessa.
 
 ```lisp

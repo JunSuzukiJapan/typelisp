@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/ffi.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
+<!-- translated-from: docs/ja/guide/ffi.md @ dff3b51792f6d9c49bb8802bd3d3fb6e168edd92 -->
 # FFI для C (defffi)
 
 Цей посібник пояснює, як викликати функції C із typelisp. Перелік типів, які можна оголошувати, і
@@ -46,7 +46,7 @@
 | `bool` | `bool` (`_Bool`) |
 | `()` | `void` |
 | `string` | `const char *` |
-| `c-long` / `c-ulong` | `long` / `unsigned long` (також `size_t`, `int64_t` тощо) |
+| `c-long` / `c-ulong` | `long` / `unsigned long` (також `size_t` тощо) |
 | `ptr` | Будь-який вказівник (`void *`, `FILE *` тощо) |
 | `(ptr T)` | Вказівник на `T` ([розділ 7](#7-структури-c)) |
 
@@ -63,10 +63,10 @@
 ### `c-long` / `c-ulong` / `ptr`
 
 Ці типи існують лише для передавання значень через межу з C і **не підтримують арифметики**. Щоб
-використати одне з них як ціле число typelisp, перетворіть його через `as`.
+використати одне з них як ціле число typelisp, перетворіть його через `as`. Їхня ширина така сама, як у C на машині, де працює програма (64 біти і для `c-long`, і для вказівників на 64-бітних macOS і Linux, 32 біти, коли `--target` вказує wasm32 або Cortex-M).
 
 ```lisp
-(as int (unsafe (c-strlen s)))      ; int does not lose any of the 64-bit value
+(as int (unsafe (c-strlen s)))      ; int loses none of the value
 (try-as i32 (unsafe (c-strlen s)))  ; None if it does not fit in an i32
 (unsafe (c-malloc 16))              ; integer literals can be passed as they are
 ```

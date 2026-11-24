@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/ffi.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
+<!-- translated-from: docs/ja/guide/ffi.md @ dff3b51792f6d9c49bb8802bd3d3fb6e168edd92 -->
 # C-FFI (defffi)
 
 Deze handleiding legt uit hoe je C-functies vanuit typelisp aanroept. De lijst met types die kunnen
@@ -48,7 +48,7 @@ tonen.
 | `bool` | `bool` (`_Bool`) |
 | `()` | `void` |
 | `string` | `const char *` |
-| `c-long` / `c-ulong` | `long` / `unsigned long` (ook `size_t`, `int64_t` enzovoort) |
+| `c-long` / `c-ulong` | `long` / `unsigned long` (ook `size_t` enzovoort) |
 | `ptr` | Elke pointer (`void *`, `FILE *` enzovoort) |
 | `(ptr T)` | Een pointer naar `T` ([paragraaf 7](#7-c-structs)) |
 
@@ -65,10 +65,10 @@ tonen.
 ### `c-long` / `c-ulong` / `ptr`
 
 Deze types bestaan alleen om waarden over de grens met C heen te geven en **ondersteunen geen
-rekenkunde**. Om er een als typelisp-geheel getal te gebruiken, converteer je het met `as`.
+rekenkunde**. Om er een als typelisp-geheel getal te gebruiken, converteer je het met `as`. Hun breedte is die van C op de machine waarop het programma draait (64 bits voor zowel `c-long` als pointers op 64-bits macOS en Linux, 32 bits wanneer `--target` wasm32 of een Cortex-M noemt).
 
 ```lisp
-(as int (unsafe (c-strlen s)))      ; int does not lose any of the 64-bit value
+(as int (unsafe (c-strlen s)))      ; int loses none of the value
 (try-as i32 (unsafe (c-strlen s)))  ; None if it does not fit in an i32
 (unsafe (c-malloc 16))              ; integer literals can be passed as they are
 ```

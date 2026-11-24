@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/ffi.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
+<!-- translated-from: docs/ja/guide/ffi.md @ dff3b51792f6d9c49bb8802bd3d3fb6e168edd92 -->
 # FFI de C (defffi)
 
 Este guia explica como chamar funções C a partir do typelisp. A lista de tipos que podem ser declarados e as
@@ -46,7 +46,7 @@ O uso pretendido é confinar o `unsafe` em um só lugar e apresentar uma funçã
 | `bool` | `bool` (`_Bool`) |
 | `()` | `void` |
 | `string` | `const char *` |
-| `c-long` / `c-ulong` | `long` / `unsigned long` (também `size_t`, `int64_t` etc.) |
+| `c-long` / `c-ulong` | `long` / `unsigned long` (também `size_t` etc.) |
 | `ptr` | Qualquer ponteiro (`void *`, `FILE *` etc.) |
 | `(ptr T)` | Um ponteiro para `T` ([seção 7](#7-structs-c)) |
 
@@ -63,10 +63,10 @@ O uso pretendido é confinar o `unsafe` em um só lugar e apresentar uma funçã
 ### `c-long` / `c-ulong` / `ptr`
 
 Esses tipos existem só para passar valores pela fronteira com C, e **não suportam aritmética**. Para usar um
-deles como inteiro do typelisp, converta-o com `as`.
+deles como inteiro do typelisp, converta-o com `as`. A largura é a do C na máquina em que o programa roda (64 bits tanto para `c-long` quanto para ponteiros no macOS e no Linux de 64 bits, 32 bits quando `--target` indica wasm32 ou um Cortex-M).
 
 ```lisp
-(as int (unsafe (c-strlen s)))      ; int não perde nada do valor de 64 bits
+(as int (unsafe (c-strlen s)))      ; int não perde nada do valor
 (try-as i32 (unsafe (c-strlen s)))  ; None se não couber em um i32
 (unsafe (c-malloc 16))              ; literais inteiros podem ser passados como estão
 ```

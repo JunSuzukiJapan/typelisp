@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/option-result.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
+<!-- translated-from: docs/ja/reference/functions/option-result.md @ dff3b51792f6d9c49bb8802bd3d3fb6e168edd92 -->
 # Option, Result och feltyper
 
 ## 1. `Option<T>` / `Result<T,E>`
@@ -65,7 +65,7 @@ En ruta används bara när ett värde av typen `T` inte kan skiljas från värde
 |---|---|---|
 | `Option<U>` (nästlad) | Ruta | Det inre `None` skulle vara samma värde som det yttre `None` |
 | `()` | Ruta | Värdet av `()` är själva värdet för den tomma listan |
-| `ptr` / `c-long` / `c-ulong` | Ruta | Alla 64 bitar är värde, vilket inte lämnar något utrymme att skilja dem åt |
+| `ptr` / `c-long` / `c-ulong` | Ruta | Alla bitar är värde, vilket inte lämnar något utrymme att skilja dem åt |
 | Allt annat | Ingen ruta | — |
 
 Representationen avgörs av typen ensam och kan inte läsas från ett värde. Vid utskrift rekonstrueras

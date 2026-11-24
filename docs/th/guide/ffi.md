@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/ffi.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
+<!-- translated-from: docs/ja/guide/ffi.md @ dff3b51792f6d9c49bb8802bd3d3fb6e168edd92 -->
 # FFI สำหรับ C (defffi)
 
 คู่มือนี้อธิบายวิธีเรียกฟังก์ชัน C จาก typelisp รายการชนิดที่ประกาศได้และข้อจำกัดอยู่ใน
@@ -46,7 +46,7 @@
 | `bool` | `bool` (`_Bool`) |
 | `()` | `void` |
 | `string` | `const char *` |
-| `c-long` / `c-ulong` | `long` / `unsigned long` (รวมถึง `size_t`, `int64_t` และอื่น ๆ) |
+| `c-long` / `c-ulong` | `long` / `unsigned long` (รวมถึง `size_t` และอื่น ๆ) |
 | `ptr` | ตัวชี้ใด ๆ (`void *`, `FILE *` และอื่น ๆ) |
 | `(ptr T)` | ตัวชี้ไปยัง `T` ([หัวข้อ 7](#7-โครงสร้าง-c)) |
 
@@ -63,10 +63,10 @@
 ### `c-long` / `c-ulong` / `ptr`
 
 ชนิดเหล่านี้มีไว้เพื่อส่งค่าข้ามขอบเขตกับ C เท่านั้น และ **ไม่รองรับการคำนวณใด ๆ** หาก
-ต้องการใช้เป็นจำนวนเต็มของ typelisp ให้แปลงด้วย `as`
+ต้องการใช้เป็นจำนวนเต็มของ typelisp ให้แปลงด้วย `as` ความกว้างเท่ากับ C ของเครื่องที่โปรแกรมทำงาน (บน macOS และ Linux แบบ 64 บิต ทั้ง `c-long` และพอยน์เตอร์เป็น 64 บิต และเป็น 32 บิตเมื่อระบุ wasm32 หรือ Cortex-M ใน `--target`)
 
 ```lisp
-(as int (unsafe (c-strlen s)))      ; int does not lose any of the 64-bit value
+(as int (unsafe (c-strlen s)))      ; int loses none of the value
 (try-as i32 (unsafe (c-strlen s)))  ; None if it does not fit in an i32
 (unsafe (c-malloc 16))              ; integer literals can be passed as they are
 ```

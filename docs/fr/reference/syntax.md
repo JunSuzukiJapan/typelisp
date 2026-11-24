@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 0af7d052ede61d9b74e6590bb00955c0c9c3b9a4 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ dff3b51792f6d9c49bb8802bd3d3fb6e168edd92 -->
 # Référence de la syntaxe de typelisp
 
 typelisp est un Lisp à typage statique, écrit en S-expressions. Pour la liste des fonctions et méthodes intégrées,
@@ -368,7 +368,7 @@ seule durée de vie correcte est donc celle du processus.
 #### ptr / c-long / c-ulong — mots machine bruts
 
 `ptr` est un pointeur opaque (`void *`, `FILE *`, quoi que la déclaration ait voulu dire). `c-long` / `c-ulong` sont
-les `long` / `unsigned long` de C (aussi `size_t`, `int64_t` et `intptr_t`).
+les `long` / `unsigned long` de C (aussi `size_t` et `intptr_t`).
 
 ```lisp
 (defffi (c-malloc "malloc") (c-ulong) ptr)
@@ -380,7 +380,7 @@ les `long` / `unsigned long` de C (aussi `size_t`, `int64_t` et `intptr_t`).
 
 **Ne pas les appeler `i64` / `u64` est délibéré.** Ce langage n'a pas de type entier sur 64 bits, parce qu'une valeur
 immédiate étiquetée n'a que 63 bits ([chapitre 2](#2-écrire-les-types)). Le nom `c-long` dit « c'est un mot qui
-traverse la frontière avec C, pas un entier de ce langage ».
+traverse la frontière avec C, pas un entier de ce langage ». Sa largeur est celle du `long` de C sur la cible (64 bits sur macOS et Linux 64 bits, 32 bits sur wasm32 et Cortex-M).
 
 **Ils n'ont pas d'arithmétique.** `(+ x 1)` ne peut pas s'écrire. On pourrait la fournir mais on ne le fait pas, afin
 qu'aucun calcul ne s'exécute sur une valeur qui ne peut être stockée nulle part et dont la largeur diffère de celle
@@ -389,7 +389,7 @@ des conversions** :
 
 ```lisp
 (as i32 (unsafe (c-strlen "hello")))         ; lire ce qui est revenu
-(as int (unsafe (c-strlen s)))               ; celle-ci pour le lire exactement (int ne perd pas de bits sur 64)
+(as int (unsafe (c-strlen s)))               ; celle-ci pour le lire exactement (int ne perd rien de la valeur)
 (try-as i32 (unsafe (c-strlen s)))           ; demander s'il tient
 (as c-ulong n)                               ; en créer un à partir d'un autre entier
 ```
@@ -527,7 +527,7 @@ supérieur (qui ne peut contenir que des `def-c-struct`). Une docstring peut êt
 Les types qu'on peut écrire pour les champs sont `i8` `i16` `i32` `u8` `u16` `u32` `c-long` `c-ulong` `f32` `f64`
 `bool` `ptr`, les pointeurs typés `(ptr T)` et d'autres `def-c-struct` (incorporées par valeur). La disposition (le
 décalage de chaque champ, ainsi que la taille et l'alignement de la structure) est calculée selon les règles de C
-(en supposant LP64). Un champ pointant vers la structure elle-même peut s'écrire, mais la structure ne peut pas
+(les largeurs de `c-long` et des pointeurs et l'alignement de `f64` suivent le C de la cible). Un champ pointant vers la structure elle-même peut s'écrire, mais la structure ne peut pas
 s'incorporer elle-même.
 
 ```lisp

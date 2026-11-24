@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/ffi.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
+<!-- translated-from: docs/ja/guide/ffi.md @ dff3b51792f6d9c49bb8802bd3d3fb6e168edd92 -->
 # C FFI (defffi)
 
 Den här guiden förklarar hur man anropar C-funktioner från typelisp. Listan över typer som kan
@@ -47,7 +47,7 @@ Den avsedda användningen är att begränsa `unsafe` till ett enda ställe och v
 | `bool` | `bool` (`_Bool`) |
 | `()` | `void` |
 | `string` | `const char *` |
-| `c-long` / `c-ulong` | `long` / `unsigned long` (även `size_t`, `int64_t` och så vidare) |
+| `c-long` / `c-ulong` | `long` / `unsigned long` (även `size_t` och så vidare) |
 | `ptr` | Vilken pekare som helst (`void *`, `FILE *` och så vidare) |
 | `(ptr T)` | En pekare till `T` ([avsnitt 7](#7-c-structs)) |
 
@@ -64,10 +64,10 @@ Den avsedda användningen är att begränsa `unsafe` till ett enda ställe och v
 ### `c-long` / `c-ulong` / `ptr`
 
 De här typerna finns bara för att skicka värden över gränsen mot C och **stöder ingen aritmetik**. För
-att använda en som ett typelisp-heltal konverterar man den med `as`.
+att använda en som ett typelisp-heltal konverterar man den med `as`. Bredden är densamma som för C på maskinen programmet körs på (64 bitar för både `c-long` och pekare på 64-bitars macOS och Linux, 32 bitar när `--target` anger wasm32 eller en Cortex-M).
 
 ```lisp
-(as int (unsafe (c-strlen s)))      ; int förlorar ingenting av 64-bitsvärdet
+(as int (unsafe (c-strlen s)))      ; int förlorar ingenting av värdet
 (try-as i32 (unsafe (c-strlen s)))  ; None om det inte ryms i ett i32
 (unsafe (c-malloc 16))              ; heltalsliteraler kan skickas som de är
 ```

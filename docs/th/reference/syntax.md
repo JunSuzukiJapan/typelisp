@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 0af7d052ede61d9b74e6590bb00955c0c9c3b9a4 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ dff3b51792f6d9c49bb8802bd3d3fb6e168edd92 -->
 # เอกสารอ้างอิงไวยากรณ์ typelisp
 
 typelisp เป็น Lisp ที่มีระบบชนิดแบบสถิต เขียนด้วย S-expression สำหรับรายการฟังก์ชันและเมทอดที่มีให้ในตัว
@@ -330,7 +330,7 @@ typelisp เป็น Lisp ที่มีระบบชนิดแบบส�
 #### ptr / c-long / c-ulong — word ดิบของเครื่อง
 
 `ptr` คือตัวชี้ทึบ (`void *`, `FILE *` หรืออะไรก็ตามที่การประกาศหมายถึง) `c-long` / `c-ulong` คือ
-`long` / `unsigned long` ของ C (และ `size_t`, `int64_t` และ `intptr_t` ด้วย)
+`long` / `unsigned long` ของ C (และ `size_t` และ `intptr_t` ด้วย)
 
 ```lisp
 (defffi (c-malloc "malloc") (c-ulong) ptr)
@@ -342,7 +342,7 @@ typelisp เป็น Lisp ที่มีระบบชนิดแบบส�
 
 **การไม่เรียกว่า `i64` / `u64` เป็นความตั้งใจ** ภาษานี้ไม่มีชนิดจำนวนเต็ม 64 บิต เพราะ
 immediate ที่มีแท็กมีเพียง 63 บิต ([บทที่ 2](#2-การเขียนชนิด)) ชื่อ `c-long` บอกว่า "นี่คือ
-word ที่ข้ามขอบเขตกับ C ไม่ใช่จำนวนเต็มของภาษานี้"
+word ที่ข้ามขอบเขตกับ C ไม่ใช่จำนวนเต็มของภาษานี้" ความกว้างเท่ากับ `long` ของ C บนเป้าหมาย (64 บิตบน macOS และ Linux แบบ 64 บิต และ 32 บิตบน wasm32 และ Cortex-M)
 
 **ไม่มีการคำนวณ** `(+ x 1)` เขียนไม่ได้ จะให้ก็ได้แต่ไม่ให้ เพื่อไม่ให้มีการคำนวณใดรันบนค่าที่
 เก็บไว้ที่ไหนไม่ได้และมีความกว้างต่างจากตัวเลขอื่นทุกชนิด ด้วยเหตุผลเดียวกับที่ละชนิดจำนวนเต็ม
@@ -350,7 +350,7 @@ word ที่ข้ามขอบเขตกับ C ไม่ใช่จำ
 
 ```lisp
 (as i32 (unsafe (c-strlen "hello")))         ; read what came back
-(as int (unsafe (c-strlen s)))               ; this one to read it exactly (int does not lose 64 bits)
+(as int (unsafe (c-strlen s)))               ; this one to read it exactly (int loses none of the value)
 (try-as i32 (unsafe (c-strlen s)))           ; ask whether it fits
 (as c-ulong n)                               ; make one from another integer
 ```
@@ -483,7 +483,7 @@ GC ไม่ติดตาม `ptr` มันชี้ออกนอกฮี�
 
 ชนิดที่เขียนได้สำหรับฟิลด์คือ `i8` `i16` `i32` `u8` `u16` `u32` `c-long` `c-ulong` `f32`
 `f64` `bool` `ptr` ตัวชี้ที่มีชนิด `(ptr T)` และ `def-c-struct` อื่น (ฝังแบบส่งค่า) เลย์เอาต์
-(ออฟเซ็ตของแต่ละฟิลด์ และขนาดกับการจัดตำแหน่งของ struct) คำนวณตามกฎของ C (สมมติ LP64)
+(ออฟเซ็ตของแต่ละฟิลด์ และขนาดกับการจัดตำแหน่งของ struct) คำนวณตามกฎของ C (ความกว้างของ `c-long` และพอยน์เตอร์ และการจัดตำแหน่งของ `f64` เป็นไปตาม C ของเป้าหมาย)
 เขียนฟิลด์ที่ชี้ไปยัง struct เองได้ แต่ struct ฝังตัวเองไม่ได้
 
 ```lisp

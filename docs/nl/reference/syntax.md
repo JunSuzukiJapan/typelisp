@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 0af7d052ede61d9b74e6590bb00955c0c9c3b9a4 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ dff3b51792f6d9c49bb8802bd3d3fb6e168edd92 -->
 # typelisp-syntaxisreferentie
 
 typelisp is een statisch getypeerde Lisp, geschreven in S-expressies. Voor de lijst met ingebouwde
@@ -383,7 +383,7 @@ wijst blijft draaien, dus de enige juiste levensduur is die van het proces.
 #### ptr / c-long / c-ulong — ruwe machinewoorden
 
 `ptr` is een ondoorzichtige pointer (`void *`, `FILE *`, wat de declaratie ook bedoelde). `c-long` /
-`c-ulong` zijn `long` / `unsigned long` van C (ook `size_t`, `int64_t` en `intptr_t`).
+`c-ulong` zijn `long` / `unsigned long` van C (ook `size_t` en `intptr_t`).
 
 ```lisp
 (defffi (c-malloc "malloc") (c-ulong) ptr)
@@ -395,7 +395,7 @@ wijst blijft draaien, dus de enige juiste levensduur is die van het proces.
 
 **Ze niet `i64` / `u64` noemen is bewust.** Deze taal heeft geen geheel type van 64 bits, omdat een
 getagde directe waarde maar 63 bits heeft ([hoofdstuk 2](#2-types-schrijven)). De naam `c-long` zegt
-"dit is een woord dat de grens met C overschrijdt, geen geheel getal van deze taal".
+"dit is een woord dat de grens met C overschrijdt, geen geheel getal van deze taal". De breedte is die van C's `long` op het doel (64 bits op 64-bits macOS en Linux, 32 bits op wasm32 en Cortex-M).
 
 **Ze hebben geen rekenkunde.** `(+ x 1)` kan niet worden geschreven. Het zou kunnen worden geboden maar
 is dat niet, zodat er geen berekening draait op een waarde die nergens kan worden opgeslagen en een andere
@@ -404,7 +404,7 @@ zijn **alleen conversies**:
 
 ```lisp
 (as i32 (unsafe (c-strlen "hello")))         ; read what came back
-(as int (unsafe (c-strlen s)))               ; this one to read it exactly (int does not lose 64 bits)
+(as int (unsafe (c-strlen s)))               ; this one to read it exactly (int loses none of the value)
 (try-as i32 (unsafe (c-strlen s)))           ; ask whether it fits
 (as c-ulong n)                               ; make one from another integer
 ```
@@ -547,7 +547,7 @@ docstring worden gezet.
 De types die voor velden kunnen worden geschreven zijn `i8` `i16` `i32` `u8` `u16` `u32` `c-long`
 `c-ulong` `f32` `f64` `bool` `ptr`, getypeerde pointers `(ptr T)`, en andere `def-c-struct`s (op waarde
 ingebed). De indeling (de offset van elk veld, en de grootte en uitlijning van de struct) wordt volgens de
-regels van C berekend (uitgaande van LP64). Een veld dat naar de struct zelf wijst kan worden geschreven,
+regels van C berekend (de breedtes van `c-long` en pointers en de uitlijning van `f64` volgen de C van het doel). Een veld dat naar de struct zelf wijst kan worden geschreven,
 maar de struct kan zichzelf niet insluiten.
 
 ```lisp

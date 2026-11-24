@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 0af7d052ede61d9b74e6590bb00955c0c9c3b9a4 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ dff3b51792f6d9c49bb8802bd3d3fb6e168edd92 -->
 # Syntaxreferenz von typelisp
 
 typelisp ist ein statisch typisiertes Lisp, geschrieben in S-Ausdrücken. Die Liste der eingebauten Funktionen
@@ -379,7 +379,7 @@ weiter, daher ist die einzig korrekte Lebensdauer die des Prozesses.
 #### ptr / c-long / c-ulong — rohe Maschinenwörter
 
 `ptr` ist ein undurchsichtiger Zeiger (`void *`, `FILE *`, was auch immer die Deklaration meinte). `c-long` /
-`c-ulong` sind Cs `long` / `unsigned long` (auch `size_t`, `int64_t` und `intptr_t`).
+`c-ulong` sind Cs `long` / `unsigned long` (auch `size_t` und `intptr_t`).
 
 ```lisp
 (defffi (c-malloc "malloc") (c-ulong) ptr)
@@ -391,7 +391,7 @@ weiter, daher ist die einzig korrekte Lebensdauer die des Prozesses.
 
 **Dass sie nicht `i64` / `u64` heißen, ist Absicht.** Diese Sprache hat keinen 64-Bit-Ganzzahltyp, weil ein
 markierter Direktwert nur 63 Bit hat ([Kapitel 2](#2-typen-schreiben)). Der Name `c-long` sagt „das ist ein
-Wort, das die Grenze zu C überquert, keine Ganzzahl dieser Sprache“.
+Wort, das die Grenze zu C überquert, keine Ganzzahl dieser Sprache“. Seine Breite ist die von Cs `long` auf dem Ziel (64 Bit auf 64-Bit-macOS und -Linux, 32 Bit auf wasm32 und Cortex-M).
 
 **Sie haben keine Arithmetik.** `(+ x 1)` lässt sich nicht schreiben. Man könnte sie bereitstellen, tut es aber
 nicht, damit keine Berechnung auf einem Wert läuft, der sich nirgends speichern lässt und eine andere Breite
@@ -400,7 +400,7 @@ Umwandlungen**:
 
 ```lisp
 (as i32 (unsafe (c-strlen "hello")))         ; lesen, was zurückkam
-(as int (unsafe (c-strlen s)))               ; damit liest man es exakt (int verliert keine 64 Bit)
+(as int (unsafe (c-strlen s)))               ; damit liest man es exakt (int verliert nichts vom Wert)
 (try-as i32 (unsafe (c-strlen s)))           ; fragen, ob es passt
 (as c-ulong n)                               ; aus einer anderen Ganzzahl erzeugen
 ```
@@ -539,8 +539,7 @@ stehen.
 
 Für Felder lassen sich die Typen `i8` `i16` `i32` `u8` `u16` `u32` `c-long` `c-ulong` `f32` `f64` `bool`
 `ptr`, typisierte Zeiger `(ptr T)` und andere `def-c-struct`s (per Wert eingebettet) schreiben. Das Layout (der
-Versatz jedes Feldes sowie Größe und Ausrichtung des Structs) wird nach den Regeln von C berechnet (unter
-Annahme von LP64). Ein Feld, das auf das Struct selbst zeigt, lässt sich schreiben, aber das Struct kann sich
+Versatz jedes Feldes sowie Größe und Ausrichtung des Structs) wird nach den Regeln von C berechnet (die Breiten von `c-long` und Zeigern und die Ausrichtung von `f64` folgen dem C des Ziels). Ein Feld, das auf das Struct selbst zeigt, lässt sich schreiben, aber das Struct kann sich
 nicht selbst einbetten.
 
 ```lisp

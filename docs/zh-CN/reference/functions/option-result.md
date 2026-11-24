@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/option-result.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
+<!-- translated-from: docs/ja/reference/functions/option-result.md @ dff3b51792f6d9c49bb8802bd3d3fb6e168edd92 -->
 # Option、Result 与错误类型
 
 ## 1. `Option<T>` / `Result<T,E>`
@@ -59,7 +59,7 @@
 |---|---|---|
 | `Option<U>`（嵌套） | 盒子 | 内层的 `None` 会与外层的 `None` 成为同一个值 |
 | `()` | 盒子 | `()` 的值就是空列表的值本身 |
-| `ptr` / `c-long` / `c-ulong` | 盒子 | 64 位全部都是值，没有用于区分的余地 |
+| `ptr` / `c-long` / `c-ulong` | 盒子 | 所有位都是值，没有用于区分的余地 |
 | 其他 | 无盒子 | — |
 
 表示只由类型决定，无法从值读出。打印时根据静态类型恢复 `(Some ...)`/`None`，所以 `(format false "~a" opt)` 输出

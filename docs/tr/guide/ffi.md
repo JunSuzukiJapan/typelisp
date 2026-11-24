@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/ffi.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
+<!-- translated-from: docs/ja/guide/ffi.md @ dff3b51792f6d9c49bb8802bd3d3fb6e168edd92 -->
 # C FFI (defffi)
 
 Bu kılavuz, typelisp'ten C fonksiyonlarının nasıl çağrılacağını anlatır. Bildirilebilen türlerin
@@ -47,7 +47,7 @@ Amaçlanan kullanım, `unsafe`'i tek bir yere hapsetmek ve dışarıya sıradan 
 | `bool` | `bool` (`_Bool`) |
 | `()` | `void` |
 | `string` | `const char *` |
-| `c-long` / `c-ulong` | `long` / `unsigned long` (ayrıca `size_t`, `int64_t` vb.) |
+| `c-long` / `c-ulong` | `long` / `unsigned long` (ayrıca `size_t` vb.) |
 | `ptr` | Herhangi bir işaretçi (`void *`, `FILE *` vb.) |
 | `(ptr T)` | `T`'ye bir işaretçi ([bölüm 7](#7-c-structları)) |
 
@@ -64,10 +64,10 @@ Amaçlanan kullanım, `unsafe`'i tek bir yere hapsetmek ve dışarıya sıradan 
 ### `c-long` / `c-ulong` / `ptr`
 
 Bu türler yalnızca C ile sınır boyunca değer geçirmek için vardır ve **hiçbir aritmetiği
-desteklemez**. Birini typelisp tamsayısı olarak kullanmak için `as` ile dönüştürün.
+desteklemez**. Birini typelisp tamsayısı olarak kullanmak için `as` ile dönüştürün. Genişlikleri, programın çalıştığı makinedeki C'ninkiyle aynıdır (64 bitlik macOS ve Linux'ta hem `c-long` hem işaretçiler 64 bit, `--target` wasm32 ya da bir Cortex-M belirttiğinde 32 bit).
 
 ```lisp
-(as int (unsafe (c-strlen s)))      ; int does not lose any of the 64-bit value
+(as int (unsafe (c-strlen s)))      ; int loses none of the value
 (try-as i32 (unsafe (c-strlen s)))  ; None if it does not fit in an i32
 (unsafe (c-malloc 16))              ; integer literals can be passed as they are
 ```

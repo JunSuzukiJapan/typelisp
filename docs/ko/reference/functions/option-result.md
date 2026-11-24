@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/option-result.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
+<!-- translated-from: docs/ja/reference/functions/option-result.md @ dff3b51792f6d9c49bb8802bd3d3fb6e168edd92 -->
 # Option, Result, 오류 타입
 
 ## 1. `Option<T>` / `Result<T,E>`
@@ -61,7 +61,7 @@ Rust와 마찬가지로 **`Option<T>`는 보통 상자를 만들지 않는다**.
 |---|---|---|
 | `Option<U>`(중첩) | 상자 | 안쪽의 `None`이 바깥쪽의 `None`과 같은 값이 되어 버린다 |
 | `()` | 상자 | `()`의 값은 빈 리스트의 값 그 자체이다 |
-| `ptr` / `c-long` / `c-ulong` | 상자 | 64비트 전부가 값이라 구별할 여지가 없다 |
+| `ptr` / `c-long` / `c-ulong` | 상자 | 비트 전부가 값이라 구별할 여지가 없다 |
 | 그 밖 | 상자 없음 | — |
 
 표현은 타입만으로 정해지며 값에서 읽을 수는 없다. 출력할 때는 정적 타입에서 `(Some ...)`/`None`을 다시 만들므로

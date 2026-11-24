@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/ffi.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
+<!-- translated-from: docs/ja/guide/ffi.md @ dff3b51792f6d9c49bb8802bd3d3fb6e168edd92 -->
 # واجهة C الخارجية (defffi)
 
 يشرح هذا الدليل كيفية استدعاء دوال C من typelisp. وقائمة الأنواع التي يمكن إعلانها والقيود موجودة في
@@ -45,7 +45,7 @@
 | `bool` | `bool` (`_Bool`) |
 | `()` | `void` |
 | `string` | `const char *` |
-| `c-long` / `c-ulong` | `long` / `unsigned long` (وكذلك `size_t` و`int64_t` وما إلى ذلك) |
+| `c-long` / `c-ulong` | `long` / `unsigned long` (وكذلك `size_t` وما إلى ذلك) |
 | `ptr` | أي مؤشر (`void *` و`FILE *` وما إلى ذلك) |
 | `(ptr T)` | مؤشر إلى `T` ([القسم 7](#7-بنى-c)) |
 
@@ -61,10 +61,10 @@
 ### `c-long` / `c-ulong` / `ptr`
 
 هذه الأنواع موجودة فقط لتمرير القيم عبر الحدود مع C، و**لا تدعم أي عمليات حسابية**. ولاستخدام أحدها
-كعدد صحيح في typelisp حوّله بـ `as`.
+كعدد صحيح في typelisp حوّله بـ `as`. عرضها هو عرض C على الجهاز الذي يعمل عليه البرنامج (64 بت لكل من `c-long` والمؤشرات على macOS وLinux بنظام 64 بت، و32 بت عندما يحدد `--target` منصة wasm32 أو Cortex-M).
 
 ```lisp
-(as int (unsafe (c-strlen s)))      ; لا يفقد int أي شيء من القيمة ذات 64 بت
+(as int (unsafe (c-strlen s)))      ; لا يفقد int أي شيء من القيمة
 (try-as i32 (unsafe (c-strlen s)))  ; None إذا لم تتسع في i32
 (unsafe (c-malloc 16))              ; يمكن تمرير الثوابت الصحيحة كما هي
 ```

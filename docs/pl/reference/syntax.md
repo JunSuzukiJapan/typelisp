@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 0af7d052ede61d9b74e6590bb00955c0c9c3b9a4 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ dff3b51792f6d9c49bb8802bd3d3fb6e168edd92 -->
 # Referencja składni typelisp
 
 typelisp to statycznie typowany Lisp zapisywany w S-wyrażeniach. Listę funkcji wbudowanych i
@@ -365,7 +365,7 @@ dalej, więc jedynym poprawnym czasem życia jest czas życia procesu.
 #### ptr / c-long / c-ulong — surowe słowa maszynowe
 
 `ptr` to nieprzezroczysty wskaźnik (`void *`, `FILE *`, cokolwiek oznaczała deklaracja). `c-long` / `c-ulong` to
-`long` / `unsigned long` z C (także `size_t`, `int64_t` i `intptr_t`).
+`long` / `unsigned long` z C (także `size_t` i `intptr_t`).
 
 ```lisp
 (defffi (c-malloc "malloc") (c-ulong) ptr)
@@ -377,7 +377,7 @@ dalej, więc jedynym poprawnym czasem życia jest czas życia procesu.
 
 **Nienazywanie ich `i64` / `u64` jest zamierzone.** Ten język nie ma 64-bitowego typu całkowitego, ponieważ
 otagowana wartość natychmiastowa ma tylko 63 bity ([rozdział 2](#2-zapis-typów)). Nazwa `c-long` mówi „to jest
-słowo przekraczające granicę z C, a nie liczba całkowita tego języka".
+słowo przekraczające granicę z C, a nie liczba całkowita tego języka". Jego szerokość jest taka jak `long` w C na platformie docelowej (64 bity na 64-bitowym macOS i Linuksie, 32 bity na wasm32 i Cortex-M).
 
 **Nie mają arytmetyki.** `(+ x 1)` nie da się napisać. Można by to udostępnić, ale nie jest, aby żadne
 obliczenie nie działało na wartości, której nie można nigdzie przechować i która ma inną szerokość niż każda inna
@@ -385,7 +385,7 @@ liczba, z tego samego powodu, dla którego pominięto 64-bitowy typ całkowity. 
 
 ```lisp
 (as i32 (unsafe (c-strlen "hello")))         ; odczytaj to, co wróciło
-(as int (unsafe (c-strlen s)))               ; ta, aby odczytać dokładnie (int nie gubi 64 bitów)
+(as int (unsafe (c-strlen s)))               ; ta, aby odczytać dokładnie (int nie traci żadnej części wartości)
 (try-as i32 (unsafe (c-strlen s)))           ; zapytaj, czy się mieści
 (as c-ulong n)                               ; utwórz z innej liczby całkowitej
 ```
@@ -519,8 +519,7 @@ Deklaruje strukturę o takim samym układzie jak w C. Można ją zapisać tylko 
 
 Typy, które można zapisać dla pól, to `i8` `i16` `i32` `u8` `u16` `u32` `c-long` `c-ulong` `f32`
 `f64` `bool` `ptr`, typowane wskaźniki `(ptr T)` oraz inne `def-c-struct` (osadzane przez wartość). Układ
-(przesunięcie każdego pola oraz rozmiar i wyrównanie struktury) jest obliczany według reguł C (przy założeniu
-LP64). Można zapisać pole wskazujące na samą strukturę, ale struktura nie może osadzać samej siebie.
+(przesunięcie każdego pola oraz rozmiar i wyrównanie struktury) jest obliczany według reguł C (szerokości `c-long` i wskaźników oraz wyrównanie `f64` są takie jak w C platformy docelowej). Można zapisać pole wskazujące na samą strukturę, ale struktura nie może osadzać samej siebie.
 
 ```lisp
 (unsafe

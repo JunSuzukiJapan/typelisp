@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/option-result.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
+<!-- translated-from: docs/ja/reference/functions/option-result.md @ dff3b51792f6d9c49bb8802bd3d3fb6e168edd92 -->
 # Option, Result, dan Tipe Kesalahan
 
 ## 1. `Option<T>` / `Result<T,E>`
@@ -66,7 +66,7 @@ Kotak dipakai hanya ketika nilai `T` tidak dapat dibedakan dari nilai daftar kos
 |---|---|---|
 | `Option<U>` (bersarang) | Kotak | `None` bagian dalam akan menjadi nilai yang sama dengan `None` bagian luar |
 | `()` | Kotak | Nilai `()` adalah nilai daftar kosong itu sendiri |
-| `ptr` / `c-long` / `c-ulong` | Kotak | Seluruh 64 bit adalah nilai, tidak menyisakan ruang untuk membedakan |
+| `ptr` / `c-long` / `c-ulong` | Kotak | Seluruh bit adalah nilai, tidak menyisakan ruang untuk membedakan |
 | Lainnya | Tanpa kotak | — |
 
 Representasi ditentukan oleh tipe saja dan tidak dapat dibaca dari nilai. Saat mencetak,

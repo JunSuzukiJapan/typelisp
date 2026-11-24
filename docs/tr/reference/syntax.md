@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 0af7d052ede61d9b74e6590bb00955c0c9c3b9a4 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ dff3b51792f6d9c49bb8802bd3d3fb6e168edd92 -->
 # typelisp Sözdizimi Başvurusu
 
 typelisp, S-ifadelerle yazılan, statik tür denetimli bir Lisp'tir. Yerleşik fonksiyonların ve metotların
@@ -367,7 +367,7 @@ kütüphaneler asla kapatılmaz: fonksiyonlarına işaret eden kod çalışmaya 
 #### ptr / c-long / c-ulong — ham makine sözcükleri
 
 `ptr` opak bir işaretçidir (`void *`, `FILE *`, bildirimin ne kastettiyse). `c-long` / `c-ulong`, C'nin
-`long` / `unsigned long`'udur (ayrıca `size_t`, `int64_t` ve `intptr_t`).
+`long` / `unsigned long`'udur (ayrıca `size_t` ve `intptr_t`).
 
 ```lisp
 (defffi (c-malloc "malloc") (c-ulong) ptr)
@@ -379,7 +379,7 @@ kütüphaneler asla kapatılmaz: fonksiyonlarına işaret eden kod çalışmaya 
 
 **Onlara `i64` / `u64` dememek bilinçlidir.** Bu dilde 64 bitlik bir tamsayı türü yoktur; çünkü etiketli
 bir anlık değerin yalnızca 63 biti vardır ([2. bölüm](#2-türlerin-yazımı)). `c-long` adı "bu, bu dilin
-bir tamsayısı değil, C ile sınırı geçen bir sözcüktür" der.
+bir tamsayısı değil, C ile sınırı geçen bir sözcüktür" der. Genişliği hedefteki C'nin `long`'u ile aynıdır (64 bitlik macOS ve Linux'ta 64 bit, wasm32 ve Cortex-M'de 32 bit).
 
 **Aritmetikleri yoktur.** `(+ x 1)` yazılamaz. Sağlanabilirdi, ancak sağlanmamıştır; böylece hiçbir yerde
 saklanamayan ve diğer her sayıdan farklı bir genişliğe sahip bir değer üzerinde hesaplama çalışmaz; 64
@@ -387,7 +387,7 @@ bitlik tamsayı türünün dışarıda bırakılmasıyla aynı nedenle. **Yalnı
 
 ```lisp
 (as i32 (unsafe (c-strlen "hello")))         ; read what came back
-(as int (unsafe (c-strlen s)))               ; this one to read it exactly (int does not lose 64 bits)
+(as int (unsafe (c-strlen s)))               ; this one to read it exactly (int loses none of the value)
 (try-as i32 (unsafe (c-strlen s)))           ; ask whether it fits
 (as c-ulong n)                               ; make one from another integer
 ```
@@ -523,7 +523,7 @@ içinde `def-c-struct`'lardan başka bir şey olamaz). Adın hemen ardından bir
 
 Alanlar için yazılabilen türler `i8` `i16` `i32` `u8` `u16` `u32` `c-long` `c-ulong` `f32` `f64` `bool`
 `ptr`, türlü işaretçiler `(ptr T)` ve diğer `def-c-struct`'lardır (değerle gömülü). Düzen (her alanın
-ofseti ile struct'ın boyutu ve hizalaması) C'nin kurallarıyla hesaplanır (LP64 varsayılarak). Struct'ın
+ofseti ile struct'ın boyutu ve hizalaması) C'nin kurallarıyla hesaplanır (`c-long` ve işaretçilerin genişlikleri ile `f64`'ün hizalaması hedefin C'sine uyar). Struct'ın
 kendisine işaret eden bir alan yazılabilir, ancak struct kendini gömemez.
 
 ```lisp

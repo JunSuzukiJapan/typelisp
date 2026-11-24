@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/option-result.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
+<!-- translated-from: docs/ja/reference/functions/option-result.md @ dff3b51792f6d9c49bb8802bd3d3fb6e168edd92 -->
 # Option, Result and Error Types
 
 ## 1. `Option<T>` / `Result<T,E>`
@@ -65,7 +65,7 @@ A box is used only when a value of `T` cannot be told apart from the empty-list 
 |---|---|---|
 | `Option<U>` (nested) | Box | The inner `None` would be the same value as the outer `None` |
 | `()` | Box | The value of `()` is the empty-list value itself |
-| `ptr` / `c-long` / `c-ulong` | Box | All 64 bits are value, leaving no room to tell them apart |
+| `ptr` / `c-long` / `c-ulong` | Box | All the bits are value, leaving no room to tell them apart |
 | Anything else | No box | — |
 
 The representation is decided by the type alone and cannot be read from a value. When printing,

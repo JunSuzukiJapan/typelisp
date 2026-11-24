@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/ffi.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
+<!-- translated-from: docs/ja/guide/ffi.md @ dff3b51792f6d9c49bb8802bd3d3fb6e168edd92 -->
 # C FFI (defffi)
 
 이 가이드에서는 typelisp에서 C 함수를 호출하는 방법을 설명한다. 선언할 수 있는 타입의 목록과 제한은
@@ -45,7 +45,7 @@
 | `bool` | `bool`(`_Bool`) |
 | `()` | `void` |
 | `string` | `const char *` |
-| `c-long` / `c-ulong` | `long` / `unsigned long`(`size_t`, `int64_t` 등도) |
+| `c-long` / `c-ulong` | `long` / `unsigned long`(`size_t` 등도) |
 | `ptr` | 아무 포인터(`void *`, `FILE *` 등) |
 | `(ptr T)` | `T`를 가리키는 포인터([7절](#7-c-구조체)) |
 
@@ -59,10 +59,10 @@
 
 ### `c-long` / `c-ulong` / `ptr`
 
-이 타입들은 C와의 경계에서 값을 넘기기 위해서만 있으며 **산술은 없다**. typelisp의 정수로 쓰려면 `as`로 변환한다.
+이 타입들은 C와의 경계에서 값을 넘기기 위해서만 있으며 **산술은 없다**. typelisp의 정수로 쓰려면 `as`로 변환한다. 폭은 프로그램이 실행되는 기계의 C와 같습니다(64bit macOS와 Linux에서는 `c-long`도 포인터도 64bit, `--target`에 wasm32나 Cortex-M을 지정하면 32bit).
 
 ```lisp
-(as int (unsafe (c-strlen s)))      ; int는 64비트 값을 하나도 잃지 않는다
+(as int (unsafe (c-strlen s)))      ; int는 값을 하나도 잃지 않는다
 (try-as i32 (unsafe (c-strlen s)))  ; i32에 들어가지 않으면 None
 (unsafe (c-malloc 16))              ; 정수 리터럴은 그대로 넘길 수 있다
 ```

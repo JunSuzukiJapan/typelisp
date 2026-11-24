@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 0af7d052ede61d9b74e6590bb00955c0c9c3b9a4 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ dff3b51792f6d9c49bb8802bd3d3fb6e168edd92 -->
 # Tham chiếu cú pháp typelisp
 
 typelisp là một ngôn ngữ Lisp có kiểu tĩnh, được viết bằng S-expression. Về danh sách các hàm và phương thức
@@ -350,7 +350,7 @@ trong **chính tiến trình** (mọi thứ đã được liên kết, gồm c�
 #### ptr / c-long / c-ulong — các từ máy thô
 
 `ptr` là một con trỏ mờ (`void *`, `FILE *`, bất cứ thứ gì khai báo muốn nói). `c-long` / `c-ulong` là `long` /
-`unsigned long` của C (cũng là `size_t`, `int64_t` và `intptr_t`).
+`unsigned long` của C (cũng là `size_t` và `intptr_t`).
 
 ```lisp
 (defffi (c-malloc "malloc") (c-ulong) ptr)
@@ -362,7 +362,7 @@ trong **chính tiến trình** (mọi thứ đã được liên kết, gồm c�
 
 **Không gọi chúng là `i64` / `u64` là có chủ ý.** Ngôn ngữ này không có kiểu số nguyên 64 bit, vì một giá trị
 tức thời có tag chỉ có 63 bit ([chương 2](#2-cách-viết-kiểu)). Cái tên `c-long` nói rằng "đây là một từ đi qua
-ranh giới với C, không phải một số nguyên của ngôn ngữ này".
+ranh giới với C, không phải một số nguyên của ngôn ngữ này". Độ rộng của nó bằng `long` của C trên đích (64 bit trên macOS và Linux 64 bit, 32 bit trên wasm32 và Cortex-M).
 
 **Chúng không có số học.** `(+ x 1)` không thể viết. Nó có thể được cung cấp nhưng không được cung cấp, để
 không có phép tính nào chạy trên một giá trị không thể được lưu ở đâu cả và có độ rộng khác mọi số khác, vì
@@ -370,7 +370,7 @@ cùng lý do kiểu số nguyên 64 bit bị bỏ. Chỉ có **các phép chuy�
 
 ```lisp
 (as i32 (unsafe (c-strlen "hello")))         ; đọc thứ trả về
-(as int (unsafe (c-strlen s)))               ; cái này để đọc chính xác (int không mất 64 bit)
+(as int (unsafe (c-strlen s)))               ; cái này để đọc chính xác (int không làm mất giá trị)
 (try-as i32 (unsafe (c-strlen s)))           ; hỏi xem nó có vừa không
 (as c-ulong n)                               ; tạo một giá trị từ một số nguyên khác
 ```
@@ -500,7 +500,7 @@ Khai báo một struct có cùng bố cục như trong C. Nó chỉ có thể đ
 
 Các kiểu có thể viết cho trường là `i8` `i16` `i32` `u8` `u16` `u32` `c-long` `c-ulong` `f32` `f64` `bool`
 `ptr`, con trỏ có kiểu `(ptr T)`, và các `def-c-struct` khác (nhúng theo giá trị). Bố cục (offset của từng
-trường, và kích thước cùng căn chỉnh của struct) được tính theo quy tắc của C (giả định LP64). Một trường
+trường, và kích thước cùng căn chỉnh của struct) được tính theo quy tắc của C (độ rộng của `c-long` và con trỏ cùng căn chỉnh của `f64` theo C của đích). Một trường
 trỏ tới chính struct đó có thể được viết, nhưng struct không thể nhúng chính nó.
 
 ```lisp
