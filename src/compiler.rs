@@ -978,17 +978,15 @@ const SOURCE_TEMPLATE: &str = r#"
       (frame-slot-rooted builder m)
       (frame-slot builder)))
 
-;; One word out of what the driver left for this entry.
-;;
-;; Under the coroutine ABI a function has exactly one parameter -- the frame --
-;; so its arguments and its captures cannot arrive as parameters at all; they
-;; wait in `typelisp_abi::call_state` for the prologue to copy in. `entry` is
-;; `"rt_pending_arg"` or `"rt_pending_env"`, which are two lists because a
-;; capture and a parameter are different names read by different indices.
+;; One word out of what this entry was given: argument `idx` (`entry`
+;; `"rt_pending_arg"`) or capture `idx` (`"rt_pending_env"`), which are two
+;; lists because a capture and a parameter are different names read by
+;; different indices. Where it comes from is the function's shape's business
+;; (`entry-word`): a coroutine has one parameter, the frame, and finds its
+;; arguments waiting in `typelisp_abi::call_state`; a direct function has
+;; them as parameters.
 (defun pending-word ((builder llvm-builder) (m llvm-module) (entry string) (idx int)) llvm-value
-  (let ((idx-ptr (alloca-args builder 1)))
-    (store-arg builder idx-ptr 0 (const-word builder idx))
-    (build-call builder (get-function m entry) idx-ptr 1)))
+  (entry-word builder m entry idx))
 
 ;; [`frame-arg-slots`] past the first slot: hands out the rest and throws the
 ;; addresses away, because they are the first one's address plus an index.
@@ -3806,16 +3804,17 @@ const SOURCE_TEMPLATE: &str = r#"
 ;; stop every thread, which is the reason this exists
 ;; at all.
 ;;
-;; `rt_loop_safepoint` decides and this only branches
-;; on the answer. That division is the same one
-;; `rt_suspend_*` already draws: the shim decides
-;; *what* a task waits for, `coroutine-suspend` only
-;; ends the activation. Non-zero means the shim has
-;; already recorded the suspension, so the poll block
-;; has nothing left to do but end the activation and
-;; come back through the `pc` dispatch like any other
-;; resume. The value it wakes with is discarded —
-;; nothing was asked for.
+;; `loop-safepoint` emits the poll. `rt_loop_safepoint`
+;; decides and the poll only branches on the answer.
+;; That division is the same one `rt_suspend_*`
+;; already draws: the shim decides *what* a task waits
+;; for, the activation only ends. Non-zero means the
+;; shim has already recorded the suspension, so the
+;; poll block has nothing left to do but end the
+;; activation and come back through the `pc` dispatch
+;; like any other resume. A direct function, which is
+;; only ever built for a program that runs no other
+;; task, goes straight back.
 ;;
 ;; The handler slot needs no reinstalling here: the
 ;; poll block is written in the same region the loop
@@ -3823,15 +3822,7 @@ const SOURCE_TEMPLATE: &str = r#"
 ;; its own normal path before control reaches the back
 ;; edge.
 (defun emit-loop-safepoint ((m llvm-module) (builder llvm-builder) (cur-fn llvm-function) (loop-block llvm-basic-block)) ()
-    (let* ((poll (append-block cur-fn "loop-safepoint"))
-           (args-ptr (alloca-args builder 0))
-           (offered (build-call builder (get-function m "rt_loop_safepoint") args-ptr 0)))
-      (build-cond-br builder
-                     (build-icmp-eq builder offered (const-word builder 0))
-                     loop-block poll)
-      (position-at-end builder poll)
-      (let ((ignored (coroutine-suspend builder m)))
-        (build-br builder loop-block))))
+    (loop-safepoint builder m loop-block))
 
 ;; `(loop body-form...)` — `Expr::Loop` (`loop`/
 ;; `break`/`return`/`setf`). Installs a fresh

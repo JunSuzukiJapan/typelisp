@@ -63,6 +63,7 @@ pub mod bootstrap;
 pub(crate) mod carriers;
 pub mod codegen_prep;
 pub mod core_bridge;
+pub(crate) mod direct;
 pub mod driver;
 pub mod dump;
 pub mod externs;

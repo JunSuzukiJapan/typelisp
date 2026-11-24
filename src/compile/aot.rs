@@ -70,6 +70,7 @@ use crate::CompileTarget;
 use crate::{Checker, Heap, Interp, Path, Reader, TopLevelForm, Value};
 use typelisp_mem::{wk, ConcreteNames};
 mod archive;
+mod direct;
 mod made;
 mod native;
 mod reach;
@@ -620,9 +621,60 @@ pub fn compile_file_with(source_path: &str, output_path: &str, options: &BuildOp
         Rc::new(RefCell::new(module))
     };
 
+    // Every body this file will emit, translated for the island before any
+    // is emitted: whether a function is direct (`crate::compile::direct`) is
+    // read off what it does, and decides how every call to it is emitted.
+    // Rooted for the rest of the build, like the forms they come from.
+    let translated = |heap: &mut Heap, item: &CompileTarget| -> Result<direct::Body, String> {
+        let (params, body) = interp.compiled_fn_body(item).map_err(|e| e.to_string())?;
+        let ret = interp.compiled_fn_ret(item).map_err(|e| e.to_string())?;
+        let (param_list, body) =
+            crate::compile::driver::translate(&interp, heap, &params, &body, &std::collections::HashSet::new()).map_err(|e| e.to_string())?;
+        heap.push_root(param_list);
+        heap.push_root(body);
+        let params = params.into_iter().map(|(_, r)| r).collect();
+        Ok(direct::Body { symbol: target_symbol_name(item), params, ret, param_list, body })
+    };
+    let mut bodies: Vec<direct::Body> = Vec::with_capacity(items.len());
+    // What the prelude's bitcode has a body for: its own definitions, and a
+    // specialization of one that this file asks for too, which is the same
+    // function and is not emitted twice.
+    let mut prelude_items: std::collections::HashMap<String, &CompileTarget> =
+        prelude.items.iter().map(|i| (target_symbol_name(i), i)).collect();
+    for item in &items {
+        let symbol = target_symbol_name(item);
+        if module.borrow().get_function(&symbol).is_some_and(|f| f.count_basic_blocks() > 0) {
+            prelude_items.insert(symbol, item);
+        } else {
+            bodies.push(translated(&mut heap, item)?);
+        }
+    }
+    let mut init_bodies: Vec<Value> = Vec::with_capacity(defvar_inits.len());
+    for (_, form) in &defvar_inits {
+        let body = crate::compile::driver::translate_global_init(&interp, &mut heap, *form).map_err(|e| e.to_string())?;
+        heap.push_root(body);
+        init_bodies.push(body);
+    }
+    // The functions whose address the executable hands the runtime, each
+    // entered under the coroutine ABI.
+    let mut pinned: std::collections::HashSet<String> = std::collections::HashSet::new();
+    pinned.insert(target_symbol_name(&CompileTarget::Fn(entry_path)));
+    pinned.extend(items.iter().filter(|i| print_object_receiver(i).is_some()).map(target_symbol_name));
+    pinned.extend(chk.interrupt_handlers().into_iter().map(|(_, path)| target_symbol_name(&CompileTarget::Fn(path))));
+    pinned.extend(chk.ffi_callbacks().into_iter().map(|sig| ConcreteNames::symbol(&sig.function.to_string())));
+    for (_, slots) in interp.vtable_descriptors() {
+        pinned.extend(slots.iter().map(|(type_name, method)| ConcreteNames::method_symbol(type_name, method.name())));
+    }
+    let direct::Direct { sigs, copies, emit } = direct::direct_functions(&mut heap, &module.borrow(), &bodies, &init_bodies, &pinned, |heap, symbol| {
+        prelude_items.get(symbol).map(|item| translated(heap, item)).transpose()
+    })?;
+    bodies.extend(emit);
+    let direct_names: Vec<String> = sigs.keys().cloned().collect();
+    let producing_direct = crate::compile::direct::producing(sigs, copies.clone());
+
     {
         // Every body this file will emit, declared before any of them is
-        // translated — the same thing the prelude artifact's generator does
+        // emitted — the same thing the prelude artifact's generator does
         // with its own item list.
         //
         // Declaration order is not call order. A file's own `defun`s used to
@@ -632,9 +684,8 @@ pub fn compile_file_with(source_path: &str, output_path: &str, options: &BuildOp
         // `length <vector-iter<i32>,i32>` precedes the `vector-iter::next
         // <i32>` it calls. The island resolves a callee by looking it up in
         // this module and **aborts the process** when it finds nothing, so the
-        // declaration has to be there first. Nothing exercised this until the
-        // prelude arrived: a file that could not name a generic could not
-        // instantiate one either. Under the whole-build guard above.
+        // declaration has to be there first. Under the whole-build guard
+        // above.
         let m = module.borrow();
         // A *Lisp* function's type, so it must follow this process's emit ABI
         // rather than the fixed `(ptr, i32)` the `rt_*` shims keep. A
@@ -648,25 +699,24 @@ pub fn compile_file_with(source_path: &str, output_path: &str, options: &BuildOp
             let ptr_ty = ctx.ptr_type(AddressSpace::default());
             crate::compile::carriers::word().fn_type(&[ptr_ty.into(), ctx.i32_type().into()], false)
         };
-        for item in &items {
-            let symbol = target_symbol_name(item);
-            if m.get_function(&symbol).is_none() {
-                m.add_function(&symbol, lisp_fn_ty, None);
+        for b in &bodies {
+            if m.get_function(&b.symbol).is_none() {
+                let ty = crate::compile::direct::sig_of(&b.symbol).map_or(lisp_fn_ty, |sig| sig.fn_type());
+                m.add_function(&b.symbol, ty, None);
             }
         }
     }
 
-    // One shared module, one `add_compiled_function` call per `defun` —
-    // *not* per-function modules merged afterward, see this module's doc
-    // comment for why. Each call takes `COMPILE_LOCK` per LLVM builtin (via
-    // `eval_llvm_builtin_method`), nesting inside the whole-build guard above.
-    for item in &items {
-        // Every user body's own LLVM symbol name is `ConcreteNames::symbol`'s
-        // — `main` is no longer a special case: `build_main_wrapper` calls it
-        // by that same symbol (`tl_p::main` for `p.typl`). A method's symbol
-        // is `ConcreteNames::method_symbol`'s `tl_type''method`, exactly what
-        // a compiled call site emits.
-        crate::compile::driver::add_compiled_function(&interp, &mut heap, module.clone(), item, &target_symbol_name(item)).map_err(|e| e.to_string())?;
+    // One shared module, one `compile-function` per body — *not*
+    // per-function modules merged afterward, see this module's doc comment
+    // for why. Each LLVM builtin takes `COMPILE_LOCK`, nesting inside the
+    // whole-build guard above. Every user body's own LLVM symbol name is
+    // `ConcreteNames::symbol`'s — `main` is no longer a special case:
+    // `build_main_wrapper` calls it by that same symbol (`tl_p::main` for
+    // `p.typl`). A method's symbol is `ConcreteNames::method_symbol`'s
+    // `tl_type''method`, exactly what a compiled call site emits.
+    for b in &bodies {
+        crate::compile::driver::run_compile_function(&interp, &mut heap, module.clone(), &b.symbol, b.param_list, b.body).map_err(|e| e.to_string())?;
     }
 
     // One `add_compiled_global_init` per `defvar`, in the order
@@ -680,14 +730,23 @@ pub fn compile_file_with(source_path: &str, output_path: &str, options: &BuildOp
     // The prelude's are not optional even for a program that never mentions
     // one: its compiled bodies address their globals by baked-in slot id, so
     // `*print-pretty*` has to have storage before anything that prints runs.
-    let all_inits: Vec<(Path, Value)> =
-        prelude.global_inits.iter().chain(defvar_inits.iter()).cloned().collect();
-    let mut global_init_names: Vec<String> = Vec::with_capacity(all_inits.len());
-    for (i, (_, form)) in all_inits.iter().enumerate() {
-        let internal_name = format!("$global_init${}", i);
+    let mut global_init_names: Vec<String> = Vec::with_capacity(prelude.global_inits.len() + defvar_inits.len());
+    for (_, form) in &prelude.global_inits {
+        let internal_name = format!("$global_init${}", global_init_names.len());
         crate::compile::driver::add_compiled_global_init(&interp, &mut heap, module.clone(), &internal_name, *form).map_err(|e| e.to_string())?;
         global_init_names.push(internal_name);
     }
+    for body in &init_bodies {
+        let internal_name = format!("$global_init${}", global_init_names.len());
+        crate::compile::driver::run_compile_function(&interp, &mut heap, module.clone(), &internal_name, Value::Empty, *body).map_err(|e| e.to_string())?;
+        global_init_names.push(internal_name);
+    }
+    let all_inits: Vec<(Path, Value)> =
+        prelude.global_inits.iter().chain(defvar_inits.iter()).cloned().collect();
+    let skipped_safepoints = crate::compile::direct::skipped_safepoints();
+    // Every body is emitted. What compiles from here on compiles for this
+    // process (the `eval` environment's checking), and nothing there is direct.
+    drop(producing_direct);
 
     // Which types have a compiled `print-object`, for the printer's AOT
     // startup registration to choose from (`live_types` keeps those
@@ -751,7 +810,13 @@ pub fn compile_file_with(source_path: &str, output_path: &str, options: &BuildOp
     let mut body_globals: std::collections::HashMap<String, Vec<usize>> = std::collections::HashMap::new();
     for item in items.iter().chain(&prelude.items) {
         let (_, body) = interp.compiled_fn_body(item).map_err(|e| e.to_string())?;
-        body_globals.insert(target_symbol_name(item), globals_read(&heap, &body)?);
+        let symbol = target_symbol_name(item);
+        let read = globals_read(&heap, &body)?;
+        // A direct copy is the same body.
+        if let Some(copy) = copies.get(&symbol) {
+            body_globals.insert(copy.clone(), read.clone());
+        }
+        body_globals.insert(symbol, read);
     }
     let globals = Globals {
         inits: all_inits
@@ -876,6 +941,17 @@ pub fn compile_file_with(source_path: &str, output_path: &str, options: &BuildOp
             },
         )
             .and_then(|()| m.verify().map_err(|e| format!("module failed verification: {}", e)))
+            .and_then(|()| direct::check_only_called(&m, &direct_names))
+            .and_then(|()| {
+                // A direct function's loop offers the scheduler no turn, which
+                // is right only in a program with no other task to run.
+                let entry = m.get_function(ENTRY_POINT_NAME).expect("build_main_wrapper defined `main`");
+                let waits = reach::uses(&m, entry, |name| crate::compile::externs::needs_scheduler(name).then(String::new));
+                if skipped_safepoints > 0 && !waits.is_empty() {
+                    return Err("internal error: a direct function has a loop, and the program runs other tasks".to_string());
+                }
+                Ok(())
+            })
             .and_then(|()| {
                 if !options.no_cons {
                     return Ok(());

@@ -3296,14 +3296,14 @@ mod tests {
     #[test]
     fn construct_builds_a_struct_and_field_get_reads_it() {
         let mut h = stress_heap();
-        let point = "(construct ::point (type-named ::point) 0 true (int-any-width int-any-width) \
+        let point = "(construct ::point (type-named ::point) 0 true (i32 i32) \
                        (int-any-width 1) (int-any-width 2))";
         assert_eq!(
-            eval_ok(&mut h, &format!("(field-get {} 1 int-any-width)", point)),
+            eval_ok(&mut h, &format!("(field-get {} 1 i32)", point)),
             Value::Int(2)
         );
         assert_eq!(
-            eval_ok(&mut h, &format!("(field-get {} 0 int-any-width)", point)),
+            eval_ok(&mut h, &format!("(field-get {} 0 i32)", point)),
             Value::Int(1)
         );
     }
@@ -3313,13 +3313,13 @@ mod tests {
     #[test]
     fn a_nested_construction_does_not_lose_the_outer_fields() {
         let mut h = stress_heap();
-        let inner = "(construct ::point (type-named ::point) 0 true (int-any-width int-any-width) \
+        let inner = "(construct ::point (type-named ::point) 0 true (i32 i32) \
                        (int-any-width 3) (int-any-width 4))";
         let outer = format!(
             "(construct ::pair (type-named ::pair) 0 true (str point) (str \"tag\") {})",
             inner
         );
-        let src = format!("(field-get (field-get {} 1 point) 0 int-any-width)", outer);
+        let src = format!("(field-get (field-get {} 1 point) 0 i32)", outer);
         assert_eq!(eval_ok(&mut h, &src), Value::Int(3));
     }
 
@@ -3328,9 +3328,9 @@ mod tests {
     #[test]
     fn a_struct_survives_being_bound_and_read_back() {
         let mut h = stress_heap();
-        let src = "(let ((p sexpr (construct ::point (type-named ::point) 0 true (int-any-width int-any-width) \
+        let src = "(let ((p sexpr (construct ::point (type-named ::point) 0 true (i32 i32) \
                                     (int-any-width 5) (int-any-width 6))))
-                     (field-get (var p) 1 int-any-width))";
+                     (field-get (var p) 1 i32))";
         assert_eq!(eval_ok(&mut h, src), Value::Int(6));
     }
 
@@ -3339,11 +3339,11 @@ mod tests {
     #[test]
     fn a_lambda_is_applied_to_its_arguments() {
         let mut h = stress_heap();
-        let src = "(apply (lambda ((x int-any-width)) int-any-width (var x)) int-any-width \
-                     (int-any-width) (int-any-width 5))";
+        let src = "(apply (lambda ((x i32)) i32 (var x)) i32 \
+                     (i32) (int-any-width 5))";
         assert_eq!(eval_ok(&mut h, src), Value::Int(5));
         assert_eq!(
-            eval_ok(&mut h, "(apply (lambda () int-any-width (int-any-width 7)) int-any-width ())"),
+            eval_ok(&mut h, "(apply (lambda () i32 (int-any-width 7)) i32 ())"),
             Value::Int(7)
         );
     }
@@ -3352,8 +3352,8 @@ mod tests {
     #[test]
     fn a_closure_captures_its_defining_environment() {
         let mut h = stress_heap();
-        let src = "(let ((n int-any-width (int-any-width 3)))
-                     (apply (lambda () int-any-width (var n)) int-any-width ()))";
+        let src = "(let ((n i32 (int-any-width 3)))
+                     (apply (lambda () i32 (var n)) i32 ()))";
         assert_eq!(eval_ok(&mut h, src), Value::Int(3));
     }
 
@@ -3362,10 +3362,10 @@ mod tests {
     #[test]
     fn labels_siblings_can_call_each_other() {
         let mut h = stress_heap();
-        let src = "(labels ((f ((x int-any-width)) int-any-width \
-                              (apply (var g) int-any-width (int-any-width) (var x))) \
-                            (g ((y int-any-width)) int-any-width (var y))) \
-                     (apply (var f) int-any-width (int-any-width) (int-any-width 3)))";
+        let src = "(labels ((f ((x i32)) i32 \
+                              (apply (var g) i32 (i32) (var x))) \
+                            (g ((y i32)) i32 (var y))) \
+                     (apply (var f) i32 (i32) (int-any-width 3)))";
         assert_eq!(eval_ok(&mut h, src), Value::Int(3));
     }
 
@@ -3401,7 +3401,7 @@ mod tests {
         const DEPTH: i64 = 20_000;
         let mut h = Heap::with_capacity(1 << 20);
 
-        let src = "(labels ((build ((n int-any-width)) sexpr
+        let src = "(labels ((build ((n i32)) sexpr
                         (if (call ::std::sexpr::sexpr-null (sexpr) (var n))
                             (unit)
                             (call ::std::sexpr::sexpr-cons (sexpr sexpr)
@@ -3449,7 +3449,7 @@ mod tests {
     #[test]
     fn match_takes_the_first_arm_that_matches() {
         let mut h = stress_heap();
-        let src = "(match (int-any-width 2) int-any-width \
+        let src = "(match (int-any-width 2) i32 \
                      ((pat-lit (int-any-width 1)) (int-any-width 10)) \
                      ((pat-lit (int-any-width 2)) (int-any-width 20)) \
                      ((pat-wild) (int-any-width 99)))";
@@ -3459,7 +3459,7 @@ mod tests {
     #[test]
     fn a_wildcard_arm_catches_what_the_others_do_not() {
         let mut h = stress_heap();
-        let src = "(match (int-any-width 7) int-any-width \
+        let src = "(match (int-any-width 7) i32 \
                      ((pat-lit (int-any-width 1)) (int-any-width 10)) \
                      ((pat-wild) (int-any-width 99)))";
         assert_eq!(eval_ok(&mut h, src), Value::Int(99));
@@ -3470,7 +3470,7 @@ mod tests {
     fn a_binding_pattern_is_visible_in_the_arm() {
         let mut h = stress_heap();
         assert_eq!(
-            eval_ok(&mut h, "(match (int-any-width 5) int-any-width ((pat-bind x) (var x)))"),
+            eval_ok(&mut h, "(match (int-any-width 5) i32 ((pat-bind x) (var x)))"),
             Value::Int(5)
         );
     }
@@ -3492,10 +3492,10 @@ mod tests {
     #[test]
     fn field_set_writes_through_the_struct() {
         let mut h = stress_heap();
-        let src = "(let ((p sexpr (construct ::point (type-named ::point) 0 true (int-any-width int-any-width) \
+        let src = "(let ((p sexpr (construct ::point (type-named ::point) 0 true (i32 i32) \
                                     (int-any-width 1) (int-any-width 2))))
-                     (field-set (var p) 1 int-any-width (int-any-width 42))
-                     (field-get (var p) 1 int-any-width))";
+                     (field-set (var p) 1 i32 (int-any-width 42))
+                     (field-get (var p) 1 i32))";
         assert_eq!(eval_ok(&mut h, src), Value::Int(42));
     }
 
@@ -3504,7 +3504,7 @@ mod tests {
     #[test]
     fn the_object_survives_an_allocating_value_expression() {
         let mut h = stress_heap();
-        let src = r#"(let ((p sexpr (construct ::point (type-named ::point) 0 true (int-any-width str)
+        let src = r#"(let ((p sexpr (construct ::point (type-named ::point) 0 true (i32 str)
                                       (int-any-width 1) (str "old"))))
                        (field-set (var p) 1 str (str "new"))
                        (field-get (var p) 1 str))"#;
@@ -3576,7 +3576,7 @@ mod tests {
         let mut h = stress_heap();
         // `loop`'s leading field is its own `Repr` -- positional, so unlike
         // `catch`'s trailing one it cannot be left out of a hand-written form.
-        assert_eq!(eval_ok(&mut h, "(loop int-any-width (return (int-any-width 7)))"), Value::Int(7));
+        assert_eq!(eval_ok(&mut h, "(loop i32 (return (int-any-width 7)))"), Value::Int(7));
         assert_eq!(eval_ok(&mut h, "(loop unit (break))"), Value::Empty);
         assert_eq!(eval_ok(&mut h, "(loop unit (return))"), Value::Empty);
     }
@@ -3931,7 +3931,7 @@ mod tests {
         assert_eq!(eval_ok(&mut h, "(int-any-width 1)"), Value::Int(1));
         assert_eq!(eval_ok(&mut h, "(if (bool true) (int-any-width 1) (int-any-width 2))"), Value::Int(1));
         assert_eq!(eval_ok(&mut h, "(let ((x r (int-any-width 3))) (var x))"), Value::Int(3));
-        assert_eq!(eval_ok(&mut h, "(loop int-any-width (return (int-any-width 4)))"), Value::Int(4));
+        assert_eq!(eval_ok(&mut h, "(loop i32 (return (int-any-width 4)))"), Value::Int(4));
         assert_eq!(eval_ok(&mut h, "(catch (quote t) (throw (quote t) (int-any-width 5)))"), Value::Int(5));
     }
 }

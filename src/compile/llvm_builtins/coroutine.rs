@@ -33,16 +33,31 @@ use super::{entry_alloca, expect_llvm_basic_block, expect_llvm_builder, expect_l
 pub(super) struct FrameCtx {
     /// The address of its word array, to GEP slots out of.
     data: PointerValue<'static>,
-    /// The `rt_frame_open` call. Its first argument, the slot count, starts
-    /// at zero and is replaced by `coroutine-end` once the true count is
-    /// known; its second, the mask table, likewise.
-    frame_open: InstructionValue<'static>,
     /// How many slots have been handed out.
     next: u64,
-    /// The coroutine prologue's parts.
-    coro: CoroCtx,
+    /// The function being built.
+    function: FunctionValue<'static>,
+    /// The slots handed out marked (`frame-slot-rooted`), which
+    /// `coroutine-end` turns into the mask table once every slot is known.
+    rooted: Vec<u64>,
+    /// The branch ending the prologue, to insert slot *addresses* before.
+    ///
+    /// A slot address is a GEP off the frame's data pointer, and in a
+    /// coroutine the resume blocks use it — so it has to be defined where
+    /// both the fresh and the resuming entry can see it. Emitting it where
+    /// the island asked would put it in whatever block the binding happened
+    /// to be in, which no resume block is dominated by.
+    prologue_end: InstructionValue<'static>,
     /// The `scratch-slot` handed out for each role, made on first request.
     pub(super) scratch: HashMap<i64, PointerValue<'static>>,
+    /// What the function is.
+    shape: Shape,
+}
+
+/// The two shapes a compiled function can have (`crate::compile::direct`).
+enum Shape {
+    Coroutine(CoroCtx),
+    Direct(DirectCtx),
 }
 
 /// What the coroutine prologue leaves behind for the rest of the function.
@@ -53,8 +68,6 @@ pub(super) struct FrameCtx {
 /// way: [`llvm_builder_coroutine_begin`] leaves `dispatch` empty and
 /// [`llvm_builder_coroutine_end`] fills it.
 struct CoroCtx {
-    /// The function being built, to append resume blocks to.
-    function: FunctionValue<'static>,
     /// Where the body starts — the dispatch chain's `pc == 0` arm.
     body: BasicBlock<'static>,
     /// Left empty by `coroutine-begin`, filled by `coroutine-end`.
@@ -71,22 +84,25 @@ struct CoroCtx {
     /// install the same handler (its entry, its exits, each cleanup copy) all
     /// name one id.
     handlers: Vec<(BasicBlock<'static>, u64)>,
-    /// The `rt_frame_open` call again, whose mask table argument is null
-    /// until `coroutine-end` knows the table. Which slots are rooted is a
-    /// fact about the function, so it is given where the frame is made, not
+    /// The `rt_frame_open` call. Its first argument, the slot count, starts
+    /// at zero and is replaced by `coroutine-end` once the true count is
+    /// known; its second, the mask table, likewise. Which slots are rooted is
+    /// a fact about the function, so it is given where the frame is made, not
     /// on every resume.
     frame_open: InstructionValue<'static>,
-    /// The slots handed out marked (`frame-slot-rooted`), which `coroutine-end`
-    /// turns into the mask table once every slot is known.
-    rooted: Vec<u64>,
-    /// The `br` ending `coro.prologue`, to insert slot *addresses* before.
-    ///
-    /// A slot address is a GEP off the frame's data pointer, and the resume
-    /// blocks use it — so it has to be defined where both the fresh and the
-    /// resuming entry can see it. Emitting it where the island asked would
-    /// put it in whatever block the binding happened to be in, which no
-    /// resume block is dominated by.
-    prologue_end: InstructionValue<'static>,
+}
+
+/// What a direct function's prologue leaves behind.
+struct DirectCtx {
+    /// How its parameters and result are carried.
+    sig: crate::compile::direct::DirectSig,
+    /// The stack array the slots are cut from. Its length is a placeholder
+    /// until `coroutine-end` knows it; when any slot is rooted, the array is
+    /// replaced by a frame the collector sees (`rt_local_frame_open`).
+    slots: InstructionValue<'static>,
+    /// Where an unwind leaves the function from: a raise after a call, or a
+    /// throw with no region left in the function to catch it.
+    unwind: BasicBlock<'static>,
 }
 
 thread_local! {
@@ -120,8 +136,40 @@ fn open_coroutine_frame(
         let f = map
             .get_mut(&key)
             .ok_or_else(|| EvalError::Internal(format!("{}: no frame is open on this builder", what)))?;
-        let id = f.coro.resumes.len() as u64 + 1;
-        Ok((f.data, f.coro.function, id))
+        match &f.shape {
+            Shape::Coroutine(coro) => Ok((f.data, f.function, coro.resumes.len() as u64 + 1)),
+            Shape::Direct(_) => Err(EvalError::Internal(format!(
+                "{}: `{}` is a direct function, and a direct function cannot stop",
+                what,
+                f.function.get_name().to_string_lossy()
+            ))),
+        }
+    })
+}
+
+/// Records that the resume point `id` resumes at `block`, in the coroutine on
+/// `builder`.
+fn push_resume(builder: &Rc<RefCell<Builder<'static>>>, id: u64, block: BasicBlock<'static>) {
+    FRAME_CTXS.with(|c| {
+        if let Some(FrameCtx { shape: Shape::Coroutine(coro), .. }) = c.borrow_mut().get_mut(&builder_key(builder)) {
+            coro.resumes.push((id, block));
+        }
+    });
+}
+
+/// The signature of the function on `builder`, when it is a direct one.
+fn direct_sig(builder: &Rc<RefCell<Builder<'static>>>) -> Option<crate::compile::direct::DirectSig> {
+    FRAME_CTXS.with(|c| match c.borrow().get(&builder_key(builder)) {
+        Some(FrameCtx { shape: Shape::Direct(d), .. }) => Some(d.sig.clone()),
+        _ => None,
+    })
+}
+
+/// The block an unwind leaves the direct function on `builder` from.
+fn direct_unwind(builder: &Rc<RefCell<Builder<'static>>>) -> Option<BasicBlock<'static>> {
+    FRAME_CTXS.with(|c| match c.borrow().get(&builder_key(builder)) {
+        Some(FrameCtx { shape: Shape::Direct(d), .. }) => Some(d.unwind),
+        _ => None,
     })
 }
 
@@ -170,9 +218,9 @@ fn frame_slot_impl(args: &[Value], rooted: bool) -> Result<Value, EvalError> {
         let idx = f.next;
         f.next += 1;
         if rooted {
-            f.coro.rooted.push(idx);
+            f.rooted.push(idx);
         }
-        Ok::<_, EvalError>((f.data, idx, f.coro.prologue_end))
+        Ok::<_, EvalError>((f.data, idx, f.prologue_end))
     })?;
 
     let b = builder.borrow();
@@ -278,6 +326,10 @@ pub(super) fn llvm_builder_coroutine_begin(args: &[Value]) -> Result<Value, Eval
     let what = "coroutine-begin";
     let err = |step: &str, e: String| EvalError::Internal(format!("{}: {}: {}", what, step, e));
 
+    if let Some(sig) = crate::compile::direct::sig_of(&function.get_name().to_string_lossy()) {
+        return direct_begin(&builder, function, sig);
+    }
+
     // The prologue owns its declarations: a module can reach here without
     // having been through the driver.
     ensure_declared(&module, "rt_frame_open");
@@ -366,22 +418,58 @@ pub(super) fn llvm_builder_coroutine_begin(args: &[Value]) -> Result<Value, Eval
             builder_key(&builder),
             FrameCtx {
                 data,
-                frame_open,
                 // The driver protocol's own slots are never handed out as
                 // locals.
                 next: typelisp_abi::FRAME_RESERVED_SLOTS as u64,
+                function,
+                rooted: Vec::new(),
+                prologue_end,
                 scratch: HashMap::new(),
-                coro: CoroCtx {
-                    function,
-                    body,
-                    dispatch,
-                    pc,
-                    resumes: Vec::new(),
-                    handlers: Vec::new(),
-                    frame_open,
-                    rooted: Vec::new(),
-                    prologue_end,
-                },
+                shape: Shape::Coroutine(CoroCtx { body, dispatch, pc, resumes: Vec::new(), handlers: Vec::new(), frame_open }),
+            },
+        );
+    });
+    Ok(Value::Empty)
+}
+
+/// [`llvm_builder_coroutine_begin`] for a direct function: the prologue is a
+/// straight line, since the function is entered once.
+///
+/// ``text
+/// entry:      %slots = alloca i64, N;  br body
+/// body:       ...
+/// unwind:     (written by `coroutine-end`, when anything leaves through it)
+/// ``
+///
+/// `N` is written in by `coroutine-end`, which also replaces the array with a
+/// frame the collector sees when any slot turned out to be rooted.
+fn direct_begin(
+    builder: &Rc<RefCell<Builder<'static>>>,
+    function: FunctionValue<'static>,
+    sig: crate::compile::direct::DirectSig,
+) -> Result<Value, EvalError> {
+    let ctx = crate::compile::llvm_context();
+    let word_ty = crate::compile::carriers::word();
+    let err = |step: &str, e: String| EvalError::Internal(format!("coroutine-begin (direct): {}: {}", step, e));
+    let body = ctx.append_basic_block(function, "body");
+    let unwind = ctx.append_basic_block(function, "unwind");
+    let b = builder.borrow();
+    let data = b.build_array_alloca(word_ty, word_ty.const_zero(), "slots").map_err(|e| err("alloca", e.to_string()))?;
+    let slots = data.as_instruction().ok_or_else(|| err("alloca", "not an instruction".to_string()))?;
+    let prologue_end = b.build_unconditional_branch(body).map_err(|e| err("br", e.to_string()))?;
+    b.position_at_end(body);
+    crate::compile::direct::set_unwind_exit(function, unwind);
+    FRAME_CTXS.with(|c| {
+        c.borrow_mut().insert(
+            builder_key(builder),
+            FrameCtx {
+                data,
+                next: 0,
+                function,
+                rooted: Vec::new(),
+                prologue_end,
+                scratch: HashMap::new(),
+                shape: Shape::Direct(DirectCtx { sig, slots, unwind }),
             },
         );
     });
@@ -448,7 +536,6 @@ pub(super) fn llvm_builder_coroutine_suspend(args: &[Value]) -> Result<Value, Ev
     let word_ty = crate::compile::carriers::word();
     let what = "coroutine-suspend";
     let err = |step: &str, e: String| EvalError::Internal(format!("{}: {}: {}", what, step, e));
-    let key = builder_key(&builder);
     let (data, function, id) = open_coroutine_frame(&builder, what)?;
 
     let resume = ctx.append_basic_block(function, &format!("coro.resume{}", id));
@@ -463,13 +550,8 @@ pub(super) fn llvm_builder_coroutine_suspend(args: &[Value]) -> Result<Value, Ev
             .map_err(|e| err("gep", e.to_string()))?
     };
     let result = b.build_load(word_ty, value_slot, "coro_wake").map_err(|e| err("load", e.to_string()))?;
-
-    FRAME_CTXS.with(|c| {
-        let mut map = c.borrow_mut();
-        if let Some(coro) = map.get_mut(&key).map(|f| &mut f.coro) {
-            coro.resumes.push((id, resume));
-        }
-    });
+    drop(b);
+    push_resume(&builder, id, resume);
     Ok(llvm_value_value(result))
 }
 
@@ -486,9 +568,16 @@ pub(super) fn llvm_builder_coroutine_suspend(args: &[Value]) -> Result<Value, Ev
 /// The driver truncates the root stack to the depth this frame was entered at,
 /// which closes the frame and drops everything it pushed after it in one step
 /// — as it does on a return.
+///
+/// A direct function has no driver to pop it: it leaves through its unwind
+/// block, which closes what it opened and returns.
 pub(super) fn llvm_builder_coroutine_unwind(args: &[Value]) -> Result<Value, EvalError> {
     let builder = expect_llvm_builder(&args[0])?;
     expect_llvm_module(&args[1])?;
+    if let Some(unwind) = direct_unwind(&builder) {
+        builder.borrow().build_unconditional_branch(unwind).map_err(|e| EvalError::Internal(format!("coroutine-unwind: br: {}", e)))?;
+        return Ok(Value::Empty);
+    }
     let b = builder.borrow();
     b.build_return(Some(&crate::compile::carriers::word().const_int(typelisp_abi::STATUS_UNWIND as u64, false)))
         .map_err(|e| EvalError::Internal(format!("coroutine-unwind: ret: {}", e)))?;
@@ -522,12 +611,24 @@ fn frame_handler(args: &[Value], pad: Option<BasicBlock<'static>>, what: &str) -
     let err = |step: &str, e: String| EvalError::Internal(format!("{}: {}: {}", what, step, e));
     let key = builder_key(&builder);
 
-    let (data, id) = FRAME_CTXS.with(|c| {
+    let found = FRAME_CTXS.with(|c| {
         let mut map = c.borrow_mut();
         let f = map
             .get_mut(&key)
             .ok_or_else(|| EvalError::Internal(format!("{}: no frame is open on this builder", what)))?;
-        let coro = &mut f.coro;
+        let coro = match (&mut f.shape, pad) {
+            (Shape::Coroutine(coro), _) => coro,
+            // A direct function catches nothing, so a region leaving it has
+            // nothing to say.
+            (Shape::Direct(_), None) => return Ok(None),
+            (Shape::Direct(_), Some(_)) => {
+                return Err(EvalError::Internal(format!(
+                    "{}: `{}` is a direct function, and a direct function has no handler",
+                    what,
+                    f.function.get_name().to_string_lossy()
+                )))
+            }
+        };
         let id = match pad {
             None => 0,
             Some(block) => match coro.handlers.iter().find(|(b, _)| *b == block) {
@@ -540,8 +641,9 @@ fn frame_handler(args: &[Value], pad: Option<BasicBlock<'static>>, what: &str) -
                 }
             },
         };
-        Ok::<_, EvalError>((f.data, id))
+        Ok::<_, EvalError>(Some((f.data, id)))
     })?;
+    let Some((data, id)) = found else { return Ok(Value::Empty) };
 
     let b = builder.borrow();
     let slot = unsafe {
@@ -610,7 +712,12 @@ fn coroutine_call_impl(
     let ctx = crate::compile::llvm_context();
     let word_ty = crate::compile::carriers::word();
     let err = |step: &str, e: String| EvalError::Internal(format!("{}: {}: {}", what, step, e));
-    let key = builder_key(&builder);
+    if env.is_none() && shim == "rt_frame_call" {
+        if let Some((callee, sig)) = direct_callee(&module, &head[0]) {
+            let b = builder.borrow();
+            return direct_call(&b, callee, &sig, args_ptr, argc).map(|v| llvm_value_value(v.into())).map_err(|e| err("direct call", e));
+        }
+    }
     let (data, function, id) = open_coroutine_frame(&builder, what)?;
 
     let resume = ctx.append_basic_block(function, &format!("coro.resume{}", id));
@@ -646,14 +753,68 @@ fn coroutine_call_impl(
             .map_err(|e| err("gep", e.to_string()))?
     };
     let result = b.build_load(word_ty, value_slot, "coro_result").map_err(|e| err("load", e.to_string()))?;
-
-    FRAME_CTXS.with(|c| {
-        let mut map = c.borrow_mut();
-        if let Some(coro) = map.get_mut(&key).map(|f| &mut f.coro) {
-            coro.resumes.push((id, resume));
-        }
-    });
+    drop(b);
+    push_resume(&builder, id, resume);
     Ok(llvm_value_value(result))
+}
+
+/// The direct function a call's callee word names, with its signature: the
+/// word is `ptrtoint @f` (`build-fn-address`) and `f` is direct or has a
+/// direct copy.
+fn direct_callee(module: &Rc<RefCell<Module<'static>>>, callee: &BasicValueEnum<'static>) -> Option<(FunctionValue<'static>, crate::compile::direct::DirectSig)> {
+    use inkwell::llvm_sys::core::{LLVMGetConstOpcode, LLVMGetOperand, LLVMIsAConstantExpr, LLVMIsAFunction};
+    use inkwell::values::AsValueRef;
+    let v = callee.as_value_ref();
+    // SAFETY: `v` is a live value; each step checks what it is before
+    // reading what only that kind of value has.
+    unsafe {
+        if LLVMIsAConstantExpr(v).is_null() || LLVMGetConstOpcode(v) != inkwell::llvm_sys::LLVMOpcode::LLVMPtrToInt {
+            return None;
+        }
+        let target = LLVMGetOperand(v, 0);
+        if target.is_null() || LLVMIsAFunction(target).is_null() {
+            return None;
+        }
+        let f = FunctionValue::new(target)?;
+        let (symbol, sig) = crate::compile::direct::callee(&f.get_name().to_string_lossy())?;
+        Some((module.borrow().get_function(&symbol)?, sig))
+    }
+}
+
+/// A call to the direct function `callee`, its arguments the words in the
+/// `argc` slots at `args_ptr`, each converted to the parameter's carrier; and
+/// its result converted back to the word.
+///
+/// The arguments sit in the caller's slots, not in registers, because the
+/// island evaluates a call's arguments one at a time into a slot each; LLVM
+/// forwards the stores to the loads once the slots are on the stack.
+fn direct_call(
+    b: &Builder<'static>,
+    callee: FunctionValue<'static>,
+    sig: &crate::compile::direct::DirectSig,
+    args_ptr: PointerValue<'static>,
+    argc: u64,
+) -> Result<IntValue<'static>, String> {
+    let word_ty = crate::compile::carriers::word();
+    if argc as usize != sig.params.len() {
+        return Err(format!("`{}` takes {} arguments, given {}", callee.get_name().to_string_lossy(), sig.params.len(), argc));
+    }
+    let mut passed: Vec<inkwell::values::BasicMetadataValueEnum<'static>> = Vec::with_capacity(sig.params.len());
+    for (i, carrier) in sig.params.iter().enumerate() {
+        if *carrier == crate::compile::carriers::Carrier::Unit {
+            continue;
+        }
+        let slot = unsafe { b.build_gep(word_ty, args_ptr, &[word_ty.const_int(i as u64, false)], "arg_slot").map_err(|e| e.to_string())? };
+        let w = b.build_load(word_ty, slot, "arg_word").map_err(|e| e.to_string())?.into_int_value();
+        let v = carrier.from_word(b, w)?.expect("a carried parameter");
+        passed.push(v.into());
+    }
+    let call = b.build_call(callee, &passed, "direct").map_err(|e| e.to_string())?;
+    crate::compile::raise_check::after_call(b, callee)?;
+    match call.try_as_basic_value() {
+        inkwell::values::ValueKind::Basic(v) => sig.ret.to_word(b, v),
+        inkwell::values::ValueKind::Instruction(_) => Ok(word_ty.const_zero()),
+    }
 }
 
 /// `(coroutine-end builder m v)` — return `v` through the protocol, then
@@ -685,7 +846,15 @@ pub(super) fn llvm_builder_coroutine_end(args: &[Value]) -> Result<Value, EvalEr
             .remove(&key)
             .ok_or_else(|| EvalError::Internal(format!("{}: no frame is open on this builder", what)))
     })?;
-    let coro = f.coro;
+    let coro = match f.shape {
+        Shape::Coroutine(coro) => coro,
+        Shape::Direct(direct) => {
+            let b = builder.borrow();
+            return direct_end(&b, &module, f.function, f.data, f.next, &f.rooted, f.prologue_end, direct, value.into_int_value())
+                .map(|()| Value::Empty)
+                .map_err(|e| err("direct", e));
+        }
+    };
 
     let b = builder.borrow();
     let value_slot = unsafe {
@@ -696,10 +865,14 @@ pub(super) fn llvm_builder_coroutine_end(args: &[Value]) -> Result<Value, EvalEr
     b.build_return(Some(&word_ty.const_int(typelisp_abi::STATUS_RETURN as u64, false)))
         .map_err(|e| err("ret", e.to_string()))?;
 
-    if !f.frame_open.set_operand(0, word_ty.const_int(f.next, false)) {
+    if !coro.frame_open.set_operand(0, word_ty.const_int(f.next, false)) {
         return Err(EvalError::Internal(format!("{}: could not write the slot count into the prologue", what)));
     }
-    set_rooted_table(&module, &coro, f.next).map_err(|e| err("rooted slots", e))?;
+    if let Some(table) = rooted_table(&module, f.function, &f.rooted, f.next) {
+        if !coro.frame_open.set_operand(1, table) {
+            return Err(err("rooted slots", "could not write the table's address into the prologue".to_string()));
+        }
+    }
 
     // The dispatch chain: `pc == 0` is a fresh entry, anything else names a
     // call site. The last arm is unconditional — `pc` is only ever written by
@@ -713,7 +886,7 @@ pub(super) fn llvm_builder_coroutine_end(args: &[Value]) -> Result<Value, EvalEr
             b.build_unconditional_branch(target).map_err(|e| err("br", e.to_string()))?;
             break;
         }
-        let next = ctx.append_basic_block(coro.function, &format!("coro.dispatch{}", id + 1));
+        let next = ctx.append_basic_block(f.function, &format!("coro.dispatch{}", id + 1));
         let hit = b
             .build_int_compare(inkwell::IntPredicate::EQ, coro.pc, word_ty.const_int(id, false), "coro_is")
             .map_err(|e| err("icmp", e.to_string()))?;
@@ -723,11 +896,94 @@ pub(super) fn llvm_builder_coroutine_end(args: &[Value]) -> Result<Value, EvalEr
     Ok(Value::Empty)
 }
 
-/// Hands `rt_frame_open` the slots in `coro.rooted`, as the function's mask:
-/// a constant table of bit words, bit `i` of word `i / 64` for slot `i`, one
-/// word per 64 of the frame's `nslots`. The frame points at it rather than
-/// copying it, so making a frame costs the same however many slots are
-/// rooted. A function that roots none passes null.
+/// [`llvm_builder_coroutine_end`] for a direct function: return `value` at
+/// the result's carrier, and write the slots.
+///
+/// The slots are a stack array, `nslots` long. When any of them is rooted
+/// they are instead a frame on the task's root stack (`rt_local_frame_open`,
+/// all of them, so one mask table describes them as it does a coroutine's),
+/// closed on both ways out: the return, and the unwind block, which a raise
+/// after a call or an uncaught throw branches to. An unwind block nothing
+/// branches to is removed.
+#[allow(clippy::too_many_arguments)]
+fn direct_end(
+    b: &Builder<'static>,
+    module: &Rc<RefCell<Module<'static>>>,
+    function: FunctionValue<'static>,
+    data: PointerValue<'static>,
+    nslots: u64,
+    rooted: &[u64],
+    prologue_end: InstructionValue<'static>,
+    direct: DirectCtx,
+    value: IntValue<'static>,
+) -> Result<(), String> {
+    let word_ty = crate::compile::carriers::word();
+    let e = |e: inkwell::builder::BuilderError| e.to_string();
+    crate::compile::direct::take_unwind_exit(function);
+
+    let frame = match rooted_table(module, function, rooted, nslots) {
+        None => {
+            if !direct.slots.set_operand(0, word_ty.const_int(nslots, false)) {
+                return Err("could not write the slot count into the prologue".to_string());
+            }
+            None
+        }
+        Some(table) => {
+            // Right after the array, ahead of every slot address cut from it.
+            let here = b.get_insert_block();
+            b.position_before(&direct.slots.get_next_instruction().unwrap_or(prologue_end));
+            let (_, opened) = crate::compile::runtime_abi::call(
+                b,
+                &module.borrow(),
+                "rt_local_frame_open",
+                &[word_ty.const_int(nslots, false).into(), table.into()],
+            )?;
+            let ptr = b.build_int_to_ptr(opened, crate::compile::llvm_context().ptr_type(inkwell::AddressSpace::default()), "frame").map_err(e)?;
+            if let Some(block) = here {
+                b.position_at_end(block);
+            }
+            // The slots were cut from the array before anything said whether
+            // the collector would have to see them.
+            data.replace_all_uses_with(ptr);
+            direct.slots.erase_from_basic_block();
+            Some(opened)
+        }
+    };
+    let close = |b: &Builder<'static>| -> Result<(), String> {
+        if let Some(opened) = frame {
+            crate::compile::runtime_abi::call(b, &module.borrow(), "rt_local_frame_close", &[opened.into()])?;
+        }
+        Ok(())
+    };
+
+    if b.get_insert_block().is_some_and(|block| block.get_terminator().is_none()) {
+        let answer = direct.sig.ret.from_word(b, value)?;
+        close(b)?;
+        match answer {
+            Some(v) => b.build_return(Some(&v)).map_err(e)?,
+            None => b.build_return(None).map_err(e)?,
+        };
+    }
+
+    if direct.unwind.get_first_use().is_none() {
+        // SAFETY: a block nothing branches to, in a function being built.
+        unsafe { direct.unwind.delete() }.map_err(|()| "could not remove the unused unwind block".to_string())?;
+    } else {
+        b.position_at_end(direct.unwind);
+        close(b)?;
+        match function.get_type().get_return_type() {
+            Some(t) => b.build_return(Some(&crate::compile::raise_check::zero_of(t))).map_err(e)?,
+            None => b.build_return(None).map_err(e)?,
+        };
+    }
+    Ok(())
+}
+
+/// The mask of a frame whose rooted slots are `rooted`, out of `nslots`: a
+/// constant table of bit words, bit `i` of word `i / 64` for slot `i`, one
+/// word per 64 of the frame's `nslots`, as the word of its address — or
+/// `None` when no slot is rooted. The frame points at it rather than copying
+/// it, so making a frame costs the same however many slots are rooted.
 ///
 /// A table rather than a call per slot, because a long body has a rooted slot
 /// for nearly every value it keeps in the frame, and a straight line of that
@@ -738,26 +994,108 @@ pub(super) fn llvm_builder_coroutine_end(args: &[Value]) -> Result<Value, EvalEr
 /// A bit set before the slot is written is safe by construction: an
 /// untouched slot reads as a raw `0`, whose low bits are `TAG_FIXNUM`, so the
 /// collector follows nothing.
-fn set_rooted_table(module: &Rc<RefCell<Module<'static>>>, coro: &CoroCtx, nslots: u64) -> Result<(), String> {
-    if coro.rooted.is_empty() {
-        return Ok(());
+fn rooted_table(
+    module: &Rc<RefCell<Module<'static>>>,
+    function: FunctionValue<'static>,
+    rooted: &[u64],
+    nslots: u64,
+) -> Option<IntValue<'static>> {
+    if rooted.is_empty() {
+        return None;
     }
     let word_ty = crate::compile::carriers::word();
     let m = module.borrow();
     let mut bits = vec![0u64; nslots.div_ceil(64) as usize];
-    for &slot in &coro.rooted {
+    for &slot in rooted {
         bits[(slot / 64) as usize] |= 1u64 << (slot % 64);
     }
     let table_ty = word_ty.array_type(bits.len() as u32);
-    let name = format!("{}.rooted_slots", coro.function.get_name().to_string_lossy());
+    let name = format!("{}.rooted_slots", function.get_name().to_string_lossy());
     let table = m.add_global(table_ty, None, &name);
     let words: Vec<_> = bits.iter().map(|w| word_ty.const_int(*w, false)).collect();
     table.set_initializer(&word_ty.const_array(&words));
     table.set_constant(true);
     table.set_linkage(inkwell::module::Linkage::Private);
     table.set_unnamed_addr(true);
-    if !coro.frame_open.set_operand(1, table.as_pointer_value().const_to_int(word_ty)) {
-        return Err("could not write the table's address into the prologue".to_string());
+    Some(table.as_pointer_value().const_to_int(word_ty))
+}
+
+/// `(entry-word builder m entry idx)` — the word of the function's argument
+/// `idx` (`entry` `"rt_pending_arg"`) or capture `idx` (`"rt_pending_env"`).
+///
+/// A coroutine's arguments and captures cannot arrive as parameters — it
+/// has one, the frame — so they wait in `typelisp_abi::call_state` for the
+/// prologue to copy in, and this asks the runtime function `entry` for one.
+/// A direct function's arguments are its parameters, each at its carrier,
+/// and this is the parameter as a word; a `()` one has no parameter and is
+/// the word `0`. A direct function captures nothing.
+pub(super) fn llvm_builder_entry_word(heap: &typelisp_mem::Heap, args: &[Value]) -> Result<Value, EvalError> {
+    let builder = expect_llvm_builder(&args[0])?;
+    let module = expect_llvm_module(&args[1])?;
+    let entry = crate::eval::interp::expect_str(heap, &args[2])?.to_string();
+    let idx = match &args[3] {
+        Value::Int(n) if *n >= 0 => *n as usize,
+        other => return Err(EvalError::Internal(format!("entry-word: {:?} is not an index", other))),
+    };
+    let err = |e: String| EvalError::Internal(format!("entry-word: {}", e));
+    let b = builder.borrow();
+    if let Some(sig) = direct_sig(&builder) {
+        if entry != "rt_pending_arg" {
+            return Err(err(format!("a direct function has no `{}`", entry)));
+        }
+        let carrier = *sig.params.get(idx).ok_or_else(|| err(format!("no parameter {}", idx)))?;
+        let word = match sig.llvm_index(idx) {
+            None => crate::compile::carriers::word().const_zero(),
+            Some(i) => {
+                let f = b.get_insert_block().and_then(|block| block.get_parent()).ok_or_else(|| err("outside any function".to_string()))?;
+                let p = f.get_nth_param(i).ok_or_else(|| err(format!("no LLVM parameter {}", i)))?;
+                carrier.to_word(&b, p).map_err(err)?
+            }
+        };
+        return Ok(llvm_value_value(word.into()));
     }
-    Ok(())
+    let word = crate::compile::carriers::word();
+    let (f, v) = crate::compile::runtime_abi::call(&b, &module.borrow(), &entry, &[word.const_int(idx as u64, false).into()]).map_err(err)?;
+    crate::compile::raise_check::after_call(&b, f).map_err(err)?;
+    Ok(llvm_value_value(v.into()))
+}
+
+/// `(loop-safepoint builder m loop-block)` — the back edge of a loop, to
+/// `loop-block`.
+///
+/// A coroutine offers the scheduler a turn on the way (`rt_loop_safepoint`)
+/// and stops there when it is asked to: a loop that calls nothing would
+/// otherwise keep every other task waiting. A direct function goes straight
+/// back: it is direct only in a program with no other task to run.
+pub(super) fn llvm_builder_loop_safepoint(args: &[Value]) -> Result<Value, EvalError> {
+    let builder = expect_llvm_builder(&args[0])?;
+    let module = expect_llvm_module(&args[1])?;
+    let loop_block = expect_llvm_basic_block(&args[2])?;
+    let err = |step: &str, e: String| EvalError::Internal(format!("loop-safepoint: {}: {}", step, e));
+    if direct_sig(&builder).is_some() {
+        builder.borrow().build_unconditional_branch(loop_block).map_err(|e| err("br", e.to_string()))?;
+        crate::compile::direct::skipped_safepoint();
+        return Ok(Value::Empty);
+    }
+    let ctx = crate::compile::llvm_context();
+    let (data, function, id) = open_coroutine_frame(&builder, "loop-safepoint")?;
+    let poll = ctx.append_basic_block(function, "loop-safepoint");
+    let resume = ctx.append_basic_block(function, &format!("coro.resume{}", id));
+    {
+        let b = builder.borrow();
+        let (f, offered) = crate::compile::runtime_abi::call(&b, &module.borrow(), "rt_loop_safepoint", &[]).map_err(|e| err("call", e))?;
+        crate::compile::raise_check::after_call(&b, f).map_err(|e| err("raise check", e))?;
+        let stay = b
+            .build_int_compare(inkwell::IntPredicate::EQ, offered, crate::compile::carriers::word().const_zero(), "no_turn")
+            .map_err(|e| err("icmp", e.to_string()))?;
+        b.build_conditional_branch(stay, loop_block, poll).map_err(|e| err("br", e.to_string()))?;
+        b.position_at_end(poll);
+        store_resume_point(&b, data, id, "loop-safepoint")?;
+        b.build_return(Some(&crate::compile::carriers::word().const_int(typelisp_abi::STATUS_SUSPEND as u64, false)))
+            .map_err(|e| err("ret", e.to_string()))?;
+        b.position_at_end(resume);
+        b.build_unconditional_branch(loop_block).map_err(|e| err("br", e.to_string()))?;
+    }
+    push_resume(&builder, id, resume);
+    Ok(Value::Empty)
 }

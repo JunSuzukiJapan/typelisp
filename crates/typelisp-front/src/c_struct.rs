@@ -8,6 +8,7 @@
 //! (`compile::externs`) and is answered by [`eval`] in the interpreter. Both
 //! run the same `c_mem` functions.
 
+use typelisp_mem::fixed::FixedType;
 use typelisp_mem::{wk, Heap, SymRef, Value};
 use typelisp_rt::c_mem;
 
@@ -66,7 +67,13 @@ pub fn kind_repr(kind: i64) -> Repr {
         c_mem::KIND_F32 => Repr::F32,
         c_mem::KIND_F64 => Repr::F64,
         c_mem::KIND_BOOL => Repr::Bool,
-        _ => Repr::Narrow,
+        c_mem::KIND_I8 => Repr::Narrow(FixedType::I8),
+        c_mem::KIND_I16 => Repr::Narrow(FixedType::I16),
+        c_mem::KIND_I32 => Repr::Narrow(FixedType::I32),
+        c_mem::KIND_U8 => Repr::Narrow(FixedType::U8),
+        c_mem::KIND_U16 => Repr::Narrow(FixedType::U16),
+        c_mem::KIND_U32 => Repr::Narrow(FixedType::U32),
+        other => unreachable!("{} is not a C memory kind", other),
     }
 }
 

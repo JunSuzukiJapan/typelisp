@@ -62,6 +62,20 @@ pub(crate) struct Sig {
     pub ret: RtTy,
 }
 
+/// As LLVM spells the type (`i64 (ptr, i32)`), written without asking LLVM,
+/// whose context every thread shares.
+impl std::fmt::Display for Sig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let spelled = |t: &RtTy| match t {
+            RtTy::Word => "i64",
+            RtTy::U32 => "i32",
+            RtTy::Ptr => "ptr",
+        };
+        let params: Vec<&str> = self.params.iter().map(spelled).collect();
+        write!(f, "{} ({})", spelled(&self.ret), params.join(", "))
+    }
+}
+
 impl Sig {
     /// The LLVM function type of the signature.
     pub(crate) fn fn_type(&self) -> FunctionType<'static> {

@@ -330,6 +330,19 @@ pub fn translate_and_compile(
     internal_name: &str,
     extra_exclude_from_cell_names: &HashSet<SymRef>,
 ) -> Result<(), EvalError> {
+    let (param_list, body_sexpr) = translate(interp, heap, params, body, extra_exclude_from_cell_names)?;
+    run_compile_function(interp, heap, module, internal_name, param_list, body_sexpr)
+}
+
+/// [`translate_and_compile`]'s first half: the function as the island takes
+/// it, its parameter list and its body. Unrooted.
+pub fn translate(
+    interp: &Interp,
+    heap: &mut Heap,
+    params: &[(SymRef, Repr)],
+    body: &[Value],
+    extra_exclude_from_cell_names: &HashSet<SymRef>,
+) -> Result<(Value, Value), EvalError> {
     prepare_targets(interp, heap, body)?;
     // `core_bridge` is deliberately `Registry`-free, so hand it the type
     // definitions as a plain flattened snapshot of the scope tree —
@@ -350,8 +363,7 @@ pub fn translate_and_compile(
     drop(compiled_globals);
     drop(vtable_ids);
     drop(trait_ids);
-
-    run_compile_function(interp, heap, module, internal_name, param_list, body_sexpr)
+    Ok((param_list, body_sexpr))
 }
 
 /// The scope tree's type definitions, in the shape the compile bridge
@@ -494,6 +506,14 @@ pub fn add_compiled_global_init(
     internal_name: &str,
     form: Value,
 ) -> Result<(), EvalError> {
+    let body_sexpr = translate_global_init(interp, heap, form)?;
+    // A global initializer takes no parameters.
+    run_compile_function(interp, heap, module, internal_name, Value::Empty, body_sexpr)
+}
+
+/// [`add_compiled_global_init`]'s first half: the initializer as the island
+/// takes it. Unrooted.
+pub fn translate_global_init(interp: &Interp, heap: &mut Heap, form: Value) -> Result<Value, EvalError> {
     // The whole `(defvar ...)` form, not just its initializer:
     // `core_bridge::global_init` reads the declared representation off the
     // form to know how the global's storage is tagged, which the
@@ -519,11 +539,7 @@ pub fn add_compiled_global_init(
     drop(compiled_globals);
     drop(vtable_ids);
     drop(trait_ids);
-    let mut s = RootScope::new(heap);
-    s.push_root(body_sexpr);
-    // A global initializer takes no parameters.
-    let param_list = Value::Empty;
-    run_compile_function(interp, &mut s, module, internal_name, param_list, body_sexpr)
+    Ok(body_sexpr)
 }
 
 /// `(compile fn-name)` (or `(compile type::method)`): JIT-compiles a

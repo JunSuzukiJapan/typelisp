@@ -138,7 +138,7 @@ fn a_call_that_would_raise_is_left_to_raise_at_runtime() {
     );
     assert_eq!(
         lowered("(mod (the i32 1) 0)"),
-        "(expr (assoc i32 mod true int-any-width (int-any-width int-any-width) (type-named i32) (int-any-width 1) (int-any-width 0)))"
+        "(expr (assoc i32 mod true i32 (i32 i32) (type-named i32) (int-any-width 1) (int-any-width 0)))"
     );
     // The fold must not have turned the runtime panic into a check error.
     let mut s = Session::new(Load::Prelude);

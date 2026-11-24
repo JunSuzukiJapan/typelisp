@@ -588,13 +588,13 @@ pub(crate) trait CoreForms {
     /// wants one per parameter.
     ///
     /// The last two fields are the declared types, *deliberately* redundant
-    /// with the `REPR`s beside them. A `Repr` folds all six integer widths into
-    /// `Repr::Narrow` (see its doc comment), which is the right answer for the
-    /// question a `Repr` exists to answer — how a value crosses the compiled
-    /// boundary — and the wrong one for the thunk, which has to emit
-    /// `trunc i64 to i8`. Two questions about one type, the way `field_kind`
-    /// and `binding_kind` are. One producer (`typeck::defffi`), so they
-    /// cannot drift.
+    /// with the `REPR`s beside them. A `Repr` folds `ptr`, `c-long` and
+    /// `c-ulong` into `Repr::RawWord` (see its doc comment), which is the
+    /// right answer for the question a `Repr` exists to answer — how a value
+    /// crosses the compiled boundary — and the wrong one for the thunk, which
+    /// has to pass C's `long` at C's width. Two questions about one type, the
+    /// way `field_kind` and `binding_kind` are. One producer
+    /// (`typeck::defffi`), so they cannot drift.
     #[allow(clippy::too_many_arguments)]
     fn defffi_form(
         &self,

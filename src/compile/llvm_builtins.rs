@@ -131,6 +131,8 @@ pub(crate) fn eval_llvm_builtin_method(heap: &mut Heap, type_name: &Path, method
             wk::M_COROUTINE_APPLY => Some(llvm_builder_coroutine_apply(args)),
             wk::M_COROUTINE_DYN_CALL => Some(llvm_builder_coroutine_dyn_call(args)),
             wk::M_COROUTINE_END => Some(llvm_builder_coroutine_end(args)),
+            wk::M_ENTRY_WORD => Some(coroutine::llvm_builder_entry_word(heap, args)),
+            wk::M_LOOP_SAFEPOINT => Some(coroutine::llvm_builder_loop_safepoint(args)),
             wk::M_BUILD_ICMP_LT => Some(llvm_builder_build_icmp(args, "icmp_lt", inkwell::IntPredicate::SLT)),
             wk::M_BUILD_ICMP_LE => Some(llvm_builder_build_icmp(args, "icmp_le", inkwell::IntPredicate::SLE)),
             wk::M_BUILD_ICMP_GT => Some(llvm_builder_build_icmp(args, "icmp_gt", inkwell::IntPredicate::SGT)),
@@ -295,7 +297,9 @@ fn llvm_module_add_coroutine_function(heap: &Heap, args: &[Value]) -> Result<Val
     let module = expect_llvm_module(&args[0])?;
     let name = expect_str(heap, &args[1])?;
     let existing = module.borrow().get_function(&name);
-    let function = existing.unwrap_or_else(|| module.borrow_mut().add_function(&name, coroutine_fn_type(), None));
+    // A direct function (`crate::compile::direct`) has a signature of its own.
+    let ty = crate::compile::direct::sig_of(&name).map_or_else(coroutine_fn_type, |sig| sig.fn_type());
+    let function = existing.unwrap_or_else(|| module.borrow_mut().add_function(&name, ty, None));
     Ok(llvm_function_value(function))
 }
 

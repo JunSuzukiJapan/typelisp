@@ -5,7 +5,8 @@
 //! called. Whoever called it has to look before using the answer: right after
 //! the call, generated code asks `rt_unwinding`, and if an unwind is waiting
 //! it leaves its own activation at once — a coroutine-ABI body with
-//! `STATUS_UNWIND`, which sends the driver to the frame's handler; any other
+//! `STATUS_UNWIND`, which sends the driver to the frame's handler; a direct
+//! function through its unwind block (`crate::compile::direct`); any other
 //! function with a zero of its return type, leaving the unwind waiting for
 //! its own caller to see.
 //!
@@ -44,8 +45,17 @@ pub(crate) fn after_call(builder: &Builder<'static>, callee: FunctionValue<'stat
     let raised = builder
         .build_int_compare(inkwell::IntPredicate::NE, asked, word_ty.const_zero(), "raised")
         .map_err(|e| format!("raise check: compare: {}", e))?;
-    let leave = ctx.append_basic_block(current, "raised");
     let go_on = ctx.append_basic_block(current, "not_raised");
+    // A direct function leaves through its own unwind block, which closes
+    // what the function opened before it returns.
+    if let Some(unwind) = crate::compile::direct::unwind_exit(current) {
+        builder
+            .build_conditional_branch(raised, unwind, go_on)
+            .map_err(|e| format!("raise check: branch: {}", e))?;
+        builder.position_at_end(go_on);
+        return Ok(());
+    }
+    let leave = ctx.append_basic_block(current, "raised");
     builder
         .build_conditional_branch(raised, leave, go_on)
         .map_err(|e| format!("raise check: branch: {}", e))?;
@@ -74,7 +84,7 @@ fn leave_with_the_raise(builder: &Builder<'static>, f: FunctionValue<'static>) -
     r.map(|_| ()).map_err(|e| format!("raise check: return: {}", e))
 }
 
-fn zero_of(t: BasicTypeEnum<'static>) -> inkwell::values::BasicValueEnum<'static> {
+pub(crate) fn zero_of(t: BasicTypeEnum<'static>) -> inkwell::values::BasicValueEnum<'static> {
     match t {
         BasicTypeEnum::IntType(t) => t.const_zero().into(),
         BasicTypeEnum::FloatType(t) => t.const_zero().into(),

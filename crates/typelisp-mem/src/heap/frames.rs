@@ -216,6 +216,18 @@ impl Heap {
         (*self.current).frames.open(nslots, mask, depth)
     }
 
+    /// Closes the frame whose words start at `data`, and every frame and root
+    /// above it: truncates the root stack to the depth it was opened at.
+    ///
+    /// # Safety
+    ///
+    /// `data` must be the address of a frame [`open_frame`](Self::open_frame)
+    /// opened on the running task's root stack and not yet closed.
+    pub unsafe fn close_frame(&mut self, data: *mut i64) {
+        let depth = *data.sub(FRAME_HEADER - FRAME_HEADER_DEPTH) as usize;
+        self.truncate_roots(depth);
+    }
+
     /// How many frames are open on the running task's root stack.
     pub fn open_frame_count(&self) -> usize {
         unsafe { &*self.current }.frames.open.len()

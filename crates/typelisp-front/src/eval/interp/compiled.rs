@@ -29,7 +29,7 @@ pub(crate) fn decode_crossing_return(heap: &mut Heap, raw: i64, ret: &Repr) -> R
             }
         },
         // Raw machine words on the way out, mirroring the argument encode.
-        Repr::Narrow => Value::Int(raw),
+        Repr::Narrow(_) => Value::Int(raw),
         // Also raw, and — unlike `Handle` above — with no registry to
         // check it against. Whatever C answered is the answer; the FFI
         // declaration is what claimed it would be a pointer.
@@ -159,7 +159,7 @@ pub(crate) fn encode_crossing_value(heap: &Heap, v: &Value, repr: &Repr) -> Resu
     match repr {
         // Raw machine words, by the encodings compiled code uses
         // internally.
-        Repr::Narrow => match v {
+        Repr::Narrow(_) => match v {
             Value::Int(n) => Ok(*n),
             other => Err(EvalError::Internal(format!("compiled call: expected an integer argument, got {:?}", other))),
         },
@@ -725,6 +725,15 @@ impl Interp {
         // sequence, so there is nothing for `single_body_expr`'s old
         // wrap-in-a-`progn` to do.
         Ok((params, f.body.clone()))
+    }
+
+    /// The representation of what `target` answers with.
+    pub fn compiled_fn_ret(&self, target: &crate::CompileTarget) -> Result<Repr, EvalError> {
+        let f = self.target_def(target).ok_or_else(|| EvalError::NoSuchFunction(target.link_name()))?;
+        let sig = f.sig.as_ref().ok_or_else(|| {
+            EvalError::Panic(format!("compile: \"{}\" has no signature (is it a defmacro?)", target.link_name()))
+        })?;
+        Ok(sig.1.clone())
     }
 }
 

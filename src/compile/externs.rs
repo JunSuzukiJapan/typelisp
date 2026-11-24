@@ -357,10 +357,12 @@ pub(crate) fn needs_interpreter(name: &str) -> bool {
 /// other call is checked. A shim listed here that does raise is caught by the
 /// driver — an activation that goes on after a raise is fatal there — so a
 /// mistake here is loud, not a wrong answer.
-const NEVER_RAISING_SHIMS: [&str; 24] = [
+const NEVER_RAISING_SHIMS: [&str; 26] = [
     "rt_unwinding",
     "rt_pending_arg",
     "rt_frame_open",
+    "rt_local_frame_open",
+    "rt_local_frame_close",
     "rt_frame_call",
     "rt_str_new",
     "rt_wk_symbol",
@@ -940,7 +942,7 @@ pub(crate) fn runtime_addresses() -> impl Iterator<Item = (&'static str, usize)>
 
 /// The shims every target has: `typelisp-rt`'s, the printer's, the reader's
 /// and `rt_llvm_call`.
-fn rt_shims() -> [(&'static str, Shim); 351] {
+fn rt_shims() -> [(&'static str, Shim); 353] {
     use typelisp_rt::c_mem::{
         rt_c_alloc, rt_c_arena_close, rt_c_arena_open, rt_c_index, rt_c_load, rt_c_offset, rt_c_ptr_check, rt_c_store,
         rt_c_volatile_load, rt_c_volatile_store,
@@ -1023,7 +1025,7 @@ fn rt_shims() -> [(&'static str, Shim); 351] {
         rt_dyn_new, rt_dyn_upcast, rt_dyn_value, rt_dyn_vtable, rt_types_define, rt_upcast_set, rt_vtable_set,
         rt_throw, rt_throw_matches, rt_throw_take_value, rt_unwinding,
         rt_frame_call, rt_frame_open, rt_frame_call_env, rt_frame_apply, rt_frame_dyn_call, rt_pending_arg, rt_pending_argc,
-        rt_pending_env, rt_pending_envc,
+        rt_pending_env, rt_pending_envc, rt_local_frame_open, rt_local_frame_close,
     };
     [
         // The one main-crate entry: the generic `llvm-*`/native-scope
@@ -1167,6 +1169,8 @@ fn rt_shims() -> [(&'static str, Shim); 351] {
         ("rt_panic", shim(rt_panic as unsafe extern "C-unwind" fn(i64) -> i64)),
         ("rt_frame_call", shim(rt_frame_call as unsafe extern "C" fn(*const i64, u32) -> i64)),
         ("rt_frame_open", shim(rt_frame_open as unsafe extern "C" fn(i64, i64) -> i64)),
+        ("rt_local_frame_open", shim(rt_local_frame_open as unsafe extern "C" fn(i64, i64) -> i64)),
+        ("rt_local_frame_close", shim(rt_local_frame_close as unsafe extern "C" fn(i64) -> i64)),
         ("rt_frame_apply", shim(rt_frame_apply as unsafe extern "C" fn(*const i64, u32) -> i64)),
         ("rt_frame_dyn_call", shim(rt_frame_dyn_call as unsafe extern "C" fn(*const i64, u32) -> i64)),
         ("rt_frame_call_env", shim(rt_frame_call_env as unsafe extern "C" fn(*const i64, u32) -> i64)),
@@ -1500,7 +1504,7 @@ mod scc_tests {
                     body: vec![call],
                     rest: false,
                     lambda: None,
-                    sig: Some((vec![], Repr::Narrow)),
+                    sig: Some((vec![], Repr::Narrow(typelisp_mem::fixed::FixedType::I32))),
                     compiled: RefCell::new(None),
                 }),
             );

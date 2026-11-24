@@ -36,6 +36,34 @@ pub unsafe extern "C" fn rt_frame_open(nslots: i64, mask: i64) -> i64 {
     })
 }
 
+/// `rt_local_frame_open(nslots, mask)` — a direct function's frame: the
+/// slots it keeps a value the collector has to see in, opened like a
+/// coroutine's (`Heap::open_frame`) but not published, because no driver
+/// runs a direct function. Its own code closes it on the way out
+/// ([`rt_local_frame_close`]). Returns the address of its words.
+///
+/// # Safety
+///
+/// A non-null `mask` must point to `nslots.div_ceil(64)` words that outlive
+/// the frame. A `Heap` must be registered on this thread.
+#[no_mangle]
+pub unsafe extern "C" fn rt_local_frame_open(nslots: i64, mask: i64) -> i64 {
+    typelisp_abi::call_state::with_heap(|heap, _| heap.open_frame(nslots as usize, mask as usize as *const u64).data() as i64)
+}
+
+/// `rt_local_frame_close(data)` — closes the frame [`rt_local_frame_open`]
+/// answered `data` for.
+///
+/// # Safety
+///
+/// `data` must be such a frame's address, not yet closed, on the running
+/// task's root stack.
+#[no_mangle]
+pub unsafe extern "C" fn rt_local_frame_close(data: i64) -> i64 {
+    typelisp_abi::call_state::with_heap(|heap, _| heap.close_frame(data as usize as *mut i64));
+    0
+}
+
 /// `(rt-pending-argc)` for compiled code — how many arguments the driver left
 /// for this entry.
 ///

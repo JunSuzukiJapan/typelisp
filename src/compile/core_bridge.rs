@@ -3212,7 +3212,7 @@ mod tests {
 
     /// A `point` with two int fields and an `option` over a `sexpr`, which is
     /// enough to show both a struct's and an enum's field kinds.
-    const DEFS: [&str; 2] = ["(defstruct ::point (int-any-width int-any-width))", "(defenum ::std::option::Option (None Some) (() (sexpr)))"];
+    const DEFS: [&str; 2] = ["(defstruct ::point (i32 i32))", "(defenum ::std::option::Option (None Some) (() (sexpr)))"];
 
     #[test]
     fn the_word_sized_literals_pass_through_unchanged() {
@@ -3269,7 +3269,7 @@ mod tests {
     #[test]
     fn a_let_carries_each_bindings_kind() {
         assert_eq!(
-            bridged("(let ((x int-any-width (int-any-width 1))) (var x))"),
+            bridged("(let ((x i32 (int-any-width 1))) (var x))"),
             r#"(let (((x . 0) int-any-width 0 1)) (var "x" false))"#
         );
         // A `sexpr` binding is the one that needs a GC root, hence kind 2.
@@ -3296,7 +3296,7 @@ mod tests {
     #[test]
     fn a_call_tags_every_argument_with_its_kind() {
         assert_eq!(
-            bridged("(call ::f (int-any-width sexpr) (int-any-width 1) (int-any-width 2))"),
+            bridged("(call ::f (i32 sexpr) (int-any-width 1) (int-any-width 2))"),
             r#"(call "tl_f" (0 int-any-width 0 1) (2 int-any-width 0 2))"#
         );
         assert_eq!(bridged("(call ::f ())"), r#"(call "tl_f")"#);
@@ -3322,11 +3322,11 @@ mod tests {
     #[test]
     fn an_ordinary_method_call_is_named_by_its_qualified_type() {
         assert_eq!(
-            bridged("(assoc ::std::primitive::i32 + true int-any-width (int-any-width int-any-width) (type-named ::std::primitive::i32) (var a) (var b))"),
+            bridged("(assoc ::std::primitive::i32 + true i32 (i32 i32) (type-named ::std::primitive::i32) (var a) (var b))"),
             r#"(assoc i32 "+" true "tl_std::primitive::i32''+" (0 var "a" false) (0 var "b" false))"#
         );
         assert_eq!(
-            bridged("(assoc ::m::point area true int-any-width (struct) (type-named ::std::primitive::i32) (var p))"),
+            bridged("(assoc ::m::point area true i32 (struct) (type-named ::std::primitive::i32) (var p))"),
             r#"(assoc () "area" true "tl_m::point''area" (2 var "p" false))"#
         );
         // Only the standard library's type is named for the island: a type
@@ -3339,7 +3339,7 @@ mod tests {
                     h.names().shadow(shadowing(), "i32").expect("`i32` is not a reserved word");
                 },
                 &[],
-                "(assoc ::shadowing::i32 + true int-any-width (int-any-width int-any-width) (type-named ::shadowing::i32) (var a) (var b))"
+                "(assoc ::shadowing::i32 + true i32 (i32 i32) (type-named ::shadowing::i32) (var a) (var b))"
             ),
             r#"(assoc () "+" true "tl_shadowing::i32''+" (0 var "a" false) (0 var "b" false))"#
         );
@@ -3350,7 +3350,7 @@ mod tests {
     #[test]
     fn a_vector_builtin_becomes_an_operation_carrying_its_element_kind() {
         assert_eq!(
-            bridged("(assoc ::std::vec::Vector get true int-any-width ((vector int-any-width) int-any-width) (type-named ::std::primitive::i32) (var v) (int-any-width 0))"),
+            bridged("(assoc ::std::vec::Vector get true i32 ((vector i32) i32) (type-named ::std::primitive::i32) (var v) (int-any-width 0))"),
             r#"(vector-op "get" 1 (var "v" false) (int-any-width 0 0))"#
         );
         // A `sexpr` element is already tagged, so it passes through as kind 6.
@@ -3361,7 +3361,7 @@ mod tests {
         // `new` has no receiver and no element to tag; the result is what
         // says it is a vector at all.
         assert_eq!(
-            bridged("(assoc ::std::vec::Vector new false (vector int-any-width) () (type-named ::std::vec::Vector (type-named ::std::primitive::i32)))"),
+            bridged("(assoc ::std::vec::Vector new false (vector i32) () (type-named ::std::vec::Vector (type-named ::std::primitive::i32)))"),
             format!(r#"(vector-op "new" 0 {})"#, type_nodes("(type-named ::std::vec::Vector (type-named ::std::primitive::i32))"))
         );
     }
@@ -3373,13 +3373,13 @@ mod tests {
     #[test]
     fn a_hash_table_builtin_carries_both_key_and_value_kinds() {
         assert_eq!(
-            bridged("(assoc ::std::collections::HashTable bucket-put true unit ((hashtable str int-any-width) int-any-width int-any-width str int-any-width) (type-unit) (var h) (var n) (var i) (var k) (var x))"),
+            bridged("(assoc ::std::collections::HashTable bucket-put true unit ((hashtable str i32) i32 i32 str i32) (type-unit) (var h) (var n) (var i) (var k) (var x))"),
             r#"(hashtable-op "bucket-put" 6 1 () (var "h" false) (var "n" false) (var "i" false) (var "k" false) (var "x" false))"#
         );
         // A bucket read builds no box, so the name slot stays empty; the
         // island decodes the result by `key-kind`/`val-kind` instead.
         assert_eq!(
-            bridged("(assoc ::std::collections::HashTable bucket-value true int-any-width ((hashtable str int-any-width) int-any-width int-any-width) (type-named ::std::primitive::i32) (var h) (var n) (var i))"),
+            bridged("(assoc ::std::collections::HashTable bucket-value true i32 ((hashtable str i32) i32 i32) (type-named ::std::primitive::i32) (var h) (var n) (var i))"),
             r#"(hashtable-op "bucket-value" 6 1 () (var "h" false) (var "n" false) (var "i" false))"#
         );
     }
@@ -3389,7 +3389,7 @@ mod tests {
     /// name strings.
     #[test]
     fn an_llvm_method_becomes_an_operation_id() {
-        let printed = bridged("(assoc ::%core::llvm-builder const-word true handle (handle int-any-width) (type-named ::%core::llvm-value) (var b) (int-any-width 42))");
+        let printed = bridged("(assoc ::%core::llvm-builder const-word true handle (handle i32) (type-named ::%core::llvm-value) (var b) (int-any-width 42))");
         assert_eq!(
             printed,
             format!(
@@ -3408,7 +3408,7 @@ mod tests {
         let printed = bridged("(assoc ::std::collections::Scope get true enum ((scope handle) str) (type-named ::std::option::Option (type-named ::%core::llvm-value)) (var e) (var n))");
         assert!(printed.starts_with("(llvm-op "), "expected a native-scope op, got {}", printed);
         assert_eq!(
-            bridged("(assoc ::std::collections::Scope get true enum ((scope int-any-width) str) (type-named ::std::option::Option (type-named ::std::primitive::i32)) (var e) (var n))"),
+            bridged("(assoc ::std::collections::Scope get true enum ((scope i32) str) (type-named ::std::option::Option (type-named ::std::primitive::i32)) (var e) (var n))"),
             r#"(assoc Scope "get" true "tl_std::collections::Scope''get" (2 var "e" false) (2 var "n" false))"#
         );
     }
@@ -3421,7 +3421,7 @@ mod tests {
     #[test]
     fn a_construct_tags_its_fields_from_its_own_representations() {
         assert_eq!(
-            bridged_with(&DEFS, "(construct ::point (type-named ::point) 0 true (int-any-width int-any-width) (int-any-width 1) (int-any-width 2))"),
+            bridged_with(&DEFS, "(construct ::point (type-named ::point) 0 true (i32 i32) (int-any-width 1) (int-any-width 2))"),
             format!("(construct false true {} 0 (1 int-any-width 0 1) (1 int-any-width 0 2))", type_nodes("(type-named ::point)"))
         );
         // An enum field of `sexpr` is already tagged, hence the passthrough
@@ -3443,7 +3443,7 @@ mod tests {
     #[test]
     fn a_construct_needs_no_definition_recorded() {
         assert_eq!(
-            bridged_with(&[], "(construct ::point (type-named ::point) 0 true (int-any-width int-any-width) (int-any-width 1) (int-any-width 2))"),
+            bridged_with(&[], "(construct ::point (type-named ::point) 0 true (i32 i32) (int-any-width 1) (int-any-width 2))"),
             format!("(construct false true {} 0 (1 int-any-width 0 1) (1 int-any-width 0 2))", type_nodes("(type-named ::point)"))
         );
     }
@@ -3453,7 +3453,7 @@ mod tests {
     /// kind.
     #[test]
     fn a_construct_whose_arity_disagrees_with_its_representations_is_refused() {
-        let e = refused_with(&DEFS, "(construct ::point (type-named ::point) 0 true (int-any-width int-any-width) (int-any-width 1))");
+        let e = refused_with(&DEFS, "(construct ::point (type-named ::point) 0 true (i32 i32) (int-any-width 1))");
         assert!(e.contains("has 2 fields, constructed with 1"), "{}", e);
     }
 
@@ -3464,7 +3464,7 @@ mod tests {
     /// wrong box shape.
     #[test]
     fn a_pattern_on_an_unrecorded_type_is_refused() {
-        let e = refused_with(&[], "(match (var v) struct ((pat-ctor ::point (type-named ::point) 0 false (int-any-width int-any-width) (pat-wild) (pat-wild)) (int-any-width 1)))");
+        let e = refused_with(&[], "(match (var v) struct ((pat-ctor ::point (type-named ::point) 0 false (i32 i32) (pat-wild) (pat-wild)) (int-any-width 1)))");
         assert!(e.contains("no definition recorded"), "{}", e);
     }
 
@@ -3473,10 +3473,10 @@ mod tests {
     /// narrowing primitive — but it can measure a list.
     #[test]
     fn a_field_access_encodes_its_index_as_a_list_length() {
-        assert_eq!(bridged("(field-get (var p) 0 int-any-width)"), r#"(field-get () 1 (var "p" false))"#);
+        assert_eq!(bridged("(field-get (var p) 0 i32)"), r#"(field-get () 1 (var "p" false))"#);
         assert_eq!(bridged("(field-get (var p) 2 sexpr)"), r#"(field-get (false false) 6 (var "p" false))"#);
         assert_eq!(
-            bridged("(field-set (var p) 1 int-any-width (int-any-width 5))"),
+            bridged("(field-set (var p) 1 i32 (int-any-width 5))"),
             r#"(field-set (false) 1 (var "p" false) (int-any-width 0 5))"#
         );
     }
@@ -3499,7 +3499,7 @@ mod tests {
         // A struct scrutinee: pattern kind 2, and the field kinds come from
         // the `defstruct`.
         assert_eq!(
-            bridged_with(&DEFS, "(match (var p) struct ((pat-ctor ::point (type-named ::point) 0 false (int-any-width int-any-width) (pat-bind a) (pat-wild)) (var a)))"),
+            bridged_with(&DEFS, "(match (var p) struct ((pat-ctor ::point (type-named ::point) 0 false (i32 i32) (pat-bind a) (pat-wild)) (var a)))"),
             r#"(match false (var "p" false) (((pat-ctor 0 ((pat-bind "a" 0) (pat-wild)) 2 (1 1) false ()) var "a" false)) 2)"#
         );
     }
@@ -3534,9 +3534,9 @@ mod tests {
     /// placeholder.
     #[test]
     fn only_a_downcast_pattern_carries_a_type_name() {
-        let plain = bridged_with(&DEFS, "(match (var v) sexpr ((pat-ctor ::point (type-named ::point) 0 false (int-any-width int-any-width) (pat-wild) (pat-wild)) (int-any-width 1)))");
+        let plain = bridged_with(&DEFS, "(match (var v) sexpr ((pat-ctor ::point (type-named ::point) 0 false (i32 i32) (pat-wild) (pat-wild)) (int-any-width 1)))");
         assert!(plain.contains("(pat-ctor 0 ((pat-wild) (pat-wild)) 2 (1 1) false ())"), "{}", plain);
-        let down = bridged_with(&DEFS, "(match (var v) sexpr ((pat-ctor ::point (type-named ::point) 0 true (int-any-width int-any-width) (pat-wild) (pat-wild)) (int-any-width 1)))");
+        let down = bridged_with(&DEFS, "(match (var v) sexpr ((pat-ctor ::point (type-named ::point) 0 true (i32 i32) (pat-wild) (pat-wild)) (int-any-width 1)))");
         assert!(down.contains(&format!("true {})", type_nodes("(type-named ::point)"))), "{}", down);
         // A whole-value type test always tests, so it always carries one.
         let tt = bridged_with(&DEFS, "(match (var v) sexpr ((pat-typetest ::point (type-named ::point) (pat-bind p)) (var p)))");
@@ -3554,7 +3554,7 @@ mod tests {
     #[test]
     fn a_match_on_a_scalar_translates_and_asks_for_no_root() {
         assert_eq!(
-            bridged_with(&DEFS, "(match (var n) int-any-width ((pat-lit (int-any-width 1)) (int-any-width 10)))"),
+            bridged_with(&DEFS, "(match (var n) i32 ((pat-lit (int-any-width 1)) (int-any-width 10)))"),
             r#"(match false (var "n" false) (((pat-lit 0 1) int-any-width 0 10)) 0)"#
         );
     }
@@ -3580,7 +3580,7 @@ mod tests {
     #[test]
     fn set_takes_its_kind_from_the_binding_it_targets() {
         assert_eq!(
-            bridged("(let ((x int-any-width (int-any-width 1))) (set x (int-any-width 2)))"),
+            bridged("(let ((x i32 (int-any-width 1))) (set x (int-any-width 2)))"),
             r#"(let (((x . 0) int-any-width 0 1)) (set "x" 0 (int-any-width 0 2)))"#
         );
         // A `sexpr` binding is the one with a GC root to keep in step.
@@ -3589,7 +3589,7 @@ mod tests {
             r#"(let (((s . 2) str (int-any-width 0 97))) (set "s" 2 (str (int-any-width 0 98))))"#
         );
         // An inner binding shadows an outer one of a different kind.
-        let shadowed = bridged(r#"(let ((x sexpr (str "a"))) (let ((x int-any-width (int-any-width 1))) (set x (int-any-width 2))))"#);
+        let shadowed = bridged(r#"(let ((x sexpr (str "a"))) (let ((x i32 (int-any-width 1))) (set x (int-any-width 2))))"#);
         assert!(shadowed.contains(r#"(set "x" 0"#), "the inner binding should win: {}", shadowed);
     }
 
@@ -3617,7 +3617,7 @@ mod tests {
     #[test]
     fn a_loop_carries_its_own_binding_kind() {
         assert_eq!(bridged("(loop sexpr (break))"), "(loop 2 (break))");
-        assert_eq!(bridged("(loop int-any-width (break))"), "(loop 0 (break))");
+        assert_eq!(bridged("(loop i32 (break))"), "(loop 0 (break))");
     }
 
     /// The same field on the two other forms that own a merge slot, trailing
@@ -3626,7 +3626,7 @@ mod tests {
     #[test]
     fn a_block_and_an_unwind_protect_carry_their_merge_slots_kind() {
         assert_eq!(
-            bridged(r#"(block (str "b") (let () (int-any-width 1)) int-any-width)"#),
+            bridged(r#"(block (str "b") (let () (int-any-width 1)) i32)"#),
             r#"(block "b" (let () (int-any-width 0 1)) 0)"#
         );
         // Hand-written core, so the repr is set independently of the forms:
@@ -3636,7 +3636,7 @@ mod tests {
             "(unwind-protect (int-any-width 0 2) (int-any-width 0 1) 2)"
         );
         assert_eq!(
-            bridged("(unwind-protect (int-any-width 2) (int-any-width 1) int-any-width)"),
+            bridged("(unwind-protect (int-any-width 2) (int-any-width 1) i32)"),
             "(unwind-protect (int-any-width 0 2) (int-any-width 0 1) 0)"
         );
     }
@@ -3653,10 +3653,10 @@ mod tests {
     /// time, and a kind that says how to untag the stored value.
     #[test]
     fn a_global_becomes_its_promoted_id_and_kind() {
-        assert_eq!(bridged("(global ::counter int-any-width)"), "(global 3 1)");
+        assert_eq!(bridged("(global ::counter i32)"), "(global 3 1)");
         assert_eq!(bridged("(global ::m::total sexpr)"), "(global 7 6)");
         assert_eq!(
-            bridged("(set-global ::counter int-any-width (int-any-width 5))"),
+            bridged("(set-global ::counter i32 (int-any-width 5))"),
             "(set-global 3 1 (int-any-width 0 5))"
         );
     }
@@ -3665,7 +3665,7 @@ mod tests {
     /// and this walk have gone out of step.
     #[test]
     fn an_unpromoted_global_is_refused() {
-        let e = refused("(global ::missing int-any-width)");
+        let e = refused("(global ::missing i32)");
         assert!(e.contains("was not promoted before translation"), "{}", e);
     }
 
@@ -3677,7 +3677,7 @@ mod tests {
     /// The name is process-wide unique, so the assertion matches around it.
     #[test]
     fn a_lambda_lists_its_captures_and_parameters() {
-        let printed = bridged("(lambda ((x int-any-width)) int-any-width (var x))");
+        let printed = bridged("(lambda ((x i32)) i32 (var x))");
         assert!(
             printed.ends_with(r#" () ((x . 0)) (var "x" false))"#),
             "unexpected lambda shape: {}",
@@ -3691,7 +3691,7 @@ mod tests {
     /// one place visible in another.
     #[test]
     fn a_captured_binding_becomes_a_cell() {
-        let printed = bridged("(let ((n int-any-width (int-any-width 1))) (lambda () int-any-width (var n)))");
+        let printed = bridged("(let ((n i32 (int-any-width 1))) (lambda () i32 (var n)))");
         // The binding itself gains the island's `10 +` cell marker over the
         // int field classification.
         assert!(printed.starts_with("(let (((n . 11) int-any-width 0 1))"), "the binder should create the cell: {}", printed);
@@ -3705,7 +3705,7 @@ mod tests {
     /// machinery is not simply always on.
     #[test]
     fn an_uncaptured_binding_stays_a_plain_slot() {
-        let printed = bridged("(let ((n int-any-width (int-any-width 1))) (lambda ((m int-any-width)) int-any-width (var m)))");
+        let printed = bridged("(let ((n i32 (int-any-width 1))) (lambda ((m i32)) i32 (var m)))");
         assert!(printed.starts_with("(let (((n . 0)) int-any-width 0 1))") || printed.contains("(n . 0)"), "{}", printed);
         assert!(!printed.contains("cellvar"), "nothing is captured here: {}", printed);
     }
@@ -3714,7 +3714,7 @@ mod tests {
     /// is a different island tag from an ordinary one.
     #[test]
     fn assigning_a_captured_binding_writes_through_the_cell() {
-        let printed = bridged("(let ((n int-any-width (int-any-width 1))) (lambda () unit (set n (int-any-width 2))))");
+        let printed = bridged("(let ((n i32 (int-any-width 1))) (lambda () unit (set n (int-any-width 2))))");
         assert!(printed.contains(r#"(cellset "n" 1 (int-any-width 0 2))"#), "{}", printed);
     }
 
@@ -3724,7 +3724,7 @@ mod tests {
     #[test]
     fn labels_siblings_are_called_directly() {
         let printed =
-            bridged("(labels ((go ((i int-any-width)) int-any-width (var i))) (apply (var go) int-any-width (int-any-width) (int-any-width 1)))");
+            bridged("(labels ((go ((i i32)) i32 (var i))) (apply (var go) i32 (i32) (int-any-width 1)))");
         assert_eq!(printed, r#"(labels () (("go" ((i . 0)) (var "i" false))) (apply "go" (0 int-any-width 0 1)))"#);
     }
 
@@ -3733,7 +3733,7 @@ mod tests {
     #[test]
     fn a_labels_block_captures_what_its_defs_refer_to() {
         let printed = bridged(
-            "(let ((k int-any-width (int-any-width 5))) (labels ((go ((i int-any-width)) int-any-width (var k))) (apply (var go) int-any-width (int-any-width) (int-any-width 1))))",
+            "(let ((k i32 (int-any-width 5))) (labels ((go ((i i32)) i32 (var k))) (apply (var go) i32 (i32) (int-any-width 1))))",
         );
         assert!(printed.contains("(labels ((k . 11))"), "the captured list should be a cell: {}", printed);
         assert!(printed.contains(r#"(cellvar "k" 1)"#), "{}", printed);
@@ -3743,7 +3743,7 @@ mod tests {
     #[test]
     fn an_unknown_callee_is_dispatched_indirectly() {
         assert_eq!(
-            bridged("(let ((f fn (var g))) (apply (var f) int-any-width (int-any-width) (int-any-width 1)))"),
+            bridged("(let ((f fn (var g))) (apply (var f) i32 (i32) (int-any-width 1)))"),
             r#"(let (((f . 2) var "g" false)) (apply-indirect (var "f" false) (0 int-any-width 0 1)))"#
         );
     }
@@ -3753,7 +3753,7 @@ mod tests {
     /// at all.
     #[test]
     fn an_immediately_invoked_lambda_becomes_a_labels_block() {
-        let printed = bridged("(apply (lambda ((x int-any-width)) int-any-width (var x)) int-any-width (int-any-width) (int-any-width 2))");
+        let printed = bridged("(apply (lambda ((x i32)) i32 (var x)) i32 (i32) (int-any-width 2))");
         assert!(printed.starts_with("(labels () ((\"__lambda$"), "{}", printed);
         assert!(printed.ends_with(r#"((x . 0)) (var "x" false))) (apply "__lambda$0" (0 int-any-width 0 2)))"#)
             || printed.contains(r#"((x . 0)) (var "x" false)))"#), "{}", printed);
@@ -3765,7 +3765,7 @@ mod tests {
     /// a second runtime representation.
     #[test]
     fn a_function_reference_becomes_a_forwarding_closure() {
-        let printed = bridged("(fnref ::f (int-any-width int-any-width))");
+        let printed = bridged("(fnref ::f (i32 i32))");
         assert!(
             printed.ends_with(
                 r#" () ((arg0 . 0) (arg1 . 0)) (call "tl_f" (0 var "arg0" false) (0 var "arg1" false)))"#
@@ -3856,7 +3856,7 @@ mod tests {
     fn the_boxed_values_kind_follows_its_representation() {
         let as_struct = bridged_with_dyn(r#"(dyn-new (type-named ::point) ::shape ((::point area)) () struct (var p))"#);
         let as_enum = bridged_with_dyn(r#"(dyn-new (type-named ::point) ::shape ((::point area)) () enum (var p))"#);
-        let as_int = bridged_with_dyn(r#"(dyn-new (type-named ::point) ::shape ((::point area)) () int-any-width (var p))"#);
+        let as_int = bridged_with_dyn(r#"(dyn-new (type-named ::point) ::shape ((::point area)) () i32 (var p))"#);
         assert!(as_struct.contains("(2 var"), "{}", as_struct);
         assert!(as_enum.contains("(2 var"), "{}", as_enum);
         assert!(as_int.contains("(0 var"), "{}", as_int);
@@ -3892,7 +3892,7 @@ mod tests {
     #[test]
     fn a_defun_becomes_the_boundary_triple() {
         let (name, params, body) =
-            top_level(&[], "(defun ::m::add ((a int-any-width) (b int-any-width)) int-any-width (assoc ::std::primitive::i32 + true int-any-width (int-any-width int-any-width) (type-named ::std::primitive::i32) (var a) (var b)))")
+            top_level(&[], "(defun ::m::add ((a i32) (b i32)) i32 (assoc ::std::primitive::i32 + true i32 (i32 i32) (type-named ::std::primitive::i32) (var a) (var b)))")
                 .expect("a defun is compiled");
         assert_eq!(name, "tl_m::add");
         assert_eq!(params, "((a . 0) (b . 0))");
@@ -3906,7 +3906,7 @@ mod tests {
     #[test]
     fn a_defmethod_mangles_through_its_type() {
         let (name, params, body) =
-            top_level(&[], "(defmethod ::m::point area false ((self struct)) int-any-width (field-get (var self) 0 int-any-width))")
+            top_level(&[], "(defmethod ::m::point area false ((self struct)) i32 (field-get (var self) 0 i32))")
                 .expect("a defmethod is compiled");
         assert_eq!(name, "tl_m::point''area");
         assert_eq!(params, "((self . 2))");
@@ -3926,7 +3926,7 @@ mod tests {
     #[test]
     fn a_parameter_a_closure_captures_is_a_cell_without_being_told() {
         let (_, params, body) =
-            top_level(&[], "(defun ::f ((n int-any-width)) fn (lambda () int-any-width (var n)))").expect("compiled");
+            top_level(&[], "(defun ::f ((n i32)) fn (lambda () i32 (var n)))").expect("compiled");
         assert_eq!(params, "((n . 11))", "the parameter should be bound as a cell");
         assert!(body.contains(r#"(cellvar "n" 1)"#), "{}", body);
     }
@@ -3938,7 +3938,7 @@ mod tests {
     #[test]
     fn the_rest_of_the_top_level_is_not_compiled() {
         for src in [
-            "(defstruct ::point (int-any-width int-any-width))",
+            "(defstruct ::point (i32 i32))",
             "(defenum ::m::color (red green blue) (() () ()))",
             "(defmacro m::when (c body) true (1 () ()) (quote ()))",
             "(use ::m::helper other::helper)",
@@ -3974,8 +3974,8 @@ mod tests {
     fn a_type_inside_a_module_is_recorded_too() {
         assert!(
             bridged_with(
-                &["(module ::m (defstruct ::m::point (int-any-width sexpr)))"],
-                "(construct ::m::point (type-named ::m::point) 0 true (int-any-width sexpr) (int-any-width 1) (quote ()))"
+                &["(module ::m (defstruct ::m::point (i32 sexpr)))"],
+                "(construct ::m::point (type-named ::m::point) 0 true (i32 sexpr) (int-any-width 1) (quote ()))"
             )
             .contains("(1 int-any-width 0 1)")
         );
@@ -3992,7 +3992,7 @@ mod tests {
     #[test]
     fn an_untranslated_tag_names_itself() {
         assert!(refused("(defun ::m::f () unit (unit))").contains("`defun`"));
-        assert!(refused("(defvar ::m::x int-any-width true (int-any-width 0))").contains("`defvar`"));
+        assert!(refused("(defvar ::m::x i32 true (int-any-width 0))").contains("`defvar`"));
         assert!(refused("(module ::m (expr (int-any-width 1)))").contains("`module`"));
     }
 
@@ -4001,7 +4001,7 @@ mod tests {
     /// argument.
     #[test]
     fn an_argument_list_that_disagrees_with_its_representations_is_refused() {
-        let e = refused("(call ::f (int-any-width) (int-any-width 1) (int-any-width 2))");
+        let e = refused("(call ::f (i32) (int-any-width 1) (int-any-width 2))");
         assert!(e.contains("1 argument representations for 2 arguments"), "{}", e);
     }
 }

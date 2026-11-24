@@ -286,7 +286,7 @@ fn shims(out: &mut String) {
     let mut rows: BTreeMap<&str, String> = BTreeMap::new();
     for name in super::externs::runtime_function_names_with_entries() {
         let sig = super::externs::runtime_sig(name).expect("a listed runtime function has a signature");
-        rows.insert(name, sig.fn_type().print_to_string().to_string());
+        rows.insert(name, sig.to_string());
     }
     out.push_str("## ランタイム関数\n\n| シンボル | LLVM の型 |\n|---|---|\n");
     for (name, ty) in rows {

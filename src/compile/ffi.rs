@@ -56,11 +56,11 @@ use crate::compile::{llvm_context, CompiledFn, COMPILE_LOCK};
 
 /// A type as the C side of the boundary sees it.
 ///
-/// A second vocabulary beside `Repr`, and the reason is [`Repr::Narrow`]: it
-/// folds all six integer widths into one, because how a value crosses the
-/// compiled boundary is the same for all of them (a sign-extended machine
-/// word). The thunk needs the other answer — `i8` really is one byte to the C
-/// function, and getting there is a `trunc`.
+/// A second vocabulary beside `Repr`, and the reason is `Repr::RawWord`: it
+/// folds `ptr`, `c-long` and `c-ulong` into one, because how a value crosses
+/// the compiled boundary is the same for all of them (an untagged word). The
+/// thunk needs the other answer — C's `long` is as wide as the target says,
+/// and a pointer is a pointer to the C function.
 ///
 /// **This enum is the one list of what the FFI can spell.** The checker
 /// deliberately does not keep a second one: it parses the declared types like

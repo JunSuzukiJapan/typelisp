@@ -167,6 +167,8 @@ pub(super) fn report(header: &str, uses: &[Use]) -> String {
             .chain
             .iter()
             .take(u.chain.len() - 1)
+            // A direct copy is the function it copies.
+            .map(|s| s.strip_suffix(super::direct::COPY_SUFFIX).unwrap_or(s))
             .map(|s| typelisp_mem::ConcreteNames::link_name_of(s).unwrap_or(s))
             .collect();
         msg.push_str(&format!("\n  {} (reached by {})", u.what, chain.join(" -> ")));

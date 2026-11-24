@@ -311,6 +311,14 @@ fn builder(reg: &mut Registry) {
     // looking, which is the dynamic half of `emit-unwind-onward`.
     def.instance("coroutine-unwind", vec![builder_ty(), module_ty()], Type::Unit);
     def.instance("coroutine-end", vec![builder_ty(), module_ty(), value_ty()], Type::Unit);
+    // `entry-word`: the word of an argument (`"rt_pending_arg"`) or a capture
+    // (`"rt_pending_env"`) the function was entered with. A coroutine asks
+    // the runtime for it; a direct function (`crate::compile::direct`) reads
+    // its parameter.
+    def.instance("entry-word", vec![builder_ty(), module_ty(), Type::Str, Type::Int], value_ty());
+    // `loop-safepoint`: a loop's back edge, offering the scheduler a turn on
+    // the way in a coroutine.
+    def.instance("loop-safepoint", vec![builder_ty(), module_ty(), basic_block_ty()], Type::Unit);
     // `build-icmp-lt`/`-le`/`-gt`/`-ge`/`-eq`/`-ne`: `i64` comparisons —
     // `compiler.rs`'s `compile-assoc` dispatches `<`/`<=`/`>`/`>=`/(`=`,`eq`)/`/=`
     // to these (`if`/comparisons work, labels/closures Stage 5). Each widens
