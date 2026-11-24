@@ -49,7 +49,7 @@
 
 この表は Rust の 1 か所（`Repr` から LLVM の型）に置き、島はそれを問う。今の `Repr` と `field_kind`/`binding_kind` の番号がそのまま使える。
 
-`c-long` は今 `i64` に決め打ちしていて、Cortex-M（C の `long` は 32bit）で C の関数に渡す値の幅が誤っている。この表に入れることで直る。
+`c-long` は今 `i64` に決め打ちしていて、Cortex-M（C の `long` は 32bit）で C の関数に渡す値の幅が誤っている。この表に入れることで直る。C の構造体のメモリを読み書きするランタイム（`typelisp-rt/src/c_mem.rs` の `KIND_C_LONG`/`KIND_C_ULONG`/`KIND_PTR`）も 8 バイトとして読み書きしていて、32bit の機械では C の構造体の配置と合わない。これも同じ表から幅を引く。
 
 ### 語の幅はターゲットのポインタの幅
 
