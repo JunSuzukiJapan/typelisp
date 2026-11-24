@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/numbers.md @ 676864f7e6cf8e950e51aadacecd49695c8545a8 -->
+<!-- translated-from: docs/ja/reference/functions/numbers.md @ e4290b2301ca3307be1903373bb46b8b2aea86cd -->
 # Sayılar
 
 Tamsayılar, kayan noktalı sayılar, rasyonel sayılar, karmaşık sayılar ve mantıksal değerler üzerindeki
@@ -71,11 +71,10 @@ türe geçin. `c-long` / `c-ulong`'un yalnızca dönüşümleri vardır:
 | `int->i8` … `int->u32` | `(int->W x)` | `T→W` | 1. bölümdekiyle aynı genişlik dönüşümleri. Sığmayan değerler kırpılır |
 | `try-int->i8` … `try-int->u32` | `(try-int->W x)` | `T→Option<W>` | Aynı dönüşüm bir soru olarak |
 | `int->c-long` `int->c-ulong` | `(int->W x)` | `T→W` | Diğer ham sözcükten ve 1. bölümün tamsayı türlerinden giriş yolu |
-| `try-int->c-long` `try-int->c-ulong` | `(try-int->W x)` | `T→Option<W>` | Yukarıdakiyle aynı |
 | `int->int` | `(int->int x)` | `T→int` | **Her zaman tam**. Bir `i32`'ye sığmayan bir `size_t`'yi okumanın dürüst yolu |
 
 Bunların yaptığı şeyler `(as i32 x)` / `(try-as i32 x)` / `(as int x)` / `(as c-ulong n)`'dir ve
-dönüşümler 1. bölümün tamsayı türleriyle her çift için vardır. `ptr`'nin bu tablosu bile yoktur: bir
+dönüşümler 1. bölümün tamsayı türleriyle her çift için vardır. Ham sözcüğe giden bir `try-` biçimi yoktur: `Option<c-long>` ham bir sözcüğü başka bir türün içine koyar ve bu yazılamaz. `ptr`'nin bu tablosu bile yoktur: bir
 işaretçiyi sayı olarak okumanın yolu sağlanmamıştır. Yalnızca geçirilen, alınan ve başka bir C
 fonksiyonuna iletilen bir değerdir.
 

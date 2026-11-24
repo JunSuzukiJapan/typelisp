@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/numbers.md @ 676864f7e6cf8e950e51aadacecd49695c8545a8 -->
+<!-- translated-from: docs/ja/reference/functions/numbers.md @ e4290b2301ca3307be1903373bb46b8b2aea86cd -->
 # Bilangan
 
 Operasi pada bilangan bulat, bilangan floating-point, rasional, bilangan kompleks, dan boolean, serta
@@ -72,11 +72,10 @@ berhitung, pindah ke tipe berlebar. `c-long` / `c-ulong` hanya memiliki konversi
 | `int->i8` … `int->u32` | `(int->W x)` | `T→W` | Konversi lebar yang sama seperti bab 1. Nilai yang tidak muat dipotong |
 | `try-int->i8` … `try-int->u32` | `(try-int->W x)` | `T→Option<W>` | Konversi yang sama sebagai pertanyaan |
 | `int->c-long` `int->c-ulong` | `(int->W x)` | `T→W` | Jalan masuk, dari word mentah yang lain dan dari tipe bilangan bulat pada bab 1 |
-| `try-int->c-long` `try-int->c-ulong` | `(try-int->W x)` | `T→Option<W>` | Sama seperti di atas |
 | `int->int` | `(int->int x)` | `T→int` | **Selalu tepat**. Cara jujur membaca `size_t` yang tidak muat dalam `i32` |
 
 `(as i32 x)` / `(try-as i32 x)` / `(as int x)` / `(as c-ulong n)` adalah yang dilakukan konversi ini,
-dan konversinya ada untuk setiap pasangan dengan tipe bilangan bulat pada bab 1. `ptr` bahkan tidak
+dan konversinya ada untuk setiap pasangan dengan tipe bilangan bulat pada bab 1. Tidak ada bentuk `try-` ke word mentah: `Option<c-long>` akan menaruh word mentah di dalam tipe lain, dan itu tidak dapat ditulis. `ptr` bahkan tidak
 memiliki tabel ini: tidak disediakan cara membaca pointer sebagai bilangan. Ia adalah nilai yang
 hanya dioper, diterima, dan diserahkan ke fungsi C lain.
 

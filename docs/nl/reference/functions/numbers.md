@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/numbers.md @ 676864f7e6cf8e950e51aadacecd49695c8545a8 -->
+<!-- translated-from: docs/ja/reference/functions/numbers.md @ e4290b2301ca3307be1903373bb46b8b2aea86cd -->
 # Getallen
 
 Bewerkingen op gehele getallen, drijvendekommagetallen, rationale getallen, complexe getallen en
@@ -73,11 +73,10 @@ ga om te rekenen over naar een type met een breedte. `c-long` / `c-ulong` hebben
 | `int->i8` … `int->u32` | `(int->W x)` | `T→W` | Dezelfde breedteconversies als hoofdstuk 1. Waarden die niet passen worden afgekapt |
 | `try-int->i8` … `try-int->u32` | `(try-int->W x)` | `T→Option<W>` | Dezelfde conversie als vraag |
 | `int->c-long` `int->c-ulong` | `(int->W x)` | `T→W` | De weg naar binnen, vanuit het andere ruwe woord en vanuit de gehele types van hoofdstuk 1 |
-| `try-int->c-long` `try-int->c-ulong` | `(try-int->W x)` | `T→Option<W>` | Idem |
 | `int->int` | `(int->int x)` | `T→int` | **Altijd exact**. De eerlijke manier om een `size_t` te lezen die niet in een `i32` past |
 
 `(as i32 x)` / `(try-as i32 x)` / `(as int x)` / `(as c-ulong n)` zijn wat deze doen, en de
-conversies bestaan voor elk paar met de gehele types van hoofdstuk 1. `ptr` heeft deze tabel niet
+conversies bestaan voor elk paar met de gehele types van hoofdstuk 1. Er is geen `try-`-vorm naar een ruw woord: `Option<c-long>` zou een ruw woord in een ander type stoppen, en dat kan niet worden geschreven. `ptr` heeft deze tabel niet
 eens: er is geen manier om een pointer als getal te lezen. Het is een waarde die alleen wordt
 doorgegeven, ontvangen en aan een andere C-functie overgedragen.
 

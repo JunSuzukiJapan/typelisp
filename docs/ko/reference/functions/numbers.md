@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/numbers.md @ 676864f7e6cf8e950e51aadacecd49695c8545a8 -->
+<!-- translated-from: docs/ja/reference/functions/numbers.md @ e4290b2301ca3307be1903373bb46b8b2aea86cd -->
 # 수
 
 정수, 부동소수점 수, 유리수, 복소수, 진리값의 연산과 그 밖의 수 관련 함수. 호출 형식 읽는 법은
@@ -60,11 +60,10 @@
 | `int->i8` … `int->u32` | `(int->W x)` | `T→W` | 1장과 같은 폭 변환. 들어가지 않는 값은 잘린다 |
 | `try-int->i8` … `try-int->u32` | `(try-int->W x)` | `T→Option<W>` | 같은 변환을 질문으로 |
 | `int->c-long` `int->c-ulong` | `(int->W x)` | `T→W` | 들어오는 길. 다른 원시 워드와 1장의 정수 타입에서 |
-| `try-int->c-long` `try-int->c-ulong` | `(try-int->W x)` | `T→Option<W>` | 위와 같음 |
 | `int->int` | `(int->int x)` | `T→int` | **항상 정확**. `i32`에 들어가지 않는 `size_t`를 정직하게 읽는 방법 |
 
 `(as i32 x)` / `(try-as i32 x)` / `(as int x)` / `(as c-ulong n)`이 이것들이 하는 일이며, 변환은 1장의 정수 타입과의 모든
-쌍에 있다. `ptr`에는 이 표조차 없다. 포인터를 수로 읽는 방법은 제공하지 않는다. 받고, 넘기고, 다른 C 함수에 건네기만
+쌍에 있다. 생 워드로의 `try-` 형태는 없다. `Option<c-long>`은 생 워드를 다른 타입 안에 넣게 되어 쓸 수 없기 때문이다. `ptr`에는 이 표조차 없다. 포인터를 수로 읽는 방법은 제공하지 않는다. 받고, 넘기고, 다른 C 함수에 건네기만
 하는 값이다.
 
 **출력할 수도 없다.** `(println "~a" x)`는 원시 워드를 받지 않으므로(`Sexpr` 표현이 없다) `(println "~a" (as int n))`처럼

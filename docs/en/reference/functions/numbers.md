@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/numbers.md @ 676864f7e6cf8e950e51aadacecd49695c8545a8 -->
+<!-- translated-from: docs/ja/reference/functions/numbers.md @ e4290b2301ca3307be1903373bb46b8b2aea86cd -->
 # Numbers
 
 Operations on integers, floating-point numbers, rationals, complex numbers and booleans, and other
@@ -71,11 +71,10 @@ type with a width. `c-long` / `c-ulong` have only conversions:
 | `int->i8` … `int->u32` | `(int->W x)` | `T→W` | The same width conversions as chapter 1. Values that do not fit are truncated |
 | `try-int->i8` … `try-int->u32` | `(try-int->W x)` | `T→Option<W>` | The same conversion as a question |
 | `int->c-long` `int->c-ulong` | `(int->W x)` | `T→W` | The way in, from the other raw word and from the integer types of chapter 1 |
-| `try-int->c-long` `try-int->c-ulong` | `(try-int->W x)` | `T→Option<W>` | Same as above |
 | `int->int` | `(int->int x)` | `T→int` | **Always exact**. The honest way to read a `size_t` that does not fit in an `i32` |
 
 `(as i32 x)` / `(try-as i32 x)` / `(as int x)` / `(as c-ulong n)` are what these do, and the
-conversions exist for every pair with the integer types of chapter 1. `ptr` does not even have this
+conversions exist for every pair with the integer types of chapter 1. There is no `try-` form into a raw word: `Option<c-long>` would put a raw word inside another type, which cannot be written. `ptr` does not even have this
 table: no way is provided to read a pointer as a number. It is a value that is only passed, received
 and handed on to another C function.
 

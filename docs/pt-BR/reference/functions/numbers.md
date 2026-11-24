@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/numbers.md @ 676864f7e6cf8e950e51aadacecd49695c8545a8 -->
+<!-- translated-from: docs/ja/reference/functions/numbers.md @ e4290b2301ca3307be1903373bb46b8b2aea86cd -->
 # Números
 
 Operações sobre inteiros, números de ponto flutuante, racionais, números complexos e booleanos, e outras
@@ -71,11 +71,10 @@ largura. `c-long` / `c-ulong` só têm conversões:
 | `int->i8` … `int->u32` | `(int->W x)` | `T→W` | As mesmas conversões de largura do capítulo 1. Os valores que não cabem são truncados |
 | `try-int->i8` … `try-int->u32` | `(try-int->W x)` | `T→Option<W>` | A mesma conversão como pergunta |
 | `int->c-long` `int->c-ulong` | `(int->W x)` | `T→W` | O caminho de entrada, a partir da outra palavra bruta e dos tipos inteiros do capítulo 1 |
-| `try-int->c-long` `try-int->c-ulong` | `(try-int->W x)` | `T→Option<W>` | Igual ao acima |
 | `int->int` | `(int->int x)` | `T→int` | **Sempre exata**. A forma honesta de ler um `size_t` que não cabe em um `i32` |
 
 `(as i32 x)` / `(try-as i32 x)` / `(as int x)` / `(as c-ulong n)` é o que estas fazem, e as conversões existem
-para todo par com os tipos inteiros do capítulo 1. `ptr` nem sequer tem esta tabela: não se oferece nenhuma
+para todo par com os tipos inteiros do capítulo 1. Não há forma `try-` para uma palavra crua: `Option<c-long>` colocaria uma palavra crua dentro de outro tipo, o que não pode ser escrito. `ptr` nem sequer tem esta tabela: não se oferece nenhuma
 forma de ler um ponteiro como número. É um valor que só é passado, recebido e entregue a outra função C.
 
 **Também não podem ser impressas.** `(println "~a" x)` não aceita uma palavra bruta (ela não tem

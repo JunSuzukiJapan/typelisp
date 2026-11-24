@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/numbers.md @ 676864f7e6cf8e950e51aadacecd49695c8545a8 -->
+<!-- translated-from: docs/ja/reference/functions/numbers.md @ e4290b2301ca3307be1903373bb46b8b2aea86cd -->
 # Nombres
 
 Les opérations sur les entiers, les nombres à virgule flottante, les rationnels, les nombres complexes et les
@@ -72,11 +72,10 @@ type doté d'une largeur. `c-long` / `c-ulong` n'ont que des conversions :
 | `int->i8` … `int->u32` | `(int->W x)` | `T→W` | Les mêmes conversions de largeur qu'au chapitre 1. Les valeurs qui ne tiennent pas sont tronquées |
 | `try-int->i8` … `try-int->u32` | `(try-int->W x)` | `T→Option<W>` | La même conversion sous forme de question |
 | `int->c-long` `int->c-ulong` | `(int->W x)` | `T→W` | Le chemin d'entrée, depuis l'autre mot brut et depuis les types entiers du chapitre 1 |
-| `try-int->c-long` `try-int->c-ulong` | `(try-int->W x)` | `T→Option<W>` | Idem |
 | `int->int` | `(int->int x)` | `T→int` | **Toujours exacte**. La façon honnête de lire un `size_t` qui ne tient pas dans un `i32` |
 
 `(as i32 x)` / `(try-as i32 x)` / `(as int x)` / `(as c-ulong n)` font exactement cela, et les conversions existent
-pour toutes les paires avec les types entiers du chapitre 1. `ptr` n'a même pas ce tableau : aucun moyen n'est
+pour toutes les paires avec les types entiers du chapitre 1. Il n'y a pas de forme `try-` vers un mot brut : `Option<c-long>` placerait un mot brut dans un autre type, ce qui ne peut pas s'écrire. `ptr` n'a même pas ce tableau : aucun moyen n'est
 fourni pour lire un pointeur comme un nombre. C'est une valeur qu'on ne fait que passer, recevoir et transmettre à
 une autre fonction C.
 

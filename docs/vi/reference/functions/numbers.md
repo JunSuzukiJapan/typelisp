@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/numbers.md @ 676864f7e6cf8e950e51aadacecd49695c8545a8 -->
+<!-- translated-from: docs/ja/reference/functions/numbers.md @ e4290b2301ca3307be1903373bb46b8b2aea86cd -->
 # Số
 
 Các phép toán trên số nguyên, số dấu phẩy động, số hữu tỉ, số phức và boolean, cùng các hàm khác liên quan
@@ -68,11 +68,10 @@ kiểu có độ rộng. `c-long` / `c-ulong` chỉ có các phép chuyển đ�
 | `int->i8` … `int->u32` | `(int->W x)` | `T→W` | Cùng các phép chuyển đổi độ rộng như chương 1. Các giá trị không vừa bị cắt cụt |
 | `try-int->i8` … `try-int->u32` | `(try-int->W x)` | `T→Option<W>` | Cùng phép chuyển đổi dưới dạng một câu hỏi |
 | `int->c-long` `int->c-ulong` | `(int->W x)` | `T→W` | Đường vào, từ từ máy thô kia và từ các kiểu số nguyên của chương 1 |
-| `try-int->c-long` `try-int->c-ulong` | `(try-int->W x)` | `T→Option<W>` | Như trên |
 | `int->int` | `(int->int x)` | `T→int` | **Luôn chính xác**. Cách trung thực để đọc một `size_t` không vừa trong `i32` |
 
 `(as i32 x)` / `(try-as i32 x)` / `(as int x)` / `(as c-ulong n)` là những gì chúng làm, và các phép
-chuyển đổi tồn tại cho mọi cặp với các kiểu số nguyên của chương 1. `ptr` thậm chí không có bảng này:
+chuyển đổi tồn tại cho mọi cặp với các kiểu số nguyên của chương 1. Không có dạng `try-` sang một từ thô: `Option<c-long>` sẽ đặt một từ thô vào bên trong một kiểu khác, điều không thể viết được. `ptr` thậm chí không có bảng này:
 không có cách nào để đọc một con trỏ như một số. Nó là một giá trị chỉ được truyền, nhận và chuyển tiếp
 cho một hàm C khác.
 

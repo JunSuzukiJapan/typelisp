@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/numbers.md @ 676864f7e6cf8e950e51aadacecd49695c8545a8 -->
+<!-- translated-from: docs/ja/reference/functions/numbers.md @ e4290b2301ca3307be1903373bb46b8b2aea86cd -->
 # 数值
 
 整数、浮点数、有理数、复数、布尔值的运算以及与数值相关的函数。调用形式的读法见[内置函数](README.md)。
@@ -58,11 +58,10 @@ CL 的派生目录（`abs`/`signum`/`gcd`/`lcm`/`isqrt`/`expt` 以及第 9 章�
 | `int->i8` … `int->u32` | `(int->W x)` | `T→W` | 与第 1 章相同的宽度转换。放不下的值被截断 |
 | `try-int->i8` … `try-int->u32` | `(try-int->W x)` | `T→Option<W>` | 把同样的转换作为询问 |
 | `int->c-long` `int->c-ulong` | `(int->W x)` | `T→W` | 从原始字之间以及第 1 章的整数类型创建的入口 |
-| `try-int->c-long` `try-int->c-ulong` | `(try-int->W x)` | `T→Option<W>` | 同上 |
 | `int->int` | `(int->int x)` | `T→int` | **总是精确的**。读取放不进 `i32` 的 `size_t` 的正当方式 |
 
 `(as i32 x)` / `(try-as i32 x)` / `(as int x)` / `(as c-ulong n)` 就是它们，与第 1 章所有整数类型之间都有转换。
-`ptr` 连这张表都没有——没有提供把指针当作数读取的途径。它只是被传递、接收、再交给另一个 C 函数的值。
+没有转为原始字的 `try-` 形式：`Option<c-long>` 会把原始字放进另一个类型里，这是写不出来的。`ptr` 连这张表都没有——没有提供把指针当作数读取的途径。它只是被传递、接收、再交给另一个 C 函数的值。
 
 **也不能打印。** `(println "~a" x)` 不接受原始字（它没有 `Sexpr` 表示），请像 `(println "~a" (as int n))` 这样
 先转到有宽度的类型。

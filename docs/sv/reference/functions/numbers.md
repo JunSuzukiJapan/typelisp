@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/numbers.md @ 676864f7e6cf8e950e51aadacecd49695c8545a8 -->
+<!-- translated-from: docs/ja/reference/functions/numbers.md @ e4290b2301ca3307be1903373bb46b8b2aea86cd -->
 # Tal
 
 Operationer på heltal, flyttal, kvoter, komplexa tal och booleska värden, samt andra talrelaterade
@@ -71,11 +71,10 @@ en typ med bredd. `c-long` / `c-ulong` har bara konverteringar:
 | `int->i8` … `int->u32` | `(int->W x)` | `T→W` | Samma breddkonverteringar som i kapitel 1. Värden som inte ryms trunkeras |
 | `try-int->i8` … `try-int->u32` | `(try-int->W x)` | `T→Option<W>` | Samma konvertering som en fråga |
 | `int->c-long` `int->c-ulong` | `(int->W x)` | `T→W` | Vägen in, från det andra råa ordet och från heltalstyperna i kapitel 1 |
-| `try-int->c-long` `try-int->c-ulong` | `(try-int->W x)` | `T→Option<W>` | Som ovan |
 | `int->int` | `(int->int x)` | `T→int` | **Alltid exakt**. Det ärliga sättet att läsa en `size_t` som inte ryms i en `i32` |
 
 `(as i32 x)` / `(try-as i32 x)` / `(as int x)` / `(as c-ulong n)` är vad dessa gör, och konverteringarna
-finns för varje par med heltalstyperna i kapitel 1. `ptr` har inte ens den här tabellen: inget sätt
+finns för varje par med heltalstyperna i kapitel 1. Det finns ingen `try-`-form till ett rått ord: `Option<c-long>` skulle lägga ett rått ord inuti en annan typ, och det går inte att skriva. `ptr` har inte ens den här tabellen: inget sätt
 tillhandahålls att läsa en pekare som ett tal. Det är ett värde som bara skickas, tas emot och lämnas
 vidare till en annan C-funktion.
 

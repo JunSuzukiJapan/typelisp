@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/numbers.md @ 676864f7e6cf8e950e51aadacecd49695c8545a8 -->
+<!-- translated-from: docs/ja/reference/functions/numbers.md @ e4290b2301ca3307be1903373bb46b8b2aea86cd -->
 # Zahlen
 
 Operationen auf Ganzzahlen, Gleitkommazahlen, rationalen Zahlen, komplexen Zahlen und Wahrheitswerten sowie
@@ -72,11 +72,10 @@ einem Typ mit Breite. `c-long` / `c-ulong` haben nur Umwandlungen:
 | `int->i8` … `int->u32` | `(int->W x)` | `T→W` | Dieselben Breitenumwandlungen wie in Kapitel 1. Werte, die nicht passen, werden abgeschnitten |
 | `try-int->i8` … `try-int->u32` | `(try-int->W x)` | `T→Option<W>` | Dieselbe Umwandlung als Frage |
 | `int->c-long` `int->c-ulong` | `(int->W x)` | `T→W` | Der Weg hinein, vom anderen rohen Wort und von den Ganzzahltypen aus Kapitel 1 |
-| `try-int->c-long` `try-int->c-ulong` | `(try-int->W x)` | `T→Option<W>` | Wie oben |
 | `int->int` | `(int->int x)` | `T→int` | **Immer exakt**. Der ehrliche Weg, ein `size_t` zu lesen, das nicht in ein `i32` passt |
 
 `(as i32 x)` / `(try-as i32 x)` / `(as int x)` / `(as c-ulong n)` tun genau das, und die Umwandlungen gibt es
-für jedes Paar mit den Ganzzahltypen aus Kapitel 1. `ptr` hat nicht einmal diese Tabelle: Es gibt keine
+für jedes Paar mit den Ganzzahltypen aus Kapitel 1. Eine `try-`-Form zu einem rohen Wort gibt es nicht: `Option<c-long>` würde ein rohes Wort in einen anderen Typ legen, und das lässt sich nicht schreiben. `ptr` hat nicht einmal diese Tabelle: Es gibt keine
 Möglichkeit, einen Zeiger als Zahl zu lesen. Es ist ein Wert, der nur übergeben, erhalten und an eine andere
 C-Funktion weitergereicht wird.
 

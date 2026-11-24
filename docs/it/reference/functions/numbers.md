@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/numbers.md @ 676864f7e6cf8e950e51aadacecd49695c8545a8 -->
+<!-- translated-from: docs/ja/reference/functions/numbers.md @ e4290b2301ca3307be1903373bb46b8b2aea86cd -->
 # Numeri
 
 Operazioni su interi, numeri in virgola mobile, razionali, numeri complessi e booleani, e altre funzioni
@@ -71,11 +71,10 @@ passa a un tipo con larghezza. `c-long` / `c-ulong` hanno solo conversioni:
 | `int->i8` … `int->u32` | `(int->W x)` | `T→W` | Le stesse conversioni di larghezza del capitolo 1. I valori che non stanno vengono troncati |
 | `try-int->i8` … `try-int->u32` | `(try-int->W x)` | `T→Option<W>` | La stessa conversione posta come domanda |
 | `int->c-long` `int->c-ulong` | `(int->W x)` | `T→W` | La via d'ingresso, dall'altra parola grezza e dai tipi interi del capitolo 1 |
-| `try-int->c-long` `try-int->c-ulong` | `(try-int->W x)` | `T→Option<W>` | Come sopra |
 | `int->int` | `(int->int x)` | `T→int` | **Sempre esatta**. Il modo onesto di leggere un `size_t` che non sta in un `i32` |
 
 `(as i32 x)` / `(try-as i32 x)` / `(as int x)` / `(as c-ulong n)` sono ciò che queste fanno, e le
-conversioni esistono per ogni coppia con i tipi interi del capitolo 1. `ptr` non ha nemmeno questa
+conversioni esistono per ogni coppia con i tipi interi del capitolo 1. Non esiste una forma `try-` verso una parola grezza: `Option<c-long>` metterebbe una parola grezza dentro un altro tipo, cosa che non si può scrivere. `ptr` non ha nemmeno questa
 tabella: non è previsto alcun modo di leggere un puntatore come numero. È un valore che viene solo
 passato, ricevuto e consegnato a un'altra funzione C.
 
