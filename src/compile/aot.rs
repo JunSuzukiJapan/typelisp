@@ -61,7 +61,7 @@ use std::rc::Rc;
 
 use inkwell::context::Context;
 use inkwell::module::Module;
-use inkwell::values::{CallSiteValue, InstructionOpcode, Operand};
+use inkwell::values::{InstructionOpcode, Operand};
 use inkwell::AddressSpace;
 
 use crate::check::core;
@@ -591,11 +591,7 @@ pub fn compile_file_with(source_path: &str, output_path: &str, options: &BuildOp
         // (`driver::compile_function`), no addresses are passed
         // here: these resolve as ordinary linker symbols against
         // `typelisp-rt`'s `staticlib` once `write_executable` links it in.
-        let ptr_ty = ctx.ptr_type(AddressSpace::default());
-        let fn_ty = crate::compile::carriers::word().fn_type(&[ptr_ty.into(), ctx.i32_type().into()], false);
-        for (name, _) in crate::compile::externs::rt_extern_functions() {
-            module.add_function(name, fn_ty, None);
-        }
+        crate::compile::externs::declare_runtime_functions(&module);
         // The FFI thunks, before the prelude is linked in and long before any
         // body is translated: a compiled call to `c-strlen` resolves
         // `tl_c-strlen` with `get-function`, and the island **aborts the
@@ -1032,9 +1028,6 @@ fn build_main_wrapper(
         .ok_or_else(|| "internal error: compiled entry point not found in module".to_string())?;
 
     let i32_type = ctx.i32_type();
-    let ptr_ty = ctx.ptr_type(AddressSpace::default());
-    let fn_ty = crate::compile::carriers::word().fn_type(&[ptr_ty.into(), ctx.i32_type().into()], false);
-    module.add_function("rt_heap_init", fn_ty, None);
     let main_fn = module.add_function(ENTRY_POINT_NAME, i32_type.fn_type(&[], false), None);
     let entry_block = ctx.append_basic_block(main_fn, "entry");
     let builder = ctx.create_builder();
@@ -1068,7 +1061,7 @@ fn build_main_wrapper(
             definition.as_pointer_value().const_to_int(word_ty),
             word_ty.const_int(len as u64, false),
         ];
-        call_shim(ctx, module, &builder, "rt_ffi_callback_register", &words)?;
+        call_shim(module, &builder, "rt_ffi_callback_register", &words)?;
     }
     // The printer's two program facts (`typelisp_print::aot`): an enum's
     // variant *names* and each type's `print-object`, neither of which a
@@ -1106,7 +1099,6 @@ fn build_main_wrapper(
         let (ns_words, ns_len) =
             crate::compile::type_table::constant_words(module, "typelisp_eval_ns", &typelisp_mem::type_words::ns_words(ns));
         call_shim(
-            ctx,
             module,
             &builder,
             "rt_eval_state",
@@ -1128,7 +1120,6 @@ fn build_main_wrapper(
     // The bound on memory is set by the same call, before the arena is
     // allocated, so the arena counts toward it (0 is no bound).
     call_shim(
-        ctx,
         module,
         &builder,
         "rt_heap_init",
@@ -1144,26 +1135,20 @@ fn build_main_wrapper(
     // slots the machine code addresses. See `typelisp_front::shim`'s module
     // doc comment.
     if eval_env.is_some() {
-        call_shim(ctx, module, &builder, "rt_eval_init", &[])?;
+        call_shim(module, &builder, "rt_eval_init", &[])?;
     }
     // A board's interrupt handlers (`typelisp_rt::interrupt`), each under its
     // vector-table entry: after the heap, which a handler runs on.
     for (vector, handler) in interrupt_handlers {
         let word_ty = crate::compile::carriers::word();
         let words = [word_ty.const_int(u64::from(*vector), false), handler.as_global_value().as_pointer_value().const_to_int(word_ty)];
-        call_shim(ctx, module, &builder, "rt_interrupt_register", &words)?;
+        call_shim(module, &builder, "rt_interrupt_register", &words)?;
     }
     // Trait-object vtables: after `rt_eval_init` (above), whose `Interp::new`
     // clears the table, and complete before `tl_main` can reach a `:dyn`
     // call site.
     if !vtables.is_empty() {
         let word_ty = crate::compile::carriers::word();
-        let rt_vtable_set = module
-            .get_function("rt_vtable_set")
-            .ok_or_else(|| "internal error: rt_vtable_set not declared in module".to_string())?;
-        let args_ptr = builder
-            .build_alloca(word_ty.array_type(4), "vtable_set_args")
-            .map_err(|e| format!("failed to alloca vtable-set args: {}", e))?;
         for (id, slots) in vtables {
             for (slot, (type_name, method)) in slots.iter().enumerate() {
                 let symbol = ConcreteNames::method_symbol(type_name, method.name());
@@ -1192,18 +1177,7 @@ fn build_main_wrapper(
                     fn_ptr,
                     word_ty.const_int(u64::from(body_abi), false),
                 ];
-                for (i, v) in set_args.iter().enumerate() {
-                    let v = *v;
-                    let p = unsafe {
-                        builder
-                            .build_gep(word_ty, args_ptr, &[word_ty.const_int(i as u64, false)], "vtable_set_arg_ptr")
-                            .map_err(|e| format!("failed to build vtable-set gep: {}", e))?
-                    };
-                    builder.build_store(p, v).map_err(|e| format!("failed to store vtable-set arg: {}", e))?;
-                }
-                builder
-                    .build_call(rt_vtable_set, &[args_ptr.into(), ctx.i32_type().const_int(4, false).into()], "vtable_set_result")
-                    .map_err(|e| format!("failed to build rt_vtable_set call: {}", e))?;
+                call_shim(module, &builder, "rt_vtable_set", &set_args)?;
             }
         }
     }
@@ -1211,30 +1185,13 @@ fn build_main_wrapper(
     // point: a `:dyn` upcast in `tl_main` reads it, and it is all constants.
     if !upcasts.is_empty() {
         let word_ty = crate::compile::carriers::word();
-        let rt_upcast_set = module
-            .get_function("rt_upcast_set")
-            .ok_or_else(|| "internal error: rt_upcast_set not declared in module".to_string())?;
-        let args_ptr = builder
-            .build_alloca(word_ty.array_type(3), "upcast_set_args")
-            .map_err(|e| format!("failed to alloca upcast-set args: {}", e))?;
         for (from, trait_id, to) in upcasts {
             let set_args = [
                 word_ty.const_int(*from as u64, false),
                 word_ty.const_int(*trait_id as u64, false),
                 word_ty.const_int(*to as u64, false),
             ];
-            for (i, v) in set_args.iter().enumerate() {
-                let v = *v;
-                let p = unsafe {
-                    builder
-                        .build_gep(word_ty, args_ptr, &[word_ty.const_int(i as u64, false)], "upcast_set_arg_ptr")
-                        .map_err(|e| format!("failed to build upcast-set gep: {}", e))?
-                };
-                builder.build_store(p, v).map_err(|e| format!("failed to store upcast-set arg: {}", e))?;
-            }
-            builder
-                .build_call(rt_upcast_set, &[args_ptr.into(), ctx.i32_type().const_int(3, false).into()], "upcast_set_result")
-                .map_err(|e| format!("failed to build rt_upcast_set call: {}", e))?;
+            call_shim(module, &builder, "rt_upcast_set", &set_args)?;
         }
     }
     // The program proper: its global initialisers and then `tl_main`.
@@ -1295,7 +1252,7 @@ fn build_main_wrapper(
     // The entry shim, and the one without a scheduler that takes its place
     // when the program turns out to need none (below).
     let mut entry: Option<(inkwell::values::FunctionValue<'static>, &str)> = None;
-    let call: CallSiteValue = if tl_main.get_type() == coroutine_fn_ty {
+    let result = if tl_main.get_type() == coroutine_fn_ty {
         // A native executable's tasks run on OS threads too; a WebAssembly
         // module has none.
         let threads = matches!(target, Target::Host);
@@ -1307,7 +1264,7 @@ fn build_main_wrapper(
             (false, true, false) => "rt_run_program_int",
             (false, false, false) => "rt_run_program",
         };
-        let rt_run_program = module.add_function(entry_shim, fn_ty, None);
+        let rt_run_program = declare_entry(module, entry_shim)?;
         if eval_env.is_none() {
             entry = Some((rt_run_program, if main_returns_int { "rt_run_program_alone_int" } else { "rt_run_program_alone" }));
         }
@@ -1315,21 +1272,9 @@ fn build_main_wrapper(
         inits.set_initializer(&word_ty.const_array(&init_addrs));
         inits.set_constant(true);
         let inits_addr = inits.as_pointer_value().const_to_int(word_ty);
-        let words = [inits_addr, word_ty.const_int(init_addrs.len() as u64, false), entry_addr];
-        let args_ptr = builder
-            .build_alloca(word_ty.array_type(words.len() as u32), "program_args")
-            .map_err(|e| format!("failed to alloca the program arguments: {}", e))?;
-        for (i, w) in words.iter().enumerate() {
-            let slot = unsafe {
-                builder
-                    .build_gep(word_ty, args_ptr, &[word_ty.const_int(i as u64, false)], "program_arg_ptr")
-                    .map_err(|e| format!("failed to build the program argument gep: {}", e))?
-            };
-            builder.build_store(slot, *w).map_err(|e| format!("failed to store a program argument: {}", e))?;
-        }
-        builder
-            .build_call(rt_run_program, &[args_ptr.into(), ctx.i32_type().const_int(words.len() as u64, false).into()], "tl_main_result")
-            .map_err(|e| format!("failed to build entry-point call: {}", e))?
+        let words = [inits_addr.into(), word_ty.const_int(init_addrs.len() as u64, false).into(), entry_addr.into()];
+        let sig = crate::compile::externs::runtime_sig(entry_shim).expect("an entry shim is in the entry table");
+        crate::compile::runtime_abi::call_declared(&builder, rt_run_program, sig, &words)?.1
     } else {
         if main_returns_int {
             return Err("an `int`-returning main under the classic ABI is not supported".to_string());
@@ -1337,16 +1282,7 @@ fn build_main_wrapper(
         if !init_addrs.is_empty() {
             return Err("internal error: a classic-ABI entry point cannot run global initialisers (no scheduler)".to_string());
         }
-        let rt_run_entry = module.add_function("rt_run_entry", word_ty.fn_type(&[word_ty.into()], false), None);
-        builder
-            .build_call(rt_run_entry, &[entry_addr.into()], "tl_main_result")
-            .map_err(|e| format!("failed to build entry-point call: {}", e))?
-    };
-    let result = match call.try_as_basic_value() {
-        inkwell::values::ValueKind::Basic(v) => v.into_int_value(),
-        inkwell::values::ValueKind::Instruction(_) => {
-            return Err("internal error: entry point produced no value".to_string())
-        }
+        crate::compile::runtime_abi::call(&builder, module, "rt_run_entry", &[entry_addr.into()])?.1
     };
     let exit_code = builder
         .build_int_truncate(result, i32_type, "exit_code")
@@ -1393,7 +1329,7 @@ fn build_main_wrapper(
     if let Some((scheduled, alone)) = entry {
         let waits = reach::uses(module, main_fn, |name| crate::compile::externs::needs_scheduler(name).then(String::new));
         if waits.is_empty() {
-            let alone = module.add_function(alone, fn_ty, None);
+            let alone = declare_entry(module, alone)?;
             scheduled.as_global_value().as_pointer_value().replace_all_uses_with(alone.as_global_value().as_pointer_value());
             // SAFETY: a declaration with no uses left.
             unsafe { scheduled.delete() };
@@ -1662,24 +1598,7 @@ fn emit_print_registration(
         ))
     };
     let call = |builder: &inkwell::builder::Builder<'static>, name: &str, words: &[inkwell::values::IntValue<'static>]| -> Result<(), String> {
-        let f = module
-            .get_function(name)
-            .ok_or_else(|| format!("internal error: {} not declared in module", name))?;
-        let args_ptr = builder
-            .build_alloca(word_ty.array_type(words.len() as u32), "print_reg_args")
-            .map_err(|e| format!("failed to alloca printer-registration args: {}", e))?;
-        for (i, w) in words.iter().enumerate() {
-            let p = unsafe {
-                builder
-                    .build_gep(word_ty, args_ptr, &[word_ty.const_int(i as u64, false)], "print_reg_arg_ptr")
-                    .map_err(|e| format!("failed to build printer-registration gep: {}", e))?
-            };
-            builder.build_store(p, *w).map_err(|e| format!("failed to store printer-registration arg: {}", e))?;
-        }
-        builder
-            .build_call(f, &[args_ptr.into(), ctx.i32_type().const_int(words.len() as u32 as u64, false).into()], "print_reg_result")
-            .map_err(|e| format!("failed to build {} call: {}", name, e))?;
-        Ok(())
+        call_shim(module, builder, name, words)
     };
     // The definitions and the field types, read out of the module's type
     // table (`compile::type_table`): a type's id is this process's number,
@@ -1783,39 +1702,24 @@ const EVAL_HEAP_CAPACITY: usize = 1 << 18;
 /// function and asked to run it. The price is the same one `eval` pays.
 const EVAL_SHIMS: [&str; 3] = ["rt_eval", "rt_set_macro_character", "rt_set_dispatch_macro_character"];
 
-/// Emits one call to the `rt_*` shim `name` with `words` as its argument
-/// array — the startup-registration calling pattern, spelled once.
+/// Emits one call to the runtime function `name` with `words` — the
+/// startup-registration calling pattern, spelled once.
 fn call_shim(
-    ctx: &'static Context,
     module: &Module<'static>,
     builder: &inkwell::builder::Builder<'static>,
     name: &str,
     words: &[inkwell::values::IntValue<'static>],
 ) -> Result<(), String> {
-    let word_ty = crate::compile::carriers::word();
-    let f = module
-        .get_function(name)
-        .ok_or_else(|| format!("internal error: {} not declared in module", name))?;
-    let args_ptr = if words.is_empty() {
-        ctx.ptr_type(AddressSpace::default()).const_null()
-    } else {
-        let p = builder
-            .build_alloca(word_ty.array_type(words.len() as u32), "shim_args")
-            .map_err(|e| format!("failed to alloca {} args: {}", name, e))?;
-        for (i, w) in words.iter().enumerate() {
-            let slot = unsafe {
-                builder
-                    .build_gep(word_ty, p, &[word_ty.const_int(i as u64, false)], "shim_arg_ptr")
-                    .map_err(|e| format!("failed to build {} gep: {}", name, e))?
-            };
-            builder.build_store(slot, *w).map_err(|e| format!("failed to store {} arg: {}", name, e))?;
-        }
-        p
-    };
-    builder
-        .build_call(f, &[args_ptr.into(), ctx.i32_type().const_int(words.len() as u64, false).into()], "shim_result")
-        .map_err(|e| format!("failed to build {} call: {}", name, e))?;
+    let words: Vec<inkwell::values::BasicValueEnum<'static>> = words.iter().map(|w| (*w).into()).collect();
+    crate::compile::runtime_abi::call(builder, module, name, &words)?;
     Ok(())
+}
+
+/// The program entry `name` (`rt_run_program` and its kind), declared under
+/// its signature.
+fn declare_entry(module: &Module<'static>, name: &str) -> Result<inkwell::values::FunctionValue<'static>, String> {
+    let sig = crate::compile::externs::runtime_sig(name).ok_or_else(|| format!("internal error: `{}` is not a program entry", name))?;
+    Ok(crate::compile::runtime_abi::declare(module, name, sig))
 }
 
 /// The names of the printing shims (`typelisp_print::shim`), which is what
@@ -1905,15 +1809,8 @@ fn classic_door(
     let ptr_ty = ctx.ptr_type(AddressSpace::default());
     let classic_ty = word_ty.fn_type(&[ptr_ty.into(), ctx.i32_type().into()], false);
     let door = module.add_function(&name, classic_ty, None);
-    let drive = match module.get_function("rt_drive_body") {
-        Some(f) => f,
-        None => module.add_function("rt_drive_body", classic_ty, None),
-    };
     let builder = ctx.create_builder();
     builder.position_at_end(ctx.append_basic_block(door, "entry"));
-    let args = builder
-        .build_alloca(word_ty.array_type(3), "drive_args")
-        .map_err(|e| format!("failed to alloca the driver arguments: {}", e))?;
     let words = [
         target.as_global_value().as_pointer_value().const_to_int(word_ty),
         builder
@@ -1931,23 +1828,8 @@ fn classic_door(
             )
             .map_err(|e| format!("failed to widen the argument count: {}", e))?,
     ];
-    for (i, w) in words.iter().enumerate() {
-        let p = unsafe {
-            builder
-                .build_gep(word_ty, args, &[word_ty.const_int(i as u64, false)], "drive_arg_ptr")
-                .map_err(|e| format!("failed to index the driver arguments: {}", e))?
-        };
-        builder.build_store(p, *w).map_err(|e| format!("failed to store a driver argument: {}", e))?;
-    }
-    let out = builder
-        .build_call(drive, &[args.into(), ctx.i32_type().const_int(3, false).into()], "drive_result")
-        .map_err(|e| format!("failed to build the rt_drive_body call: {}", e))?;
-    let out = match out.try_as_basic_value() {
-        inkwell::values::ValueKind::Basic(v) => v.into_int_value(),
-        inkwell::values::ValueKind::Instruction(_) => {
-            return Err("internal error: rt_drive_body produced no value".to_string())
-        }
-    };
+    let words = words.map(inkwell::values::BasicValueEnum::from);
+    let (_, out) = crate::compile::runtime_abi::call(&builder, module, "rt_drive_body", &words)?;
     builder.build_return(Some(&out)).map_err(|e| format!("failed to build the door's return: {}", e))?;
     Ok(door.as_global_value().as_pointer_value().const_to_int(word_ty))
 }
@@ -2046,20 +1928,15 @@ mod tests {
 
         let ptr_ty = ctx.ptr_type(AddressSpace::default());
         let fn_ty = crate::compile::carriers::word().fn_type(&[ptr_ty.into(), ctx.i32_type().into()], false);
-        let rt_ping = module.add_function("rt_ping", fn_ty, None);
         let tl_main = module.add_function("tl_main", fn_ty, None);
 
         let builder = ctx.create_builder();
         let entry = ctx.append_basic_block(tl_main, "entry");
         builder.position_at_end(entry);
-        let one_slot = builder.build_alloca(crate::compile::carriers::word(), "one_slot").unwrap();
-        builder.build_store(one_slot, crate::compile::carriers::word().const_int(41, false)).unwrap();
-        let argc_one = ctx.i32_type().const_int(1, false);
-        let call = builder.build_call(rt_ping, &[one_slot.into(), argc_one.into()], "rt_ping_result").unwrap();
-        let result = match call.try_as_basic_value() {
-            inkwell::values::ValueKind::Basic(v) => v.into_int_value(),
-            inkwell::values::ValueKind::Instruction(_) => panic!("rt_ping call produced no value"),
-        };
+        let forty_one = crate::compile::carriers::word().const_int(41, false);
+        let sig = crate::compile::runtime_abi::shim(typelisp_rt::rt_ping as unsafe extern "C" fn(i64) -> i64).sig;
+        let rt_ping = crate::compile::runtime_abi::declare(&module, "rt_ping", &sig);
+        let (_, result) = crate::compile::runtime_abi::call_declared(&builder, rt_ping, &sig, &[forty_one.into()]).unwrap();
         // A `main` that returns normally exits 0 whatever it answers
         // (`rt_run_entry`), so the answer leaves through `exit` instead.
         let exit_ty = ctx.void_type().fn_type(&[ctx.i32_type().into()], false);
@@ -2092,19 +1969,14 @@ mod tests {
 
         let ptr_ty = ctx.ptr_type(AddressSpace::default());
         let fn_ty = crate::compile::carriers::word().fn_type(&[ptr_ty.into(), ctx.i32_type().into()], false);
-        let rt_heap_live_count = module.add_function("rt_heap_live_count", fn_ty, None);
         let tl_main = module.add_function("tl_main", fn_ty, None);
 
         let builder = ctx.create_builder();
         let entry = ctx.append_basic_block(tl_main, "entry");
         builder.position_at_end(entry);
-        let null_args = ptr_ty.const_null();
-        let argc_zero = ctx.i32_type().const_int(0, false);
-        let call = builder.build_call(rt_heap_live_count, &[null_args.into(), argc_zero.into()], "live_count").unwrap();
-        let result = match call.try_as_basic_value() {
-            inkwell::values::ValueKind::Basic(v) => v.into_int_value(),
-            inkwell::values::ValueKind::Instruction(_) => panic!("rt_heap_live_count call produced no value"),
-        };
+        let sig = crate::compile::runtime_abi::shim(typelisp_rt::rt_heap_live_count as unsafe extern "C" fn() -> i64).sig;
+        let rt_heap_live_count = crate::compile::runtime_abi::declare(&module, "rt_heap_live_count", &sig);
+        let (_, result) = crate::compile::runtime_abi::call_declared(&builder, rt_heap_live_count, &sig, &[]).unwrap();
         builder.build_return(Some(&result)).unwrap();
 
         build_main_wrapper(ctx, &module, "tl_main", &[], &super::Globals::default(), &[], &[], &[], &[], &[], &[], &[], &[], &[], None, false, super::Target::Host, super::HeapInit { cells: typelisp_rt::DEFAULT_AOT_HEAP_CAPACITY, fixed: false, max_memory: None }).expect("build_main_wrapper failed");

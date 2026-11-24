@@ -18,7 +18,6 @@ use inkwell::llvm_sys::core::{LLVMGetGlobalParent, LLVMGetNamedFunction};
 use inkwell::module::Module;
 use inkwell::types::BasicTypeEnum;
 use inkwell::values::{AsValueRef, FunctionValue};
-use inkwell::AddressSpace;
 
 /// The shim generated code asks whether an unwind is waiting.
 pub(crate) const RT_UNWINDING: &str = "rt_unwinding";
@@ -37,10 +36,7 @@ pub(crate) fn after_call(builder: &Builder<'static>, callee: FunctionValue<'stat
     let block = builder.get_insert_block().ok_or("a call was made with the builder outside any block")?;
     let current = block.get_parent().ok_or("a call was made in a block outside any function")?;
     let unwinding = rt_unwinding_in(current)?;
-    let null = ctx.ptr_type(AddressSpace::default()).const_null();
-    let asked = builder
-        .build_call(unwinding, &[null.into(), ctx.i32_type().const_zero().into()], "unwinding")
-        .map_err(|e| format!("raise check: call: {}", e))?;
+    let asked = builder.build_call(unwinding, &[], "unwinding").map_err(|e| format!("raise check: call: {}", e))?;
     let asked = match asked.try_as_basic_value() {
         inkwell::values::ValueKind::Basic(v) => v.into_int_value(),
         inkwell::values::ValueKind::Instruction(_) => return Err("raise check: rt_unwinding produced no value".to_string()),
@@ -91,9 +87,8 @@ fn zero_of(t: BasicTypeEnum<'static>) -> inkwell::values::BasicValueEnum<'static
 }
 
 /// `rt_unwinding` as declared in the module `f` is in, declared there under
-/// the shared shim signature if it is not yet.
+/// its signature if it is not yet.
 fn rt_unwinding_in(f: FunctionValue<'static>) -> Result<FunctionValue<'static>, String> {
-    let ctx = crate::compile::llvm_context();
     // SAFETY: `f` is a function in a live module; the module reference is
     // only used to look a name up and, failing that, to add a declaration.
     let module_ref = unsafe { LLVMGetGlobalParent(f.as_value_ref()) };
@@ -106,6 +101,6 @@ fn rt_unwinding_in(f: FunctionValue<'static>) -> Result<FunctionValue<'static>, 
     // SAFETY: borrowed for the one declaration and not dropped — the module is
     // owned elsewhere.
     let module: std::mem::ManuallyDrop<Module<'static>> = std::mem::ManuallyDrop::new(unsafe { Module::new(module_ref) });
-    let fn_ty = crate::compile::carriers::word().fn_type(&[ctx.ptr_type(AddressSpace::default()).into(), ctx.i32_type().into()], false);
-    Ok(module.add_function(RT_UNWINDING, fn_ty, None))
+    let sig = crate::compile::externs::runtime_sig(RT_UNWINDING).ok_or("raise check: rt_unwinding is not in the runtime table")?;
+    Ok(crate::compile::runtime_abi::declare(&module, RT_UNWINDING, sig))
 }

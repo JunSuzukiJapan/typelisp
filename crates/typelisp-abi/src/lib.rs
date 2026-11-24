@@ -34,7 +34,7 @@ pub mod dribble;
 // `concat!` takes literals only. `scripts/regen-abi-version.sh` is what
 // rewrites them, and only when that description changed or the typelisp
 // version's MAJOR.MINOR did.
-macro_rules! with_abi_version { ($then:ident) => { $then!(0, 3, 75) }; }
+macro_rules! with_abi_version { ($then:ident) => { $then!(0, 3, 76) }; }
 
 macro_rules! dotted { ($major:literal, $minor:literal, $patch:literal) => { concat!($major, ".", $minor, ".", $patch) }; }
 
@@ -62,7 +62,7 @@ use core::cell::{Cell, RefCell};
 
 use typelisp_mem::prelude::*;
 
-use typelisp_mem::{Heap, Value};
+use typelisp_mem::Heap;
 
 
 // The `Heap` every other `rt_*` function in this crate (from Stage 3
@@ -755,11 +755,3 @@ pub mod call_state {
 /// crate — has to be able to decode them.
 pub use typelisp_mem::tagged::{decode, encode};
 
-/// Decodes one tagged argument.
-///
-/// # Safety
-///
-/// `args` must point to at least `i + 1` valid `i64`s.
-pub unsafe fn tagged_arg(args: *const i64, i: usize) -> Value {
-    decode(*args.add(i))
-}

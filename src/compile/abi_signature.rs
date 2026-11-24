@@ -283,12 +283,10 @@ fn sig_types(sig: &FnDef, note: &mut impl FnMut(&Type)) {
 /// Every symbol compiled code calls in the archive, with the LLVM type it
 /// declares it at.
 fn shims(out: &mut String) {
-    const CLASSIC: &str = "i64 (ptr, i32)";
-    let mut rows: BTreeMap<&str, &str> = super::externs::rt_extern_functions().iter().map(|(n, _)| (*n, CLASSIC)).collect();
-    // Declared by the AOT entry sequence rather than the shim table
-    // (`aot::build_main_wrapper`, `aot::coroutine_door`).
-    for (name, ty) in [("rt_heap_init", CLASSIC), ("rt_run_entry", "i64 (i64)"), ("rt_drive_body", CLASSIC)] {
-        rows.insert(name, ty);
+    let mut rows: BTreeMap<&str, String> = BTreeMap::new();
+    for name in super::externs::runtime_function_names_with_entries() {
+        let sig = super::externs::runtime_sig(name).expect("a listed runtime function has a signature");
+        rows.insert(name, sig.fn_type().print_to_string().to_string());
     }
     out.push_str("## ランタイム関数\n\n| シンボル | LLVM の型 |\n|---|---|\n");
     for (name, ty) in rows {

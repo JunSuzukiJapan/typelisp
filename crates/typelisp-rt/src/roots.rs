@@ -21,14 +21,11 @@ use typelisp_abi::{active_heap, decode, encode, fatal};
 ///
 /// # Safety
 ///
-/// `argc` must be `>= 1` and `args` must point to at least 1 valid `i64`; a
+/// The words must be valid; a
 /// `Heap` must already be registered on this thread.
 #[no_mangle]
-pub unsafe extern "C" fn rt_push_sexpr_root(args: *const i64, argc: u32) -> i64 {
-    if argc < 1 {
-        fatal("rt_push_sexpr_root: expected 1 argument");
-    }
-    let tagged = *args;
+pub unsafe extern "C" fn rt_push_sexpr_root(tagged: i64) -> i64 {
+    let tagged = tagged;
     active_heap().push_root(decode(tagged));
     tagged
 }
@@ -44,7 +41,7 @@ pub unsafe extern "C" fn rt_push_sexpr_root(args: *const i64, argc: u32) -> i64 
 ///
 /// A `Heap` must already be registered on this thread.
 #[no_mangle]
-pub unsafe extern "C" fn rt_pop_sexpr_root(_args: *const i64, _argc: u32) -> i64 {
+pub unsafe extern "C" fn rt_pop_sexpr_root() -> i64 {
     match active_heap().pop_root() {
         Some(v) => encode(v),
         None => fatal("rt_pop_sexpr_root: root stack was empty"),
@@ -75,11 +72,8 @@ pub unsafe extern "C" fn rt_pop_sexpr_root(_args: *const i64, _argc: u32) -> i64
 ///
 /// Same as [`rt_push_sexpr_root`].
 #[no_mangle]
-pub unsafe extern "C" fn rt_push_permanent_sexpr_root(args: *const i64, argc: u32) -> i64 {
-    if argc < 1 {
-        fatal("rt_push_permanent_sexpr_root: expected 1 argument");
-    }
-    let tagged = *args;
+pub unsafe extern "C" fn rt_push_permanent_sexpr_root(tagged: i64) -> i64 {
+    let tagged = tagged;
     active_heap().push_permanent_root(decode(tagged));
     tagged
 }
@@ -103,13 +97,13 @@ pub unsafe extern "C" fn rt_push_permanent_sexpr_root(args: *const i64, argc: u3
 ///
 /// A `Heap` must already be registered on this thread.
 #[no_mangle]
-pub unsafe extern "C" fn rt_root_count(_args: *const i64, _argc: u32) -> i64 {
+pub unsafe extern "C" fn rt_root_count() -> i64 {
     active_heap().root_count() as i64
 }
 
 /// `setf`'s GC-root counterpart to [`rt_push_sexpr_root`]: overwrites the
-/// root at stack position `args[0]` (a raw host index, *not* a tagged
-/// `Sexpr` — see [`rt_root_count`]) with `args[1]` (`Heap::set_root`).
+/// root at stack position `idx` (a raw host index, *not* a tagged
+/// `Sexpr` — see [`rt_root_count`]) with `tagged` (`Heap::set_root`).
 ///
 /// A `let`/parameter/captured binding's GC root is pushed exactly once, at
 /// bind time, holding whatever value the binding started with
@@ -134,28 +128,25 @@ pub unsafe extern "C" fn rt_root_count(_args: *const i64, _argc: u32) -> i64 {
 /// a loop), unlike pushing a fresh root per `setf` would be (which has no
 /// matching pop count known until runtime).
 ///
-/// Returns `args[1]` unchanged, like [`rt_push_sexpr_root`].
+/// Returns `tagged` unchanged, like [`rt_push_sexpr_root`].
 ///
 /// # Safety
 ///
-/// `argc` must be `>= 2` and `args` must point to at least 2 valid `i64`s; a
-/// `Heap` must already be registered on this thread; `args[0]` must be a
+/// The words must be valid; a
+/// `Heap` must already be registered on this thread; `idx` must be a
 /// valid index into that `Heap`'s current root stack (always true in
 /// practice — it's always a value `rt_root_count` itself returned earlier in
 /// the same dynamic scope, never user input).
 #[no_mangle]
-pub unsafe extern "C" fn rt_set_sexpr_root(args: *const i64, argc: u32) -> i64 {
-    if argc < 2 {
-        fatal("rt_set_sexpr_root: expected 2 arguments");
-    }
-    let idx = *args as usize;
-    let tagged = *args.add(1);
+pub unsafe extern "C" fn rt_set_sexpr_root(idx: i64, tagged: i64) -> i64 {
+    let idx = idx as usize;
+    let tagged = tagged;
     active_heap().set_root(idx, decode(tagged));
     tagged
 }
 
 /// `compiler.rs`'s `compile-break`/`compile-return` call this, with
-/// `args[0]` set to the root count `compile-loop` read (`rt_root_count`)
+/// `len` set to the root count `compile-loop` read (`rt_root_count`)
 /// right before entering the loop's own body, immediately before building
 /// the jump to the loop's exit block — discarding, in one call
 /// (`Heap::truncate_roots`), every `Sexpr`-typed GC root any number of
@@ -166,7 +157,7 @@ pub unsafe extern "C" fn rt_set_sexpr_root(args: *const i64, argc: u32) -> i64 {
 /// `pop-sexpr-root` at its merge block — both skip that pop specifically
 /// *because* the block is already terminated by the jump this truncates
 /// for). Unlike [`rt_pop_sexpr_root`], which is fatal on an empty stack,
-/// this is a no-op if `args[0] >= rt_root_count()` already (a `break`/
+/// this is a no-op if `len` >= rt_root_count()` already (a `break`/
 /// `return` with no scopes open above the loop itself) — the same
 /// "truncating to at-or-past the current length does nothing" behavior
 /// [`typelisp_mem::Heap::truncate_roots`] gets from `Vec::truncate`.
@@ -175,14 +166,11 @@ pub unsafe extern "C" fn rt_set_sexpr_root(args: *const i64, argc: u32) -> i64 {
 ///
 /// # Safety
 ///
-/// `argc` must be `>= 1` and `args` must point to at least 1 valid `i64`; a
+/// The words must be valid; a
 /// `Heap` must already be registered on this thread.
 #[no_mangle]
-pub unsafe extern "C" fn rt_truncate_sexpr_roots(args: *const i64, argc: u32) -> i64 {
-    if argc < 1 {
-        fatal("rt_truncate_sexpr_roots: expected 1 argument");
-    }
-    let len = *args as usize;
+pub unsafe extern "C" fn rt_truncate_sexpr_roots(len: i64) -> i64 {
+    let len = len as usize;
     active_heap().truncate_roots(len);
     0
 }

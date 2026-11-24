@@ -27,7 +27,7 @@ fn proper_list_elements(heap: &Heap, list: Value, who: &str) -> Vec<Value> {
     }
 }
 
-/// A quoted `#(..)` in compiled code: `args[0]` is a `Sexpr` list of the
+/// A quoted `#(..)` in compiled code: `list` is a `Sexpr` list of the
 /// elements (`core_bridge::quoted_form` takes the vector apart into one,
 /// since compiled code cannot refer to the compiling heap's box), and the
 /// result is the `Sexpr` `vector` variant's box holding them — what the
@@ -35,15 +35,12 @@ fn proper_list_elements(heap: &Heap, list: Value, who: &str) -> Vec<Value> {
 ///
 /// # Safety
 ///
-/// `argc` must be `>= 1` and `args` must point to a valid tagged word; a
+/// The word must be a valid tagged word; a
 /// `Heap` must already be registered on this thread.
 #[no_mangle]
-pub unsafe extern "C" fn rt_list_to_sexpr_vector(args: *const i64, argc: u32) -> i64 {
-    if argc < 1 {
-        fatal("rt_list_to_sexpr_vector: expected 1 argument");
-    }
+pub unsafe extern "C" fn rt_list_to_sexpr_vector(list: i64) -> i64 {
     let heap = active_heap();
-    let list = decode(*args);
+    let list = decode(list);
     let elems = proper_list_elements(heap, list, "rt_list_to_sexpr_vector");
     // The elements are reachable only through `list`, which nothing else
     // roots while the box is allocated.
@@ -63,21 +60,18 @@ fn sexpr_tuple_of(heap: &mut Heap, elems: Vec<Value>) -> Result<Value, Raised> {
     Ok(heap.alloc_struct(key, elems))
 }
 
-/// A quoted `#{..}` in compiled code: `args[0]` is a `Sexpr` list of the
+/// A quoted `#{..}` in compiled code: `list` is a `Sexpr` list of the
 /// elements, as for [`rt_list_to_sexpr_vector`], and the result is the tuple
 /// box the reader builds from the same text.
 ///
 /// # Safety
 ///
-/// `argc` must be `>= 1` and `args` must point to a valid tagged word; a
+/// The word must be a valid tagged word; a
 /// `Heap` must already be registered on this thread.
 #[no_mangle]
-pub unsafe extern "C-unwind" fn rt_list_to_sexpr_tuple(args: *const i64, argc: u32) -> i64 {
-    if argc < 1 {
-        fatal("rt_list_to_sexpr_tuple: expected 1 argument");
-    }
+pub unsafe extern "C-unwind" fn rt_list_to_sexpr_tuple(list: i64) -> i64 {
     let heap = active_heap();
-    let list = decode(*args);
+    let list = decode(list);
     let elems = proper_list_elements(heap, list, "rt_list_to_sexpr_tuple");
     heap.push_root(list);
     let t = sexpr_tuple_of(heap, elems);
@@ -89,19 +83,16 @@ pub unsafe extern "C-unwind" fn rt_list_to_sexpr_tuple(args: *const i64, argc: u
 }
 
 /// `(construct sexpr tuple V)` in compiled code: the tuple of the elements of
-/// the `Vector<Option<Sexpr>>` `args[0]`.
+/// the `Vector<Option<Sexpr>>` `v`.
 ///
 /// # Safety
 ///
-/// `argc` must be `>= 1` and `args` must point to a tagged vector box; a
+/// The word must be a tagged vector box; a
 /// `Heap` must already be registered on this thread.
 #[no_mangle]
-pub unsafe extern "C-unwind" fn rt_vector_to_sexpr_tuple(args: *const i64, argc: u32) -> i64 {
-    if argc < 1 {
-        fatal("rt_vector_to_sexpr_tuple: expected 1 argument");
-    }
+pub unsafe extern "C-unwind" fn rt_vector_to_sexpr_tuple(v: i64) -> i64 {
     let heap = active_heap();
-    let v = decode(*args);
+    let v = decode(v);
     let Value::Boxed(id) = v else { fatal("rt_vector_to_sexpr_tuple: argument is not a vector") };
     let elems: Vec<Value> = (0..heap.struct_field_count(id)).map(|i| heap.struct_field(id, i)).collect();
     heap.push_root(v);
@@ -114,20 +105,17 @@ pub unsafe extern "C-unwind" fn rt_vector_to_sexpr_tuple(args: *const i64, argc:
 }
 
 /// The payload a `(Tuple v)` pattern binds: a fresh `Vector<Option<Sexpr>>`
-/// of the elements of the tuple box `args[0]` — the interpreter's
+/// of the elements of the tuple box `t` — the interpreter's
 /// `match_sexpr_core` `tuple` arm, for compiled code.
 ///
 /// # Safety
 ///
-/// `argc` must be `>= 1` and `args` must point to a tagged tuple box; a
+/// The word must be a tagged tuple box; a
 /// `Heap` must already be registered on this thread.
 #[no_mangle]
-pub unsafe extern "C" fn rt_sexpr_tuple_items(args: *const i64, argc: u32) -> i64 {
-    if argc < 1 {
-        fatal("rt_sexpr_tuple_items: expected 1 argument");
-    }
+pub unsafe extern "C" fn rt_sexpr_tuple_items(t: i64) -> i64 {
     let heap = active_heap();
-    let t = decode(*args);
+    let t = decode(t);
     let Value::Boxed(id) = t else { fatal("rt_sexpr_tuple_items: argument is not a tuple") };
     let elems: Vec<Value> = (0..heap.struct_field_count(id)).map(|i| heap.struct_field(id, i)).collect();
     heap.push_root(t);
@@ -136,23 +124,20 @@ pub unsafe extern "C" fn rt_sexpr_tuple_items(args: *const i64, argc: u32) -> i6
     encode(v)
 }
 
-/// A quoted `#nA(..)` in compiled code: `args[0]` is a list of the
-/// dimensions as `int`s, `args[1]` a list of the elements in row-major order
+/// A quoted `#nA(..)` in compiled code: `dims_list` is a list of the
+/// dimensions as `int`s, `data_list` a list of the elements in row-major order
 /// (`core_bridge::quoted_form` again). The result is the `Sexpr` `array`
 /// variant's box, built by the reader's own `alloc_sexpr_array`.
 ///
 /// # Safety
 ///
-/// `argc` must be `>= 2` and `args` must point to two valid tagged words; a
+/// The words must be valid tagged words; a
 /// `Heap` must already be registered on this thread.
 #[no_mangle]
-pub unsafe extern "C" fn rt_lists_to_sexpr_array(args: *const i64, argc: u32) -> i64 {
-    if argc < 2 {
-        fatal("rt_lists_to_sexpr_array: expected 2 arguments");
-    }
+pub unsafe extern "C" fn rt_lists_to_sexpr_array(dims_list: i64, data_list: i64) -> i64 {
     let heap = active_heap();
-    let dims_list = decode(*args);
-    let data_list = decode(*args.add(1));
+    let dims_list = decode(dims_list);
+    let data_list = decode(data_list);
     let dims = proper_list_elements(heap, dims_list, "rt_lists_to_sexpr_array");
     let data = proper_list_elements(heap, data_list, "rt_lists_to_sexpr_array");
     // The elements are reachable only through `data_list`.

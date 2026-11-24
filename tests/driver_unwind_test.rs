@@ -39,12 +39,6 @@ const THROWN: i64 = 7;
 const PAD_PC: i64 = 1;
 const AFTER_CALL_PC: i64 = 2;
 
-/// One-slot argument arrays, since every `rt_*` entry point takes
-/// `(*const i64, u32)`.
-unsafe fn rt1(f: unsafe extern "C" fn(*const i64, u32) -> i64, a: i64) -> i64 {
-    f([a].as_ptr(), 1)
-}
-
 /// The prologue every compiled body emits: on first entry open a frame, which
 /// `rt_frame_open` also tells the driver about (it is made *inside* the
 /// callee, so there is no other moment); on a later entry the driver hands
@@ -56,7 +50,7 @@ unsafe fn prologue(param: i64, nslots: usize) -> (*mut i64, i64) {
         return (data, *data.add(FRAME_PC_SLOT));
     }
     let open = [nslots as i64, 0];
-    let data = typelisp_rt::rt_frame_open(open.as_ptr(), 2) as usize as *mut i64;
+    let data = typelisp_rt::rt_frame_open(open[0], open[1]) as usize as *mut i64;
     (data, 0)
 }
 
@@ -82,9 +76,9 @@ unsafe extern "C-unwind" fn raiser(param: i64) -> i64 {
     let (_frame, _) = prologue(param, FRAME_RESERVED_SLOTS);
     let tag = call_state::with(|s| s.pending_arg(0)).expect("raiser was passed a tag");
     let args = [tag, encode(Value::Int(THROWN))];
-    typelisp_rt::rt_throw(args.as_ptr(), 2);
+    typelisp_rt::rt_throw(args[0], args[1]);
     // What generated code does after a call that raised.
-    assert_ne!(typelisp_rt::rt_unwinding(std::ptr::null(), 0), 0, "rt_throw raised nothing");
+    assert_ne!(typelisp_rt::rt_unwinding(), 0, "rt_throw raised nothing");
     STATUS_UNWIND
 }
 
@@ -110,8 +104,8 @@ unsafe extern "C-unwind" fn guarded(param: i64) -> i64 {
     if pc == PAD_PC {
         // The region is over the moment its pad runs, either way it goes.
         set_slot(frame, FRAME_HANDLER_SLOT, 0);
-        if rt1(typelisp_rt::rt_throw_matches, slot(frame, FRAME_RESERVED_SLOTS)) != 0 {
-            let claimed = typelisp_rt::rt_throw_take_value(std::ptr::null(), 0);
+        if typelisp_rt::rt_throw_matches(slot(frame, FRAME_RESERVED_SLOTS)) != 0 {
+            let claimed = typelisp_rt::rt_throw_take_value();
             set_slot(frame, FRAME_VALUE_SLOT, claimed);
             return STATUS_RETURN;
         }

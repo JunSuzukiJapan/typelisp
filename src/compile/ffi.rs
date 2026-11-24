@@ -223,18 +223,6 @@ pub(crate) fn emit_thunk(module: &Module<'static>, decl: &FfiDecl) -> Result<Fun
     let word_ty = crate::compile::carriers::word();
     let args_ptr = thunk.get_nth_param(0).expect("the shared signature has two parameters").into_pointer_value();
 
-    // One scratch slot, reused: every shim call below takes exactly one word
-    // and consumes it before the next is stored. In the entry block because
-    // that is where LLVM wants an `alloca`.
-    let scratch = builder
-        .build_alloca(word_ty, "ffi_scratch")
-        .map_err(|e| format!("ffi: failed to reserve the shim argument slot: {}", e))?;
-    let one = ctx.i32_type().const_int(1, false);
-    let shim = |name: &str| match module.get_function(name) {
-        Some(f) => f,
-        None => module.add_function(name, compiled_fn_type(), None),
-    };
-
     let mut call_args: Vec<BasicMetadataValueEnum<'static>> = Vec::with_capacity(params.len());
     // The C strings made for this call, to be freed once it has returned.
     let mut owned_cstrings: Vec<IntValue<'static>> = Vec::new();
@@ -252,7 +240,7 @@ pub(crate) fn emit_thunk(module: &Module<'static>, decl: &FfiDecl) -> Result<Fun
             .map_err(|e| format!("ffi: failed to load an argument: {}", e))?
             .into_int_value();
         if *c == CType::Str {
-            let made = call_shim(&builder, shim("rt_ffi_cstring_new"), scratch, one, word, "cstr")?;
+            let made = call_shim(&builder, module, "rt_ffi_cstring_new", &[word])?;
             owned_cstrings.push(made);
             let p = builder
                 .build_int_to_ptr(made, ctx.ptr_type(inkwell::AddressSpace::default()), "cstr_ptr")
@@ -266,12 +254,11 @@ pub(crate) fn emit_thunk(module: &Module<'static>, decl: &FfiDecl) -> Result<Fun
     // Native for exactly the C call: everything it is given is a C value
     // by now, and nothing it answers is a Lisp one yet — see
     // `typelisp_rt::rt_ffi_enter_native`.
-    let zero = word_ty.const_zero();
-    call_shim(&builder, shim("rt_ffi_enter_native"), scratch, one, zero, "native")?;
+    call_shim(&builder, module, "rt_ffi_enter_native", &[])?;
     let call = builder
         .build_call(c_fn, &call_args, "ffi_call")
         .map_err(|e| format!("ffi: failed to build the call to `{}`: {}", decl.c_symbol, e))?;
-    call_shim(&builder, shim("rt_ffi_leave_native"), scratch, one, zero, "running")?;
+    call_shim(&builder, module, "rt_ffi_leave_native", &[])?;
     let out = match call.try_as_basic_value() {
         inkwell::values::ValueKind::Basic(v) if ret == CType::Str => {
             // Copied *before* the arguments are freed: a C function that
@@ -283,7 +270,7 @@ pub(crate) fn emit_thunk(module: &Module<'static>, decl: &FfiDecl) -> Result<Fun
             let raw = builder
                 .build_ptr_to_int(v.into_pointer_value(), word_ty, "ret_cstr")
                 .map_err(|e| format!("ffi: failed to take the address of a string result: {}", e))?;
-            call_shim(&builder, shim("rt_ffi_string_from_cstr"), scratch, one, raw, "ret_str")?
+            call_shim(&builder, module, "rt_ffi_string_from_cstr", &[raw])?
         }
         inkwell::values::ValueKind::Basic(v) => c_to_word(&builder, v, ret)?,
         // A `void` C function still has to answer with a word, because the
@@ -292,7 +279,7 @@ pub(crate) fn emit_thunk(module: &Module<'static>, decl: &FfiDecl) -> Result<Fun
         inkwell::values::ValueKind::Instruction(_) => word_ty.const_zero(),
     };
     for made in owned_cstrings {
-        call_shim(&builder, shim("rt_ffi_cstring_free"), scratch, one, made, "freed")?;
+        call_shim(&builder, module, "rt_ffi_cstring_free", &[made])?;
     }
     builder.build_return(Some(&out)).map_err(|e| format!("ffi: failed to build the return: {}", e))?;
 
@@ -321,51 +308,21 @@ fn emit_coroutine_entry(
     let builder = ctx.create_builder();
     builder.position_at_end(ctx.append_basic_block(entry_fn, "entry"));
 
-    let shim = |n: &str| match module.get_function(n) {
-        Some(f) => f,
-        None => module.add_function(n, compiled_fn_type(), None),
-    };
-    let scratch = builder
-        .build_alloca(word_ty, "ffi_entry_scratch")
-        .map_err(|e| format!("ffi: failed to reserve the entry scratch slot: {}", e))?;
-    let one = ctx.i32_type().const_int(1, false);
-
     // The driver protocol's own slots, and nothing else: this entry has no
     // locals, but a frame the driver cannot read the handler slot of is a
     // frame it cannot ask about an unwind. No slot is rooted, so no mask.
-    let open_args = builder
-        .build_alloca(word_ty.array_type(2), "ffi_frame_open_args")
-        .map_err(|e| format!("ffi: failed to reserve the frame's arguments: {}", e))?;
-    for (i, word) in [typelisp_abi::FRAME_RESERVED_SLOTS as u64, 0].into_iter().enumerate() {
-        let slot = unsafe {
-            builder
-                .build_gep(word_ty, open_args, &[word_ty.const_int(i as u64, false)], "ffi_frame_open_arg")
-                .map_err(|e| format!("ffi: failed to index the frame's arguments: {}", e))?
-        };
-        builder
-            .build_store(slot, word_ty.const_int(word, false))
-            .map_err(|e| format!("ffi: failed to store a frame argument: {}", e))?;
-    }
-    let data = builder
-        .build_call(shim("rt_frame_open"), &[open_args.into(), ctx.i32_type().const_int(2, false).into()], "ffi_frame")
-        .map_err(|e| format!("ffi: failed to open the frame: {}", e))?;
-    let data = match data.try_as_basic_value() {
-        inkwell::values::ValueKind::Basic(v) => v.into_int_value(),
-        inkwell::values::ValueKind::Instruction(_) => return Err("internal error: rt_frame_open produced no value".to_string()),
-    };
+    let data = call_shim(
+        &builder,
+        module,
+        "rt_frame_open",
+        &[word_ty.const_int(typelisp_abi::FRAME_RESERVED_SLOTS as u64, false), word_ty.const_zero()],
+    )?;
 
     let args = builder
         .build_alloca(word_ty.array_type(argc.max(1) as u32), "ffi_entry_args")
         .map_err(|e| format!("ffi: failed to reserve the entry argument array: {}", e))?;
     for i in 0..argc {
-        let word = call_shim(
-            &builder,
-            shim("rt_pending_arg"),
-            scratch,
-            one,
-            word_ty.const_int(i as u64, false),
-            "ffi_pending",
-        )?;
+        let word = call_shim(&builder, module, "rt_pending_arg", &[word_ty.const_int(i as u64, false)])?;
         let slot = unsafe {
             builder
                 .build_gep(word_ty, args, &[word_ty.const_int(i as u64, false)], "ffi_entry_arg_ptr")
@@ -400,27 +357,18 @@ fn emit_coroutine_entry(
     Ok(entry_fn)
 }
 
-/// Call a one-word `rt_*` shim: store `word` in `scratch` and call under the
-/// shared signature, which is what every shim is written to.
+/// Calls the runtime function `name` with `args` and answers its word,
+/// leaving the current function if it raised.
 fn call_shim(
     builder: &inkwell::builder::Builder<'static>,
-    f: FunctionValue<'static>,
-    scratch: inkwell::values::PointerValue<'static>,
-    one: IntValue<'static>,
-    word: IntValue<'static>,
+    module: &Module<'static>,
     name: &str,
+    args: &[IntValue<'static>],
 ) -> Result<IntValue<'static>, String> {
-    builder.build_store(scratch, word).map_err(|e| format!("ffi: failed to store a shim argument: {}", e))?;
-    let call = builder
-        .build_call(f, &[scratch.into(), one.into()], name)
-        .map_err(|e| format!("ffi: failed to call a runtime shim: {}", e))?;
+    let args: Vec<BasicValueEnum<'static>> = args.iter().map(|a| (*a).into()).collect();
+    let (f, v) = crate::compile::runtime_abi::call(builder, module, name, &args).map_err(|e| format!("ffi: {}", e))?;
     crate::compile::raise_check::after_call(builder, f).map_err(|e| format!("ffi: {}", e))?;
-    match call.try_as_basic_value() {
-        inkwell::values::ValueKind::Basic(v) => Ok(v.into_int_value()),
-        inkwell::values::ValueKind::Instruction(_) => {
-            Err("internal error: a runtime shim produced no value".to_string())
-        }
-    }
+    Ok(v)
 }
 
 /// Every declared parameter as a [`CType`], or an error naming the first one
@@ -820,17 +768,9 @@ fn emit_callback_entry(
         add_attribute(entry, inkwell::attributes::AttributeLoc::Return, attr);
     }
     builder.position_at_end(ctx.append_basic_block(entry, "entry"));
-    let shim = |n: &str| match module.get_function(n) {
-        Some(f) => f,
-        None => module.add_function(n, compiled_fn_type(), None),
-    };
-    let scratch = builder
-        .build_alloca(word_ty, "cb_scratch")
-        .map_err(|e| format!("ffi: failed to reserve the callback scratch slot: {}", e))?;
-    let one = ctx.i32_type().const_int(1, false);
     let zero = word_ty.const_zero();
 
-    call_shim(&builder, shim("rt_ffi_callback_enter"), scratch, one, zero, "cb_enter")?;
+    call_shim(&builder, module, "rt_ffi_callback_enter", &[])?;
 
     // `[target, n, kind0, word0, aux0, ...]` — see `rt_ffi_callback_invoke`.
     let len = 2 + 3 * params.len();
@@ -873,26 +813,20 @@ fn emit_callback_entry(
         store(3 + 3 * i, word)?;
         store(4 + 3 * i, aux)?;
     }
-    let call = builder
-        .build_call(
-            shim("rt_ffi_callback_invoke"),
-            &[words.into(), ctx.i32_type().const_int(len as u64, false).into()],
-            "cb_value",
-        )
-        .map_err(|e| format!("ffi: failed to call the callback: {}", e))?;
-    let value = match call.try_as_basic_value() {
-        inkwell::values::ValueKind::Basic(v) => v.into_int_value(),
-        inkwell::values::ValueKind::Instruction(_) => {
-            return Err("internal error: the callback runner produced no value".to_string())
-        }
-    };
+    let (_, value) = crate::compile::runtime_abi::call(
+        &builder,
+        module,
+        "rt_ffi_callback_invoke",
+        &[words.into(), ctx.i32_type().const_int(len as u64, false).into()],
+    )
+    .map_err(|e| format!("ffi: failed to call the callback: {}", e))?;
     // Converted before the native section is re-entered, though it touches
     // no heap: every step after `rt_ffi_callback_leave` is C's.
     let out = match ret {
         CType::Void => None,
         _ => Some(word_to_c(&builder, value, ret)?),
     };
-    call_shim(&builder, shim("rt_ffi_callback_leave"), scratch, one, zero, "cb_leave")?;
+    call_shim(&builder, module, "rt_ffi_callback_leave", &[])?;
     match out {
         Some(v) => builder.build_return(Some(&v)),
         None => builder.build_return(None),

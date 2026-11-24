@@ -144,7 +144,7 @@ pub(crate) fn return_form(heap: &mut Heap, value: Option<Value>) -> Result<Value
 ///
 /// `REPR` is the block's own value, for the reason [`loop_form`]'s doc comment
 /// gives: a `return-from` leaves it in a merge slot, and a cleanup crossed on
-/// the way out can allocate while it sits there.
+/// The way out can allocate while it sits there.
 ///
 /// The name is carried as a plain string field, not as a quoted symbol the way
 /// [`catch_form`] carries its tag. The difference is the one that separates the

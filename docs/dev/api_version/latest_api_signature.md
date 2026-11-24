@@ -1,11 +1,11 @@
-# ABI バージョン 0.3.75
+# ABI バージョン 0.3.76
 
 `scripts/regen-abi-version.sh` が生成した文書。手で編集しない。
 
-コンパイラが生成するコードが、ABI バージョン 0.3.75 のランタイムライブラリについて仮定していることの一覧。
+コンパイラが生成するコードが、ABI バージョン 0.3.76 のランタイムライブラリについて仮定していることの一覧。
 ここに書かれていない前提(シムが引数をどう扱うか、生成コードがヒープを直接読む箇所など)は含まない。
 
-内容ハッシュ (FNV-1a 64): `7e8a89339610c1ae`
+内容ハッシュ (FNV-1a 64): `63ad63f69dd77524`
 
 ## 呼び出し規約 (typelisp_abi)
 
@@ -1018,98 +1018,98 @@
 
 | シンボル | LLVM の型 |
 |---|---|
-| `rt_atom` | `i64 (ptr, i32)` |
+| `rt_atom` | `i64 (i64)` |
 | `rt_bignum_new` | `i64 (ptr, i32)` |
-| `rt_box_kind` | `i64 (ptr, i32)` |
+| `rt_box_kind` | `i64 (i64)` |
 | `rt_c_alloc` | `i64 (ptr, i32)` |
-| `rt_c_arena_close` | `i64 (ptr, i32)` |
-| `rt_c_arena_open` | `i64 (ptr, i32)` |
-| `rt_c_index` | `i64 (ptr, i32)` |
-| `rt_c_load` | `i64 (ptr, i32)` |
-| `rt_c_offset` | `i64 (ptr, i32)` |
-| `rt_c_ptr_check` | `i64 (ptr, i32)` |
-| `rt_c_store` | `i64 (ptr, i32)` |
-| `rt_c_volatile_load` | `i64 (ptr, i32)` |
-| `rt_c_volatile_store` | `i64 (ptr, i32)` |
-| `rt_car` | `i64 (ptr, i32)` |
-| `rt_cdr` | `i64 (ptr, i32)` |
-| `rt_cell_get` | `i64 (ptr, i32)` |
-| `rt_cell_new` | `i64 (ptr, i32)` |
-| `rt_cell_set` | `i64 (ptr, i32)` |
-| `rt_char_alphap` | `i64 (ptr, i32)` |
-| `rt_char_digitp` | `i64 (ptr, i32)` |
-| `rt_char_downcase` | `i64 (ptr, i32)` |
-| `rt_char_equalp` | `i64 (ptr, i32)` |
-| `rt_char_upcase` | `i64 (ptr, i32)` |
-| `rt_closure_env_get` | `i64 (ptr, i32)` |
-| `rt_closure_env_len` | `i64 (ptr, i32)` |
-| `rt_closure_fnptr` | `i64 (ptr, i32)` |
+| `rt_c_arena_close` | `i64 (i64)` |
+| `rt_c_arena_open` | `i64 ()` |
+| `rt_c_index` | `i64 (i64, i64, i64, i64)` |
+| `rt_c_load` | `i64 (i64, i64, i64)` |
+| `rt_c_offset` | `i64 (i64, i64)` |
+| `rt_c_ptr_check` | `i64 (i64, i64)` |
+| `rt_c_store` | `i64 (i64, i64, i64, i64)` |
+| `rt_c_volatile_load` | `i64 (i64, i64)` |
+| `rt_c_volatile_store` | `i64 (i64, i64, i64)` |
+| `rt_car` | `i64 (i64)` |
+| `rt_cdr` | `i64 (i64)` |
+| `rt_cell_get` | `i64 (i64)` |
+| `rt_cell_new` | `i64 (i64)` |
+| `rt_cell_set` | `i64 (i64, i64)` |
+| `rt_char_alphap` | `i64 (i64)` |
+| `rt_char_digitp` | `i64 (i64)` |
+| `rt_char_downcase` | `i64 (i64)` |
+| `rt_char_equalp` | `i64 (i64, i64)` |
+| `rt_char_upcase` | `i64 (i64)` |
+| `rt_closure_env_get` | `i64 (i64, i64)` |
+| `rt_closure_env_len` | `i64 (i64)` |
+| `rt_closure_fnptr` | `i64 (i64)` |
 | `rt_closure_new` | `i64 (ptr, i32)` |
-| `rt_command_line_args` | `i64 (ptr, i32)` |
-| `rt_cons` | `i64 (ptr, i32)` |
-| `rt_consp` | `i64 (ptr, i32)` |
+| `rt_command_line_args` | `i64 ()` |
+| `rt_cons` | `i64 (i64, i64)` |
+| `rt_consp` | `i64 (i64)` |
 | `rt_coroutine_closure_new` | `i64 (ptr, i32)` |
-| `rt_data_field` | `i64 (ptr, i32)` |
+| `rt_data_field` | `i64 (i64, i64)` |
 | `rt_data_new` | `i64 (ptr, i32)` |
-| `rt_data_variant` | `i64 (ptr, i32)` |
-| `rt_dribble_start` | `i64 (ptr, i32)` |
-| `rt_dribble_stop` | `i64 (ptr, i32)` |
-| `rt_drive_body` | `i64 (ptr, i32)` |
-| `rt_dyn_new` | `i64 (ptr, i32)` |
-| `rt_dyn_upcast` | `i64 (ptr, i32)` |
-| `rt_dyn_value` | `i64 (ptr, i32)` |
-| `rt_dyn_vtable` | `i64 (ptr, i32)` |
-| `rt_ed_open` | `i64 (ptr, i32)` |
-| `rt_eval` | `i64 (ptr, i32)` |
-| `rt_eval_init` | `i64 (ptr, i32)` |
-| `rt_eval_state` | `i64 (ptr, i32)` |
-| `rt_exit` | `i64 (ptr, i32)` |
-| `rt_f32_acos` | `i64 (ptr, i32)` |
-| `rt_f32_acosh` | `i64 (ptr, i32)` |
-| `rt_f32_asin` | `i64 (ptr, i32)` |
-| `rt_f32_asinh` | `i64 (ptr, i32)` |
-| `rt_f32_atan` | `i64 (ptr, i32)` |
-| `rt_f32_atanh` | `i64 (ptr, i32)` |
-| `rt_f32_cosh` | `i64 (ptr, i32)` |
-| `rt_f32_new` | `i64 (ptr, i32)` |
-| `rt_f32_sinh` | `i64 (ptr, i32)` |
-| `rt_f32_tan` | `i64 (ptr, i32)` |
-| `rt_f32_tanh` | `i64 (ptr, i32)` |
-| `rt_f32_value` | `i64 (ptr, i32)` |
-| `rt_f64_acos` | `i64 (ptr, i32)` |
-| `rt_f64_acosh` | `i64 (ptr, i32)` |
-| `rt_f64_asin` | `i64 (ptr, i32)` |
-| `rt_f64_asinh` | `i64 (ptr, i32)` |
-| `rt_f64_atan` | `i64 (ptr, i32)` |
-| `rt_f64_atanh` | `i64 (ptr, i32)` |
-| `rt_f64_cosh` | `i64 (ptr, i32)` |
-| `rt_f64_fits_f32` | `i64 (ptr, i32)` |
-| `rt_f64_new` | `i64 (ptr, i32)` |
-| `rt_f64_sinh` | `i64 (ptr, i32)` |
-| `rt_f64_tan` | `i64 (ptr, i32)` |
-| `rt_f64_tanh` | `i64 (ptr, i32)` |
-| `rt_f64_value` | `i64 (ptr, i32)` |
-| `rt_ffi_callback_address` | `i64 (ptr, i32)` |
-| `rt_ffi_callback_enter` | `i64 (ptr, i32)` |
+| `rt_data_variant` | `i64 (i64)` |
+| `rt_dribble_start` | `i64 (i64)` |
+| `rt_dribble_stop` | `i64 ()` |
+| `rt_drive_body` | `i64 (i64, i64, i64)` |
+| `rt_dyn_new` | `i64 (i64, i64)` |
+| `rt_dyn_upcast` | `i64 (i64, i64)` |
+| `rt_dyn_value` | `i64 (i64)` |
+| `rt_dyn_vtable` | `i64 (i64)` |
+| `rt_ed_open` | `i64 (i64, i64)` |
+| `rt_eval` | `i64 (i64)` |
+| `rt_eval_init` | `i64 ()` |
+| `rt_eval_state` | `i64 (i64, i64, i64, i64, i64)` |
+| `rt_exit` | `i64 (i64)` |
+| `rt_f32_acos` | `i64 (i64)` |
+| `rt_f32_acosh` | `i64 (i64)` |
+| `rt_f32_asin` | `i64 (i64)` |
+| `rt_f32_asinh` | `i64 (i64)` |
+| `rt_f32_atan` | `i64 (i64)` |
+| `rt_f32_atanh` | `i64 (i64)` |
+| `rt_f32_cosh` | `i64 (i64)` |
+| `rt_f32_new` | `i64 (i64)` |
+| `rt_f32_sinh` | `i64 (i64)` |
+| `rt_f32_tan` | `i64 (i64)` |
+| `rt_f32_tanh` | `i64 (i64)` |
+| `rt_f32_value` | `i64 (i64)` |
+| `rt_f64_acos` | `i64 (i64)` |
+| `rt_f64_acosh` | `i64 (i64)` |
+| `rt_f64_asin` | `i64 (i64)` |
+| `rt_f64_asinh` | `i64 (i64)` |
+| `rt_f64_atan` | `i64 (i64)` |
+| `rt_f64_atanh` | `i64 (i64)` |
+| `rt_f64_cosh` | `i64 (i64)` |
+| `rt_f64_fits_f32` | `i64 (i64)` |
+| `rt_f64_new` | `i64 (i64)` |
+| `rt_f64_sinh` | `i64 (i64)` |
+| `rt_f64_tan` | `i64 (i64)` |
+| `rt_f64_tanh` | `i64 (i64)` |
+| `rt_f64_value` | `i64 (i64)` |
+| `rt_ffi_callback_address` | `i64 (i64, i64)` |
+| `rt_ffi_callback_enter` | `i64 ()` |
 | `rt_ffi_callback_invoke` | `i64 (ptr, i32)` |
-| `rt_ffi_callback_leave` | `i64 (ptr, i32)` |
-| `rt_ffi_callback_register` | `i64 (ptr, i32)` |
-| `rt_ffi_cstring_free` | `i64 (ptr, i32)` |
-| `rt_ffi_cstring_new` | `i64 (ptr, i32)` |
-| `rt_ffi_enter_native` | `i64 (ptr, i32)` |
-| `rt_ffi_leave_native` | `i64 (ptr, i32)` |
-| `rt_ffi_string_from_cstr` | `i64 (ptr, i32)` |
-| `rt_file_create_directories` | `i64 (ptr, i32)` |
-| `rt_file_delete` | `i64 (ptr, i32)` |
-| `rt_file_directory_p` | `i64 (ptr, i32)` |
-| `rt_file_exists_p` | `i64 (ptr, i32)` |
-| `rt_file_list_directory` | `i64 (ptr, i32)` |
-| `rt_file_modified_date` | `i64 (ptr, i32)` |
-| `rt_file_owner_name` | `i64 (ptr, i32)` |
-| `rt_file_rename` | `i64 (ptr, i32)` |
-| `rt_file_truename` | `i64 (ptr, i32)` |
-| `rt_float_to_int` | `i64 (ptr, i32)` |
-| `rt_float_to_ratio` | `i64 (ptr, i32)` |
+| `rt_ffi_callback_leave` | `i64 ()` |
+| `rt_ffi_callback_register` | `i64 (i64, i64, i64, i64)` |
+| `rt_ffi_cstring_free` | `i64 (i64)` |
+| `rt_ffi_cstring_new` | `i64 (i64)` |
+| `rt_ffi_enter_native` | `i64 ()` |
+| `rt_ffi_leave_native` | `i64 ()` |
+| `rt_ffi_string_from_cstr` | `i64 (i64)` |
+| `rt_file_create_directories` | `i64 (i64)` |
+| `rt_file_delete` | `i64 (i64)` |
+| `rt_file_directory_p` | `i64 (i64)` |
+| `rt_file_exists_p` | `i64 (i64)` |
+| `rt_file_list_directory` | `i64 (i64)` |
+| `rt_file_modified_date` | `i64 (i64)` |
+| `rt_file_owner_name` | `i64 (i64)` |
+| `rt_file_rename` | `i64 (i64, i64)` |
+| `rt_file_truename` | `i64 (i64)` |
+| `rt_float_to_int` | `i64 (i64)` |
+| `rt_float_to_ratio` | `i64 (i64)` |
 | `rt_fmt_as_list` | `i64 (ptr, i32)` |
 | `rt_fmt_block_close` | `i64 (ptr, i32)` |
 | `rt_fmt_block_open` | `i64 (ptr, i32)` |
@@ -1150,287 +1150,295 @@
 | `rt_frame_call` | `i64 (ptr, i32)` |
 | `rt_frame_call_env` | `i64 (ptr, i32)` |
 | `rt_frame_dyn_call` | `i64 (ptr, i32)` |
-| `rt_frame_open` | `i64 (ptr, i32)` |
-| `rt_get_dispatch_macro_character` | `i64 (ptr, i32)` |
-| `rt_get_internal_real_time` | `i64 (ptr, i32)` |
-| `rt_get_internal_run_time` | `i64 (ptr, i32)` |
-| `rt_get_macro_character` | `i64 (ptr, i32)` |
-| `rt_get_universal_time` | `i64 (ptr, i32)` |
-| `rt_getenv` | `i64 (ptr, i32)` |
-| `rt_global_get` | `i64 (ptr, i32)` |
-| `rt_global_new` | `i64 (ptr, i32)` |
-| `rt_global_set` | `i64 (ptr, i32)` |
-| `rt_hashtable_bucket_count` | `i64 (ptr, i32)` |
-| `rt_hashtable_bucket_delete` | `i64 (ptr, i32)` |
-| `rt_hashtable_bucket_key` | `i64 (ptr, i32)` |
-| `rt_hashtable_bucket_put` | `i64 (ptr, i32)` |
-| `rt_hashtable_bucket_value` | `i64 (ptr, i32)` |
-| `rt_hashtable_clear` | `i64 (ptr, i32)` |
-| `rt_hashtable_count` | `i64 (ptr, i32)` |
-| `rt_hashtable_entries` | `i64 (ptr, i32)` |
-| `rt_hashtable_function` | `i64 (ptr, i32)` |
-| `rt_hashtable_keys` | `i64 (ptr, i32)` |
-| `rt_hashtable_new` | `i64 (ptr, i32)` |
-| `rt_hashtable_values` | `i64 (ptr, i32)` |
-| `rt_heap_info` | `i64 (ptr, i32)` |
-| `rt_heap_init` | `i64 (ptr, i32)` |
-| `rt_home_directory` | `i64 (ptr, i32)` |
-| `rt_i16_box` | `i64 (ptr, i32)` |
-| `rt_i16_unbox` | `i64 (ptr, i32)` |
-| `rt_i32_box` | `i64 (ptr, i32)` |
-| `rt_i32_unbox` | `i64 (ptr, i32)` |
-| `rt_i8_box` | `i64 (ptr, i32)` |
-| `rt_i8_unbox` | `i64 (ptr, i32)` |
-| `rt_int_div_fault` | `i64 (ptr, i32)` |
-| `rt_int_fits_char` | `i64 (ptr, i32)` |
-| `rt_int_mod_fault` | `i64 (ptr, i32)` |
-| `rt_int_not_fixnum` | `i64 (ptr, i32)` |
-| `rt_int_to_char` | `i64 (ptr, i32)` |
-| `rt_int_to_ratio` | `i64 (ptr, i32)` |
-| `rt_integer_add` | `i64 (ptr, i32)` |
-| `rt_integer_ash` | `i64 (ptr, i32)` |
-| `rt_integer_cmp` | `i64 (ptr, i32)` |
-| `rt_integer_div` | `i64 (ptr, i32)` |
-| `rt_integer_fits_char` | `i64 (ptr, i32)` |
-| `rt_integer_fits_i16` | `i64 (ptr, i32)` |
-| `rt_integer_fits_i32` | `i64 (ptr, i32)` |
-| `rt_integer_fits_i8` | `i64 (ptr, i32)` |
-| `rt_integer_fits_u16` | `i64 (ptr, i32)` |
-| `rt_integer_fits_u32` | `i64 (ptr, i32)` |
-| `rt_integer_fits_u8` | `i64 (ptr, i32)` |
-| `rt_integer_from_c_ulong` | `i64 (ptr, i32)` |
-| `rt_integer_from_word` | `i64 (ptr, i32)` |
-| `rt_integer_integer_length` | `i64 (ptr, i32)` |
-| `rt_integer_logand` | `i64 (ptr, i32)` |
-| `rt_integer_logbitp` | `i64 (ptr, i32)` |
-| `rt_integer_logcount` | `i64 (ptr, i32)` |
-| `rt_integer_logior` | `i64 (ptr, i32)` |
-| `rt_integer_lognot` | `i64 (ptr, i32)` |
-| `rt_integer_logtest` | `i64 (ptr, i32)` |
-| `rt_integer_logxor` | `i64 (ptr, i32)` |
-| `rt_integer_mod` | `i64 (ptr, i32)` |
-| `rt_integer_mul` | `i64 (ptr, i32)` |
-| `rt_integer_sub` | `i64 (ptr, i32)` |
-| `rt_integer_to_c_long` | `i64 (ptr, i32)` |
-| `rt_integer_to_c_ulong` | `i64 (ptr, i32)` |
-| `rt_integer_to_char` | `i64 (ptr, i32)` |
-| `rt_integer_to_float` | `i64 (ptr, i32)` |
-| `rt_integer_to_i16` | `i64 (ptr, i32)` |
-| `rt_integer_to_i32` | `i64 (ptr, i32)` |
-| `rt_integer_to_i8` | `i64 (ptr, i32)` |
-| `rt_integer_to_ratio` | `i64 (ptr, i32)` |
-| `rt_integer_to_u16` | `i64 (ptr, i32)` |
-| `rt_integer_to_u32` | `i64 (ptr, i32)` |
-| `rt_integer_to_u8` | `i64 (ptr, i32)` |
-| `rt_intern` | `i64 (ptr, i32)` |
+| `rt_frame_open` | `i64 (i64, i64)` |
+| `rt_get_dispatch_macro_character` | `i64 (i64, i64)` |
+| `rt_get_internal_real_time` | `i64 ()` |
+| `rt_get_internal_run_time` | `i64 ()` |
+| `rt_get_macro_character` | `i64 (i64)` |
+| `rt_get_universal_time` | `i64 ()` |
+| `rt_getenv` | `i64 (i64)` |
+| `rt_global_get` | `i64 (i64)` |
+| `rt_global_new` | `i64 (i64)` |
+| `rt_global_set` | `i64 (i64, i64)` |
+| `rt_hashtable_bucket_count` | `i64 (i64, i64)` |
+| `rt_hashtable_bucket_delete` | `i64 (i64, i64, i64)` |
+| `rt_hashtable_bucket_key` | `i64 (i64, i64, i64)` |
+| `rt_hashtable_bucket_put` | `i64 (i64, i64, i64, i64, i64)` |
+| `rt_hashtable_bucket_value` | `i64 (i64, i64, i64)` |
+| `rt_hashtable_clear` | `i64 (i64)` |
+| `rt_hashtable_count` | `i64 (i64)` |
+| `rt_hashtable_entries` | `i64 (i64, i64)` |
+| `rt_hashtable_function` | `i64 (i64, i64)` |
+| `rt_hashtable_keys` | `i64 (i64, i64)` |
+| `rt_hashtable_new` | `i64 (i64, i64, i64)` |
+| `rt_hashtable_values` | `i64 (i64, i64)` |
+| `rt_heap_info` | `i64 ()` |
+| `rt_heap_init` | `i64 (i64, i64, i64)` |
+| `rt_home_directory` | `i64 ()` |
+| `rt_i16_box` | `i64 (i64)` |
+| `rt_i16_unbox` | `i64 (i64)` |
+| `rt_i32_box` | `i64 (i64)` |
+| `rt_i32_unbox` | `i64 (i64)` |
+| `rt_i8_box` | `i64 (i64)` |
+| `rt_i8_unbox` | `i64 (i64)` |
+| `rt_int_div_fault` | `i64 (i64, i64)` |
+| `rt_int_fits_char` | `i64 (i64)` |
+| `rt_int_mod_fault` | `i64 (i64, i64)` |
+| `rt_int_not_fixnum` | `i64 (i64)` |
+| `rt_int_to_char` | `i64 (i64)` |
+| `rt_int_to_ratio` | `i64 (i64)` |
+| `rt_integer_add` | `i64 (i64, i64)` |
+| `rt_integer_ash` | `i64 (i64, i64)` |
+| `rt_integer_cmp` | `i64 (i64, i64)` |
+| `rt_integer_div` | `i64 (i64, i64)` |
+| `rt_integer_fits_char` | `i64 (i64)` |
+| `rt_integer_fits_i16` | `i64 (i64)` |
+| `rt_integer_fits_i32` | `i64 (i64)` |
+| `rt_integer_fits_i8` | `i64 (i64)` |
+| `rt_integer_fits_u16` | `i64 (i64)` |
+| `rt_integer_fits_u32` | `i64 (i64)` |
+| `rt_integer_fits_u8` | `i64 (i64)` |
+| `rt_integer_from_c_ulong` | `i64 (i64)` |
+| `rt_integer_from_word` | `i64 (i64)` |
+| `rt_integer_integer_length` | `i64 (i64)` |
+| `rt_integer_logand` | `i64 (i64, i64)` |
+| `rt_integer_logbitp` | `i64 (i64, i64)` |
+| `rt_integer_logcount` | `i64 (i64)` |
+| `rt_integer_logior` | `i64 (i64, i64)` |
+| `rt_integer_lognot` | `i64 (i64)` |
+| `rt_integer_logtest` | `i64 (i64, i64)` |
+| `rt_integer_logxor` | `i64 (i64, i64)` |
+| `rt_integer_mod` | `i64 (i64, i64)` |
+| `rt_integer_mul` | `i64 (i64, i64)` |
+| `rt_integer_sub` | `i64 (i64, i64)` |
+| `rt_integer_to_c_long` | `i64 (i64)` |
+| `rt_integer_to_c_ulong` | `i64 (i64)` |
+| `rt_integer_to_char` | `i64 (i64)` |
+| `rt_integer_to_float` | `i64 (i64)` |
+| `rt_integer_to_i16` | `i64 (i64)` |
+| `rt_integer_to_i32` | `i64 (i64)` |
+| `rt_integer_to_i8` | `i64 (i64)` |
+| `rt_integer_to_ratio` | `i64 (i64)` |
+| `rt_integer_to_u16` | `i64 (i64)` |
+| `rt_integer_to_u32` | `i64 (i64)` |
+| `rt_integer_to_u8` | `i64 (i64)` |
+| `rt_intern` | `i64 (i64, i64)` |
 | `rt_intern_path` | `i64 (ptr, i32)` |
 | `rt_intern_symbol` | `i64 (ptr, i32)` |
-| `rt_interrupt_disable` | `i64 (ptr, i32)` |
-| `rt_interrupt_enable` | `i64 (ptr, i32)` |
-| `rt_interrupt_register` | `i64 (ptr, i32)` |
-| `rt_keywordp` | `i64 (ptr, i32)` |
-| `rt_lisp_implementation_version` | `i64 (ptr, i32)` |
-| `rt_list_to_path` | `i64 (ptr, i32)` |
-| `rt_list_to_sexpr_tuple` | `i64 (ptr, i32)` |
-| `rt_list_to_sexpr_vector` | `i64 (ptr, i32)` |
-| `rt_lists_to_sexpr_array` | `i64 (ptr, i32)` |
+| `rt_interrupt_disable` | `i64 (i64)` |
+| `rt_interrupt_enable` | `i64 (i64)` |
+| `rt_interrupt_register` | `i64 (i64, i64)` |
+| `rt_keywordp` | `i64 (i64)` |
+| `rt_lisp_implementation_version` | `i64 ()` |
+| `rt_list_to_path` | `i64 (i64)` |
+| `rt_list_to_sexpr_tuple` | `i64 (i64)` |
+| `rt_list_to_sexpr_vector` | `i64 (i64)` |
+| `rt_lists_to_sexpr_array` | `i64 (i64, i64)` |
 | `rt_llvm_call` | `i64 (ptr, i32)` |
-| `rt_loop_safepoint` | `i64 (ptr, i32)` |
-| `rt_machine_instance` | `i64 (ptr, i32)` |
-| `rt_machine_type` | `i64 (ptr, i32)` |
-| `rt_machine_version` | `i64 (ptr, i32)` |
-| `rt_macroexpand` | `i64 (ptr, i32)` |
-| `rt_macroexpand_1` | `i64 (ptr, i32)` |
-| `rt_make_random_state_fresh` | `i64 (ptr, i32)` |
-| `rt_match_fail` | `i64 (ptr, i32)` |
-| `rt_net_accept` | `i64 (ptr, i32)` |
-| `rt_net_buffered_p` | `i64 (ptr, i32)` |
-| `rt_net_connect_begin` | `i64 (ptr, i32)` |
-| `rt_net_connect_finish` | `i64 (ptr, i32)` |
-| `rt_net_fill` | `i64 (ptr, i32)` |
-| `rt_net_flush` | `i64 (ptr, i32)` |
-| `rt_net_listen` | `i64 (ptr, i32)` |
-| `rt_net_local_address` | `i64 (ptr, i32)` |
-| `rt_net_peer_address` | `i64 (ptr, i32)` |
-| `rt_net_peer_subject` | `i64 (ptr, i32)` |
-| `rt_net_pop_byte` | `i64 (ptr, i32)` |
-| `rt_net_pop_char` | `i64 (ptr, i32)` |
-| `rt_net_push_byte` | `i64 (ptr, i32)` |
-| `rt_net_push_string` | `i64 (ptr, i32)` |
-| `rt_net_resolve_begin` | `i64 (ptr, i32)` |
-| `rt_net_resolve_finish` | `i64 (ptr, i32)` |
-| `rt_net_server_name` | `i64 (ptr, i32)` |
-| `rt_net_set_keepalive` | `i64 (ptr, i32)` |
-| `rt_net_set_keepalive_period` | `i64 (ptr, i32)` |
-| `rt_net_set_nodelay` | `i64 (ptr, i32)` |
-| `rt_net_shutdown_write` | `i64 (ptr, i32)` |
-| `rt_net_socket_error` | `i64 (ptr, i32)` |
-| `rt_net_tls_add_certificate` | `i64 (ptr, i32)` |
-| `rt_net_tls_handshake` | `i64 (ptr, i32)` |
-| `rt_net_tls_listen` | `i64 (ptr, i32)` |
-| `rt_net_tls_start` | `i64 (ptr, i32)` |
-| `rt_net_udp_bind` | `i64 (ptr, i32)` |
-| `rt_net_udp_last_sender` | `i64 (ptr, i32)` |
-| `rt_net_udp_recv` | `i64 (ptr, i32)` |
-| `rt_net_udp_send_to` | `i64 (ptr, i32)` |
-| `rt_net_unix_connect` | `i64 (ptr, i32)` |
-| `rt_net_unix_listen` | `i64 (ptr, i32)` |
-| `rt_null` | `i64 (ptr, i32)` |
-| `rt_panic` | `i64 (ptr, i32)` |
-| `rt_parse_float` | `i64 (ptr, i32)` |
-| `rt_path_to_list` | `i64 (ptr, i32)` |
-| `rt_pending_arg` | `i64 (ptr, i32)` |
-| `rt_pending_argc` | `i64 (ptr, i32)` |
-| `rt_pending_env` | `i64 (ptr, i32)` |
-| `rt_pending_envc` | `i64 (ptr, i32)` |
-| `rt_pop_sexpr_root` | `i64 (ptr, i32)` |
-| `rt_pprint` | `i64 (ptr, i32)` |
-| `rt_pprint_block_end` | `i64 (ptr, i32)` |
-| `rt_pprint_block_start` | `i64 (ptr, i32)` |
-| `rt_pprint_indent` | `i64 (ptr, i32)` |
-| `rt_pprint_list_exhausted` | `i64 (ptr, i32)` |
-| `rt_pprint_newline` | `i64 (ptr, i32)` |
-| `rt_pprint_pop` | `i64 (ptr, i32)` |
-| `rt_pprint_tab` | `i64 (ptr, i32)` |
-| `rt_print_enum_variant` | `i64 (ptr, i32)` |
-| `rt_print_field_name` | `i64 (ptr, i32)` |
-| `rt_print_field_template` | `i64 (ptr, i32)` |
-| `rt_print_global` | `i64 (ptr, i32)` |
-| `rt_print_names` | `i64 (ptr, i32)` |
-| `rt_print_object_method` | `i64 (ptr, i32)` |
-| `rt_push_permanent_sexpr_root` | `i64 (ptr, i32)` |
-| `rt_push_sexpr_root` | `i64 (ptr, i32)` |
-| `rt_random_state_copy` | `i64 (ptr, i32)` |
-| `rt_random_state_next` | `i64 (ptr, i32)` |
-| `rt_ratio_add` | `i64 (ptr, i32)` |
-| `rt_ratio_cmp` | `i64 (ptr, i32)` |
-| `rt_ratio_denominator` | `i64 (ptr, i32)` |
-| `rt_ratio_div` | `i64 (ptr, i32)` |
-| `rt_ratio_from_bignums` | `i64 (ptr, i32)` |
-| `rt_ratio_mul` | `i64 (ptr, i32)` |
-| `rt_ratio_numerator` | `i64 (ptr, i32)` |
-| `rt_ratio_sub` | `i64 (ptr, i32)` |
-| `rt_ratio_to_float` | `i64 (ptr, i32)` |
-| `rt_ratio_to_int` | `i64 (ptr, i32)` |
-| `rt_rational_add` | `i64 (ptr, i32)` |
-| `rt_rational_cmp` | `i64 (ptr, i32)` |
-| `rt_rational_denominator` | `i64 (ptr, i32)` |
-| `rt_rational_div` | `i64 (ptr, i32)` |
-| `rt_rational_from_ratio` | `i64 (ptr, i32)` |
-| `rt_rational_is_int` | `i64 (ptr, i32)` |
-| `rt_rational_mul` | `i64 (ptr, i32)` |
-| `rt_rational_numerator` | `i64 (ptr, i32)` |
-| `rt_rational_sub` | `i64 (ptr, i32)` |
-| `rt_rational_to_float` | `i64 (ptr, i32)` |
-| `rt_rational_to_int` | `i64 (ptr, i32)` |
-| `rt_rational_to_ratio` | `i64 (ptr, i32)` |
-| `rt_read` | `i64 (ptr, i32)` |
-| `rt_read_datum_at` | `i64 (ptr, i32)` |
-| `rt_root_count` | `i64 (ptr, i32)` |
+| `rt_loop_safepoint` | `i64 ()` |
+| `rt_machine_instance` | `i64 ()` |
+| `rt_machine_type` | `i64 ()` |
+| `rt_machine_version` | `i64 ()` |
+| `rt_macroexpand` | `i64 (i64, i64)` |
+| `rt_macroexpand_1` | `i64 (i64, i64)` |
+| `rt_make_random_state_fresh` | `i64 ()` |
+| `rt_match_fail` | `i64 ()` |
+| `rt_net_accept` | `i64 (i64)` |
+| `rt_net_buffered_p` | `i64 (i64)` |
+| `rt_net_connect_begin` | `i64 (i64)` |
+| `rt_net_connect_finish` | `i64 (i64)` |
+| `rt_net_fill` | `i64 (i64)` |
+| `rt_net_flush` | `i64 (i64)` |
+| `rt_net_listen` | `i64 (i64, i64)` |
+| `rt_net_local_address` | `i64 (i64)` |
+| `rt_net_peer_address` | `i64 (i64)` |
+| `rt_net_peer_subject` | `i64 (i64)` |
+| `rt_net_pop_byte` | `i64 (i64)` |
+| `rt_net_pop_char` | `i64 (i64)` |
+| `rt_net_push_byte` | `i64 (i64, i64)` |
+| `rt_net_push_string` | `i64 (i64, i64)` |
+| `rt_net_resolve_begin` | `i64 (i64, i64)` |
+| `rt_net_resolve_finish` | `i64 (i64)` |
+| `rt_net_server_name` | `i64 (i64)` |
+| `rt_net_set_keepalive` | `i64 (i64, i64)` |
+| `rt_net_set_keepalive_period` | `i64 (i64, i64)` |
+| `rt_net_set_nodelay` | `i64 (i64, i64)` |
+| `rt_net_shutdown_write` | `i64 (i64)` |
+| `rt_net_socket_error` | `i64 (i64)` |
+| `rt_net_tls_add_certificate` | `i64 (i64, i64, i64, i64)` |
+| `rt_net_tls_handshake` | `i64 (i64)` |
+| `rt_net_tls_listen` | `i64 (i64, i64, i64, i64, i64)` |
+| `rt_net_tls_start` | `i64 (i64, i64, i64, i64, i64)` |
+| `rt_net_udp_bind` | `i64 (i64, i64)` |
+| `rt_net_udp_last_sender` | `i64 (i64)` |
+| `rt_net_udp_recv` | `i64 (i64)` |
+| `rt_net_udp_send_to` | `i64 (i64, i64, i64)` |
+| `rt_net_unix_connect` | `i64 (i64)` |
+| `rt_net_unix_listen` | `i64 (i64)` |
+| `rt_null` | `i64 (i64)` |
+| `rt_panic` | `i64 (i64)` |
+| `rt_parse_float` | `i64 (i64)` |
+| `rt_path_to_list` | `i64 (i64)` |
+| `rt_pending_arg` | `i64 (i64)` |
+| `rt_pending_argc` | `i64 ()` |
+| `rt_pending_env` | `i64 (i64)` |
+| `rt_pending_envc` | `i64 ()` |
+| `rt_pop_sexpr_root` | `i64 ()` |
+| `rt_pprint` | `i64 (i64, i64, i64)` |
+| `rt_pprint_block_end` | `i64 ()` |
+| `rt_pprint_block_start` | `i64 (i64, i64, i64, i64)` |
+| `rt_pprint_indent` | `i64 (i64, i64)` |
+| `rt_pprint_list_exhausted` | `i64 ()` |
+| `rt_pprint_newline` | `i64 (i64)` |
+| `rt_pprint_pop` | `i64 ()` |
+| `rt_pprint_tab` | `i64 (i64, i64, i64)` |
+| `rt_print_enum_variant` | `i64 (i64, i64, i64, i64)` |
+| `rt_print_field_name` | `i64 (i64, i64, i64, i64)` |
+| `rt_print_field_template` | `i64 (i64, i64, i64, i64)` |
+| `rt_print_global` | `i64 (i64, i64, i64)` |
+| `rt_print_names` | `i64 (i64)` |
+| `rt_print_object_method` | `i64 (i64, i64)` |
+| `rt_push_permanent_sexpr_root` | `i64 (i64)` |
+| `rt_push_sexpr_root` | `i64 (i64)` |
+| `rt_random_state_copy` | `i64 (i64)` |
+| `rt_random_state_next` | `i64 (i64, i64)` |
+| `rt_ratio_add` | `i64 (i64, i64)` |
+| `rt_ratio_cmp` | `i64 (i64, i64)` |
+| `rt_ratio_denominator` | `i64 (i64)` |
+| `rt_ratio_div` | `i64 (i64, i64)` |
+| `rt_ratio_from_bignums` | `i64 (i64, i64)` |
+| `rt_ratio_mul` | `i64 (i64, i64)` |
+| `rt_ratio_numerator` | `i64 (i64)` |
+| `rt_ratio_sub` | `i64 (i64, i64)` |
+| `rt_ratio_to_float` | `i64 (i64)` |
+| `rt_ratio_to_int` | `i64 (i64)` |
+| `rt_rational_add` | `i64 (i64, i64)` |
+| `rt_rational_cmp` | `i64 (i64, i64)` |
+| `rt_rational_denominator` | `i64 (i64)` |
+| `rt_rational_div` | `i64 (i64, i64)` |
+| `rt_rational_from_ratio` | `i64 (i64)` |
+| `rt_rational_is_int` | `i64 (i64)` |
+| `rt_rational_mul` | `i64 (i64, i64)` |
+| `rt_rational_numerator` | `i64 (i64)` |
+| `rt_rational_sub` | `i64 (i64, i64)` |
+| `rt_rational_to_float` | `i64 (i64)` |
+| `rt_rational_to_int` | `i64 (i64)` |
+| `rt_rational_to_ratio` | `i64 (i64)` |
+| `rt_read` | `i64 (i64)` |
+| `rt_read_datum_at` | `i64 (i64, i64, i64)` |
+| `rt_root_count` | `i64 ()` |
 | `rt_run_entry` | `i64 (i64)` |
-| `rt_seed_random_state` | `i64 (ptr, i32)` |
-| `rt_set_car` | `i64 (ptr, i32)` |
-| `rt_set_cdr` | `i64 (ptr, i32)` |
-| `rt_set_dispatch_macro_character` | `i64 (ptr, i32)` |
-| `rt_set_macro_character` | `i64 (ptr, i32)` |
-| `rt_set_sexpr_root` | `i64 (ptr, i32)` |
-| `rt_sexpr_bool` | `i64 (ptr, i32)` |
-| `rt_sexpr_char` | `i64 (ptr, i32)` |
-| `rt_sexpr_eq` | `i64 (ptr, i32)` |
-| `rt_sexpr_eql` | `i64 (ptr, i32)` |
-| `rt_sexpr_equal` | `i64 (ptr, i32)` |
-| `rt_sexpr_equalp` | `i64 (ptr, i32)` |
-| `rt_sexpr_f32` | `i64 (ptr, i32)` |
-| `rt_sexpr_f64` | `i64 (ptr, i32)` |
-| `rt_sexpr_i16` | `i64 (ptr, i32)` |
-| `rt_sexpr_i32` | `i64 (ptr, i32)` |
-| `rt_sexpr_i8` | `i64 (ptr, i32)` |
-| `rt_sexpr_instance_test` | `i64 (ptr, i32)` |
-| `rt_sexpr_int` | `i64 (ptr, i32)` |
-| `rt_sexpr_str` | `i64 (ptr, i32)` |
-| `rt_sexpr_tuple_items` | `i64 (ptr, i32)` |
-| `rt_sexpr_u16` | `i64 (ptr, i32)` |
-| `rt_sexpr_u32` | `i64 (ptr, i32)` |
-| `rt_sexpr_u8` | `i64 (ptr, i32)` |
-| `rt_software_type` | `i64 (ptr, i32)` |
-| `rt_software_version` | `i64 (ptr, i32)` |
-| `rt_str_append` | `i64 (ptr, i32)` |
-| `rt_str_downcase` | `i64 (ptr, i32)` |
-| `rt_str_eq` | `i64 (ptr, i32)` |
-| `rt_str_equalp` | `i64 (ptr, i32)` |
-| `rt_str_length` | `i64 (ptr, i32)` |
-| `rt_str_lt` | `i64 (ptr, i32)` |
+| `rt_run_program` | `i64 (i64, i64, i64)` |
+| `rt_run_program_alone` | `i64 (i64, i64, i64)` |
+| `rt_run_program_alone_int` | `i64 (i64, i64, i64)` |
+| `rt_run_program_int` | `i64 (i64, i64, i64)` |
+| `rt_run_program_interp` | `i64 (i64, i64, i64)` |
+| `rt_run_program_interp_int` | `i64 (i64, i64, i64)` |
+| `rt_run_program_threads` | `i64 (i64, i64, i64)` |
+| `rt_run_program_threads_int` | `i64 (i64, i64, i64)` |
+| `rt_seed_random_state` | `i64 (i64)` |
+| `rt_set_car` | `i64 (i64, i64)` |
+| `rt_set_cdr` | `i64 (i64, i64)` |
+| `rt_set_dispatch_macro_character` | `i64 (i64, i64, i64)` |
+| `rt_set_macro_character` | `i64 (i64, i64)` |
+| `rt_set_sexpr_root` | `i64 (i64, i64)` |
+| `rt_sexpr_bool` | `i64 (i64)` |
+| `rt_sexpr_char` | `i64 (i64)` |
+| `rt_sexpr_eq` | `i64 (i64, i64)` |
+| `rt_sexpr_eql` | `i64 (i64, i64)` |
+| `rt_sexpr_equal` | `i64 (i64, i64)` |
+| `rt_sexpr_equalp` | `i64 (i64, i64)` |
+| `rt_sexpr_f32` | `i64 (i64)` |
+| `rt_sexpr_f64` | `i64 (i64)` |
+| `rt_sexpr_i16` | `i64 (i64)` |
+| `rt_sexpr_i32` | `i64 (i64)` |
+| `rt_sexpr_i8` | `i64 (i64)` |
+| `rt_sexpr_instance_test` | `i64 (i64, i64, i64)` |
+| `rt_sexpr_int` | `i64 (i64)` |
+| `rt_sexpr_str` | `i64 (i64)` |
+| `rt_sexpr_tuple_items` | `i64 (i64)` |
+| `rt_sexpr_u16` | `i64 (i64)` |
+| `rt_sexpr_u32` | `i64 (i64)` |
+| `rt_sexpr_u8` | `i64 (i64)` |
+| `rt_software_type` | `i64 ()` |
+| `rt_software_version` | `i64 ()` |
+| `rt_str_append` | `i64 (i64, i64)` |
+| `rt_str_downcase` | `i64 (i64)` |
+| `rt_str_eq` | `i64 (i64, i64)` |
+| `rt_str_equalp` | `i64 (i64, i64)` |
+| `rt_str_length` | `i64 (i64)` |
+| `rt_str_lt` | `i64 (i64, i64)` |
 | `rt_str_new` | `i64 (ptr, i32)` |
-| `rt_str_ref` | `i64 (ptr, i32)` |
-| `rt_str_substring` | `i64 (ptr, i32)` |
-| `rt_str_upcase` | `i64 (ptr, i32)` |
-| `rt_stream_at_line_start` | `i64 (ptr, i32)` |
-| `rt_stream_close` | `i64 (ptr, i32)` |
-| `rt_stream_describe` | `i64 (ptr, i32)` |
-| `rt_stream_finish_output` | `i64 (ptr, i32)` |
-| `rt_stream_input_p` | `i64 (ptr, i32)` |
-| `rt_stream_listen` | `i64 (ptr, i32)` |
-| `rt_stream_open_file` | `i64 (ptr, i32)` |
-| `rt_stream_open_p` | `i64 (ptr, i32)` |
-| `rt_stream_output_p` | `i64 (ptr, i32)` |
-| `rt_stream_position` | `i64 (ptr, i32)` |
-| `rt_stream_read_byte` | `i64 (ptr, i32)` |
-| `rt_stream_read_char` | `i64 (ptr, i32)` |
-| `rt_stream_stderr` | `i64 (ptr, i32)` |
-| `rt_stream_stdin` | `i64 (ptr, i32)` |
-| `rt_stream_stdout` | `i64 (ptr, i32)` |
-| `rt_stream_string_input` | `i64 (ptr, i32)` |
-| `rt_stream_string_output` | `i64 (ptr, i32)` |
-| `rt_stream_take_output_string` | `i64 (ptr, i32)` |
-| `rt_stream_unread_char` | `i64 (ptr, i32)` |
-| `rt_stream_write_byte` | `i64 (ptr, i32)` |
-| `rt_stream_write_string` | `i64 (ptr, i32)` |
-| `rt_struct_field_count` | `i64 (ptr, i32)` |
-| `rt_struct_field_get` | `i64 (ptr, i32)` |
-| `rt_struct_field_set` | `i64 (ptr, i32)` |
+| `rt_str_ref` | `i64 (i64, i64)` |
+| `rt_str_substring` | `i64 (i64, i64, i64)` |
+| `rt_str_upcase` | `i64 (i64)` |
+| `rt_stream_at_line_start` | `i64 (i64)` |
+| `rt_stream_close` | `i64 (i64)` |
+| `rt_stream_describe` | `i64 (i64)` |
+| `rt_stream_finish_output` | `i64 (i64)` |
+| `rt_stream_input_p` | `i64 (i64)` |
+| `rt_stream_listen` | `i64 (i64)` |
+| `rt_stream_open_file` | `i64 (i64, i64)` |
+| `rt_stream_open_p` | `i64 (i64)` |
+| `rt_stream_output_p` | `i64 (i64)` |
+| `rt_stream_position` | `i64 (i64)` |
+| `rt_stream_read_byte` | `i64 (i64)` |
+| `rt_stream_read_char` | `i64 (i64)` |
+| `rt_stream_stderr` | `i64 ()` |
+| `rt_stream_stdin` | `i64 ()` |
+| `rt_stream_stdout` | `i64 ()` |
+| `rt_stream_string_input` | `i64 (i64)` |
+| `rt_stream_string_output` | `i64 ()` |
+| `rt_stream_take_output_string` | `i64 (i64)` |
+| `rt_stream_unread_char` | `i64 (i64, i64)` |
+| `rt_stream_write_byte` | `i64 (i64, i64)` |
+| `rt_stream_write_string` | `i64 (i64, i64)` |
+| `rt_struct_field_count` | `i64 (i64)` |
+| `rt_struct_field_get` | `i64 (i64, i64)` |
+| `rt_struct_field_set` | `i64 (i64, i64, i64)` |
 | `rt_struct_new` | `i64 (ptr, i32)` |
-| `rt_struct_pop_field` | `i64 (ptr, i32)` |
-| `rt_struct_push_field` | `i64 (ptr, i32)` |
-| `rt_suspend_chan_cap` | `i64 (ptr, i32)` |
-| `rt_suspend_chan_close` | `i64 (ptr, i32)` |
-| `rt_suspend_chan_len` | `i64 (ptr, i32)` |
-| `rt_suspend_chan_new` | `i64 (ptr, i32)` |
-| `rt_suspend_chan_recv` | `i64 (ptr, i32)` |
+| `rt_struct_pop_field` | `i64 (i64)` |
+| `rt_struct_push_field` | `i64 (i64, i64)` |
+| `rt_suspend_chan_cap` | `i64 (i64)` |
+| `rt_suspend_chan_close` | `i64 (i64)` |
+| `rt_suspend_chan_len` | `i64 (i64)` |
+| `rt_suspend_chan_new` | `i64 (i64, i64)` |
+| `rt_suspend_chan_recv` | `i64 (i64, i64)` |
 | `rt_suspend_chan_select` | `i64 (ptr, i32)` |
-| `rt_suspend_chan_send` | `i64 (ptr, i32)` |
-| `rt_suspend_io` | `i64 (ptr, i32)` |
-| `rt_suspend_io_for` | `i64 (ptr, i32)` |
-| `rt_suspend_main` | `i64 (ptr, i32)` |
-| `rt_suspend_sleep` | `i64 (ptr, i32)` |
-| `rt_suspend_task` | `i64 (ptr, i32)` |
-| `rt_suspend_thread` | `i64 (ptr, i32)` |
-| `rt_suspend_wait` | `i64 (ptr, i32)` |
-| `rt_suspend_yield` | `i64 (ptr, i32)` |
-| `rt_sxhash_eq` | `i64 (ptr, i32)` |
-| `rt_sxhash_eql` | `i64 (ptr, i32)` |
-| `rt_sxhash_equalp` | `i64 (ptr, i32)` |
-| `rt_sym_name` | `i64 (ptr, i32)` |
-| `rt_symp` | `i64 (ptr, i32)` |
-| `rt_thread_available_parallelism` | `i64 (ptr, i32)` |
-| `rt_thread_current_id` | `i64 (ptr, i32)` |
-| `rt_throw` | `i64 (ptr, i32)` |
-| `rt_throw_matches` | `i64 (ptr, i32)` |
-| `rt_throw_take_value` | `i64 (ptr, i32)` |
-| `rt_timezone_daylight_p` | `i64 (ptr, i32)` |
-| `rt_timezone_offset_seconds` | `i64 (ptr, i32)` |
-| `rt_truncate_sexpr_roots` | `i64 (ptr, i32)` |
-| `rt_types_define` | `i64 (ptr, i32)` |
-| `rt_u16_box` | `i64 (ptr, i32)` |
-| `rt_u16_unbox` | `i64 (ptr, i32)` |
-| `rt_u32_box` | `i64 (ptr, i32)` |
-| `rt_u32_unbox` | `i64 (ptr, i32)` |
-| `rt_u8_box` | `i64 (ptr, i32)` |
-| `rt_u8_unbox` | `i64 (ptr, i32)` |
-| `rt_unwinding` | `i64 (ptr, i32)` |
-| `rt_upcast_set` | `i64 (ptr, i32)` |
-| `rt_vector_to_sexpr_tuple` | `i64 (ptr, i32)` |
-| `rt_vtable_set` | `i64 (ptr, i32)` |
-| `rt_wk_symbol` | `i64 (ptr, i32)` |
+| `rt_suspend_chan_send` | `i64 (i64, i64)` |
+| `rt_suspend_io` | `i64 (i64, i64)` |
+| `rt_suspend_io_for` | `i64 (i64, i64, i64)` |
+| `rt_suspend_main` | `i64 ()` |
+| `rt_suspend_sleep` | `i64 (i64)` |
+| `rt_suspend_task` | `i64 (i64, i64)` |
+| `rt_suspend_thread` | `i64 (i64, i64)` |
+| `rt_suspend_wait` | `i64 (i64)` |
+| `rt_suspend_yield` | `i64 ()` |
+| `rt_sxhash_eq` | `i64 (i64)` |
+| `rt_sxhash_eql` | `i64 (i64)` |
+| `rt_sxhash_equalp` | `i64 (i64)` |
+| `rt_sym_name` | `i64 (i64)` |
+| `rt_symp` | `i64 (i64)` |
+| `rt_thread_available_parallelism` | `i64 ()` |
+| `rt_thread_current_id` | `i64 ()` |
+| `rt_throw` | `i64 (i64, i64)` |
+| `rt_throw_matches` | `i64 (i64)` |
+| `rt_throw_take_value` | `i64 ()` |
+| `rt_timezone_daylight_p` | `i64 (i64, i64)` |
+| `rt_timezone_offset_seconds` | `i64 (i64, i64)` |
+| `rt_truncate_sexpr_roots` | `i64 (i64)` |
+| `rt_types_define` | `i64 (i64, i64, i64)` |
+| `rt_u16_box` | `i64 (i64)` |
+| `rt_u16_unbox` | `i64 (i64)` |
+| `rt_u32_box` | `i64 (i64)` |
+| `rt_u32_unbox` | `i64 (i64)` |
+| `rt_u8_box` | `i64 (i64)` |
+| `rt_u8_unbox` | `i64 (i64)` |
+| `rt_unwinding` | `i64 ()` |
+| `rt_upcast_set` | `i64 (i64, i64, i64)` |
+| `rt_vector_to_sexpr_tuple` | `i64 (i64)` |
+| `rt_vtable_set` | `i64 (i64, i64, i64, i64)` |
+| `rt_wk_symbol` | `i64 (i64)` |
 
 ## 組み込み型
 

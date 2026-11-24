@@ -69,51 +69,42 @@ pub fn vtable_define(id: u32, slots: Vec<(usize, u8)>) {
     t[id as usize] = slots;
 }
 
-/// Boxes `args[1]` (a tagged value) as a trait object dispatching through
-/// vtable `args[0]`.
+/// Boxes `value` (a tagged value) as a trait object dispatching through
+/// vtable `vtable_id`.
 ///
 /// # Safety
 ///
-/// `argc` must be `>= 2` and `args` must point to at least 2 valid `i64`s; a
+/// The words must be valid; a
 /// `Heap` must already be registered on this thread.
 #[no_mangle]
-pub unsafe extern "C" fn rt_dyn_new(args: *const i64, argc: u32) -> i64 {
-    if argc < 2 {
-        fatal("rt_dyn_new: expected 2 arguments (the vtable id and the value)");
-    }
-    let vtable_id = *args as u32;
-    let value = decode(*args.add(1));
+pub unsafe extern "C" fn rt_dyn_new(vtable_id: i64, value: i64) -> i64 {
+    let vtable_id = vtable_id as u32;
+    let value = decode(value);
     encode(active_heap().alloc_dyn(vtable_id, value))
 }
 
-/// The vtable id of the trait object `args[0]`, as a raw `i64`.
+/// The vtable id of the trait object `x`, as a raw `i64`.
 ///
 /// # Safety
 ///
-/// `argc` must be `>= 1`, `args[0]` must be a tagged `BoxedObj::Dyn`, and a
+/// , `x` must be a tagged `BoxedObj::Dyn`, and a
 /// `Heap` must be registered on this thread.
 #[no_mangle]
-pub unsafe extern "C" fn rt_dyn_vtable(args: *const i64, argc: u32) -> i64 {
-    if argc < 1 {
-        fatal("rt_dyn_vtable: expected 1 argument");
-    }
-    match decode(*args) {
+pub unsafe extern "C" fn rt_dyn_vtable(x: i64) -> i64 {
+    match decode(x) {
         Value::Boxed(id) if active_heap().is_dyn(id) => active_heap().dyn_vtable_id(id) as i64,
         _ => fatal("rt_dyn_vtable: not a trait object"),
     }
 }
 
-/// The concrete value inside the trait object `args[0]`, tagged.
+/// The concrete value inside the trait object `x`, tagged.
 ///
 /// # Safety
 ///
 /// Same as [`rt_dyn_vtable`].
 #[no_mangle]
-pub unsafe extern "C" fn rt_dyn_value(args: *const i64, argc: u32) -> i64 {
-    if argc < 1 {
-        fatal("rt_dyn_value: expected 1 argument");
-    }
-    match decode(*args) {
+pub unsafe extern "C" fn rt_dyn_value(x: i64) -> i64 {
+    match decode(x) {
         Value::Boxed(id) if active_heap().is_dyn(id) => encode(active_heap().dyn_value(id)),
         _ => fatal("rt_dyn_value: not a trait object"),
     }
@@ -232,8 +223,8 @@ pub(crate) unsafe fn resolve_closure(closure: i64) -> Callee {
     }
 }
 
-/// Upcasts the trait object `args[1]` to the supertrait interned as trait id
-/// `args[0]`, returning a fat box over the same concrete value dispatching
+/// Upcasts the trait object `value` to the supertrait interned as trait id
+/// `trait_id`, returning a fat box over the same concrete value dispatching
 /// through that supertrait's own vtable (`Expr::DynUpcast`). Emitted only
 /// where the layouts do *not* share a prefix — the leftmost-spine case is a
 /// checker-level retype that reaches no code at all.
@@ -249,15 +240,12 @@ pub(crate) unsafe fn resolve_closure(closure: i64) -> Callee {
 ///
 /// # Safety
 ///
-/// `argc` must be `>= 2`, `args[1]` must be a tagged `BoxedObj::Dyn`, and a
+/// , `value` must be a tagged `BoxedObj::Dyn`, and a
 /// `Heap` must be registered on this thread.
 #[no_mangle]
-pub unsafe extern "C" fn rt_dyn_upcast(args: *const i64, argc: u32) -> i64 {
-    if argc < 2 {
-        fatal("rt_dyn_upcast: expected 2 arguments (the target trait id and the trait object)");
-    }
-    let trait_id = *args as u32;
-    let value = decode(*args.add(1));
+pub unsafe extern "C" fn rt_dyn_upcast(trait_id: i64, value: i64) -> i64 {
+    let trait_id = trait_id as u32;
+    let value = decode(value);
     let Value::Boxed(id) = value else {
         fatal("rt_dyn_upcast: not a trait object");
     };
@@ -285,58 +273,49 @@ pub unsafe extern "C" fn rt_dyn_upcast(args: *const i64, argc: u32) -> i64 {
 ///
 /// # Safety
 ///
-/// `argc` must be `>= 3`, `args` must point to 3 valid `i64`s, `words` to
+/// the words must be valid, `words` to
 /// `word_count` words of a list `TypeWords` wrote (its strings placed as
 /// constants), and `table` to as many writable words as the list has types.
 #[no_mangle]
-pub unsafe extern "C" fn rt_types_define(args: *const i64, argc: u32) -> i64 {
-    if argc < 3 {
-        fatal("rt_types_define: expected 3 arguments");
-    }
-    let words = core::slice::from_raw_parts(*args as usize as *const i64, *args.add(1) as usize);
-    let table = *args.add(2) as usize as *mut i64;
+pub unsafe extern "C" fn rt_types_define(words: i64, words_len: i64, table: i64) -> i64 {
+    let words = core::slice::from_raw_parts(words as usize as *const i64, words_len as usize);
+    let table = table as usize as *mut i64;
     for (i, id) in typelisp_mem::type_words::define(words).into_iter().enumerate() {
         *table.add(i) = id.word();
     }
     0
 }
 
-/// Registers the upcast `(vtable args[0], trait id args[1]) -> vtable
-/// args[2]`. Used by AOT startup for the same reason [`rt_vtable_set`] is —
+/// Registers the upcast `(vtable `from`, trait id `trait_id`) -> vtable
+/// `to`. Used by AOT startup for the same reason [`rt_vtable_set`] is —
 /// the tables have to exist before `main` runs any user code, and there is
 /// no interpreter around to fill them; the JIT calls [`upcast_define`]
 /// Rust-side instead.
 ///
 /// # Safety
 ///
-/// `argc` must be `>= 3` and `args` must point to at least 3 valid `i64`s.
+/// Each word must be a value of the type the signature gives it.
 #[no_mangle]
-pub unsafe extern "C" fn rt_upcast_set(args: *const i64, argc: u32) -> i64 {
-    if argc < 3 {
-        fatal("rt_upcast_set: expected 3 arguments (the source vtable id, the trait id and the target vtable id)");
-    }
-    upcast_define(*args as u32, *args.add(1) as u32, *args.add(2) as u32);
+pub unsafe extern "C" fn rt_upcast_set(from: i64, trait_id: i64, to: i64) -> i64 {
+    upcast_define(from as u32, trait_id as u32, to as u32);
     0
 }
 
-/// Sets slot `args[1]` of vtable `args[0]` to the native entry point
-/// `args[2]`, which answers to the ABI in `args[3]`, extending the table as
+/// Sets slot `slot` of vtable `id` to the native entry point
+/// `ptr`, which answers to the ABI in `body_abi`, extending the table as
 /// needed. Used by AOT startup, where the pointers are `ptrtoint` constants
 /// the linker resolves; the JIT fills tables through [`vtable_define`]
 /// instead.
 ///
 /// # Safety
 ///
-/// `argc` must be `>= 4` and `args` must point to at least 4 valid `i64`s.
+/// Each word must be a value of the type the signature gives it.
 #[no_mangle]
-pub unsafe extern "C" fn rt_vtable_set(args: *const i64, argc: u32) -> i64 {
-    if argc < 4 {
-        fatal("rt_vtable_set: expected 4 arguments (the vtable id, the slot, the function pointer and its ABI)");
-    }
-    let id = *args as usize;
-    let slot = *args.add(1) as usize;
-    let ptr = *args.add(2) as usize;
-    let body_abi = *args.add(3) as u8;
+pub unsafe extern "C" fn rt_vtable_set(id: i64, slot: i64, ptr: i64, body_abi: i64) -> i64 {
+    let id = id as usize;
+    let slot = slot as usize;
+    let ptr = ptr as usize;
+    let body_abi = body_abi as u8;
     let shared = shared::rt_shared();
     let mut t = shared.vtables.write();
     if t.len() <= id {

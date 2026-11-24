@@ -290,20 +290,13 @@ fn type_arg(word: i64, who: &str) -> TypeId {
     TypeId::from_word(word).unwrap_or_else(|| fatal(&format!("{}: expected a type, got {:#x}", who, word)))
 }
 
-unsafe fn args_of<'a>(args: *const i64, argc: u32, want: u32, who: &str) -> &'a [i64] {
-    if argc < want {
-        fatal(&format!("{}: expected {} arguments", who, want));
-    }
-    core::slice::from_raw_parts(args, argc as usize)
-}
-
 /// `(" c-arena-open")`.
 ///
 /// # Safety
 ///
-/// Callable with any arguments; it reads none.
+/// None: it reads nothing.
 #[no_mangle]
-pub unsafe extern "C" fn rt_c_arena_open(_args: *const i64, _argc: u32) -> i64 {
+pub unsafe extern "C" fn rt_c_arena_open() -> i64 {
     arena_open() as i64
 }
 
@@ -311,11 +304,10 @@ pub unsafe extern "C" fn rt_c_arena_open(_args: *const i64, _argc: u32) -> i64 {
 ///
 /// # Safety
 ///
-/// `args` must point to one readable `i64`.
+/// `arena` must be open.
 #[no_mangle]
-pub unsafe extern "C" fn rt_c_arena_close(args: *const i64, argc: u32) -> i64 {
-    let a = args_of(args, argc, 1, "rt_c_arena_close");
-    if let Err(msg) = arena_close(a[0] as u64) {
+pub unsafe extern "C" fn rt_c_arena_close(arena: i64) -> i64 {
+    if let Err(msg) = arena_close(arena as u64) {
         fatal(&msg);
     }
     0
@@ -331,7 +323,10 @@ pub unsafe extern "C" fn rt_c_arena_close(args: *const i64, argc: u32) -> i64 {
 /// number, and a `Heap` must be registered on this thread.
 #[no_mangle]
 pub unsafe extern "C-unwind" fn rt_c_alloc(args: *const i64, argc: u32) -> i64 {
-    let a = args_of(args, argc, 4, "rt_c_alloc");
+    if argc < 4 {
+        fatal("rt_c_alloc: expected 4 arguments");
+    }
+    let a = core::slice::from_raw_parts(args, argc as usize);
     if a.len() % 2 != 0 {
         fatal("rt_c_alloc: an offset without its type");
     }
@@ -346,13 +341,11 @@ pub unsafe extern "C-unwind" fn rt_c_alloc(args: *const i64, argc: u32) -> i64 {
 ///
 /// # Safety
 ///
-/// `args` must point to two readable `i64`s, and a `Heap` must be registered
-/// on this thread.
+/// A `Heap` must be registered on this thread.
 #[no_mangle]
-pub unsafe extern "C-unwind" fn rt_c_ptr_check(args: *const i64, argc: u32) -> i64 {
-    let a = args_of(args, argc, 2, "rt_c_ptr_check");
-    match check(a[0] as usize, type_arg(a[1], "rt_c_ptr_check")) {
-        Ok(()) => a[0],
+pub unsafe extern "C-unwind" fn rt_c_ptr_check(addr: i64, ty: i64) -> i64 {
+    match check(addr as usize, type_arg(ty, "rt_c_ptr_check")) {
+        Ok(()) => addr,
         Err(msg) => raise(msg).into_word(),
     }
 }
@@ -361,12 +354,10 @@ pub unsafe extern "C-unwind" fn rt_c_ptr_check(args: *const i64, argc: u32) -> i
 ///
 /// # Safety
 ///
-/// `args` must point to four readable `i64`s, and a `Heap` must be
-/// registered on this thread.
+/// A `Heap` must be registered on this thread.
 #[no_mangle]
-pub unsafe extern "C-unwind" fn rt_c_index(args: *const i64, argc: u32) -> i64 {
-    let a = args_of(args, argc, 4, "rt_c_index");
-    match index(a[0] as usize, a[1], a[2] as usize, type_arg(a[3], "rt_c_index")) {
+pub unsafe extern "C-unwind" fn rt_c_index(addr: i64, i: i64, size: i64, ty: i64) -> i64 {
+    match index(addr as usize, i, size as usize, type_arg(ty, "rt_c_index")) {
         Ok(p) => p as i64,
         Err(msg) => raise(msg).into_word(),
     }
@@ -376,33 +367,30 @@ pub unsafe extern "C-unwind" fn rt_c_index(args: *const i64, argc: u32) -> i64 {
 ///
 /// # Safety
 ///
-/// `args` must point to two readable `i64`s.
+/// None: it only adds.
 #[no_mangle]
-pub unsafe extern "C" fn rt_c_offset(args: *const i64, argc: u32) -> i64 {
-    let a = args_of(args, argc, 2, "rt_c_offset");
-    a[0].wrapping_add(a[1])
+pub unsafe extern "C" fn rt_c_offset(addr: i64, offset: i64) -> i64 {
+    addr.wrapping_add(offset)
 }
 
 /// `(" c-load" ADDR OFFSET KIND)`.
 ///
 /// # Safety
 ///
-/// `args` must point to three readable `i64`s describing a readable value.
+/// The words must describe a readable value.
 #[no_mangle]
-pub unsafe extern "C" fn rt_c_load(args: *const i64, argc: u32) -> i64 {
-    let a = args_of(args, argc, 3, "rt_c_load");
-    load(a[0].wrapping_add(a[1]) as usize, a[2])
+pub unsafe extern "C" fn rt_c_load(addr: i64, offset: i64, kind: i64) -> i64 {
+    load(addr.wrapping_add(offset) as usize, kind)
 }
 
 /// `(" c-store" ADDR OFFSET KIND WORD)`.
 ///
 /// # Safety
 ///
-/// `args` must point to four readable `i64`s describing a writable value.
+/// The words must describe a writable value.
 #[no_mangle]
-pub unsafe extern "C" fn rt_c_store(args: *const i64, argc: u32) -> i64 {
-    let a = args_of(args, argc, 4, "rt_c_store");
-    store(a[0].wrapping_add(a[1]) as usize, a[2], a[3]);
+pub unsafe extern "C" fn rt_c_store(addr: i64, offset: i64, kind: i64, word: i64) -> i64 {
+    store(addr.wrapping_add(offset) as usize, kind, word);
     0
 }
 
@@ -410,11 +398,10 @@ pub unsafe extern "C" fn rt_c_store(args: *const i64, argc: u32) -> i64 {
 ///
 /// # Safety
 ///
-/// `args` must point to two readable `i64`s naming a readable register.
+/// The words must name a readable register.
 #[no_mangle]
-pub unsafe extern "C-unwind" fn rt_c_volatile_load(args: *const i64, argc: u32) -> i64 {
-    let a = args_of(args, argc, 2, "rt_c_volatile_load");
-    match volatile_load(a[0], a[1]) {
+pub unsafe extern "C-unwind" fn rt_c_volatile_load(addr: i64, kind: i64) -> i64 {
+    match volatile_load(addr, kind) {
         Ok(word) => word,
         Err(msg) => raise(msg).into_word(),
     }
@@ -424,11 +411,10 @@ pub unsafe extern "C-unwind" fn rt_c_volatile_load(args: *const i64, argc: u32) 
 ///
 /// # Safety
 ///
-/// `args` must point to three readable `i64`s naming a writable register.
+/// The words must name a writable register.
 #[no_mangle]
-pub unsafe extern "C-unwind" fn rt_c_volatile_store(args: *const i64, argc: u32) -> i64 {
-    let a = args_of(args, argc, 3, "rt_c_volatile_store");
-    match volatile_store(a[0], a[1], a[2]) {
+pub unsafe extern "C-unwind" fn rt_c_volatile_store(addr: i64, kind: i64, word: i64) -> i64 {
+    match volatile_store(addr, kind, word) {
         Ok(()) => 0,
         Err(msg) => raise(msg).into_word(),
     }

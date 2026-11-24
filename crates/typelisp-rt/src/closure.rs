@@ -76,23 +76,20 @@ unsafe fn closure_new(args: *const i64, argc: u32, body_abi: u8, what: &str) -> 
 }
 
 /// `(rt-closure-fnptr clo)` for compiled code — the *raw* native entry
-/// point of boxed compiled closure `args[0]` (a tagged `Sexpr`), ready for
-/// an indirect call. Fatal if `args[0]` isn't a boxed compiled closure —
+/// point of boxed compiled closure `id` (a tagged `Sexpr`), ready for
+/// an indirect call. Fatal if `id` isn't a boxed compiled closure —
 /// the checker's type discipline (`Type::Fn`) is what guarantees only
 /// function values reach an apply site. Allocates nothing, so triggers no
 /// GC.
 ///
 /// # Safety
 ///
-/// `argc` must be `>= 1` and `args` must point to at least 1 valid `i64`
+/// The words must be valid
 /// decoding to a `Value::Boxed` compiled closure; a `Heap` must already be
 /// registered on this thread.
 #[no_mangle]
-pub unsafe extern "C" fn rt_closure_fnptr(args: *const i64, argc: u32) -> i64 {
-    if argc < 1 {
-        fatal("rt_closure_fnptr: expected 1 argument");
-    }
-    let id = match decode(*args) {
+pub unsafe extern "C" fn rt_closure_fnptr(id: i64) -> i64 {
+    let id = match decode(id) {
         Value::Boxed(id) if active_heap().is_compiled_closure(id) => id,
         _ => fatal("rt_closure_fnptr: argument is not a boxed compiled closure"),
     };
@@ -100,7 +97,7 @@ pub unsafe extern "C" fn rt_closure_fnptr(args: *const i64, argc: u32) -> i64 {
 }
 
 /// `(rt-closure-env-len clo)` for compiled code — the number of captured
-/// slots boxed compiled closure `args[0]` carries, as a *raw* `i64` (the
+/// slots boxed compiled closure `id` carries, as a *raw* `i64` (the
 /// `env_len` argument an indirect `compiled_fn_type_with_env` call passes
 /// on). Fatal like [`rt_closure_fnptr`]. Allocates nothing.
 ///
@@ -108,11 +105,8 @@ pub unsafe extern "C" fn rt_closure_fnptr(args: *const i64, argc: u32) -> i64 {
 ///
 /// Same contract as [`rt_closure_fnptr`].
 #[no_mangle]
-pub unsafe extern "C" fn rt_closure_env_len(args: *const i64, argc: u32) -> i64 {
-    if argc < 1 {
-        fatal("rt_closure_env_len: expected 1 argument");
-    }
-    let id = match decode(*args) {
+pub unsafe extern "C" fn rt_closure_env_len(id: i64) -> i64 {
+    let id = match decode(id) {
         Value::Boxed(id) if active_heap().is_compiled_closure(id) => id,
         _ => fatal("rt_closure_env_len: argument is not a boxed compiled closure"),
     };
@@ -120,28 +114,25 @@ pub unsafe extern "C" fn rt_closure_env_len(args: *const i64, argc: u32) -> i64 
 }
 
 /// `(rt-closure-env-get clo idx)` for compiled code — the `idx`-th captured
-/// slot of boxed compiled closure `args[0]`, where `args[1]` is a *raw*
+/// slot of boxed compiled closure `id`, where `idx` is a *raw*
 /// index. Hands back the exact `i64` word the slot was created with: a
 /// masked slot re-encodes its stored tagged value, an unmasked slot unwraps
 /// the raw native bits it smuggled through `Value::Int` (see
-/// [`rt_closure_new`]). Fatal if `args[0]` isn't a boxed compiled closure
+/// [`rt_closure_new`]). Fatal if `id` isn't a boxed compiled closure
 /// or `idx` is out of range. Allocates nothing.
 ///
 /// # Safety
 ///
-/// `argc` must be `>= 2` and `args` must point to at least 2 valid `i64`s,
+/// The words must be valid,
 /// the first decoding to a `Value::Boxed` compiled closure; a `Heap` must
 /// already be registered on this thread.
 #[no_mangle]
-pub unsafe extern "C" fn rt_closure_env_get(args: *const i64, argc: u32) -> i64 {
-    if argc < 2 {
-        fatal("rt_closure_env_get: expected 2 arguments");
-    }
-    let id = match decode(*args) {
+pub unsafe extern "C" fn rt_closure_env_get(id: i64, idx: i64) -> i64 {
+    let id = match decode(id) {
         Value::Boxed(id) if active_heap().is_compiled_closure(id) => id,
         _ => fatal("rt_closure_env_get: first argument is not a boxed compiled closure"),
     };
-    let idx = *args.add(1);
+    let idx = idx;
     if idx < 0 {
         fatal("rt_closure_env_get: negative slot index");
     }
@@ -182,45 +173,39 @@ pub fn set_apply_interpreted(f: Option<ApplyInterpretedFn>) {
 }
 
 /// `(rt-cell-new v)` for compiled code — allocates a shared binding cell
-/// (`BoxedObj::Cell`) holding tagged `Sexpr` `args[0]`, returning the
+/// (`BoxedObj::Cell`) holding tagged `Sexpr` `v`, returning the
 /// cell's own tagged reference. Unlike the interpreter's `Heap::alloc_cell`
 /// there is no owning-`Rc` liveness registration — the cell lives by
 /// ordinary reachability (a root, a closure env slot, ...) like any other
-/// box. Allocation never triggers a collection, so `args[0]` may be
+/// box. Allocation never triggers a collection, so `v` may be
 /// un-rooted at the moment of the call — but the caller must make the
 /// returned cell reachable before anything can trigger one.
 ///
 /// # Safety
 ///
-/// `argc` must be `>= 1` and `args` must point to at least 1 valid `i64`
+/// The words must be valid
 /// holding a valid tagged value; a `Heap` must already be registered on
 /// this thread.
 #[no_mangle]
-pub unsafe extern "C" fn rt_cell_new(args: *const i64, argc: u32) -> i64 {
-    if argc < 1 {
-        fatal("rt_cell_new: expected 1 argument");
-    }
-    let v = decode(*args);
+pub unsafe extern "C" fn rt_cell_new(v: i64) -> i64 {
+    let v = decode(v);
     encode(active_heap().alloc_cell_unregistered(v))
 }
 
 /// `(rt-cell-get c)` for compiled code — the current contents of binding
-/// cell `args[0]` (a tagged `Sexpr` reference to a `BoxedObj::Cell`), as a
+/// cell `x` (a tagged `Sexpr` reference to a `BoxedObj::Cell`), as a
 /// tagged `Sexpr`; per-kind untagging is the caller's job
 /// (`compile-sexpr-field` conventions), exactly as for a struct field.
-/// Fatal if `args[0]` isn't a boxed cell. Allocates nothing.
+/// Fatal if `x` isn't a boxed cell. Allocates nothing.
 ///
 /// # Safety
 ///
-/// `argc` must be `>= 1` and `args` must point to at least 1 valid `i64`
+/// The words must be valid
 /// decoding to a `Value::Boxed` cell; a `Heap` must already be registered
 /// on this thread.
 #[no_mangle]
-pub unsafe extern "C" fn rt_cell_get(args: *const i64, argc: u32) -> i64 {
-    if argc < 1 {
-        fatal("rt_cell_get: expected 1 argument");
-    }
-    match decode(*args) {
+pub unsafe extern "C" fn rt_cell_get(x: i64) -> i64 {
+    match decode(x) {
         Value::Boxed(id) => match active_heap().try_cell_get(id) {
             Some(v) => encode(v),
             None => fatal("rt_cell_get: argument is not a boxed cell"),
@@ -230,28 +215,25 @@ pub unsafe extern "C" fn rt_cell_get(args: *const i64, argc: u32) -> i64 {
 }
 
 /// `(rt-cell-set! c v)` for compiled code — overwrites binding cell
-/// `args[0]`'s contents in place with tagged `Sexpr` `args[1]`; `setf`'s
+/// `id`'s contents in place with tagged `Sexpr` `v`; `setf`'s
 /// primitive for a shared (captured) binding, visible to every holder of
 /// the cell — interpreter bindings included, since both worlds share the
 /// very same `BoxedObj::Cell`. Returns the compiled representation of
 /// `Unit` (`0`), the same convention [`rt_struct_field_set`] uses. Fatal if
-/// `args[0]` isn't a boxed cell. Allocates nothing.
+/// `id` isn't a boxed cell. Allocates nothing.
 ///
 /// # Safety
 ///
-/// `argc` must be `>= 2` and `args` must point to at least 2 valid `i64`s,
+/// The words must be valid,
 /// the first decoding to a `Value::Boxed` cell, the second holding a valid
 /// tagged value; a `Heap` must already be registered on this thread.
 #[no_mangle]
-pub unsafe extern "C" fn rt_cell_set(args: *const i64, argc: u32) -> i64 {
-    if argc < 2 {
-        fatal("rt_cell_set: expected 2 arguments");
-    }
-    let id = match decode(*args) {
+pub unsafe extern "C" fn rt_cell_set(id: i64, v: i64) -> i64 {
+    let id = match decode(id) {
         Value::Boxed(id) if active_heap().is_cell(id) => id,
         _ => fatal("rt_cell_set: first argument is not a boxed cell"),
     };
-    let v = decode(*args.add(1));
+    let v = decode(v);
     active_heap().cell_set(id, v);
     0
 }

@@ -709,7 +709,7 @@ pub(super) fn escaped_task_failure(e: EvalError) -> EvalError {
 
 /// Places `e` at `loc`, if there is one. `EvalError::at` keeps the innermost
 /// location in the program's own source, so calling this more than once on
-/// the way out is harmless.
+/// The way out is harmless.
 fn place(e: EvalError, loc: Option<crate::Loc>) -> EvalError {
     match loc {
         Some(l) => e.at(l),

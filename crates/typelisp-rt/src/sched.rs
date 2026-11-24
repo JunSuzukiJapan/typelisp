@@ -343,7 +343,7 @@ struct Chan {
 /// The type is the one the checker wrote for this `task` node and every
 /// layer below passed along: nothing here has a type to read the
 /// instantiation off, and a handle prints as its type (`#<Task<int> 1>`),
-/// the way a `Vector<T>` does. The id is not a number a program may read.
+/// The way a `Vector<T>` does. The id is not a number a program may read.
 pub fn task_handle(heap: &mut Heap, id: TaskId, ty: TypeId) -> Value {
     heap.alloc_struct(ty, vec![Value::Int(id.0 as i64)])
 }
@@ -1330,7 +1330,7 @@ struct IoWait {
 }
 
 /// `#{ARM VALUE}` — what a `select` answers with: field 0 is the arm index,
-/// the whole of the dispatch, and field 1 the receive's `Option<T>` (or unit
+/// The whole of the dispatch, and field 1 the receive's `Option<T>` (or unit
 /// for a send or an `else`). A box rather than a cons, so that `select` takes
 /// no cell from the cons arena.
 ///

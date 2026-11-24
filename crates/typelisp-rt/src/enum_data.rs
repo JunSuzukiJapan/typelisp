@@ -45,23 +45,20 @@ pub unsafe extern "C" fn rt_data_new(args: *const i64, argc: u32) -> i64 {
 }
 
 /// `(rt-data-variant v)` for compiled code — the variant index of boxed
-/// enum value `args[0]` (a tagged `Sexpr`), returned as a *raw* (untagged)
-/// `i64`, ready for a `match` arm's tag comparison. Fatal if `args[0]`
+/// enum value `id` (a tagged `Sexpr`), returned as a *raw* (untagged)
+/// `i64`, ready for a `match` arm's tag comparison. Fatal if `id`
 /// isn't a boxed enum — the checker's type discipline is what guarantees
 /// only enum-typed scrutinees reach a tag test. Allocates nothing, so
 /// triggers no GC.
 ///
 /// # Safety
 ///
-/// `argc` must be `>= 1` and `args` must point to at least 1 valid `i64`
+/// The words must be valid
 /// decoding to a `Value::Boxed` enum; a `Heap` must already be registered
 /// on this thread.
 #[no_mangle]
-pub unsafe extern "C" fn rt_data_variant(args: *const i64, argc: u32) -> i64 {
-    if argc < 1 {
-        fatal("rt_data_variant: expected 1 argument");
-    }
-    let id = match decode(*args) {
+pub unsafe extern "C" fn rt_data_variant(id: i64) -> i64 {
+    let id = match decode(id) {
         Value::Boxed(id) if active_heap().is_enum(id) => id,
         _ => fatal("rt_data_variant: argument is not a boxed enum value"),
     };
@@ -69,28 +66,25 @@ pub unsafe extern "C" fn rt_data_variant(args: *const i64, argc: u32) -> i64 {
 }
 
 /// `(rt-data-field v idx)` for compiled code — the `idx`-th field of boxed
-/// enum value `args[0]` (a tagged `Sexpr`), where `args[1]` is a *raw*
+/// enum value `id` (a tagged `Sexpr`), where `idx` is a *raw*
 /// (untagged) index like [`rt_struct_field_get`]'s. The result is the
 /// stored tagged `Sexpr`; per-kind untagging is the caller's job
 /// (`compile-sexpr-field`), exactly as for a struct field. Fatal if
-/// `args[0]` isn't a boxed enum or `idx` is out of range. No `set`
+/// `id` isn't a boxed enum or `idx` is out of range. No `set`
 /// counterpart exists: enum values are immutable.
 ///
 /// # Safety
 ///
-/// `argc` must be `>= 2` and `args` must point to at least 2 valid `i64`s,
+/// The words must be valid,
 /// the first decoding to a `Value::Boxed` enum; a `Heap` must already be
 /// registered on this thread.
 #[no_mangle]
-pub unsafe extern "C" fn rt_data_field(args: *const i64, argc: u32) -> i64 {
-    if argc < 2 {
-        fatal("rt_data_field: expected 2 arguments");
-    }
-    let id = match decode(*args) {
+pub unsafe extern "C" fn rt_data_field(id: i64, idx: i64) -> i64 {
+    let id = match decode(id) {
         Value::Boxed(id) if active_heap().is_enum(id) => id,
         _ => fatal("rt_data_field: first argument is not a boxed enum value"),
     };
-    let idx = *args.add(1);
+    let idx = idx;
     if idx < 0 {
         fatal("rt_data_field: negative field index");
     }
@@ -101,9 +95,9 @@ pub unsafe extern "C" fn rt_data_field(args: *const i64, argc: u32) -> i64 {
 /// Sexpr-downcast pattern guard (`(point x y)`/`(color::red)`/`(the T p)`
 /// against a `Sexpr` scrutinee — `compiler.rs`'s `compile-sexpr-instance-
 /// test`, `core_bridge::translate_pattern`'s `downcast`/`pat-typetest`
-/// encoding). Tests whether tagged `Sexpr` value `args[0]` is a boxed
-/// struct or enum whose own type is `args[1]`, and —
-/// for an enum — whose variant also matches the *raw* `args[2]` (`-1` skips
+/// encoding). Tests whether tagged `Sexpr` value `v` is a boxed
+/// struct or enum whose own type is `type_key`, and —
+/// for an enum — whose variant also matches the *raw* `variant` (`-1` skips
 /// the variant check, for a struct downcast or a `(the T p)` whole-enum
 /// bind, where any variant of `T` matches).
 ///
@@ -118,21 +112,18 @@ pub unsafe extern "C" fn rt_data_field(args: *const i64, argc: u32) -> i64 {
 ///
 /// # Safety
 ///
-/// `argc` must be `>= 3`, `args` must point to at least 3 valid `i64`s, and
-/// `args[1]` must be a type's word; a `Heap` must already be
+/// the words must be valid, and
+/// `type_key` must be a type's word; a `Heap` must already be
 /// registered on this thread.
 #[no_mangle]
-pub unsafe extern "C" fn rt_sexpr_instance_test(args: *const i64, argc: u32) -> i64 {
-    if argc < 3 {
-        fatal("rt_sexpr_instance_test: expected 3 arguments");
-    }
-    let v = decode(*args);
-    let type_key = type_arg(*args.add(1), "rt_sexpr_instance_test");
+pub unsafe extern "C" fn rt_sexpr_instance_test(v: i64, type_key: i64, variant: i64) -> i64 {
+    let v = decode(v);
+    let type_key = type_arg(type_key, "rt_sexpr_instance_test");
     let id = match v {
         Value::Boxed(id) => id,
         _ => return 0,
     };
-    let variant = *args.add(2);
+    let variant = variant;
     let heap = active_heap();
     let matches = if heap.is_struct(id) {
         heap.struct_type_key(id) == type_key

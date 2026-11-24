@@ -139,10 +139,10 @@ pub fn ed_open(heap: &mut Heap, path: &str, line: i64) -> Value {
 ///
 /// # Safety
 ///
-/// `args`/`argc` are unused (the builtin is nullary). A `Heap` must be
+/// A `Heap` must be
 /// registered on this thread.
 #[no_mangle]
-pub unsafe extern "C" fn rt_get_internal_run_time(_args: *const i64, _argc: u32) -> i64 {
+pub unsafe extern "C" fn rt_get_internal_run_time() -> i64 {
     let v = internal_time_value(active_heap(), get_internal_run_time());
     encode(v)
 }
@@ -153,10 +153,10 @@ pub unsafe extern "C" fn rt_get_internal_run_time(_args: *const i64, _argc: u32)
 ///
 /// # Safety
 ///
-/// `args`/`argc` are unused (the builtin is nullary). A `Heap` must be
+/// A `Heap` must be
 /// registered on this thread.
 #[no_mangle]
-pub unsafe extern "C" fn rt_machine_instance(_args: *const i64, _argc: u32) -> i64 {
+pub unsafe extern "C" fn rt_machine_instance() -> i64 {
     encode(machine_instance(active_heap()))
 }
 
@@ -164,46 +164,40 @@ pub unsafe extern "C" fn rt_machine_instance(_args: *const i64, _argc: u32) -> i
 ///
 /// # Safety
 ///
-/// `args`/`argc` are unused (the builtin is nullary). A `Heap` must be
+/// A `Heap` must be
 /// registered on this thread.
 #[no_mangle]
-pub unsafe extern "C" fn rt_software_version(_args: *const i64, _argc: u32) -> i64 {
+pub unsafe extern "C" fn rt_software_version() -> i64 {
     encode(software_version(active_heap()))
 }
 
-/// `(ed-open path line)` for compiled code: `args[0]` is a tagged `string`,
-/// `args[1]` a raw `i32` line number.
+/// `(ed-open path line)` for compiled code: `path` is a tagged `string`,
+/// `line` a raw `i32` line number.
 ///
 /// # Safety
 ///
-/// `argc` must be `>= 2` and `args` must point to 2 valid `i64`s, the first
+/// The words must be valid, the first
 /// encoding a `Value::Str`; a `Heap` must be registered on this thread.
 #[no_mangle]
-pub unsafe extern "C" fn rt_ed_open(args: *const i64, argc: u32) -> i64 {
-    if argc < 2 {
-        fatal("rt_ed_open: expected 2 arguments");
-    }
-    let path = match decode(*args) {
+pub unsafe extern "C" fn rt_ed_open(path: i64, line: i64) -> i64 {
+    let path = match decode(path) {
         Value::Str(id) => active_heap().string(id).to_string(),
         other => fatal(&format!("ed-open: argument is not a string, got {:?}", other)),
     };
-    let line = *args.add(1);
+    let line = line;
     encode(ed_open(active_heap(), &path, line))
 }
 
-/// `(file-owner-name path)` for compiled code: `args[0]` is a tagged
+/// `(file-owner-name path)` for compiled code: `path` is a tagged
 /// `string`.
 ///
 /// # Safety
 ///
-/// `argc` must be `>= 1` and `args` must point to a valid `i64` encoding a
+/// The word must encode a
 /// `Value::Str`; a `Heap` must be registered on this thread.
 #[no_mangle]
-pub unsafe extern "C" fn rt_file_owner_name(args: *const i64, argc: u32) -> i64 {
-    if argc < 1 {
-        fatal("rt_file_owner_name: expected 1 argument");
-    }
-    let path = match decode(*args) {
+pub unsafe extern "C" fn rt_file_owner_name(path: i64) -> i64 {
+    let path = match decode(path) {
         Value::Str(id) => active_heap().string(id).to_string(),
         other => fatal(&format!("file-owner-name: argument is not a string, got {:?}", other)),
     };

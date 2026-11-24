@@ -68,19 +68,16 @@ pub fn global_new(heap: &mut Heap, v: Value) -> usize {
     globals.len() - 1
 }
 
-/// `args[0]` (its initial tagged value) — see [`global_new`] for the id this
+/// `v` (its initial tagged value) — see [`global_new`] for the id this
 /// assigns.
 ///
 /// # Safety
 ///
-/// `argc` must be `>= 1` and `args` must point to at least 1 valid `i64`; a
+/// The words must be valid; a
 /// `Heap` must already be registered on this thread.
 #[no_mangle]
-pub unsafe extern "C" fn rt_global_new(args: *const i64, argc: u32) -> i64 {
-    if argc < 1 {
-        fatal("rt_global_new: expected 1 argument");
-    }
-    let v = decode(*args);
+pub unsafe extern "C" fn rt_global_new(v: i64) -> i64 {
+    let v = decode(v);
     global_new(active_heap(), v) as i64
 }
 
@@ -120,34 +117,26 @@ pub fn global_skip() {
 ///
 /// # Safety
 ///
-/// A `Heap` must already be registered on this thread; `args` must point to
-/// at least 1 valid `i64`; `id` must be a value `rt_global_new` actually
+/// A `Heap` must already be registered on this thread; `id` must be a value `rt_global_new` actually
 /// returned on this thread since the last [`reset_global_table`].
 #[no_mangle]
-pub unsafe extern "C" fn rt_global_get(args: *const i64, argc: u32) -> i64 {
-    if argc < 1 {
-        fatal("rt_global_get: expected 1 argument (the global id)");
-    }
-    let id = *args as usize;
+pub unsafe extern "C" fn rt_global_get(id: i64) -> i64 {
+    let id = id as usize;
     let perm_idx = global_perm_idx(id).unwrap_or_else(|| fatal("rt_global_get: unknown global id"));
     encode(active_heap().permanent_root(perm_idx))
 }
 
-/// Overwrites global `id`'s value (`args[1]`, tagged) in place
+/// Overwrites global `id`'s value (`tagged`, tagged) in place
 /// (`Heap::set_permanent_root`); returns the new value unchanged, like
 /// [`rt_push_sexpr_root`].
 ///
 /// # Safety
 ///
-/// Same as [`rt_global_get`], plus `args` must point to at least 2 valid
-/// `i64`s.
+/// Same as [`rt_global_get`], and `tagged` must be a valid tagged word.
 #[no_mangle]
-pub unsafe extern "C" fn rt_global_set(args: *const i64, argc: u32) -> i64 {
-    if argc < 2 {
-        fatal("rt_global_set: expected 2 arguments (the global id and its new value)");
-    }
-    let id = *args as usize;
-    let tagged = *args.add(1);
+pub unsafe extern "C" fn rt_global_set(id: i64, tagged: i64) -> i64 {
+    let id = id as usize;
+    let tagged = tagged;
     let perm_idx = global_perm_idx(id).unwrap_or_else(|| fatal("rt_global_set: unknown global id"));
     active_heap().set_permanent_root(perm_idx, decode(tagged));
     tagged

@@ -808,7 +808,7 @@ fn call_macro_char(
 }
 
 /// Read `<prefix-char><datum>` as `(<head> datum)` — the shared shape behind
-/// `'x` -> `(quote x)`, `` `x `` -> `(quasiquote x)`, `,x` -> `(unquote x)`,
+/// `'x` -> `(quote x)`, ` `x ` -> `(quasiquote x)`, `,x` -> `(unquote x)`,
 /// `,@x` -> `(unquote-splicing x)`. Consumes the single prefix character
 /// itself, then delegates the rest (reading `datum` and building the
 /// 2-element list) to [`read_wrapped_body`] — `,@` needs to consume *two*

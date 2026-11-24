@@ -29,10 +29,9 @@ use typelisp_mem::{decode, encode, fixnum_fits, IntArg, Value};
 
 /// # Safety
 ///
-/// `args` must be valid for at least `idx + 1` `i64`s; a `Heap` must be
-/// registered on this thread.
-unsafe fn integer_arg(args: *const i64, idx: isize, who: &str) -> IntArg {
-    match decode(*args.offset(idx)) {
+/// A `Heap` must be registered on this thread.
+unsafe fn integer_arg(word: i64, who: &str) -> IntArg {
+    match decode(word) {
         Value::Int(n) if fixnum_fits(n) => IntArg::Fix(n),
         Value::Int(n) => fatal(&format!("{who}: an int fixnum out of range: {n}")),
         Value::Boxed(id) => {
@@ -47,26 +46,6 @@ unsafe fn integer_arg(args: *const i64, idx: isize, who: &str) -> IntArg {
         }
         _ => fatal(&format!("{who}: argument is not an int")),
     }
-}
-
-/// # Safety
-///
-/// Same as [`integer_arg`], for `args[0]` and `args[1]`.
-unsafe fn integer_pair(args: *const i64, argc: u32, who: &str) -> (IntArg, IntArg) {
-    if argc < 2 {
-        fatal(&format!("{who}: expected 2 arguments"));
-    }
-    (integer_arg(args, 0, who), integer_arg(args, 1, who))
-}
-
-/// # Safety
-///
-/// Same as [`integer_arg`], for `args[0]`.
-unsafe fn integer_single(args: *const i64, argc: u32, who: &str) -> IntArg {
-    if argc < 1 {
-        fatal(&format!("{who}: expected 1 argument"));
-    }
-    integer_arg(args, 0, who)
 }
 
 /// An `int` result, canonical.
@@ -93,8 +72,8 @@ macro_rules! binop {
         ///
         /// Same as [`integer_pair`].
         #[no_mangle]
-        pub unsafe extern "C" fn $name(args: *const i64, argc: u32) -> i64 {
-            match integer_pair(args, argc, $who) {
+        pub unsafe extern "C" fn $name(a: i64, b: i64) -> i64 {
+            match (integer_arg(a, $who), integer_arg(b, $who)) {
                 (IntArg::Fix($a), IntArg::Fix($b)) => {
                     let ($a, $b) = (i128::from($a), i128::from($b));
                     wide_result($fix)
@@ -143,8 +122,8 @@ binop!(
 ///
 /// Same as [`integer_pair`].
 #[no_mangle]
-pub unsafe extern "C-unwind" fn rt_integer_div(args: *const i64, argc: u32) -> i64 {
-    match integer_pair(args, argc, "rt_integer_div") {
+pub unsafe extern "C-unwind" fn rt_integer_div(a: i64, b: i64) -> i64 {
+    match (integer_arg(a, "rt_integer_div"), integer_arg(b, "rt_integer_div")) {
         (IntArg::Fix(a), IntArg::Fix(b)) => {
             if b == 0 {
                 return raise("divide by zero".to_string()).into_word();
@@ -168,8 +147,8 @@ pub unsafe extern "C-unwind" fn rt_integer_div(args: *const i64, argc: u32) -> i
 ///
 /// Same as [`integer_pair`].
 #[no_mangle]
-pub unsafe extern "C-unwind" fn rt_integer_mod(args: *const i64, argc: u32) -> i64 {
-    match integer_pair(args, argc, "rt_integer_mod") {
+pub unsafe extern "C-unwind" fn rt_integer_mod(a: i64, b: i64) -> i64 {
+    match (integer_arg(a, "rt_integer_mod"), integer_arg(b, "rt_integer_mod")) {
         (IntArg::Fix(a), IntArg::Fix(b)) => {
             if b == 0 {
                 return raise("mod by zero".to_string()).into_word();
@@ -196,8 +175,8 @@ pub unsafe extern "C-unwind" fn rt_integer_mod(args: *const i64, argc: u32) -> i
 ///
 /// Same as [`integer_pair`].
 #[no_mangle]
-pub unsafe extern "C" fn rt_integer_cmp(args: *const i64, argc: u32) -> i64 {
-    let (a, b) = integer_pair(args, argc, "rt_integer_cmp");
+pub unsafe extern "C" fn rt_integer_cmp(a: i64, b: i64) -> i64 {
+    let (a, b) = (integer_arg(a, "rt_integer_cmp"), integer_arg(b, "rt_integer_cmp"));
     let ord = match (a, b) {
         (IntArg::Fix(a), IntArg::Fix(b)) => a.cmp(&b),
         (a, b) => a.into_big().cmp(&b.into_big()),
@@ -211,41 +190,33 @@ pub unsafe extern "C" fn rt_integer_cmp(args: *const i64, argc: u32) -> i64 {
 ///
 /// Same as [`integer_pair`].
 #[no_mangle]
-pub unsafe extern "C" fn rt_integer_logtest(args: *const i64, argc: u32) -> i64 {
-    match integer_pair(args, argc, "rt_integer_logtest") {
+pub unsafe extern "C" fn rt_integer_logtest(a: i64, b: i64) -> i64 {
+    match (integer_arg(a, "rt_integer_logtest"), integer_arg(b, "rt_integer_logtest")) {
         (IntArg::Fix(a), IntArg::Fix(b)) => (a & b != 0) as i64,
         (a, b) => (!(a.into_big() & b.into_big()).is_zero()) as i64,
     }
 }
 
-/// `int::ash` — `args[1]` is a raw bit count, like `rt_bignum_ash`'s.
+/// `int::ash` — `count` is a raw bit count, like `rt_bignum_ash`'s.
 ///
 /// # Safety
 ///
-/// `argc >= 2`; `args[0]` as [`integer_arg`], `args[1]` a raw `i64`.
+/// `argc >= 2`; `n` as [`integer_arg`], `count` a raw `i64`.
 #[no_mangle]
-pub unsafe extern "C" fn rt_integer_ash(args: *const i64, argc: u32) -> i64 {
-    if argc < 2 {
-        fatal("rt_integer_ash: expected 2 arguments");
-    }
-    let n = integer_arg(args, 0, "rt_integer_ash").into_big();
-    let count = *args.add(1);
+pub unsafe extern "C" fn rt_integer_ash(n: i64, count: i64) -> i64 {
+    let n = integer_arg(n, "rt_integer_ash").into_big();
     int_result(if count >= 0 { n << (count as u64) } else { n >> ((-count) as u64) })
 }
 
-/// `int::logbitp` — raw `0`/`1`; `args[1]` is a raw bit position. A negative
+/// `int::logbitp` — raw `0`/`1`; `pos` is a raw bit position. A negative
 /// position reads the sign, the "infinite two's complement" answer.
 ///
 /// # Safety
 ///
 /// Same as [`rt_integer_ash`].
 #[no_mangle]
-pub unsafe extern "C" fn rt_integer_logbitp(args: *const i64, argc: u32) -> i64 {
-    if argc < 2 {
-        fatal("rt_integer_logbitp: expected 2 arguments");
-    }
-    let n = integer_arg(args, 0, "rt_integer_logbitp").into_big();
-    let pos = *args.add(1);
+pub unsafe extern "C" fn rt_integer_logbitp(n: i64, pos: i64) -> i64 {
+    let n = integer_arg(n, "rt_integer_logbitp").into_big();
     let bit = if pos < 0 { n.sign() == Sign::Minus } else { ((n >> (pos as u64)) & BigInt::from(1)) == BigInt::from(1) };
     bit as i64
 }
@@ -256,8 +227,8 @@ pub unsafe extern "C" fn rt_integer_logbitp(args: *const i64, argc: u32) -> i64 
 ///
 /// Same as [`integer_single`].
 #[no_mangle]
-pub unsafe extern "C" fn rt_integer_lognot(args: *const i64, argc: u32) -> i64 {
-    match integer_single(args, argc, "rt_integer_lognot") {
+pub unsafe extern "C" fn rt_integer_lognot(x: i64) -> i64 {
+    match integer_arg(x, "rt_integer_lognot") {
         IntArg::Fix(n) => wide_result(i128::from(!n)),
         IntArg::Big(n) => int_result(!n),
     }
@@ -270,8 +241,8 @@ pub unsafe extern "C" fn rt_integer_lognot(args: *const i64, argc: u32) -> i64 {
 ///
 /// Same as [`integer_single`].
 #[no_mangle]
-pub unsafe extern "C" fn rt_integer_logcount(args: *const i64, argc: u32) -> i64 {
-    let a = integer_single(args, argc, "rt_integer_logcount").into_big();
+pub unsafe extern "C" fn rt_integer_logcount(x: i64) -> i64 {
+    let a = integer_arg(x, "rt_integer_logcount").into_big();
     let n = if a.sign() == Sign::Minus { !&a } else { a };
     let count: u64 = n.magnitude().to_u32_digits().iter().map(|d| u64::from(d.count_ones())).sum();
     wide_result(i128::from(count))
@@ -283,8 +254,8 @@ pub unsafe extern "C" fn rt_integer_logcount(args: *const i64, argc: u32) -> i64
 ///
 /// Same as [`integer_single`].
 #[no_mangle]
-pub unsafe extern "C" fn rt_integer_integer_length(args: *const i64, argc: u32) -> i64 {
-    let a = integer_single(args, argc, "rt_integer_integer_length").into_big();
+pub unsafe extern "C" fn rt_integer_integer_length(x: i64) -> i64 {
+    let a = integer_arg(x, "rt_integer_integer_length").into_big();
     let bits = if a.sign() == Sign::Minus { (-(&a) - 1u32).magnitude().bits() } else { a.magnitude().bits() };
     wide_result(i128::from(bits))
 }
@@ -296,8 +267,8 @@ pub unsafe extern "C" fn rt_integer_integer_length(args: *const i64, argc: u32) 
 ///
 /// Same as [`integer_single`].
 #[no_mangle]
-pub unsafe extern "C" fn rt_integer_to_float(args: *const i64, argc: u32) -> i64 {
-    let f = match integer_single(args, argc, "rt_integer_to_float") {
+pub unsafe extern "C" fn rt_integer_to_float(x: i64) -> i64 {
+    let f = match integer_arg(x, "rt_integer_to_float") {
         IntArg::Fix(n) => n as f64,
         IntArg::Big(n) => n.to_f64().unwrap_or(f64::INFINITY.copysign(if n.sign() == Sign::Minus { -1.0 } else { 1.0 })),
     };
@@ -310,8 +281,8 @@ pub unsafe extern "C" fn rt_integer_to_float(args: *const i64, argc: u32) -> i64
 ///
 /// Same as [`integer_single`].
 #[no_mangle]
-pub unsafe extern "C" fn rt_integer_to_ratio(args: *const i64, argc: u32) -> i64 {
-    let n = integer_single(args, argc, "rt_integer_to_ratio").into_big();
+pub unsafe extern "C" fn rt_integer_to_ratio(x: i64) -> i64 {
+    let n = integer_arg(x, "rt_integer_to_ratio").into_big();
     encode(active_heap().alloc_ratio(BigRational::from_integer(n)))
 }
 
@@ -322,8 +293,8 @@ pub unsafe extern "C" fn rt_integer_to_ratio(args: *const i64, argc: u32) -> i64
 ///
 /// Same as [`integer_single`].
 #[no_mangle]
-pub unsafe extern "C-unwind" fn rt_integer_to_char(args: *const i64, argc: u32) -> i64 {
-    let a = integer_single(args, argc, "rt_integer_to_char");
+pub unsafe extern "C-unwind" fn rt_integer_to_char(x: i64) -> i64 {
+    let a = integer_arg(x, "rt_integer_to_char");
     match scalar_of(&a) {
         Some(c) => i64::from(c),
         None => raise(format!("int->char: {} is not a valid Unicode scalar value", a.into_big())).into_word(),
@@ -336,8 +307,8 @@ pub unsafe extern "C-unwind" fn rt_integer_to_char(args: *const i64, argc: u32) 
 ///
 /// Same as [`integer_single`].
 #[no_mangle]
-pub unsafe extern "C" fn rt_integer_fits_char(args: *const i64, argc: u32) -> i64 {
-    scalar_of(&integer_single(args, argc, "rt_integer_fits_char")).is_some() as i64
+pub unsafe extern "C" fn rt_integer_fits_char(x: i64) -> i64 {
+    scalar_of(&integer_arg(x, "rt_integer_fits_char")).is_some() as i64
 }
 
 fn scalar_of(a: &IntArg) -> Option<u32> {
@@ -354,13 +325,10 @@ macro_rules! integer_to_fixed {
         ///
         /// # Safety
         ///
-        /// `argc >= 1`; `args[0]` as [`integer_arg`].
+        /// `argc >= 1`; `x` as [`integer_arg`].
         #[no_mangle]
-        pub unsafe extern "C" fn $to(args: *const i64, argc: u32) -> i64 {
-            if argc < 1 {
-                fatal(concat!(stringify!($to), ": expected 1 argument"));
-            }
-            fixed::from_int::<$t>(integer_arg(args, 0, stringify!($to))).to_word()
+        pub unsafe extern "C" fn $to(x: i64) -> i64 {
+            fixed::from_int::<$t>(integer_arg(x, stringify!($to))).to_word()
         }
     )*};
 }
@@ -382,13 +350,10 @@ macro_rules! integer_fits_fixed {
         ///
         /// # Safety
         ///
-        /// `argc >= 1`; `args[0]` as [`integer_arg`].
+        /// `argc >= 1`; `x` as [`integer_arg`].
         #[no_mangle]
-        pub unsafe extern "C" fn $fits(args: *const i64, argc: u32) -> i64 {
-            if argc < 1 {
-                fatal(concat!(stringify!($fits), ": expected 1 argument"));
-            }
-            fixed::try_from_int::<$t>(&integer_arg(args, 0, stringify!($fits))).is_some() as i64
+        pub unsafe extern "C" fn $fits(x: i64) -> i64 {
+            fixed::try_from_int::<$t>(&integer_arg(x, stringify!($fits))).is_some() as i64
         }
     )*};
 }
@@ -402,19 +367,16 @@ integer_fits_fixed! {
 }
 
 /// `int->int` on a signed fixed-width receiver or one narrower than 64 bits
-/// (`(as int x)`): the raw word `args[0]`, which is the number, made
+/// (`(as int x)`): the raw word `x`, which is the number, made
 /// canonical.
 ///
 /// # Safety
 ///
-/// `argc >= 1`; `args[0]` a raw word; a `Heap` must be registered on this
+/// `argc >= 1`; `x` a raw word; a `Heap` must be registered on this
 /// thread.
 #[no_mangle]
-pub unsafe extern "C" fn rt_integer_from_word(args: *const i64, argc: u32) -> i64 {
-    if argc < 1 {
-        fatal("rt_integer_from_word: expected 1 argument");
-    }
-    wide_result(fixed::to_int(*args))
+pub unsafe extern "C" fn rt_integer_from_word(x: i64) -> i64 {
+    wide_result(fixed::to_int(x))
 }
 
 /// `int->int` on a `c-ulong`: the one receiver whose top bit is not a sign.
@@ -423,11 +385,8 @@ pub unsafe extern "C" fn rt_integer_from_word(args: *const i64, argc: u32) -> i6
 ///
 /// Same as [`rt_integer_from_word`].
 #[no_mangle]
-pub unsafe extern "C" fn rt_integer_from_c_ulong(args: *const i64, argc: u32) -> i64 {
-    if argc < 1 {
-        fatal("rt_integer_from_c_ulong: expected 1 argument");
-    }
-    wide_result(fixed::to_int(*args as c_ulong))
+pub unsafe extern "C" fn rt_integer_from_c_ulong(x: i64) -> i64 {
+    wide_result(fixed::to_int(x as c_ulong))
 }
 
 /// `(untag-int E)`'s refusal: an `int` in a machine-word position (an index,
@@ -439,14 +398,11 @@ pub unsafe extern "C" fn rt_integer_from_c_ulong(args: *const i64, argc: u32) ->
 ///
 /// Same as [`integer_single`].
 #[no_mangle]
-pub unsafe extern "C-unwind" fn rt_int_not_fixnum(args: *const i64, argc: u32) -> i64 {
-    if argc < 1 {
-        fatal("rt_int_not_fixnum: expected 1 argument");
-    }
+pub unsafe extern "C-unwind" fn rt_int_not_fixnum(text: i64) -> i64 {
     // Written through `bignum_text`, so that a program that makes no bignum
     // (and calls this only on a path it never takes) does not carry the
     // arbitrary-precision arithmetic for the message.
-    let text = match decode(*args) {
+    let text = match decode(text) {
         Value::Boxed(id) if active_heap().is_bignum(id) => active_heap().bignum_text(id),
         _ => fatal("rt_int_not_fixnum: the argument is not a bignum"),
     };

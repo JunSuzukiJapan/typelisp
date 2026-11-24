@@ -24,7 +24,6 @@
 use inkwell::builder::Builder;
 use inkwell::module::{Linkage, Module};
 use inkwell::values::{GlobalValue, IntValue};
-use inkwell::AddressSpace;
 
 use typelisp_mem::type_words::{TypeWords, Word};
 use typelisp_mem::TypeId;
@@ -120,25 +119,12 @@ pub fn settle_for_export(module: &Module<'static>) -> Result<(), String> {
     let init = module.add_function(&format!("{}{}", INIT, module_name), ctx.void_type().fn_type(&[], false), None);
     let builder = ctx.create_builder();
     builder.position_at_end(ctx.append_basic_block(init, "entry"));
-    let ptr_ty = ctx.ptr_type(AddressSpace::default());
-    let define = match module.get_function("rt_types_define") {
-        Some(f) => f,
-        None => module.add_function("rt_types_define", word_ty.fn_type(&[ptr_ty.into(), ctx.i32_type().into()], false), None),
-    };
-    let args = builder.build_alloca(word_ty.array_type(3), "args").map_err(|e| e.to_string())?;
     let arg_words = [
-        shapes.as_pointer_value().const_to_int(word_ty),
-        word_ty.const_int(nwords as u64, false),
-        table.as_pointer_value().const_to_int(word_ty),
+        shapes.as_pointer_value().const_to_int(word_ty).into(),
+        word_ty.const_int(nwords as u64, false).into(),
+        table.as_pointer_value().const_to_int(word_ty).into(),
     ];
-    for (i, w) in arg_words.into_iter().enumerate() {
-        // SAFETY: `i` is below the array's length, 3.
-        let slot = unsafe { builder.build_gep(word_ty, args, &[word_ty.const_int(i as u64, false)], "arg") }.map_err(|e| e.to_string())?;
-        builder.build_store(slot, w).map_err(|e| e.to_string())?;
-    }
-    builder
-        .build_call(define, &[args.into(), ctx.i32_type().const_int(3, false).into()], "")
-        .map_err(|e| e.to_string())?;
+    crate::compile::runtime_abi::call(&builder, module, "rt_types_define", &arg_words)?;
     builder.build_return(None).map_err(|e| e.to_string())?;
     Ok(())
 }
@@ -278,8 +264,8 @@ pub fn table_of(init: inkwell::values::FunctionValue<'static>) -> Result<GlobalV
 }
 
 /// The shapes' and the table's globals that the init function `init` hands
-/// `rt_types_define`: what [`settle_for_export`] stores into its arguments,
-/// the shapes' address, their length in words and the table's address.
+/// `rt_types_define`: its call's arguments, the shapes' address, their
+/// length in words and the table's address.
 fn init_arguments(
     init: inkwell::values::FunctionValue<'static>,
 ) -> Result<(inkwell::llvm_sys::prelude::LLVMValueRef, inkwell::llvm_sys::prelude::LLVMValueRef), String> {
@@ -295,19 +281,21 @@ fn init_arguments(
         let g = LLVMGetOperand(v, 0);
         (!LLVMIsAGlobalVariable(g).is_null()).then_some(g)
     };
-    let mut stored = Vec::new();
+    let mut calls = Vec::new();
     for block in init.get_basic_blocks() {
         let mut instr = block.get_first_instruction();
         while let Some(i) = instr {
-            if i.get_opcode() == InstructionOpcode::Store {
-                stored.push(unsafe { LLVMGetOperand(i.as_value_ref(), 0) });
+            if i.get_opcode() == InstructionOpcode::Call {
+                calls.push(i);
             }
             instr = i.get_next_instruction();
         }
     }
-    let [shapes, _, table] = stored[..] else {
-        return Err(format!("internal error: `{}` stores {} words, not `rt_types_define`'s 3", name, stored.len()));
+    let [call] = calls[..] else {
+        return Err(format!("internal error: `{}` makes {} calls, not the one to `rt_types_define`", name, calls.len()));
     };
+    // SAFETY: a call's first three operands are its three arguments.
+    let (shapes, table) = unsafe { (LLVMGetOperand(call.as_value_ref(), 0), LLVMGetOperand(call.as_value_ref(), 2)) };
     match (address_of(shapes), address_of(table)) {
         (Some(shapes), Some(table)) => Ok((shapes, table)),
         _ => Err(format!("internal error: `{}` does not hand `rt_types_define` two globals' addresses", name)),

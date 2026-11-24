@@ -635,7 +635,7 @@ impl Interp {
     /// itself ([`typelisp_mem::BoxedObj::Closure`]'s `params`/`ret`), because
     /// nothing else at this point has them: the apply site knows the callee's
     /// `Fn` type statically but carries none of it into the emitted call, and
-    /// the words are exactly as ambiguous here as they are anywhere else on
+    /// The words are exactly as ambiguous here as they are anywhere else on
     /// this boundary (a raw `f64` bit pattern and a tagged box pointer are
     /// both just `i64`s). A built-in used as a function value has no
     /// signature to read, which is why it is rejected before it can ever

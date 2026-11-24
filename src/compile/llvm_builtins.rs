@@ -238,7 +238,7 @@ fn llvm_module_create(heap: &Heap, args: &[Value]) -> Result<Value, EvalError> {
 /// reads a logical parameter back out of `args`. LLVM 22 has only opaque
 /// pointers, so the parameter type is `Context::ptr_type`, not
 /// `IntType::ptr_type`.
-/// Shared by [`llvm_module_add_function`] and [`declare_external_function`]
+/// Shared by [`llvm_module_add_function`] and [`declare_external_compiled_function`]
 /// (labels/closures Stage 3's JIT-only forward declarations) — both declare
 /// a function under this exact same signature, just with or without a body.
 pub(crate) fn compiled_fn_type() -> inkwell::types::FunctionType<'static> {
@@ -248,7 +248,7 @@ pub(crate) fn compiled_fn_type() -> inkwell::types::FunctionType<'static> {
 }
 
 /// Get-or-create: reuses an existing declaration under `name` (a bodyless
-/// forward declaration — [`declare_external_function`] or an earlier call to
+/// forward declaration — [`declare_external_compiled_function`] or an earlier call to
 /// this very builtin) instead of always minting a fresh one. LLVM's own
 /// `LLVMAddFunction` does *not* do this — a second call with a colliding
 /// name silently gets uniquified (`"name.1"`), never merged with the first —
@@ -265,6 +265,10 @@ pub(crate) fn compiled_fn_type() -> inkwell::types::FunctionType<'static> {
 fn llvm_module_add_function(heap: &Heap, args: &[Value]) -> Result<Value, EvalError> {
     let module = expect_llvm_module(&args[0])?;
     let name = expect_str(heap, &args[1])?;
+    // A runtime function has the one signature its definition gives it.
+    if let Some(sig) = crate::compile::externs::runtime_sig(&name) {
+        return Ok(llvm_function_value(crate::compile::runtime_abi::declare(&module.borrow(), &name, sig)));
+    }
     let existing = module.borrow().get_function(&name);
     let function = existing.unwrap_or_else(|| module.borrow_mut().add_function(&name, compiled_fn_type(), None));
     Ok(llvm_function_value(function))
@@ -312,23 +316,8 @@ fn llvm_function_param(args: &[Value]) -> Result<Value, EvalError> {
         .ok_or_else(|| EvalError::Internal(format!("function-param: no parameter {}", idx)))
 }
 
-/// Forward-declares `name` in `module` with the standard compiled-function
-/// ABI but **no body** — [`crate::compile::driver::compile_function`]'s JIT-only step
-/// (labels/closures Stage 3, `call` to a different top-level function)
-/// that lets `compiler.rs`'s `compile-call` find an already-`compile`d
-/// function via `get-function` before the real call target's address is supplied
-/// when this declaration's own module is JIT-compiled (see that method's doc
-/// comment). Not exposed as an
-/// `llvm-*` builtin — unlike [`llvm_module_add_function`], the typelisp
-/// compiler body itself never needs to call this; only the Rust-side JIT
-/// orchestration above does. Must be called with
-/// [`crate::compile::COMPILE_LOCK`] held.
-pub(crate) fn declare_external_function(module: &Rc<RefCell<Module<'static>>>, name: &str) {
-    module.borrow_mut().add_function(name, compiled_fn_type(), None);
-}
-
-/// [`declare_external_function`] for a **compiled Lisp** function rather than
-/// an `rt_*` entry point: declared under whichever ABI this process emits.
+/// Forward-declares the **compiled Lisp** function `name` in `module`, with
+/// no body, under whichever ABI this process emits.
 ///
 /// The two cannot share one signature any more. A forward declaration is
 /// matched to its definition by name, and `add-coroutine-function` is
@@ -759,6 +748,30 @@ fn llvm_builder_build_call(args: &[Value]) -> Result<Value, EvalError> {
     let target = expect_llvm_function(&args[1])?;
     let args_ptr = expect_llvm_value(&args[2])?;
     let argc = expect_int(&args[3])? as u64;
+    let err = |e: String| EvalError::Internal(format!("build-call: {}", e));
+    // A runtime function of fixed arity takes its arguments in registers,
+    // each at its own type: the words the island stored are read back here
+    // and passed, and the array is left for LLVM to remove.
+    if let Some(sig) = crate::compile::externs::runtime_sig(&target.get_name().to_string_lossy()) {
+        if !sig.takes_array() {
+            let b = builder.borrow();
+            let word_ty = crate::compile::carriers::word();
+            let mut words = Vec::with_capacity(argc as usize);
+            // A call with no arguments may pass any value for the array.
+            if argc > 0 {
+                let array = args_ptr.into_pointer_value();
+                for i in 0..argc {
+                    // SAFETY: the island made `array` an array of at least `argc` words.
+                    let slot = unsafe { b.build_gep(word_ty, array, &[word_ty.const_int(i, false)], "rt_arg_slot") }
+                        .map_err(|e| err(e.to_string()))?;
+                    words.push(b.build_load(word_ty, slot, "rt_arg").map_err(|e| err(e.to_string()))?);
+                }
+            }
+            let (_, result) = crate::compile::runtime_abi::call_declared(&b, target, sig, &words).map_err(err)?;
+            crate::compile::raise_check::after_call(&b, target).map_err(err)?;
+            return Ok(llvm_value_value(result.into()));
+        }
+    }
     let ctx = crate::compile::llvm_context();
     let argc_val = ctx.i32_type().const_int(argc, false);
     let call = builder

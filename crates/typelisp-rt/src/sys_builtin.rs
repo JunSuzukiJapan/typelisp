@@ -311,14 +311,11 @@ use crate::{active_heap, decode, encode, fatal};
 ///
 /// # Safety
 ///
-/// `argc` must be `>= 1` and `args` must point to a valid `i64` encoding a
+/// The word must encode a
 /// `Value::Str`; a `Heap` must be registered on this thread.
 #[no_mangle]
-pub unsafe extern "C" fn rt_parse_float(args: *const i64, argc: u32) -> i64 {
-    if argc < 1 {
-        fatal("rt_parse_float: expected 1 argument");
-    }
-    let s = match decode(*args) {
+pub unsafe extern "C" fn rt_parse_float(s: i64) -> i64 {
+    let s = match decode(s) {
         Value::Str(id) => active_heap().string(id).to_string(),
         other => fatal(&format!("parse-float: argument is not a string, got {:?}", other)),
     };
@@ -331,10 +328,10 @@ pub unsafe extern "C" fn rt_parse_float(args: *const i64, argc: u32) -> i64 {
 ///
 /// # Safety
 ///
-/// `args`/`argc` are unused (the builtin is nullary). A `Heap` must be
+/// A `Heap` must be
 /// registered on this thread.
 #[no_mangle]
-pub unsafe extern "C" fn rt_get_universal_time(_args: *const i64, _argc: u32) -> i64 {
+pub unsafe extern "C" fn rt_get_universal_time() -> i64 {
     let v = universal_time_value(active_heap(), get_universal_time());
     encode(v)
 }
@@ -344,10 +341,10 @@ pub unsafe extern "C" fn rt_get_universal_time(_args: *const i64, _argc: u32) ->
 ///
 /// # Safety
 ///
-/// `args`/`argc` are unused (the builtin is nullary). A `Heap` must be
+/// A `Heap` must be
 /// registered on this thread.
 #[no_mangle]
-pub unsafe extern "C" fn rt_get_internal_real_time(_args: *const i64, _argc: u32) -> i64 {
+pub unsafe extern "C" fn rt_get_internal_real_time() -> i64 {
     let v = internal_time_value(active_heap(), get_internal_real_time());
     encode(v)
 }
@@ -374,10 +371,10 @@ pub fn sleep(heap: &mut Heap, secs: f64) -> Result<(), String> {
 ///
 /// # Safety
 ///
-/// `args`/`argc` are unused (the builtin is nullary). A `Heap` must be
+/// A `Heap` must be
 /// registered on this thread.
 #[no_mangle]
-pub unsafe extern "C" fn rt_lisp_implementation_version(_args: *const i64, _argc: u32) -> i64 {
+pub unsafe extern "C" fn rt_lisp_implementation_version() -> i64 {
     encode(lisp_implementation_version(active_heap()))
 }
 
@@ -385,10 +382,10 @@ pub unsafe extern "C" fn rt_lisp_implementation_version(_args: *const i64, _argc
 ///
 /// # Safety
 ///
-/// `args`/`argc` are unused (the builtin is nullary). A `Heap` must be
+/// A `Heap` must be
 /// registered on this thread.
 #[no_mangle]
-pub unsafe extern "C" fn rt_machine_type(_args: *const i64, _argc: u32) -> i64 {
+pub unsafe extern "C" fn rt_machine_type() -> i64 {
     encode(machine_type(active_heap()))
 }
 
@@ -396,10 +393,10 @@ pub unsafe extern "C" fn rt_machine_type(_args: *const i64, _argc: u32) -> i64 {
 ///
 /// # Safety
 ///
-/// `args`/`argc` are unused (the builtin is nullary). A `Heap` must be
+/// A `Heap` must be
 /// registered on this thread.
 #[no_mangle]
-pub unsafe extern "C" fn rt_software_type(_args: *const i64, _argc: u32) -> i64 {
+pub unsafe extern "C" fn rt_software_type() -> i64 {
     encode(software_type(active_heap()))
 }
 
@@ -409,10 +406,10 @@ pub unsafe extern "C" fn rt_software_type(_args: *const i64, _argc: u32) -> i64 
 ///
 /// # Safety
 ///
-/// `args`/`argc` are unused (the builtin is nullary). A `Heap` must be
+/// A `Heap` must be
 /// registered on this thread.
 #[no_mangle]
-pub unsafe extern "C" fn rt_machine_version(_args: *const i64, _argc: u32) -> i64 {
+pub unsafe extern "C" fn rt_machine_version() -> i64 {
     encode(machine_version(active_heap()))
 }
 
@@ -422,14 +419,11 @@ pub unsafe extern "C" fn rt_machine_version(_args: *const i64, _argc: u32) -> i6
 ///
 /// # Safety
 ///
-/// `argc` must be `>= 2` and `args` must point to two valid `i64`s; a `Heap`
+/// The words must be valid; a `Heap`
 /// must be registered on this thread.
 #[no_mangle]
-pub unsafe extern "C" fn rt_timezone_offset_seconds(args: *const i64, argc: u32) -> i64 {
-    if argc < 2 {
-        fatal("rt_timezone_offset_seconds: expected 2 arguments");
-    }
-    encode(timezone_offset_seconds(active_heap(), *args, *args.add(1)))
+pub unsafe extern "C" fn rt_timezone_offset_seconds(day: i64, second: i64) -> i64 {
+    encode(timezone_offset_seconds(active_heap(), day, second))
 }
 
 /// `(timezone-daylight-p day second)` for compiled code.
@@ -438,11 +432,8 @@ pub unsafe extern "C" fn rt_timezone_offset_seconds(args: *const i64, argc: u32)
 ///
 /// Same as [`rt_timezone_offset_seconds`].
 #[no_mangle]
-pub unsafe extern "C" fn rt_timezone_daylight_p(args: *const i64, argc: u32) -> i64 {
-    if argc < 2 {
-        fatal("rt_timezone_daylight_p: expected 2 arguments");
-    }
-    encode(timezone_daylight_p(active_heap(), *args, *args.add(1)))
+pub unsafe extern "C" fn rt_timezone_daylight_p(day: i64, second: i64) -> i64 {
+    encode(timezone_daylight_p(active_heap(), day, second))
 }
 
 /// `(heap-info)` for compiled code — a freshly allocated `heap-info` struct,
@@ -451,10 +442,10 @@ pub unsafe extern "C" fn rt_timezone_daylight_p(args: *const i64, argc: u32) -> 
 ///
 /// # Safety
 ///
-/// `args`/`argc` are unused (the builtin is nullary). A `Heap` must be
+/// A `Heap` must be
 /// registered on this thread.
 #[no_mangle]
-pub unsafe extern "C" fn rt_heap_info(_args: *const i64, _argc: u32) -> i64 {
+pub unsafe extern "C" fn rt_heap_info() -> i64 {
     encode(heap_info(active_heap()))
 }
 
@@ -462,9 +453,9 @@ pub unsafe extern "C" fn rt_heap_info(_args: *const i64, _argc: u32) -> i64 {
 ///
 /// # Safety
 ///
-/// `args`/`argc` are unused (the builtin is nullary).
+/// None: the builtin is nullary.
 #[no_mangle]
-pub unsafe extern "C" fn rt_thread_current_id(_args: *const i64, _argc: u32) -> i64 {
+pub unsafe extern "C" fn rt_thread_current_id() -> i64 {
     thread_current_id()
 }
 
@@ -473,9 +464,9 @@ pub unsafe extern "C" fn rt_thread_current_id(_args: *const i64, _argc: u32) -> 
 ///
 /// # Safety
 ///
-/// `args`/`argc` are unused (the builtin is nullary).
+/// None: the builtin is nullary.
 #[no_mangle]
-pub unsafe extern "C-unwind" fn rt_thread_available_parallelism(_args: *const i64, _argc: u32) -> i64 {
+pub unsafe extern "C-unwind" fn rt_thread_available_parallelism() -> i64 {
     match thread_available_parallelism() {
         Ok(n) => n,
         Err(msg) => typelisp_abi::raise(msg).into_word(),
@@ -493,12 +484,9 @@ pub unsafe extern "C-unwind" fn rt_thread_available_parallelism(_args: *const i6
 ///
 /// # Safety
 ///
-/// `argc` must be `>= 1`; `args[0]` is a raw `i64` exit code. Touches no
+/// `x` is a raw `i64` exit code. Touches no
 /// heap.
 #[no_mangle]
-pub unsafe extern "C" fn rt_exit(args: *const i64, argc: u32) -> i64 {
-    if argc < 1 {
-        fatal("rt_exit: expected 1 argument");
-    }
-    typelisp_mem::host::exit(*args as i32)
+pub unsafe extern "C" fn rt_exit(x: i64) -> i64 {
+    typelisp_mem::host::exit(x as i32)
 }

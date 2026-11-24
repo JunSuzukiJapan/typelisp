@@ -219,8 +219,8 @@ fn start_program_threads(
 ///
 /// `rt_run_program`'s.
 #[no_mangle]
-pub unsafe extern "C" fn rt_run_program_threads(args: *const i64, argc: u32) -> i64 {
-    typelisp_rt::run_entry(args, argc, "rt_run_program_threads", false, |program| typelisp_rt::run_program(program, Some(start_program_threads)))
+pub unsafe extern "C" fn rt_run_program_threads(inits: i64, count: i64, entry: i64) -> i64 {
+    typelisp_rt::run_entry(inits, count, entry, false, |program| typelisp_rt::run_program(program, Some(start_program_threads)))
 }
 
 /// `rt_run_program_int` on a target with OS threads.
@@ -229,6 +229,6 @@ pub unsafe extern "C" fn rt_run_program_threads(args: *const i64, argc: u32) -> 
 ///
 /// `rt_run_program`'s.
 #[no_mangle]
-pub unsafe extern "C" fn rt_run_program_threads_int(args: *const i64, argc: u32) -> i64 {
-    typelisp_rt::run_entry(args, argc, "rt_run_program_threads_int", true, |program| typelisp_rt::run_program(program, Some(start_program_threads)))
+pub unsafe extern "C" fn rt_run_program_threads_int(inits: i64, count: i64, entry: i64) -> i64 {
+    typelisp_rt::run_entry(inits, count, entry, true, |program| typelisp_rt::run_program(program, Some(start_program_threads)))
 }

@@ -74,123 +74,111 @@ unsafe fn checked_field_index(id: BoxId, idx: i64) -> Result<usize, Raised> {
 }
 
 /// `(rt-struct-field-get s idx)` for compiled code — the `idx`-th field of
-/// boxed struct `args[0]` (a tagged `Sexpr`), where `args[1]` is a *raw*
+/// boxed struct `id` (a tagged `Sexpr`), where `index` is a *raw*
 /// (untagged) `i64` index, matching [`rt_str_ref`]'s convention for its own
-/// raw index argument. Fatal if `args[0]` isn't a boxed struct (a compiler
+/// raw index argument. Fatal if `id` isn't a boxed struct (a compiler
 /// contract violation); an out-of-range `idx` is an ordinary recoverable
 /// failure instead — see [`checked_field_index`].
 ///
 /// # Safety
 ///
-/// `argc` must be `>= 2` and `args` must point to at least 2 valid `i64`s,
+/// The words must be valid,
 /// the first decoding to a `Value::Boxed` struct; a `Heap` must already be
 /// registered on this thread.
 #[no_mangle]
-pub unsafe extern "C-unwind" fn rt_struct_field_get(args: *const i64, argc: u32) -> i64 {
-    if argc < 2 {
-        fatal("rt_struct_field_get: expected 2 arguments");
-    }
-    let id = match decode(*args) {
+pub unsafe extern "C-unwind" fn rt_struct_field_get(id: i64, index: i64) -> i64 {
+    let id = match decode(id) {
         Value::Boxed(id) => id,
         _ => fatal("rt_struct_field_get: first argument is not a boxed Sexpr"),
     };
-    match checked_field_index(id, *args.add(1)) {
+    match checked_field_index(id, index) {
         Ok(idx) => encode(active_heap().struct_field(id, idx)),
         Err(raised) => raised.into_word(),
     }
 }
 
 /// `(rt-struct-field-set! s idx val)` for compiled code — overwrites the
-/// `idx`-th field of boxed struct `args[0]` in place with `args[2]` (a
-/// tagged `Sexpr`); `args[1]` is a raw index, like [`rt_struct_field_get`],
+/// `idx`-th field of boxed struct `id` in place with `val` (a
+/// tagged `Sexpr`); `idx` is a raw index, like [`rt_struct_field_get`],
 /// and out-of-range the same recoverable way ([`checked_field_index`]).
 /// Returns the compiled representation of `Unit` (`0`), the same convention
 /// [`rt_set_car`]/[`rt_set_cdr`] use for their own in-place mutation.
 ///
 /// # Safety
 ///
-/// `argc` must be `>= 3` and `args` must point to at least 3 valid `i64`s,
+/// The words must be valid,
 /// the first decoding to a `Value::Boxed` struct; a `Heap` must already be
 /// registered on this thread.
 #[no_mangle]
-pub unsafe extern "C-unwind" fn rt_struct_field_set(args: *const i64, argc: u32) -> i64 {
-    if argc < 3 {
-        fatal("rt_struct_field_set: expected 3 arguments");
-    }
-    let id = match decode(*args) {
+pub unsafe extern "C-unwind" fn rt_struct_field_set(id: i64, idx: i64, val: i64) -> i64 {
+    let id = match decode(id) {
         Value::Boxed(id) => id,
         _ => fatal("rt_struct_field_set: first argument is not a boxed Sexpr"),
     };
-    let idx = match checked_field_index(id, *args.add(1)) {
+    let idx = match checked_field_index(id, idx) {
         Ok(idx) => idx,
         Err(raised) => return raised.into_word(),
     };
-    let val = decode(*args.add(2));
+    let val = decode(val);
     active_heap().struct_set_field(id, idx, val);
     0
 }
 
 /// `(rt-struct-field-count s)` for compiled code — the number of fields boxed
-/// struct `args[0]` (a tagged `Sexpr`) holds, returned as a *raw* (untagged)
+/// struct `id` (a tagged `Sexpr`) holds, returned as a *raw* (untagged)
 /// `i64` (like `rt_str_length`'s own raw count result, and the raw index
 /// [`rt_struct_field_get`] consumes). `Vector<T>::len`'s primitive: a growable
-/// boxed struct's field count is its element count. Fatal if `args[0]` isn't a
+/// boxed struct's field count is its element count. Fatal if `id` isn't a
 /// boxed struct. Allocates nothing, so triggers no GC.
 ///
 /// # Safety
 ///
-/// `argc` must be `>= 1` and `args` must point to at least 1 valid `i64`
+/// The words must be valid
 /// decoding to a `Value::Boxed` struct; a `Heap` must already be registered
 /// on this thread.
 #[no_mangle]
-pub unsafe extern "C" fn rt_struct_field_count(args: *const i64, argc: u32) -> i64 {
-    if argc < 1 {
-        fatal("rt_struct_field_count: expected 1 argument");
-    }
-    let id = match decode(*args) {
+pub unsafe extern "C" fn rt_struct_field_count(id: i64) -> i64 {
+    let id = match decode(id) {
         Value::Boxed(id) => id,
         _ => fatal("rt_struct_field_count: first argument is not a boxed Sexpr"),
     };
     active_heap().struct_field_count(id) as i64
 }
 
-/// `(rt-struct-push-field! s val)` for compiled code — appends `args[1]` (a
-/// tagged `Sexpr`) as a new field of boxed struct `args[0]`, growing its field
+/// `(rt-struct-push-field! s val)` for compiled code — appends `val` (a
+/// tagged `Sexpr`) as a new field of boxed struct `id`, growing its field
 /// count by one. `Vector<T>::push`'s primitive. Returns the compiled
 /// representation of `Unit` (`0`), the same convention [`rt_struct_field_set`]
-/// uses for its own in-place mutation. Fatal if `args[0]` isn't a boxed
+/// uses for its own in-place mutation. Fatal if `id` isn't a boxed
 /// struct. Only pushes an already-decoded `Value` onto the struct's own field
 /// `Vec` (a Rust `Vec::push`, not a cons-heap allocation), so triggers no GC —
 /// the caller need not keep `val` rooted across this call.
 ///
 /// # Safety
 ///
-/// `argc` must be `>= 2` and `args` must point to at least 2 valid `i64`s, the
+/// The words must be valid, the
 /// first decoding to a `Value::Boxed` struct; a `Heap` must already be
 /// registered on this thread.
 #[no_mangle]
-pub unsafe extern "C" fn rt_struct_push_field(args: *const i64, argc: u32) -> i64 {
-    if argc < 2 {
-        fatal("rt_struct_push_field: expected 2 arguments");
-    }
-    let id = match decode(*args) {
+pub unsafe extern "C" fn rt_struct_push_field(id: i64, val: i64) -> i64 {
+    let id = match decode(id) {
         Value::Boxed(id) => id,
         _ => fatal("rt_struct_push_field: first argument is not a boxed Sexpr"),
     };
-    let val = decode(*args.add(1));
+    let val = decode(val);
     active_heap().struct_push_field(id, val);
     0
 }
 
 /// `(rt-struct-pop-field! s)` for compiled code — removes and returns the
-/// last field of boxed struct `args[0]` (a tagged `Sexpr`), shrinking its
+/// last field of boxed struct `id` (a tagged `Sexpr`), shrinking its
 /// field count by one. `Vector<T>::pop`'s primitive, the inverse of
 /// [`rt_struct_push_field`]. Only ever called after the compiled caller's
 /// own `rt_struct_field_count` check confirmed at least one field present
 /// (`compiler.rs`'s `compile-vector-op` "pop" branch) — mirrors
 /// the "caller already checked the count" precondition, since `pop`,
 /// returns `Option<T>` (`None` on empty is a legitimate outcome the checked
-/// branch builds directly, never by calling this). Fatal if `args[0]` isn't
+/// branch builds directly, never by calling this). Fatal if `id` isn't
 /// a boxed struct, or if it turns out empty anyway (an internal-invariant
 /// trap, the same convention every other `rt_*` bounds violation follows).
 ///
@@ -204,15 +192,12 @@ pub unsafe extern "C" fn rt_struct_push_field(args: *const i64, argc: u32) -> i6
 ///
 /// # Safety
 ///
-/// `argc` must be `>= 1` and `args` must point to at least 1 valid `i64`
+/// The words must be valid
 /// decoding to a `Value::Boxed` struct; a `Heap` must already be registered
 /// on this thread.
 #[no_mangle]
-pub unsafe extern "C" fn rt_struct_pop_field(args: *const i64, argc: u32) -> i64 {
-    if argc < 1 {
-        fatal("rt_struct_pop_field: expected 1 argument");
-    }
-    let id = match decode(*args) {
+pub unsafe extern "C" fn rt_struct_pop_field(id: i64) -> i64 {
+    let id = match decode(id) {
         Value::Boxed(id) => id,
         _ => fatal("rt_struct_pop_field: first argument is not a boxed Sexpr"),
     };

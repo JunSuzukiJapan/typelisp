@@ -86,23 +86,20 @@ pub fn resume_pending() -> Result<(), Raised> {
 }
 
 /// `(" ffi-callback-address" PATH TYPE)`: the address of the entry for the
-/// function the path `args[0]` names, called at the function type `args[1]`,
+/// function the path `path` names, called at the function type `ty`,
 /// as a raw word.
 ///
 /// # Safety
 ///
-/// `args` must point to at least two readable `i64`s, and a `Heap` must be
+/// The words must be valid, and a `Heap` must be
 /// registered on this thread.
 #[no_mangle]
-pub unsafe extern "C-unwind" fn rt_ffi_callback_address(args: *const i64, argc: u32) -> i64 {
-    if argc < 2 {
-        fatal("rt_ffi_callback_address: expected 2 arguments");
-    }
-    let (ns, sym) = match decode(*args) {
+pub unsafe extern "C-unwind" fn rt_ffi_callback_address(path: i64, ty: i64) -> i64 {
+    let (ns, sym) = match decode(path) {
         Value::Symbol(sym) => (sym.home(), sym),
         other => fatal(&format!("rt_ffi_callback_address: the function is not a symbol, got {:?}", other)),
     };
-    let ty = TypeId::from_word(*args.add(1))
+    let ty = TypeId::from_word(ty)
         .unwrap_or_else(|| fatal("rt_ffi_callback_address: the function type is not a type"));
     if let Some(addr) = lookup((ns, sym, ty)) {
         return addr as i64;
@@ -126,18 +123,15 @@ pub unsafe extern "C-unwind" fn rt_ffi_callback_address(args: *const i64, argc: 
 ///
 /// # Safety
 ///
-/// `args` must point to four readable `i64`s; the last two must describe
-/// the words of a definition, whose strings are constants.
+/// The words must be valid; the last two must describe
+/// The words of a definition, whose strings are constants.
 #[no_mangle]
-pub unsafe extern "C" fn rt_ffi_callback_register(args: *const i64, argc: u32) -> i64 {
-    if argc < 4 {
-        fatal("rt_ffi_callback_register: expected 4 arguments");
-    }
-    let ty = TypeId::from_word(*args.add(1))
+pub unsafe extern "C" fn rt_ffi_callback_register(entry: i64, ty: i64, words: i64, words_len: i64) -> i64 {
+    let ty = TypeId::from_word(ty)
         .unwrap_or_else(|| fatal("rt_ffi_callback_register: the function type is not a type"));
-    let words = core::slice::from_raw_parts(*args.add(2) as usize as *const i64, *args.add(3) as usize);
+    let words = core::slice::from_raw_parts(words as usize as *const i64, words_len as usize);
     let (ns, sym) = typelisp_mem::type_words::read_definition(words);
-    register((ns, sym, ty), *args as usize);
+    register((ns, sym, ty), entry as usize);
     0
 }
 
@@ -154,7 +148,7 @@ pub unsafe extern "C" fn rt_ffi_callback_register(args: *const i64, argc: u32) -
 ///
 /// Called only from an entry, as its first action.
 #[no_mangle]
-pub unsafe extern "C" fn rt_ffi_callback_enter(_args: *const i64, _argc: u32) -> i64 {
+pub unsafe extern "C" fn rt_ffi_callback_enter() -> i64 {
     if !typelisp_abi::heap_registered() {
         fatal(
             "a C callback was called on a thread that is not running typelisp — a callback can \
@@ -180,7 +174,7 @@ pub unsafe extern "C" fn rt_ffi_callback_enter(_args: *const i64, _argc: u32) ->
 ///
 /// Called only from an entry, after [`rt_ffi_callback_enter`].
 #[no_mangle]
-pub unsafe extern "C" fn rt_ffi_callback_leave(_args: *const i64, _argc: u32) -> i64 {
+pub unsafe extern "C" fn rt_ffi_callback_leave() -> i64 {
     active_heap().enter_native();
     0
 }

@@ -726,21 +726,18 @@ fn take_pending_call() -> Pending {
 // safepoint — decides what to do with the suspension.
 
 /// `(task ...)` for compiled code: hand the scheduler a closure to run as a
-/// new task. `args[0]` is the closure, tagged — a heap box, rooted by the
-/// frame slot it sits in; `args[1]` is the handle's type (`Task<int>`),
+/// new task. `closure` is the closure, tagged — a heap box, rooted by the
+/// frame slot it sits in; `name` is the handle's type (`Task<int>`),
 /// appended by the bridge, since nothing below the site knows `T`. The
 /// answer is the `Task<T>` handle, and it arrives on the next activation like
 /// every other suspension's.
 ///
 /// # Safety
 ///
-/// `args` must point to `argc >= 2` valid `i64`s.
+/// The words must be valid.
 #[no_mangle]
-pub unsafe extern "C" fn rt_suspend_task(args: *const i64, argc: u32) -> i64 {
-    if argc < 2 {
-        typelisp_abi::fatal("rt_suspend_task: expected the closure to start and the handle's type");
-    }
-    call_state::set_pending_suspend_2(call_state::SUSPEND_TASK, *args, *args.add(1));
+pub unsafe extern "C" fn rt_suspend_task(closure: i64, name: i64) -> i64 {
+    call_state::set_pending_suspend_2(call_state::SUSPEND_TASK, closure, name);
     0
 }
 
@@ -752,9 +749,9 @@ pub unsafe extern "C" fn rt_suspend_task(args: *const i64, argc: u32) -> i64 {
 ///
 /// # Safety
 ///
-/// `args`/`argc` are unused (the suspension takes nothing).
+/// None: the suspension takes nothing.
 #[no_mangle]
-pub unsafe extern "C" fn rt_suspend_main(_args: *const i64, _argc: u32) -> i64 {
+pub unsafe extern "C" fn rt_suspend_main() -> i64 {
     call_state::set_pending_suspend(call_state::SUSPEND_MAIN, 0);
     0
 }
@@ -763,9 +760,9 @@ pub unsafe extern "C" fn rt_suspend_main(_args: *const i64, _argc: u32) -> i64 {
 ///
 /// # Safety
 ///
-/// `args`/`argc` are unused (the builtin is nullary).
+/// None: the builtin is nullary.
 #[no_mangle]
-pub unsafe extern "C" fn rt_suspend_yield(_args: *const i64, _argc: u32) -> i64 {
+pub unsafe extern "C" fn rt_suspend_yield() -> i64 {
     call_state::set_pending_suspend(call_state::SUSPEND_YIELD, 0);
     0
 }
@@ -811,9 +808,9 @@ const SAFEPOINT_PERIOD: u32 = 256;
 ///
 /// # Safety
 ///
-/// `args`/`argc` are unused; a `Heap` must be registered on this thread.
+/// A `Heap` must be registered on this thread.
 #[no_mangle]
-pub unsafe extern "C" fn rt_loop_safepoint(_args: *const i64, _argc: u32) -> i64 {
+pub unsafe extern "C" fn rt_loop_safepoint() -> i64 {
     typelisp_abi::active_heap().safepoint();
     SAFEPOINT_COUNTDOWN.with(|c| {
         let left = c.get().saturating_sub(1);
@@ -828,7 +825,7 @@ pub unsafe extern "C" fn rt_loop_safepoint(_args: *const i64, _argc: u32) -> i64
     })
 }
 
-/// `(sleep secs)` for compiled code: `args[0]` is an `f64`'s raw bit pattern.
+/// `(sleep secs)` for compiled code: `x` is an `f64`'s raw bit pattern.
 ///
 /// The bits travel as the payload untouched — this shim does not sleep, and
 /// must not: with tasks, `sleep` stops **the task**, and only the scheduler
@@ -838,17 +835,14 @@ pub unsafe extern "C" fn rt_loop_safepoint(_args: *const i64, _argc: u32) -> i64
 ///
 /// # Safety
 ///
-/// `argc` must be `>= 1` and `args` must point to at least 1 valid `i64`.
+/// Each word must be a value of the type the signature gives it.
 #[no_mangle]
-pub unsafe extern "C" fn rt_suspend_sleep(args: *const i64, argc: u32) -> i64 {
-    if argc < 1 {
-        crate::fatal("rt_suspend_sleep: expected 1 argument");
-    }
-    call_state::set_pending_suspend(call_state::SUSPEND_SLEEP, *args);
+pub unsafe extern "C" fn rt_suspend_sleep(x: i64) -> i64 {
+    call_state::set_pending_suspend(call_state::SUSPEND_SLEEP, x);
     0
 }
 
-/// `(wait t)` for compiled code: `args[0]` is the `Task<T>` handle.
+/// `(wait t)` for compiled code: `x` is the `Task<T>` handle.
 ///
 /// The handle goes through as the payload **still tagged**. Reading the
 /// scheduler id out of it is the front end's job, not this crate's: the box is
@@ -857,13 +851,10 @@ pub unsafe extern "C" fn rt_suspend_sleep(args: *const i64, argc: u32) -> i64 {
 ///
 /// # Safety
 ///
-/// `argc` must be `>= 1` and `args` must point to at least 1 valid `i64`.
+/// Each word must be a value of the type the signature gives it.
 #[no_mangle]
-pub unsafe extern "C" fn rt_suspend_wait(args: *const i64, argc: u32) -> i64 {
-    if argc < 1 {
-        crate::fatal("rt_suspend_wait: expected 1 argument");
-    }
-    call_state::set_pending_suspend(call_state::SUSPEND_WAIT, *args);
+pub unsafe extern "C" fn rt_suspend_wait(x: i64) -> i64 {
+    call_state::set_pending_suspend(call_state::SUSPEND_WAIT, x);
     0
 }
 
@@ -878,20 +869,16 @@ pub unsafe extern "C" fn rt_suspend_wait(args: *const i64, argc: u32) -> i64 {
 /// Each shim only *records*; none of them touches a channel, and none of them
 /// blocks. That is the same division the other `rt_suspend_*` shims draw.
 ///
-/// `(Chan::new cap)`'s own `args[1]` is the channel's type (`Chan<int>`),
+/// After `(Chan::new cap)`'s own `capacity`, `ty` is the channel's type (`Chan<int>`),
 /// appended by the bridge at the site — `recv`'s arrangement for its
 /// `Option<T>`.
 ///
 /// # Safety
 ///
-/// `argc` must be at least as large as the number of words each reads, and
-/// `args` must point to that many valid `i64`s.
+/// Each word must be a value of the type the signature gives it.
 #[no_mangle]
-pub unsafe extern "C" fn rt_suspend_chan_new(args: *const i64, argc: u32) -> i64 {
-    if argc < 2 {
-        crate::fatal("rt_suspend_chan_new: expected 2 arguments (the capacity and the channel's type)");
-    }
-    call_state::set_pending_suspend_2(call_state::SUSPEND_CHAN_NEW, *args, *args.add(1));
+pub unsafe extern "C" fn rt_suspend_chan_new(capacity: i64, ty: i64) -> i64 {
+    call_state::set_pending_suspend_2(call_state::SUSPEND_CHAN_NEW, capacity, ty);
     0
 }
 
@@ -899,13 +886,10 @@ pub unsafe extern "C" fn rt_suspend_chan_new(args: *const i64, argc: u32) -> i64
 ///
 /// # Safety
 ///
-/// `argc` must be `>= 1` and `args` must point to at least 1 valid `i64`.
+/// Each word must be a value of the type the signature gives it.
 #[no_mangle]
-pub unsafe extern "C" fn rt_suspend_chan_len(args: *const i64, argc: u32) -> i64 {
-    if argc < 1 {
-        crate::fatal("rt_suspend_chan_len: expected 1 argument");
-    }
-    call_state::set_pending_suspend(call_state::SUSPEND_CHAN_LEN, *args);
+pub unsafe extern "C" fn rt_suspend_chan_len(x: i64) -> i64 {
+    call_state::set_pending_suspend(call_state::SUSPEND_CHAN_LEN, x);
     0
 }
 
@@ -913,13 +897,10 @@ pub unsafe extern "C" fn rt_suspend_chan_len(args: *const i64, argc: u32) -> i64
 ///
 /// # Safety
 ///
-/// `argc` must be `>= 1` and `args` must point to at least 1 valid `i64`.
+/// Each word must be a value of the type the signature gives it.
 #[no_mangle]
-pub unsafe extern "C" fn rt_suspend_chan_cap(args: *const i64, argc: u32) -> i64 {
-    if argc < 1 {
-        crate::fatal("rt_suspend_chan_cap: expected 1 argument");
-    }
-    call_state::set_pending_suspend(call_state::SUSPEND_CHAN_CAP, *args);
+pub unsafe extern "C" fn rt_suspend_chan_cap(x: i64) -> i64 {
+    call_state::set_pending_suspend(call_state::SUSPEND_CHAN_CAP, x);
     0
 }
 
@@ -927,31 +908,25 @@ pub unsafe extern "C" fn rt_suspend_chan_cap(args: *const i64, argc: u32) -> i64
 ///
 /// # Safety
 ///
-/// `argc` must be `>= 1` and `args` must point to at least 1 valid `i64`.
+/// Each word must be a value of the type the signature gives it.
 #[no_mangle]
-pub unsafe extern "C" fn rt_suspend_chan_close(args: *const i64, argc: u32) -> i64 {
-    if argc < 1 {
-        crate::fatal("rt_suspend_chan_close: expected 1 argument");
-    }
-    call_state::set_pending_suspend(call_state::SUSPEND_CHAN_CLOSE, *args);
+pub unsafe extern "C" fn rt_suspend_chan_close(x: i64) -> i64 {
+    call_state::set_pending_suspend(call_state::SUSPEND_CHAN_CLOSE, x);
     0
 }
 
 /// `(send ch v)` for compiled code. See [`rt_suspend_chan_new`].
 ///
-/// `args[1]` arrives **already tagged**: the suspension site tagged it with
+/// `value` arrives **already tagged**: the suspension site tagged it with
 /// the element's own `Repr::field_kind`, because a raw machine word does not
 /// say whether it is an integer or a pointer and the driver has only the word.
 ///
 /// # Safety
 ///
-/// `argc` must be `>= 2` and `args` must point to at least 2 valid `i64`s.
+/// Each word must be a value of the type the signature gives it.
 #[no_mangle]
-pub unsafe extern "C" fn rt_suspend_chan_send(args: *const i64, argc: u32) -> i64 {
-    if argc < 2 {
-        crate::fatal("rt_suspend_chan_send: expected 2 arguments");
-    }
-    call_state::set_pending_suspend_2(call_state::SUSPEND_CHAN_SEND, *args, *args.add(1));
+pub unsafe extern "C" fn rt_suspend_chan_send(chan: i64, value: i64) -> i64 {
+    call_state::set_pending_suspend_2(call_state::SUSPEND_CHAN_SEND, chan, value);
     0
 }
 
@@ -980,19 +955,16 @@ pub unsafe extern "C" fn rt_suspend_chan_select(args: *const i64, argc: u32) -> 
 
 /// `(recv ch)` for compiled code. See [`rt_suspend_chan_new`].
 ///
-/// `args[1]` is the `Option<T>` type the answer is built with, appended by
+/// `ty` is the `Option<T>` type the answer is built with, appended by
 /// the bridge at the call site, the same way `vector-op`'s `pop`
 /// carries one. Nothing here can derive it: a channel's buffer holds tagged
 /// words and a word does not name its type.
 ///
 /// # Safety
 ///
-/// `argc` must be `>= 2` and `args` must point to at least 2 valid `i64`s.
+/// Each word must be a value of the type the signature gives it.
 #[no_mangle]
-pub unsafe extern "C" fn rt_suspend_chan_recv(args: *const i64, argc: u32) -> i64 {
-    if argc < 2 {
-        crate::fatal("rt_suspend_chan_recv: expected 2 arguments");
-    }
-    call_state::set_pending_suspend_2(call_state::SUSPEND_CHAN_RECV, *args, *args.add(1));
+pub unsafe extern "C" fn rt_suspend_chan_recv(chan: i64, ty: i64) -> i64 {
+    call_state::set_pending_suspend_2(call_state::SUSPEND_CHAN_RECV, chan, ty);
     0
 }

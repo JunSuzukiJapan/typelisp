@@ -1,7 +1,7 @@
 //! Compiled-code shims for the stream and readtable builtins.
 
 use typelisp_mem::prelude::*;
-use typelisp_abi::{active_heap, encode, fatal, tagged_arg};
+use typelisp_abi::{active_heap, decode, encode, fatal};
 use typelisp_mem::Value;
 
 // ---- stream builtins ----------------------------------------------------
@@ -28,34 +28,27 @@ use typelisp_mem::Value;
 #[macro_export]
 macro_rules! stream_shim {
     // Through a dispatcher that answers `None` for a name it has not got.
-    ($shim:ident, $sym:expr, $name:literal, [$($arg:ident),*], $ret:ident, via $dispatch:path) => {
-        $crate::stream_shim!(@shim $shim, $sym, $name, [$($arg),*], $ret, |heap, sym, decoded| $dispatch(heap, sym, decoded));
+    ($shim:ident, $sym:expr, $name:literal, [$($p:ident: $arg:ident),*], $ret:ident, via $dispatch:path) => {
+        $crate::stream_shim!(@shim $shim, $sym, $name, [$($p: $arg),*], $ret, |heap, sym, decoded| $dispatch(heap, sym, decoded));
     };
     // Straight to the one operation, so that the shim links only that one.
-    ($shim:ident, $sym:expr, $name:literal, [$($arg:ident),*], $ret:ident, op $op:path) => {
-        $crate::stream_shim!(@shim $shim, $sym, $name, [$($arg),*], $ret, |heap, sym, decoded| Some($op(heap, sym, decoded)));
+    ($shim:ident, $sym:expr, $name:literal, [$($p:ident: $arg:ident),*], $ret:ident, op $op:path) => {
+        $crate::stream_shim!(@shim $shim, $sym, $name, [$($p: $arg),*], $ret, |heap, sym, decoded| Some($op(heap, sym, decoded)));
     };
-    (@shim $shim:ident, $sym:expr, $name:literal, [$($arg:ident),*], $ret:ident, |$heap:ident, $s:ident, $decoded:ident| $call:expr) => {
+    (@shim $shim:ident, $sym:expr, $name:literal, [$($p:ident: $arg:ident),*], $ret:ident, |$heap:ident, $s:ident, $decoded:ident| $call:expr) => {
         /// A builtin for compiled code — see the operation it calls, which
         /// is also what the interpreter calls.
         ///
         /// # Safety
         ///
-        /// `args` must point to at least as many valid `i64`s as this
-        /// builtin has parameters, each in the representation its signature
+        /// Each word must be in the representation the builtin's signature
         /// gives it; a `Heap` must already be registered on this thread.
         #[no_mangle]
-        pub unsafe extern "C" fn $shim(args: *const i64, argc: u32) -> i64 {
-            // A nullary builtin reads neither, and `decoded` stays empty.
-            let _ = (args, argc);
+        pub unsafe extern "C" fn $shim($($p: i64),*) -> i64 {
             #[allow(unused_mut)]
             let mut decoded: $crate::__shim::Vec<$crate::__shim::Value> = $crate::__shim::Vec::new();
             $(
-                let i = decoded.len();
-                if argc as usize <= i {
-                    $crate::fatal(concat!(stringify!($shim), ": too few arguments"));
-                }
-                decoded.push($crate::stream_shim!(@arg $arg, args, i));
+                decoded.push($crate::stream_shim!(@arg $arg, $p));
             )*
             let ($heap, $s, $decoded) = ($crate::active_heap(), $crate::__shim::well_known_symbol($sym), &decoded);
             match $call {
@@ -66,14 +59,14 @@ macro_rules! stream_shim {
         }
     };
     // A stream handle and an `open` mode are both bare `i64`s.
-    (@arg int, $args:expr, $i:expr) => { $crate::__shim::Value::Int(*$args.add($i)) };
-    (@arg str, $args:expr, $i:expr) => { $crate::tagged_arg($args, $i) };
+    (@arg int, $w:expr) => { $crate::__shim::Value::Int($w) };
+    (@arg str, $w:expr) => { $crate::decode($w) };
     // Any other heap value — a `Vector<int>` datagram — crosses the same way.
-    (@arg tagged, $args:expr, $i:expr) => { $crate::tagged_arg($args, $i) };
+    (@arg tagged, $w:expr) => { $crate::decode($w) };
     // A `bool` is a bare 0/1 word, as `@ret bool` writes it.
-    (@arg bool, $args:expr, $i:expr) => { $crate::__shim::Value::Bool(*$args.add($i) != 0) };
-    (@arg char, $args:expr, $i:expr) => {
-        match char::from_u32(*$args.add($i) as u32) {
+    (@arg bool, $w:expr) => { $crate::__shim::Value::Bool($w != 0) };
+    (@arg char, $w:expr) => {
+        match char::from_u32($w as u32) {
             Some(c) => $crate::__shim::Value::Char(c),
             None => $crate::fatal("stream shim: argument is not a valid char scalar value"),
         }
@@ -101,32 +94,25 @@ macro_rules! stream_shim {
 ///
 /// # Safety
 ///
-/// `args` must point to at least as many valid `i64`s as the builtin has
-/// parameters, each in the representation its signature gives it; a `Heap`
-/// must already be registered on this thread.
+/// Each word must be in the representation the builtin's signature gives
+/// it; a `Heap` must already be registered on this thread.
 macro_rules! readtable_shim {
-    ($shim:ident, $sym:expr, $name:literal, $chars:literal, $fn_arg:literal, $ret:ident) => {
+    ($shim:ident, $sym:expr, $name:literal, [$($c:ident),*], [$($f:ident)?], $ret:ident) => {
         #[doc = concat!("`", $name, "` for compiled code.")]
         ///
         /// # Safety
         ///
         /// See [`readtable_shim`].
         #[no_mangle]
-        pub unsafe extern "C" fn $shim(args: *const i64, argc: u32) -> i64 {
-            let want = $chars + if $fn_arg { 1 } else { 0 };
-            if (argc as usize) < want {
-                fatal(concat!(stringify!($shim), ": too few arguments"));
-            }
+        pub unsafe extern "C" fn $shim($($c: i64,)* $($f: i64)?) -> i64 {
             let mut decoded: Vec<Value> = Vec::new();
-            for i in 0..$chars {
-                match char::from_u32(*args.add(i) as u32) {
+            $(
+                match char::from_u32($c as u32) {
                     Some(c) => decoded.push(Value::Char(c)),
                     None => fatal(concat!(stringify!($shim), ": argument is not a valid char scalar value")),
                 }
-            }
-            if $fn_arg {
-                decoded.push(tagged_arg(args, $chars));
-            }
+            )*
+            $(decoded.push(decode($f));)?
             match crate::readtable::readtable_builtin(active_heap(), typelisp_mem::symbols::well_known_symbol($sym), &decoded) {
                 Some(Ok(v)) => readtable_shim!(@ret $ret, v),
                 Some(Err(e)) => fatal(&e),
@@ -141,28 +127,28 @@ macro_rules! readtable_shim {
     (@ret tagged, $v:expr) => { encode($v) };
 }
 
-readtable_shim!(rt_set_macro_character, typelisp_mem::wk::F_SET_MACRO_CHARACTER, "set-macro-character", 1, true, unit);
-readtable_shim!(rt_get_macro_character, typelisp_mem::wk::F_GET_MACRO_CHARACTER, "get-macro-character", 1, false, tagged);
-readtable_shim!(rt_set_dispatch_macro_character, typelisp_mem::wk::F_SET_DISPATCH_MACRO_CHARACTER, "set-dispatch-macro-character", 2, true, unit);
-readtable_shim!(rt_get_dispatch_macro_character, typelisp_mem::wk::F_GET_DISPATCH_MACRO_CHARACTER, "get-dispatch-macro-character", 2, false, tagged);
+readtable_shim!(rt_set_macro_character, typelisp_mem::wk::F_SET_MACRO_CHARACTER, "set-macro-character", [c], [f], unit);
+readtable_shim!(rt_get_macro_character, typelisp_mem::wk::F_GET_MACRO_CHARACTER, "get-macro-character", [c], [], tagged);
+readtable_shim!(rt_set_dispatch_macro_character, typelisp_mem::wk::F_SET_DISPATCH_MACRO_CHARACTER, "set-dispatch-macro-character", [c, sub], [f], unit);
+readtable_shim!(rt_get_dispatch_macro_character, typelisp_mem::wk::F_GET_DISPATCH_MACRO_CHARACTER, "get-dispatch-macro-character", [c, sub], [], tagged);
 
 stream_shim!(rt_stream_stdin, typelisp_mem::wk::F_STREAM_STDIN, "stream-stdin", [], raw, op crate::stream_builtin::stdin);
 stream_shim!(rt_stream_stdout, typelisp_mem::wk::F_STREAM_STDOUT, "stream-stdout", [], raw, op crate::stream_builtin::stdout);
 stream_shim!(rt_stream_stderr, typelisp_mem::wk::F_STREAM_STDERR, "stream-stderr", [], raw, op crate::stream_builtin::stderr);
-stream_shim!(rt_stream_string_input, typelisp_mem::wk::F_STREAM_STRING_INPUT, "stream-string-input", [str], raw, op crate::stream_builtin::string_input);
+stream_shim!(rt_stream_string_input, typelisp_mem::wk::F_STREAM_STRING_INPUT, "stream-string-input", [a: str], raw, op crate::stream_builtin::string_input);
 stream_shim!(rt_stream_string_output, typelisp_mem::wk::F_STREAM_STRING_OUTPUT, "stream-string-output", [], raw, op crate::stream_builtin::string_output);
-stream_shim!(rt_stream_close, typelisp_mem::wk::F_STREAM_CLOSE, "stream-close", [int], tagged, op crate::stream_builtin::close);
-stream_shim!(rt_stream_open_p, typelisp_mem::wk::F_STREAM_OPEN_P, "stream-open-p", [int], bool, op crate::stream_builtin::open_p);
-stream_shim!(rt_stream_describe, typelisp_mem::wk::F_STREAM_DESCRIBE, "stream-describe", [int], tagged, op crate::stream_builtin::describe);
-stream_shim!(rt_stream_input_p, typelisp_mem::wk::F_STREAM_INPUT_P, "stream-input-p", [int], tagged, op crate::stream_builtin::input_p);
-stream_shim!(rt_stream_output_p, typelisp_mem::wk::F_STREAM_OUTPUT_P, "stream-output-p", [int], tagged, op crate::stream_builtin::output_p);
-stream_shim!(rt_stream_read_char, typelisp_mem::wk::F_STREAM_READ_CHAR, "stream-read-char", [int], tagged, op crate::stream_builtin::read_char);
-stream_shim!(rt_stream_read_byte, typelisp_mem::wk::F_STREAM_READ_BYTE, "stream-read-byte", [int], tagged, op crate::stream_builtin::read_byte);
-stream_shim!(rt_stream_write_byte, typelisp_mem::wk::F_STREAM_WRITE_BYTE, "stream-write-byte", [int, int], tagged, op crate::stream_builtin::write_byte);
-stream_shim!(rt_stream_unread_char, typelisp_mem::wk::F_STREAM_UNREAD_CHAR, "stream-unread-char", [int, char], tagged, op crate::stream_builtin::unread_char);
-stream_shim!(rt_stream_listen, typelisp_mem::wk::F_STREAM_LISTEN, "stream-listen", [int], tagged, op crate::stream_builtin::listen);
-stream_shim!(rt_stream_position, typelisp_mem::wk::F_STREAM_POSITION, "stream-position", [int], tagged, op crate::stream_builtin::position);
-stream_shim!(rt_stream_write_string, typelisp_mem::wk::F_STREAM_WRITE_STRING, "stream-write-string", [int, str], tagged, op crate::stream_builtin::write_string);
-stream_shim!(rt_stream_at_line_start, typelisp_mem::wk::F_STREAM_AT_LINE_START, "stream-at-line-start", [int], tagged, op crate::stream_builtin::at_line_start);
-stream_shim!(rt_stream_finish_output, typelisp_mem::wk::F_STREAM_FINISH_OUTPUT, "stream-finish-output", [int], tagged, op crate::stream_builtin::finish_output);
-stream_shim!(rt_stream_take_output_string, typelisp_mem::wk::F_STREAM_TAKE_OUTPUT_STRING, "stream-take-output-string", [int], tagged, op crate::stream_builtin::take_output_string);
+stream_shim!(rt_stream_close, typelisp_mem::wk::F_STREAM_CLOSE, "stream-close", [a: int], tagged, op crate::stream_builtin::close);
+stream_shim!(rt_stream_open_p, typelisp_mem::wk::F_STREAM_OPEN_P, "stream-open-p", [a: int], bool, op crate::stream_builtin::open_p);
+stream_shim!(rt_stream_describe, typelisp_mem::wk::F_STREAM_DESCRIBE, "stream-describe", [a: int], tagged, op crate::stream_builtin::describe);
+stream_shim!(rt_stream_input_p, typelisp_mem::wk::F_STREAM_INPUT_P, "stream-input-p", [a: int], tagged, op crate::stream_builtin::input_p);
+stream_shim!(rt_stream_output_p, typelisp_mem::wk::F_STREAM_OUTPUT_P, "stream-output-p", [a: int], tagged, op crate::stream_builtin::output_p);
+stream_shim!(rt_stream_read_char, typelisp_mem::wk::F_STREAM_READ_CHAR, "stream-read-char", [a: int], tagged, op crate::stream_builtin::read_char);
+stream_shim!(rt_stream_read_byte, typelisp_mem::wk::F_STREAM_READ_BYTE, "stream-read-byte", [a: int], tagged, op crate::stream_builtin::read_byte);
+stream_shim!(rt_stream_write_byte, typelisp_mem::wk::F_STREAM_WRITE_BYTE, "stream-write-byte", [a: int, b: int], tagged, op crate::stream_builtin::write_byte);
+stream_shim!(rt_stream_unread_char, typelisp_mem::wk::F_STREAM_UNREAD_CHAR, "stream-unread-char", [a: int, b: char], tagged, op crate::stream_builtin::unread_char);
+stream_shim!(rt_stream_listen, typelisp_mem::wk::F_STREAM_LISTEN, "stream-listen", [a: int], tagged, op crate::stream_builtin::listen);
+stream_shim!(rt_stream_position, typelisp_mem::wk::F_STREAM_POSITION, "stream-position", [a: int], tagged, op crate::stream_builtin::position);
+stream_shim!(rt_stream_write_string, typelisp_mem::wk::F_STREAM_WRITE_STRING, "stream-write-string", [a: int, b: str], tagged, op crate::stream_builtin::write_string);
+stream_shim!(rt_stream_at_line_start, typelisp_mem::wk::F_STREAM_AT_LINE_START, "stream-at-line-start", [a: int], tagged, op crate::stream_builtin::at_line_start);
+stream_shim!(rt_stream_finish_output, typelisp_mem::wk::F_STREAM_FINISH_OUTPUT, "stream-finish-output", [a: int], tagged, op crate::stream_builtin::finish_output);
+stream_shim!(rt_stream_take_output_string, typelisp_mem::wk::F_STREAM_TAKE_OUTPUT_STRING, "stream-take-output-string", [a: int], tagged, op crate::stream_builtin::take_output_string);

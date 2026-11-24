@@ -48,20 +48,17 @@ pub unsafe extern "C" fn rt_str_new(args: *const i64, argc: u32) -> i64 {
 }
 
 /// `str::length` for compiled code — the character count (not byte length)
-/// of `args[0]`, matching the interpreter's own `string_length`. Returns a
+/// of `id`, matching the interpreter's own `string_length`. Returns a
 /// bare `i64` (a `Type::I64` result is never itself Sexpr-tagged).
 ///
 /// # Safety
 ///
-/// `argc` must be `>= 1` and `args` must point to at least 1 valid `i64`
+/// The words must be valid
 /// encoding a `Value::Str`; a `Heap` must already be registered on this
 /// thread.
 #[no_mangle]
-pub unsafe extern "C" fn rt_str_length(args: *const i64, argc: u32) -> i64 {
-    if argc < 1 {
-        fatal("rt_str_length: expected 1 argument");
-    }
-    let id = match decode(*args) {
+pub unsafe extern "C" fn rt_str_length(id: i64) -> i64 {
+    let id = match decode(id) {
         Value::Str(id) => id,
         _ => fatal("rt_str_length: argument is not a Str"),
     };
@@ -69,7 +66,7 @@ pub unsafe extern "C" fn rt_str_length(args: *const i64, argc: u32) -> i64 {
 }
 
 /// `str::ref` for compiled code — the `i`-th Unicode scalar value of
-/// `args[0]`'s content (`args[1]`, a bare `i64` index), matching the
+/// `id`'s content (`idx`, a bare `i64` index), matching the
 /// interpreter's own `string_ref`. Returns a bare (untagged) scalar, the
 /// same `Type::Char` representation `compile-sexpr-field`'s own `char`
 /// extraction produces. An out-of-range index (negative included) [`raise`]s
@@ -79,19 +76,16 @@ pub unsafe extern "C" fn rt_str_length(args: *const i64, argc: u32) -> i64 {
 ///
 /// # Safety
 ///
-/// `argc` must be `>= 2` and `args` must point to at least 2 valid `i64`s,
+/// The words must be valid,
 /// the first encoding a `Value::Str`; a `Heap` must already be registered on
 /// this thread.
 #[no_mangle]
-pub unsafe extern "C-unwind" fn rt_str_ref(args: *const i64, argc: u32) -> i64 {
-    if argc < 2 {
-        fatal("rt_str_ref: expected 2 arguments");
-    }
-    let id = match decode(*args) {
+pub unsafe extern "C-unwind" fn rt_str_ref(id: i64, idx: i64) -> i64 {
+    let id = match decode(id) {
         Value::Str(id) => id,
         _ => fatal("rt_str_ref: first argument is not a Str"),
     };
-    let idx = *args.add(1);
+    let idx = idx;
     let found = if idx >= 0 { active_heap().string(id).chars().nth(idx as usize) } else { None };
     match found {
         Some(c) => c as i64,
@@ -112,19 +106,16 @@ pub unsafe extern "C-unwind" fn rt_str_ref(args: *const i64, argc: u32) -> i64 {
 ///
 /// # Safety
 ///
-/// `argc` must be `>= 2` and `args` must point to at least 2 valid `i64`s,
+/// The words must be valid,
 /// both encoding a `Value::Str`; a `Heap` must already be registered on this
 /// thread.
 #[no_mangle]
-pub unsafe extern "C" fn rt_str_eq(args: *const i64, argc: u32) -> i64 {
-    if argc < 2 {
-        fatal("rt_str_eq: expected 2 arguments");
-    }
-    let a = match decode(*args) {
+pub unsafe extern "C" fn rt_str_eq(a: i64, b: i64) -> i64 {
+    let a = match decode(a) {
         Value::Str(id) => id,
         _ => fatal("rt_str_eq: first argument is not a Str"),
     };
-    let b = match decode(*args.add(1)) {
+    let b = match decode(b) {
         Value::Str(id) => id,
         _ => fatal("rt_str_eq: second argument is not a Str"),
     };
@@ -141,15 +132,12 @@ pub unsafe extern "C" fn rt_str_eq(args: *const i64, argc: u32) -> i64 {
 ///
 /// Same as [`rt_str_eq`].
 #[no_mangle]
-pub unsafe extern "C" fn rt_str_lt(args: *const i64, argc: u32) -> i64 {
-    if argc < 2 {
-        fatal("rt_str_lt: expected 2 arguments");
-    }
-    let a = match decode(*args) {
+pub unsafe extern "C" fn rt_str_lt(a: i64, b: i64) -> i64 {
+    let a = match decode(a) {
         Value::Str(id) => id,
         _ => fatal("rt_str_lt: first argument is not a Str"),
     };
-    let b = match decode(*args.add(1)) {
+    let b = match decode(b) {
         Value::Str(id) => id,
         _ => fatal("rt_str_lt: second argument is not a Str"),
     };
@@ -168,15 +156,12 @@ pub unsafe extern "C" fn rt_str_lt(args: *const i64, argc: u32) -> i64 {
 ///
 /// Same as [`rt_str_eq`].
 #[no_mangle]
-pub unsafe extern "C" fn rt_str_equalp(args: *const i64, argc: u32) -> i64 {
-    if argc < 2 {
-        fatal("rt_str_equalp: expected 2 arguments");
-    }
-    let a = match decode(*args) {
+pub unsafe extern "C" fn rt_str_equalp(a: i64, b: i64) -> i64 {
+    let a = match decode(a) {
         Value::Str(id) => id,
         _ => fatal("rt_str_equalp: first argument is not a Str"),
     };
-    let b = match decode(*args.add(1)) {
+    let b = match decode(b) {
         Value::Str(id) => id,
         _ => fatal("rt_str_equalp: second argument is not a Str"),
     };
@@ -188,22 +173,19 @@ pub unsafe extern "C" fn rt_str_equalp(args: *const i64, argc: u32) -> i64 {
 /// (`char::eq_ignore_ascii_case`), matching the interpreter's own `char_eqp`.
 /// Unlike a compiled `char`'s `eq`/`eql`/`equal`/`<`/... (raw `i64` code-point
 /// `icmp`s, lowered in place by `compile-assoc`), `equalp` folds case and so
-/// has no single-instruction form. `args[0]`/`args[1]` are the *raw* (untagged)
+/// has no single-instruction form. `a`/`b` are the *raw* (untagged)
 /// `i64` Unicode scalar values a compiled `char` is represented as — not
 /// tagged `Sexpr`s — matching `compile-assoc`'s char branch, which compiles
 /// its operands to bare code points. Returns a bare `0`/`1`.
 ///
 /// # Safety
 ///
-/// `argc` must be `>= 2` and `args` must point to at least 2 valid `i64`s.
+/// Each word must be a value of the type the signature gives it.
 /// No `Heap` is needed (both operands are immediates).
 #[no_mangle]
-pub unsafe extern "C" fn rt_char_equalp(args: *const i64, argc: u32) -> i64 {
-    if argc < 2 {
-        fatal("rt_char_equalp: expected 2 arguments");
-    }
-    let a = *args;
-    let b = *args.add(1);
+pub unsafe extern "C" fn rt_char_equalp(a: i64, b: i64) -> i64 {
+    let a = a;
+    let b = b;
     match (char::from_u32(a as u32), char::from_u32(b as u32)) {
         (Some(x), Some(y)) => i64::from(x.eq_ignore_ascii_case(&y)),
         // A compiled `char` always holds a valid scalar value; a mismatch here
@@ -223,20 +205,20 @@ pub unsafe extern "C" fn rt_char_equalp(args: *const i64, argc: u32) -> i64 {
 ///
 /// # Safety
 ///
-/// `argc` must be `>= 1` and `args` must point to at least 1 valid `i64`.
+/// Each word must be a value of the type the signature gives it.
 #[no_mangle]
-pub unsafe extern "C" fn rt_char_upcase(args: *const i64, argc: u32) -> i64 {
-    char_map(args, argc, "rt_char_upcase", |c| c.to_ascii_uppercase() as i64)
+pub unsafe extern "C" fn rt_char_upcase(a: i64) -> i64 {
+    char_map(a, |c| c.to_ascii_uppercase() as i64)
 }
 
 /// See [`rt_char_upcase`].
 ///
 /// # Safety
 ///
-/// `argc` must be `>= 1` and `args` must point to at least 1 valid `i64`.
+/// Each word must be a value of the type the signature gives it.
 #[no_mangle]
-pub unsafe extern "C" fn rt_char_downcase(args: *const i64, argc: u32) -> i64 {
-    char_map(args, argc, "rt_char_downcase", |c| c.to_ascii_lowercase() as i64)
+pub unsafe extern "C" fn rt_char_downcase(a: i64) -> i64 {
+    char_map(a, |c| c.to_ascii_lowercase() as i64)
 }
 
 /// `char::alphap` — CL's `alpha-char-p`, ASCII-only like the interpreter's.
@@ -244,10 +226,10 @@ pub unsafe extern "C" fn rt_char_downcase(args: *const i64, argc: u32) -> i64 {
 ///
 /// # Safety
 ///
-/// `argc` must be `>= 1` and `args` must point to at least 1 valid `i64`.
+/// Each word must be a value of the type the signature gives it.
 #[no_mangle]
-pub unsafe extern "C" fn rt_char_alphap(args: *const i64, argc: u32) -> i64 {
-    char_map(args, argc, "rt_char_alphap", |c| i64::from(c.is_ascii_alphabetic()))
+pub unsafe extern "C" fn rt_char_alphap(a: i64) -> i64 {
+    char_map(a, |c| i64::from(c.is_ascii_alphabetic()))
 }
 
 /// `char::digitp` — the `bool` predicate, not CL's weight-returning
@@ -256,10 +238,10 @@ pub unsafe extern "C" fn rt_char_alphap(args: *const i64, argc: u32) -> i64 {
 ///
 /// # Safety
 ///
-/// `argc` must be `>= 1` and `args` must point to at least 1 valid `i64`.
+/// Each word must be a value of the type the signature gives it.
 #[no_mangle]
-pub unsafe extern "C" fn rt_char_digitp(args: *const i64, argc: u32) -> i64 {
-    char_map(args, argc, "rt_char_digitp", |c| i64::from(c.is_ascii_digit()))
+pub unsafe extern "C" fn rt_char_digitp(a: i64) -> i64 {
+    char_map(a, |c| i64::from(c.is_ascii_digit()))
 }
 
 /// The one-code-point-in, one-word-out shape the four `char` shims above
@@ -270,12 +252,8 @@ pub unsafe extern "C" fn rt_char_digitp(args: *const i64, argc: u32) -> i64 {
 ///
 /// # Safety
 ///
-/// `argc` must be `>= 1` and `args` must point to at least 1 valid `i64`.
-unsafe fn char_map(args: *const i64, argc: u32, who: &str, f: impl FnOnce(char) -> i64) -> i64 {
-    if argc < 1 {
-        fatal(&format!("{}: expected 1 argument", who));
-    }
-    let a = *args;
+/// None: `a` is a character's scalar value.
+unsafe fn char_map(a: i64, f: impl FnOnce(char) -> i64) -> i64 {
     match char::from_u32(a as u32) {
         Some(c) => f(c),
         None => a,
@@ -292,13 +270,10 @@ unsafe fn char_map(args: *const i64, argc: u32, who: &str, f: impl FnOnce(char) 
 ///
 /// # Safety
 ///
-/// `argc` must be `>= 1` and `args` must point to at least 1 valid `i64`.
+/// Each word must be a value of the type the signature gives it.
 #[no_mangle]
-pub unsafe extern "C-unwind" fn rt_int_to_char(args: *const i64, argc: u32) -> i64 {
-    if argc < 1 {
-        fatal("rt_int_to_char: expected 1 argument");
-    }
-    let n = *args;
+pub unsafe extern "C-unwind" fn rt_int_to_char(n: i64) -> i64 {
+    let n = n;
     let valid = n >= 0 && n <= i64::from(u32::MAX) && char::from_u32(n as u32).is_some();
     if !valid {
         return raise(format!("int->char: {} is not a valid Unicode scalar value", n)).into_word();
@@ -307,7 +282,7 @@ pub unsafe extern "C-unwind" fn rt_int_to_char(args: *const i64, argc: u32) -> i
 }
 
 /// `str::append` for compiled code — concatenates the content of
-/// `args[0]`/`args[1]` into a freshly allocated string, matching the
+/// `a`/`b` into a freshly allocated string, matching the
 /// interpreter's own `string_append`. Returns the tagged form, exactly like
 /// [`rt_str_new`] (and just as unrooted until a caller protects it).
 ///
@@ -315,15 +290,12 @@ pub unsafe extern "C-unwind" fn rt_int_to_char(args: *const i64, argc: u32) -> i
 ///
 /// Same as [`rt_str_eq`].
 #[no_mangle]
-pub unsafe extern "C" fn rt_str_append(args: *const i64, argc: u32) -> i64 {
-    if argc < 2 {
-        fatal("rt_str_append: expected 2 arguments");
-    }
-    let a = match decode(*args) {
+pub unsafe extern "C" fn rt_str_append(a: i64, b: i64) -> i64 {
+    let a = match decode(a) {
         Value::Str(id) => id,
         _ => fatal("rt_str_append: first argument is not a Str"),
     };
-    let b = match decode(*args.add(1)) {
+    let b = match decode(b) {
         Value::Str(id) => id,
         _ => fatal("rt_str_append: second argument is not a Str"),
     };
@@ -337,12 +309,9 @@ pub unsafe extern "C" fn rt_str_append(args: *const i64, argc: u32) -> i64 {
 ///
 /// # Safety
 ///
-/// Same as [`rt_str_eq`], for `args[0]` alone.
-unsafe fn str_map_case(args: *const i64, argc: u32, who: &str, up: bool) -> i64 {
-    if argc < 1 {
-        fatal(&format!("{who}: expected 1 argument"));
-    }
-    let id = match decode(*args) {
+/// Same as [`rt_str_eq`], for `id` alone.
+unsafe fn str_map_case(id: i64, who: &str, up: bool) -> i64 {
+    let id = match decode(id) {
         Value::Str(id) => id,
         _ => fatal(&format!("{who}: argument is not a Str")),
     };
@@ -351,7 +320,7 @@ unsafe fn str_map_case(args: *const i64, argc: u32, who: &str, up: bool) -> i64 
     encode(heap.alloc_string(s))
 }
 
-/// `string::upcase` for compiled code — `args[0]`'s content with every ASCII
+/// `string::upcase` for compiled code — `id`'s content with every ASCII
 /// letter folded up, as a freshly allocated string, matching the
 /// interpreter's own arm in `eval_builtin_method`.
 ///
@@ -362,8 +331,8 @@ unsafe fn str_map_case(args: *const i64, argc: u32, who: &str, up: bool) -> i64 
 ///
 /// Same as [`str_map_case`].
 #[no_mangle]
-pub unsafe extern "C" fn rt_str_upcase(args: *const i64, argc: u32) -> i64 {
-    str_map_case(args, argc, "rt_str_upcase", true)
+pub unsafe extern "C" fn rt_str_upcase(id: i64) -> i64 {
+    str_map_case(id, "rt_str_upcase", true)
 }
 
 /// `string::downcase` for compiled code — the folding-down counterpart of
@@ -373,13 +342,13 @@ pub unsafe extern "C" fn rt_str_upcase(args: *const i64, argc: u32) -> i64 {
 ///
 /// Same as [`str_map_case`].
 #[no_mangle]
-pub unsafe extern "C" fn rt_str_downcase(args: *const i64, argc: u32) -> i64 {
-    str_map_case(args, argc, "rt_str_downcase", false)
+pub unsafe extern "C" fn rt_str_downcase(id: i64) -> i64 {
+    str_map_case(id, "rt_str_downcase", false)
 }
 
 /// `str::substring` for compiled code — the `[start, end)` character range of
-/// `args[0]`'s content as a freshly allocated string, matching the
-/// interpreter's own `string_substring`. `args[1]`/`args[2]` are bare
+/// `id`'s content as a freshly allocated string, matching the
+/// interpreter's own `string_substring`. `start`/`end` are bare
 /// (untagged) `i64` indices, the same convention [`rt_str_ref`] uses, and
 /// they count *characters*, not bytes.
 ///
@@ -388,20 +357,17 @@ pub unsafe extern "C" fn rt_str_downcase(args: *const i64, argc: u32) -> i64 {
 ///
 /// # Safety
 ///
-/// `argc` must be `>= 3` and `args` must point to at least 3 valid `i64`s,
+/// The words must be valid,
 /// the first encoding a `Value::Str`; a `Heap` must already be registered on
 /// this thread.
 #[no_mangle]
-pub unsafe extern "C-unwind" fn rt_str_substring(args: *const i64, argc: u32) -> i64 {
-    if argc < 3 {
-        fatal("rt_str_substring: expected 3 arguments");
-    }
-    let id = match decode(*args) {
+pub unsafe extern "C-unwind" fn rt_str_substring(id: i64, start: i64, end: i64) -> i64 {
+    let id = match decode(id) {
         Value::Str(id) => id,
         _ => fatal("rt_str_substring: first argument is not a Str"),
     };
-    let start = *args.add(1);
-    let end = *args.add(2);
+    let start = start;
+    let end = end;
     let heap = active_heap();
     let chars: Vec<char> = heap.string(id).chars().collect();
     let len = chars.len() as i64;

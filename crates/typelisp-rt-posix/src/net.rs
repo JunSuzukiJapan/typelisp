@@ -1107,7 +1107,7 @@ mod tests {
     }
 
     /// A loopback pair, connected. The connect is driven to completion here
-    /// the way the prelude does it: wait for writable, then ask.
+    /// The way the prelude does it: wait for writable, then ask.
     fn connected_pair(t: &mut StreamTable) -> (Handle, Handle) {
         let l = sk(t).net_listen("127.0.0.1", 0).unwrap();
         let addr = sk(t).net_local_address(l).unwrap();

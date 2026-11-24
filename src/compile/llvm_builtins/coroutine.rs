@@ -10,7 +10,7 @@ use inkwell::module::Module;
 use inkwell::values::{BasicValueEnum, FunctionValue, InstructionValue, IntValue, PointerValue};
 use typelisp_mem::Value;
 use crate::eval::interp::EvalError;
-use super::{compiled_fn_type, entry_alloca, expect_llvm_basic_block, expect_llvm_builder, expect_llvm_function, expect_llvm_module, expect_llvm_value, llvm_value_value};
+use super::{entry_alloca, expect_llvm_basic_block, expect_llvm_builder, expect_llvm_function, expect_llvm_module, expect_llvm_value, llvm_value_value};
 
 // ---- the frame under construction ---------------------------------------
 //
@@ -33,10 +33,10 @@ use super::{compiled_fn_type, entry_alloca, expect_llvm_basic_block, expect_llvm
 pub(super) struct FrameCtx {
     /// The address of its word array, to GEP slots out of.
     data: PointerValue<'static>,
-    /// The `store` holding the slot count `rt_frame_open` reads. Its value
-    /// operand starts at zero and is replaced by `coroutine-end` once the true
-    /// count is known.
-    size_store: InstructionValue<'static>,
+    /// The `rt_frame_open` call. Its first argument, the slot count, starts
+    /// at zero and is replaced by `coroutine-end` once the true count is
+    /// known; its second, the mask table, likewise.
+    frame_open: InstructionValue<'static>,
     /// How many slots have been handed out.
     next: u64,
     /// The coroutine prologue's parts.
@@ -71,11 +71,11 @@ struct CoroCtx {
     /// install the same handler (its entry, its exits, each cleanup copy) all
     /// name one id.
     handlers: Vec<(BasicBlock<'static>, u64)>,
-    /// The `store` of `rt_frame_open`'s mask table address, in `coro.fresh` —
-    /// null until `coroutine-end` knows the table. Which slots are rooted is a
-    /// fact about the function, so it is given where the frame is made, not on
-    /// every resume.
-    rooted_table_store: InstructionValue<'static>,
+    /// The `rt_frame_open` call again, whose mask table argument is null
+    /// until `coroutine-end` knows the table. Which slots are rooted is a
+    /// fact about the function, so it is given where the frame is made, not
+    /// on every resume.
+    frame_open: InstructionValue<'static>,
     /// The slots handed out marked (`frame-slot-rooted`), which `coroutine-end`
     /// turns into the mask table once every slot is known.
     rooted: Vec<u64>,
@@ -130,11 +130,8 @@ fn open_coroutine_frame(
 /// does not merge a colliding name, it uniquifies it to `name.1` — and a
 /// second, differently-named declaration is a symbol the JIT will not resolve.
 fn ensure_declared(module: &Rc<RefCell<Module<'static>>>, name: &str) -> FunctionValue<'static> {
-    let existing = module.borrow().get_function(name);
-    match existing {
-        Some(f) => f,
-        None => module.borrow_mut().add_function(name, compiled_fn_type(), None),
-    }
+    let sig = crate::compile::externs::runtime_sig(name).unwrap_or_else(|| unreachable!("`{}` is not a runtime function", name));
+    crate::compile::runtime_abi::declare(&module.borrow(), name, sig)
 }
 
 /// `(frame-slot builder)` — the address of a fresh, **unmasked** frame slot.
@@ -219,12 +216,9 @@ fn store_resume_point(b: &Builder<'static>, data: PointerValue<'static>, id: u64
     Ok(())
 }
 
-/// Emits a call to an `rt_*` entry point with `vals` as its argument array.
-///
-/// Every one of them takes `(const i64 *args, u32 argc)`, so the array is an
-/// `alloca` filled by hand — the same three lines repeated at a dozen sites
-/// above, factored out here because the coroutine prologue makes eight such
-/// calls.
+/// Emits a call to `f`, a runtime function that takes its arguments as an
+/// array and its length (`rt_frame_call` and its siblings, whose list is a
+/// callee and any number of arguments), with `vals` as the array.
 fn emit_rt_call(
     b: &Builder<'static>,
     f: FunctionValue<'static>,
@@ -257,7 +251,7 @@ fn emit_rt_call(
 /// `(coroutine-begin builder m f)` — emit the prologue of a coroutine-ABI
 /// function and leave the builder at the start of its body.
 ///
-/// ```text
+/// ``text
 /// entry:      br (%param == 0), fresh, resumed
 /// fresh:      %d0 = rt_frame_open(N, MASK);  br prologue
 /// resumed:    %pc1 = load %param[PC];  br prologue
@@ -265,7 +259,7 @@ fn emit_rt_call(
 ///             %pc = phi [0, fresh], [%pc1, resumed];  br dispatch
 /// dispatch:   (empty — `coroutine-end` writes the chain)
 /// body:       ...
-/// ```
+/// ``
 ///
 /// `rt_frame_open` opens the frame on the task's root stack with the
 /// function's mask table as its mask (`N` and `MASK` are written in by
@@ -286,7 +280,7 @@ pub(super) fn llvm_builder_coroutine_begin(args: &[Value]) -> Result<Value, Eval
 
     // The prologue owns its declarations: a module can reach here without
     // having been through the driver.
-    let frame_open = ensure_declared(&module, "rt_frame_open");
+    ensure_declared(&module, "rt_frame_open");
     ensure_declared(&module, "rt_frame_call");
     ensure_declared(&module, "rt_pending_arg");
     ensure_declared(&module, "rt_pending_argc");
@@ -323,24 +317,14 @@ pub(super) fn llvm_builder_coroutine_begin(args: &[Value]) -> Result<Value, Eval
     // size and the mask table are placeholders; `coroutine-end` writes them
     // in.
     b.position_at_end(fresh);
-    let open_args = entry_alloca(&b, word_ty.array_type(2), "frame_open_args").map_err(|e| err("alloca", e))?;
-    let open_word = |n: u64, name: &str| unsafe {
-        b.build_gep(word_ty, open_args, &[word_ty.const_int(n, false)], name).map_err(|e| err("gep", e.to_string()))
-    };
-    let size_store =
-        b.build_store(open_word(0, "frame_size_slot")?, word_ty.const_int(0, false)).map_err(|e| err("store", e.to_string()))?;
-    let rooted_table_store =
-        b.build_store(open_word(1, "frame_mask_slot")?, word_ty.const_int(0, false)).map_err(|e| err("store", e.to_string()))?;
-    let fresh_data = match b
-        .build_call(frame_open, &[open_args.into(), ctx.i32_type().const_int(2, false).into()], "fresh_data")
-        .map_err(|e| err("call rt_frame_open", e.to_string()))?
-        .try_as_basic_value()
-    {
-        inkwell::values::ValueKind::Basic(v) => v.into_int_value(),
-        inkwell::values::ValueKind::Instruction(_) => {
-            return Err(EvalError::Internal(format!("{}: rt_frame_open returned no value", what)))
-        }
-    };
+    let (_, fresh_data) = crate::compile::runtime_abi::call(
+        &b,
+        &module.borrow(),
+        "rt_frame_open",
+        &[word_ty.const_int(0, false).into(), word_ty.const_int(0, false).into()],
+    )
+    .map_err(|e| err("call rt_frame_open", e))?;
+    let frame_open = fresh_data.as_instruction().ok_or_else(|| err("call rt_frame_open", "the call is not an instruction".to_string()))?;
     b.build_unconditional_branch(prologue).map_err(|e| err("br", e.to_string()))?;
 
     // resumed — the driver handed back the address of the words of the frame
@@ -382,7 +366,7 @@ pub(super) fn llvm_builder_coroutine_begin(args: &[Value]) -> Result<Value, Eval
             builder_key(&builder),
             FrameCtx {
                 data,
-                size_store,
+                frame_open,
                 // The driver protocol's own slots are never handed out as
                 // locals.
                 next: typelisp_abi::FRAME_RESERVED_SLOTS as u64,
@@ -394,7 +378,7 @@ pub(super) fn llvm_builder_coroutine_begin(args: &[Value]) -> Result<Value, Eval
                     pc,
                     resumes: Vec::new(),
                     handlers: Vec::new(),
-                    rooted_table_store,
+                    frame_open,
                     rooted: Vec::new(),
                     prologue_end,
                 },
@@ -712,7 +696,7 @@ pub(super) fn llvm_builder_coroutine_end(args: &[Value]) -> Result<Value, EvalEr
     b.build_return(Some(&word_ty.const_int(typelisp_abi::STATUS_RETURN as u64, false)))
         .map_err(|e| err("ret", e.to_string()))?;
 
-    if !f.size_store.set_operand(0, word_ty.const_int(f.next, false)) {
+    if !f.frame_open.set_operand(0, word_ty.const_int(f.next, false)) {
         return Err(EvalError::Internal(format!("{}: could not write the slot count into the prologue", what)));
     }
     set_rooted_table(&module, &coro, f.next).map_err(|e| err("rooted slots", e))?;
@@ -772,7 +756,7 @@ fn set_rooted_table(module: &Rc<RefCell<Module<'static>>>, coro: &CoroCtx, nslot
     table.set_constant(true);
     table.set_linkage(inkwell::module::Linkage::Private);
     table.set_unnamed_addr(true);
-    if !coro.rooted_table_store.set_operand(0, table.as_pointer_value().const_to_int(word_ty)) {
+    if !coro.frame_open.set_operand(1, table.as_pointer_value().const_to_int(word_ty)) {
         return Err("could not write the table's address into the prologue".to_string());
     }
     Ok(())

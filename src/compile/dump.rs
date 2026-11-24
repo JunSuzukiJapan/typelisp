@@ -351,7 +351,6 @@ pub fn dump_image(interp: &Interp, heap: &mut Heap, path: &str) -> Result<(), St
 /// (a session's definitions were compiled once already, so their call graph is
 /// known to work).
 fn emit_bitcode(interp: &Interp, heap: &mut Heap, items: &[CompileTarget]) -> Result<Vec<u8>, String> {
-    use inkwell::AddressSpace;
     use std::cell::RefCell;
     use std::rc::Rc;
 
@@ -361,20 +360,13 @@ fn emit_bitcode(interp: &Interp, heap: &mut Heap, items: &[CompileTarget]) -> Re
     let _guard = crate::compile::COMPILE_LOCK.lock().unwrap();
     let module = {
         let module = ctx.create_module("session");
-        let ptr_ty = ctx.ptr_type(AddressSpace::default());
-        let fn_ty = crate::compile::carriers::word().fn_type(&[ptr_ty.into(), ctx.i32_type().into()], false);
-        for (name, _) in crate::compile::externs::rt_extern_functions() {
-            module.add_function(name, fn_ty, None);
-        }
+        crate::compile::externs::declare_runtime_functions(&module);
         // A *Lisp* function's type follows this process's emit ABI, unlike the
-        // `rt_*` shims above whose `(ptr, i32)` never changes. The fourth
-        // copy of this loop (`bootstrap`, `prelude_bootstrap`, `aot`, here) --
-        // and the fourth time the wrong one made a body arrive at a
-        // declaration whose type disagreed.
+        // `rt_*` shims above, each of which has its own C signature.
         let lisp_fn_ty = if crate::compile::EMITTED_BODY_ABI == typelisp_abi::BODY_ABI_COROUTINE {
             crate::compile::llvm_builtins::coroutine_fn_type()
         } else {
-            fn_ty
+            crate::compile::llvm_builtins::compiled_fn_type()
         };
         for item in items {
             let sym = target_symbol_name(item);

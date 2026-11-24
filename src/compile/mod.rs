@@ -21,10 +21,9 @@ pub fn runtime_function_names() -> Vec<&'static str> {
 /// declares the whole set ([`runtime_function_names`]) gets the whole set
 /// back; one that declares three gets three.
 pub fn runtime_externals(module: &Module<'static>) -> Vec<(String, usize)> {
-    crate::compile::externs::rt_extern_functions()
-        .iter()
+    crate::compile::externs::runtime_addresses()
         .filter(|(name, _)| module.get_function(name).is_some())
-        .map(|(name, addr)| (name.to_string(), *addr))
+        .map(|(name, addr)| (name.to_string(), addr))
         .collect()
 }
 
@@ -71,6 +70,7 @@ pub mod ffi;
 pub mod llvm_builtins;
 pub mod optimize;
 pub(crate) mod raise_check;
+pub(crate) mod runtime_abi;
 pub mod orc;
 pub mod type_table;
 
@@ -526,20 +526,15 @@ mod tests {
 
         let ptr_ty = ctx.ptr_type(AddressSpace::default());
         let fn_ty = crate::compile::carriers::word().fn_type(&[ptr_ty.into(), ctx.i32_type().into()], false);
-        let rt_ping_decl = module.add_function("rt_ping", fn_ty, None);
         let caller = module.add_function("jit_ping_test", fn_ty, None);
 
         let builder = ctx.create_builder();
         let entry = ctx.append_basic_block(caller, "entry");
         builder.position_at_end(entry);
-        let one_slot = builder.build_alloca(crate::compile::carriers::word(), "one_slot").unwrap();
-        builder.build_store(one_slot, crate::compile::carriers::word().const_int(41, false)).unwrap();
-        let argc_one = ctx.i32_type().const_int(1, false);
-        let call = builder.build_call(rt_ping_decl, &[one_slot.into(), argc_one.into()], "rt_ping_result").unwrap();
-        let result = match call.try_as_basic_value() {
-            inkwell::values::ValueKind::Basic(v) => v.into_int_value(),
-            inkwell::values::ValueKind::Instruction(_) => panic!("rt_ping call produced no value"),
-        };
+        let sig = crate::compile::runtime_abi::shim(rt_ping as unsafe extern "C" fn(i64) -> i64).sig;
+        let rt_ping_decl = crate::compile::runtime_abi::declare(&module, "rt_ping", &sig);
+        let forty_one = crate::compile::carriers::word().const_int(41, false);
+        let (_, result) = crate::compile::runtime_abi::call_declared(&builder, rt_ping_decl, &sig, &[forty_one.into()]).unwrap();
         builder.build_return(Some(&result)).unwrap();
         module.verify().expect("module failed verification");
 
@@ -566,21 +561,14 @@ mod tests {
 
         let ptr_ty = ctx.ptr_type(AddressSpace::default());
         let fn_ty = crate::compile::carriers::word().fn_type(&[ptr_ty.into(), ctx.i32_type().into()], false);
-        let rt_heap_live_count_decl = module.add_function("rt_heap_live_count", fn_ty, None);
         let caller = module.add_function("jit_heap_test", fn_ty, None);
 
         let builder = ctx.create_builder();
         let entry = ctx.append_basic_block(caller, "entry");
         builder.position_at_end(entry);
-        let null_args = ptr_ty.const_null();
-        let argc_zero = ctx.i32_type().const_int(0, false);
-        let call = builder
-            .build_call(rt_heap_live_count_decl, &[null_args.into(), argc_zero.into()], "live_count")
-            .unwrap();
-        let result = match call.try_as_basic_value() {
-            inkwell::values::ValueKind::Basic(v) => v.into_int_value(),
-            inkwell::values::ValueKind::Instruction(_) => panic!("rt_heap_live_count call produced no value"),
-        };
+        let sig = crate::compile::runtime_abi::shim(rt_heap_live_count as unsafe extern "C" fn() -> i64).sig;
+        let rt_heap_live_count_decl = crate::compile::runtime_abi::declare(&module, "rt_heap_live_count", &sig);
+        let (_, result) = crate::compile::runtime_abi::call_declared(&builder, rt_heap_live_count_decl, &sig, &[]).unwrap();
         builder.build_return(Some(&result)).unwrap();
         module.verify().expect("module failed verification");
 
@@ -617,9 +605,6 @@ mod tests {
         let ptr_ty = ctx.ptr_type(AddressSpace::default());
         let word_ty = crate::compile::carriers::word();
         let fn_ty = word_ty.fn_type(&[ptr_ty.into(), ctx.i32_type().into()], false);
-        let rt_cons_decl = module.add_function("rt_cons", fn_ty, None);
-        let rt_car_decl = module.add_function("rt_car", fn_ty, None);
-        let rt_cdr_decl = module.add_function("rt_cdr", fn_ty, None);
         let caller = module.add_function("jit_cons_test", fn_ty, None);
 
         let builder = ctx.create_builder();
@@ -628,32 +613,12 @@ mod tests {
 
         let tagged_one = word_ty.const_int(1 << 3, false);
         let tagged_two = word_ty.const_int(2 << 3, false);
-        let cons_args = builder.build_alloca(word_ty.array_type(2), "cons_args").unwrap();
-        let argc_zero32 = ctx.i32_type().const_int(0, false);
-        let slot0 = unsafe { builder.build_gep(word_ty, cons_args, &[argc_zero32], "slot0").unwrap() };
-        builder.build_store(slot0, tagged_one).unwrap();
-        let slot1 = unsafe { builder.build_gep(word_ty, cons_args, &[ctx.i32_type().const_int(1, false)], "slot1").unwrap() };
-        builder.build_store(slot1, tagged_two).unwrap();
-        let argc_two = ctx.i32_type().const_int(2, false);
-        let pair = builder.build_call(rt_cons_decl, &[cons_args.into(), argc_two.into()], "pair").unwrap();
-        let pair = match pair.try_as_basic_value() {
-            inkwell::values::ValueKind::Basic(v) => v.into_int_value(),
-            inkwell::values::ValueKind::Instruction(_) => panic!("rt_cons call produced no value"),
+        let call = |name: &str, args: &[inkwell::values::BasicValueEnum<'static>]| {
+            crate::compile::runtime_abi::call(&builder, &module, name, args).unwrap().1
         };
-
-        let one_slot = builder.build_alloca(word_ty, "one_slot").unwrap();
-        builder.build_store(one_slot, pair).unwrap();
-        let argc_one = ctx.i32_type().const_int(1, false);
-        let car_call = builder.build_call(rt_car_decl, &[one_slot.into(), argc_one.into()], "car_result").unwrap();
-        let car_result = match car_call.try_as_basic_value() {
-            inkwell::values::ValueKind::Basic(v) => v.into_int_value(),
-            inkwell::values::ValueKind::Instruction(_) => panic!("rt_car call produced no value"),
-        };
-        let cdr_call = builder.build_call(rt_cdr_decl, &[one_slot.into(), argc_one.into()], "cdr_result").unwrap();
-        let cdr_result = match cdr_call.try_as_basic_value() {
-            inkwell::values::ValueKind::Basic(v) => v.into_int_value(),
-            inkwell::values::ValueKind::Instruction(_) => panic!("rt_cdr call produced no value"),
-        };
+        let pair = call("rt_cons", &[tagged_one.into(), tagged_two.into()]);
+        let car_result = call("rt_car", &[pair.into()]);
+        let cdr_result = call("rt_cdr", &[pair.into()]);
 
         let three = word_ty.const_int(3, false);
         let car_untagged = builder.build_right_shift(car_result, three, true, "car_untagged").unwrap();

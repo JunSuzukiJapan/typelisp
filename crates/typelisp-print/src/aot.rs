@@ -209,63 +209,51 @@ fn aot_print_object(heap: &mut Heap, v: Value, escape: bool) -> Result<Option<St
 }
 
 
-/// Reads a `(pointer, length)` pair of `args` as a `&'static str`.
+/// Reads a `(pointer, length)` pair as a `&'static str`.
 ///
 /// # Safety
 ///
 /// The two words must be a pointer to `len` valid UTF-8 bytes that outlive
 /// the process — which every caller satisfies, since the only ones are
 /// startup calls whose arguments are LLVM global string constants.
-unsafe fn static_str(args: *const i64, i: usize, who: &str) -> &'static str {
-    let ptr = *args.add(i) as usize as *const u8;
-    let len = *args.add(i + 1) as usize;
+unsafe fn static_str(ptr: i64, len: i64, who: &str) -> &'static str {
+    let (ptr, len) = (ptr as usize as *const u8, len as usize);
     match core::str::from_utf8(core::slice::from_raw_parts(ptr, len)) {
         Ok(s) => s,
-        Err(_) => fatal(&format!("{}: argument {} is not valid UTF-8", who, i)),
+        Err(_) => fatal(&format!("{}: a name is not valid UTF-8", who)),
     }
 }
 
-/// The definition the type in word `i` of `args` instantiates — a word an
-/// executable's startup read out of its type table.
-///
-/// # Safety
-///
-/// `args` must point to more than `i` valid `i64`s.
-unsafe fn definition_arg(args: *const i64, i: usize, who: &str) -> Definition {
-    let ty = type_arg(args, i, who);
+/// The definition the type `word` instantiates — a word an executable's
+/// startup read out of its type table.
+fn definition_arg(word: i64, who: &str) -> Definition {
+    let ty = type_arg(word, who);
     match definition_of(ty) {
         Ok(def) => def,
         Err(e) => fatal(&format!("{}: {}", who, e)),
     }
 }
 
-/// The type in word `i` of `args`.
-///
-/// # Safety
-///
-/// `args` must point to more than `i` valid `i64`s.
-unsafe fn type_arg(args: *const i64, i: usize, who: &str) -> TypeId {
-    let w = *args.add(i);
-    TypeId::from_word(w).unwrap_or_else(|| fatal(&format!("{}: argument {} ({}) is no type", who, i, w)))
+/// The type `w` names.
+fn type_arg(w: i64, who: &str) -> TypeId {
+    TypeId::from_word(w).unwrap_or_else(|| fatal(&format!("{}: {} is no type", who, w)))
 }
 
-/// Registers one enum variant's name: `args` is `[type, variant, name_ptr,
-/// name_len]`, `type` being an instantiation of the enum's definition.
+/// Registers one enum variant's name, `ty` being an instantiation of the
+/// enum's definition.
 ///
 /// Installs [`AOT_HOOKS`] on first use, so the generated startup sequence is
 /// just the registration calls with nothing to remember to do first.
 ///
 /// # Safety
 ///
-/// `args` must point to 4 valid `i64`s in those representations.
+/// `name_ptr` must point to `name_len` bytes of UTF-8 that live as long as
+/// the process.
 #[no_mangle]
-pub unsafe extern "C" fn rt_print_enum_variant(args: *const i64, argc: u32) -> i64 {
-    if argc < 4 {
-        fatal("rt_print_enum_variant: expected 4 arguments");
-    }
-    let def = definition_arg(args, 0, "rt_print_enum_variant");
-    let variant = *args.add(1) as usize;
-    let name = static_str(args, 2, "rt_print_enum_variant");
+pub unsafe extern "C" fn rt_print_enum_variant(ty: i64, variant: i64, name_ptr: i64, name_len: i64) -> i64 {
+    let def = definition_arg(ty, "rt_print_enum_variant");
+    let variant = variant as usize;
+    let name = static_str(name_ptr, name_len, "rt_print_enum_variant");
     install();
     crate::shared::print_shared().enum_names.write().insert((def, variant), name.to_string());
     0
@@ -278,8 +266,8 @@ pub const NO_VARIANT: i64 = -1;
 /// applies to every field of the type — a `Vector<T>`'s elements.
 pub const EVERY_FIELD: i64 = -1;
 
-/// Registers one field's declared type: `args` is `[type, variant, index,
-/// template]`, `type` being an instantiation of the definition and
+/// Registers one field's declared type, `ty` being an instantiation of the
+/// definition and
 /// `template` the field's type with the definition's parameters as
 /// `TypeShape::Param`s; `variant` is [`NO_VARIANT`] for a struct and `index`
 /// [`EVERY_FIELD`] for a uniform template. See
@@ -287,73 +275,55 @@ pub const EVERY_FIELD: i64 = -1;
 ///
 /// # Safety
 ///
-/// `args` must point to 4 valid `i64`s in those representations.
+/// None: every word is checked.
 #[no_mangle]
-pub unsafe extern "C" fn rt_print_field_template(args: *const i64, argc: u32) -> i64 {
-    if argc < 4 {
-        fatal("rt_print_field_template: expected 4 arguments");
-    }
-    let def = definition_arg(args, 0, "rt_print_field_template");
-    let variant = *args.add(1);
-    let index = *args.add(2);
-    let template = type_arg(args, 3, "rt_print_field_template");
+pub unsafe extern "C" fn rt_print_field_template(ty: i64, variant: i64, index: i64, template: i64) -> i64 {
+    let def = definition_arg(ty, "rt_print_field_template");
+    let template = type_arg(template, "rt_print_field_template");
     install();
     crate::shared::print_shared().field_templates.write().insert((def, variant, index), template);
     0
 }
 
-/// Registers one struct field's name: `args` is `[type, index, name_ptr,
-/// name_len]`. See `Interp::field_name_descriptors`.
+/// Registers one struct field's name. See `Interp::field_name_descriptors`.
 ///
 /// # Safety
 ///
-/// `args` must point to 4 valid `i64`s in those representations.
+/// As [`rt_print_enum_variant`].
 #[no_mangle]
-pub unsafe extern "C" fn rt_print_field_name(args: *const i64, argc: u32) -> i64 {
-    if argc < 4 {
-        fatal("rt_print_field_name: expected 4 arguments");
-    }
-    let def = definition_arg(args, 0, "rt_print_field_name");
-    let index = *args.add(1);
-    let name = static_str(args, 2, "rt_print_field_name");
+pub unsafe extern "C" fn rt_print_field_name(ty: i64, index: i64, name_ptr: i64, name_len: i64) -> i64 {
+    let def = definition_arg(ty, "rt_print_field_name");
+    let name = static_str(name_ptr, name_len, "rt_print_field_name");
     install();
     crate::shared::print_shared().field_names.write().insert((def, index), name.to_string());
     0
 }
 
-/// Registers one type's compiled `print-object`: `args` is `[type,
-/// fn_addr]`. An address of 0 says the executable has none for the type
+/// Registers one type's compiled `print-object`. An address of 0 says the executable has none for the type
 /// because it can make no value of it, so printing one is an internal error.
 ///
 /// # Safety
 ///
-/// `args` must point to 2 valid `i64`s, the second being the address of a
-/// function compiled under the shared compiled-function ABI.
+/// `addr` must be 0 or the address of a function compiled under the shared
+/// compiled-function ABI.
 #[no_mangle]
-pub unsafe extern "C" fn rt_print_object_method(args: *const i64, argc: u32) -> i64 {
-    if argc < 2 {
-        fatal("rt_print_object_method: expected 2 arguments");
-    }
-    let ty = type_arg(args, 0, "rt_print_object_method");
-    let addr = *args.add(1) as usize;
+pub unsafe extern "C" fn rt_print_object_method(ty: i64, addr: i64) -> i64 {
+    let ty = type_arg(ty, "rt_print_object_method");
+    let addr = addr as usize;
     install();
     crate::shared::print_shared().print_object.write().insert(ty, addr);
     0
 }
 
-/// Registers one printer control variable's compiled global: `args` is
-/// `[name_ptr, name_len, id]`.
+/// Registers one printer control variable's compiled global.
 ///
 /// # Safety
 ///
-/// `args` must point to 3 valid `i64`s in those representations.
+/// As [`rt_print_enum_variant`].
 #[no_mangle]
-pub unsafe extern "C" fn rt_print_global(args: *const i64, argc: u32) -> i64 {
-    if argc < 3 {
-        fatal("rt_print_global: expected 3 arguments");
-    }
-    let name = static_str(args, 0, "rt_print_global");
-    let id = *args.add(2) as usize;
+pub unsafe extern "C" fn rt_print_global(name_ptr: i64, name_len: i64, id: i64) -> i64 {
+    let name = static_str(name_ptr, name_len, "rt_print_global");
+    let id = id as usize;
     install();
     crate::shared::print_shared().globals.write().insert(name.to_string(), id);
     0
@@ -365,7 +335,7 @@ pub unsafe extern "C" fn rt_print_global(args: *const i64, argc: u32) -> i64 {
 /// by what writes one ([`crate::shared::name_view`]) and linked in with it.
 static NAMES: AtomicPtr<i64> = AtomicPtr::new(core::ptr::null_mut());
 
-/// Registers how the executable writes type names: `args[0]` is the
+/// Registers how the executable writes type names: `x` is the
 /// address of a constant table, `[module_ptr, module_len, n]` and then `n`
 /// times `[words_ptr, words_len, name_ptr, name_len]` — the module the
 /// names are written for as the words `typelisp_mem::type_words::ns_words`
@@ -375,14 +345,11 @@ static NAMES: AtomicPtr<i64> = AtomicPtr::new(core::ptr::null_mut());
 ///
 /// # Safety
 ///
-/// `args` must point to 1 valid `i64`, the address of such a table, whose
+/// The words must be valid, the address of such a table, whose
 /// words and strings are constants.
 #[no_mangle]
-pub unsafe extern "C" fn rt_print_names(args: *const i64, argc: u32) -> i64 {
-    if argc < 1 {
-        fatal("rt_print_names: expected 1 argument");
-    }
-    NAMES.store(*args as usize as *mut i64, Ordering::SeqCst);
+pub unsafe extern "C" fn rt_print_names(x: i64) -> i64 {
+    NAMES.store(x as usize as *mut i64, Ordering::SeqCst);
     0
 }
 
@@ -409,7 +376,7 @@ pub(crate) fn registered_names() -> Option<typelisp_mem::NameView> {
         for i in 0..n {
             let entry = table.add(3 + 4 * i);
             let definition = typelisp_mem::type_words::read_definition(words(entry));
-            let name = static_str(entry, 2, "rt_print_names");
+            let name = static_str(*entry.add(2), *entry.add(3), "rt_print_names");
             imports.insert(definition, name);
         }
         Some(typelisp_mem::NameView::new(module, imports))

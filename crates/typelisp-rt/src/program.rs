@@ -20,12 +20,12 @@ pub const DEFAULT_AOT_HEAP_CAPACITY: usize = 1 << 16;
 /// as the very first thing the generated `main` does, before calling the
 /// file's own `tl_main`.
 ///
-/// Reads the desired capacity from `args[0]` if `argc >= 1`, otherwise uses
-/// [`DEFAULT_AOT_HEAP_CAPACITY`]. `args[1]`, if `argc >= 2` and not 0, is the
-/// bound on the bytes the whole process allocates (`typl -c --max-memory`,
+/// `cells` is the arena's capacity ([`DEFAULT_AOT_HEAP_CAPACITY`] unless
+/// `typl -c` was told otherwise). `max_memory`, if not 0, is the bound on
+/// the bytes the whole process allocates (`typl -c --max-memory`,
 /// [`crate::mem_limit`]); it is set before the arena is allocated, so the
-/// arena counts toward it. `args[2]`, if `argc >= 3` and not 0, fixes the
-/// arena at its capacity (`typl -c --heap-cells`); otherwise it grows as
+/// arena counts toward it. `fixed`, if not 0, fixes the arena at its
+/// capacity (`typl -c --heap-cells`); otherwise it grows as
 /// [`Heap::with_capacity`] lets it. The allocated `Heap` is deliberately
 /// never freed — it must outlive every other compiled function in the
 /// process, i.e. live until the OS reclaims everything at process exit, the
@@ -34,17 +34,17 @@ pub const DEFAULT_AOT_HEAP_CAPACITY: usize = 1 << 16;
 ///
 /// # Safety
 ///
-/// Same as [`rt_ping`]: `args` must point to at least `argc` valid,
-/// readable `i64`s.
+/// None: it only allocates. `cells` is the cons arena's size,
+/// `max_memory` the memory limit (0 for none), and `fixed` nonzero when the
+/// arena must not grow.
 #[no_mangle]
-pub unsafe extern "C" fn rt_heap_init(args: *const i64, argc: u32) -> i64 {
+pub unsafe extern "C" fn rt_heap_init(cells: i64, max_memory: i64, fixed: i64) -> i64 {
     typelisp_mem::host::install_panic_report();
-    let capacity = if argc >= 1 { *args as usize } else { DEFAULT_AOT_HEAP_CAPACITY };
-    if argc >= 2 && *args.add(1) != 0 {
-        crate::mem_limit::set_memory_limit(*args.add(1) as usize);
+    if max_memory != 0 {
+        crate::mem_limit::set_memory_limit(max_memory as usize);
     }
-    let mut heap = Box::new(Heap::with_capacity(capacity));
-    if argc >= 3 && *args.add(2) != 0 {
+    let mut heap = Box::new(Heap::with_capacity(cells as usize));
+    if fixed != 0 {
         heap.set_growth_limit(0);
     }
     set_active_heap(Box::into_raw(heap));
@@ -61,7 +61,7 @@ pub unsafe extern "C" fn rt_heap_init(args: *const i64, argc: u32) -> i64 {
 ///
 /// A `Heap` must already be registered on this thread (see [`active_heap`]).
 #[no_mangle]
-pub unsafe extern "C" fn rt_heap_live_count(_args: *const i64, _argc: u32) -> i64 {
+pub unsafe extern "C" fn rt_heap_live_count() -> i64 {
     active_heap().live_count() as i64
 }
 
@@ -131,14 +131,14 @@ pub unsafe extern "C" fn rt_run_entry(entry: i64) -> i64 {
 ///
 /// # Safety
 ///
-/// `argc` must be 3; `args[0]` must point to `args[1]` valid
-/// `coroutine_fn_type` addresses of zero-argument bodies, and `args[2]` must
+/// `inits` must point to `count` valid
+/// `coroutine_fn_type` addresses of zero-argument bodies, and `entry` must
 /// be one such address that tolerates being entered with no arguments; a
 /// `Heap` must already be registered on this thread (`rt_heap_init` runs
 /// first).
 #[no_mangle]
-pub unsafe extern "C" fn rt_run_program(args: *const i64, argc: u32) -> i64 {
-    run_entry(args, argc, "rt_run_program", false, |program| run_program(program, None))
+pub unsafe extern "C" fn rt_run_program(inits: i64, count: i64, entry: i64) -> i64 {
+    run_entry(inits, count, entry, false, |program| run_program(program, None))
 }
 
 /// [`rt_run_program`] for a `main` declared to return `int`: the answer is
@@ -153,8 +153,8 @@ pub unsafe extern "C" fn rt_run_program(args: *const i64, argc: u32) -> i64 {
 ///
 /// [`rt_run_program`]'s.
 #[no_mangle]
-pub unsafe extern "C" fn rt_run_program_int(args: *const i64, argc: u32) -> i64 {
-    run_entry(args, argc, "rt_run_program_int", true, |program| run_program(program, None))
+pub unsafe extern "C" fn rt_run_program_int(inits: i64, count: i64, entry: i64) -> i64 {
+    run_entry(inits, count, entry, true, |program| run_program(program, None))
 }
 
 /// [`rt_run_program`] for a program that needs no scheduler: the compiler
@@ -167,8 +167,8 @@ pub unsafe extern "C" fn rt_run_program_int(args: *const i64, argc: u32) -> i64 
 ///
 /// [`rt_run_program`]'s.
 #[no_mangle]
-pub unsafe extern "C" fn rt_run_program_alone(args: *const i64, argc: u32) -> i64 {
-    run_entry(args, argc, "rt_run_program_alone", false, |program| run_alone(program))
+pub unsafe extern "C" fn rt_run_program_alone(inits: i64, count: i64, entry: i64) -> i64 {
+    run_entry(inits, count, entry, false, |program| run_alone(program))
 }
 
 /// [`rt_run_program_alone`] for a `main` declared to return `int`, read as
@@ -178,8 +178,8 @@ pub unsafe extern "C" fn rt_run_program_alone(args: *const i64, argc: u32) -> i6
 ///
 /// [`rt_run_program`]'s.
 #[no_mangle]
-pub unsafe extern "C" fn rt_run_program_alone_int(args: *const i64, argc: u32) -> i64 {
-    run_entry(args, argc, "rt_run_program_alone_int", true, |program| run_alone(program))
+pub unsafe extern "C" fn rt_run_program_alone_int(inits: i64, count: i64, entry: i64) -> i64 {
+    run_entry(inits, count, entry, true, |program| run_alone(program))
 }
 
 /// What starts the OS threads that step tasks alongside the one running the
@@ -197,13 +197,13 @@ pub type StartThreads = fn(&alloc::sync::Arc<crate::sched::SchedShared<crate::sc
 ///
 /// [`rt_run_program`]'s.
 pub unsafe fn run_entry(
-    args: *const i64,
-    argc: u32,
-    what: &str,
+    inits: i64,
+    count: i64,
+    entry: i64,
     returns_int: bool,
     run: impl FnOnce(&Program) -> Result<Value, i64>,
 ) -> i64 {
-    let program = read_program(args, argc, what);
+    let program = read_program(inits, count, entry);
     let result = run(&program);
     if !returns_int {
         // A `()`-returning `main` that returns normally exits 0; the word its
@@ -233,22 +233,20 @@ pub struct Program {
     pub entry: crate::coroutine::CoroutineFn,
 }
 
-/// Reads `[inits, n, entry]` off the standard shim argument array.
+/// The program a generated `main` hands over: the address of its `count`
+/// initialisers and its entry point.
 ///
 /// # Safety
 ///
 /// [`rt_run_program`]'s.
-pub unsafe fn read_program(args: *const i64, argc: u32, what: &str) -> Program {
-    if argc < 3 {
-        fatal(&format!("{}: expected 3 arguments (the initialiser array, its count and the entry point)", what));
-    }
-    let words = collect_words(*args as usize as *const i64, *args.add(1));
+pub unsafe fn read_program(inits: i64, count: i64, entry: i64) -> Program {
+    let words = collect_words(inits as usize as *const i64, count);
     // A 0 is a global the executable left out.
     let inits = words
         .into_iter()
         .map(|w| (w != 0).then(|| core::mem::transmute::<usize, crate::coroutine::CoroutineFn>(w as usize)))
         .collect();
-    let entry: crate::coroutine::CoroutineFn = core::mem::transmute(*args.add(2) as usize);
+    let entry: crate::coroutine::CoroutineFn = core::mem::transmute(entry as usize);
     Program { inits, entry }
 }
 
@@ -364,18 +362,13 @@ unsafe fn run_alone(program: &Program) -> Result<Value, i64> {
 ///
 /// # Safety
 ///
-/// `argc` must be 3; `args[0]` must be a `coroutine_fn_type` address and
-/// `args[1]`/`args[2]` a valid argument array for it; a `Heap` must already
+/// `f` must be a `coroutine_fn_type` address and `callee_args`/`callee_argc`
+/// a valid argument array for it; a `Heap` must already
 /// be registered on this thread.
 #[no_mangle]
-pub unsafe extern "C-unwind" fn rt_drive_body(args: *const i64, argc: u32) -> i64 {
-    if argc < 3 {
-        fatal("rt_drive_body: expected 3 arguments (the address, the argument array and its count)");
-    }
-    let f: crate::coroutine::CoroutineFn = core::mem::transmute(*args as usize);
-    let callee_args = *args.add(1) as usize as *const i64;
-    let callee_argc = *args.add(2);
-    let words = collect_words(callee_args, callee_argc);
+pub unsafe extern "C-unwind" fn rt_drive_body(f: i64, callee_args: i64, callee_argc: i64) -> i64 {
+    let f: crate::coroutine::CoroutineFn = core::mem::transmute(f as usize);
+    let words = collect_words(callee_args as usize as *const i64, callee_argc);
     match drive_to_completion(f, &words, &[], "rt_drive_body") {
         Ok(v) => v,
         Err(raised) => raised.into_word(),

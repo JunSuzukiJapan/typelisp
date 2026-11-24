@@ -1,11 +1,10 @@
 //! Fixed-width integer arithmetic and `f64` math.
 
-use typelisp_mem::prelude::*;
 use typelisp_mem::fixed::Fault;
-use typelisp_abi::{fatal, raise};
+use typelisp_abi::raise;
 
 /// The failing side of a compiled fixed-width `/` or `rem`: the divisor
-/// `args[1]` is zero, or the dividend `args[0]` is its type's most negative
+/// `b` is zero, or the dividend `a` is its type's most negative
 /// value and the divisor `-1`. Compiled code tests for both and does the
 /// division itself; it calls this only when one of them holds, and this
 /// [`raise`]s the message `typelisp_mem::fixed::Fault` gives the interpreter.
@@ -15,13 +14,10 @@ use typelisp_abi::{fatal, raise};
 ///
 /// # Safety
 ///
-/// `argc` must be `>= 2` and `args` must point to at least 2 valid `i64`s.
+/// Each word must be a value of the type the signature gives it.
 #[no_mangle]
-pub unsafe extern "C-unwind" fn rt_int_div_fault(args: *const i64, argc: u32) -> i64 {
-    if argc < 2 {
-        fatal("rt_int_div_fault: expected 2 arguments");
-    }
-    let (a, b) = (*args, *args.add(1));
+pub unsafe extern "C-unwind" fn rt_int_div_fault(a: i64, b: i64) -> i64 {
+    let (a, b) = (a, b);
     let fault = if b == 0 { Fault::DivideByZero } else { Fault::Overflow { dividend: i128::from(a), divisor: i128::from(b) } };
     raise(fault.message()).into_word()
 }
@@ -31,13 +27,14 @@ pub unsafe extern "C-unwind" fn rt_int_div_fault(args: *const i64, argc: u32) ->
 ///
 /// # Safety
 ///
-/// No arguments are read.
+/// Takes the operands as [`rt_int_div_fault`] does, and reads neither: the
+/// divisor is zero.
 #[no_mangle]
-pub unsafe extern "C-unwind" fn rt_int_mod_fault(_args: *const i64, _argc: u32) -> i64 {
+pub unsafe extern "C-unwind" fn rt_int_mod_fault(_dividend: i64, _divisor: i64) -> i64 {
     raise(Fault::ModByZero.message()).into_word()
 }
 
-/// `try-int->char`'s question — is `args[0]` a Unicode scalar value?
+/// `try-int->char`'s question — is `n` a Unicode scalar value?
 ///
 /// Not merely "in `u32` range": the surrogate range `D800..=DFFF` is `u32` and
 /// is not a `char`, which is exactly the case `int->char` raises on and this
@@ -45,18 +42,15 @@ pub unsafe extern "C-unwind" fn rt_int_mod_fault(_args: *const i64, _argc: u32) 
 ///
 /// # Safety
 ///
-/// `argc` must be `>= 1` and `args` must point to a valid `i64`.
+/// The words must be valid.
 #[no_mangle]
-pub unsafe extern "C" fn rt_int_fits_char(args: *const i64, argc: u32) -> i64 {
-    if argc < 1 {
-        fatal("rt_int_fits_char: expected 1 argument");
-    }
-    let n = *args;
+pub unsafe extern "C" fn rt_int_fits_char(n: i64) -> i64 {
+    let n = n;
     let in_u32_range = n >= 0 && n <= i64::from(u32::MAX);
     (in_u32_range && char::from_u32(n as u32).is_some()) as i64
 }
 
-/// `try-float->f32`'s question — does `args[0]` survive the round trip
+/// `try-float->f32`'s question — does `v` survive the round trip
 /// through binary32 unchanged?
 ///
 /// Bit equality rather than `==` so the answer matches
@@ -66,14 +60,11 @@ pub unsafe extern "C" fn rt_int_fits_char(args: *const i64, argc: u32) -> i64 {
 ///
 /// # Safety
 ///
-/// `argc` must be `>= 1` and `args` must point to a valid `i64` holding an
+/// The word must hold an
 /// `f64`'s bit pattern.
 #[no_mangle]
-pub unsafe extern "C" fn rt_f64_fits_f32(args: *const i64, argc: u32) -> i64 {
-    if argc < 1 {
-        fatal("rt_f64_fits_f32: expected 1 argument");
-    }
-    let v = f64::from_bits(*args as u64);
+pub unsafe extern "C" fn rt_f64_fits_f32(v: i64) -> i64 {
+    let v = f64::from_bits(v as u64);
     (f64::from(v as f32).to_bits() == v.to_bits()) as i64
 }
 
@@ -81,26 +72,20 @@ pub unsafe extern "C" fn rt_f64_fits_f32(args: *const i64, argc: u32) -> i64 {
 /// intrinsic in the LLVM version this project pins (`sin`/`cos`/`exp`/`log`
 /// do and go straight to LLVM IR in `compiler.rs` instead — see
 /// `llvm_builder_build_float_unary_intrinsic`): decode the raw bit-pattern
-/// argument, apply `f`, re-encode. `argc`/pointer validity is the caller's
-/// (`compiler.rs`'s `alloca-args`/`store-arg`) responsibility, same as every
-/// other `rt_*` shim here.
+/// argument, apply `f`, re-encode.
 ///
 /// # Safety
 ///
-/// `argc` must be `>= 1` and `args` must point to at least 1 valid `i64`
-/// (an `f64`'s raw bit pattern).
-unsafe fn rt_f64_unary(args: *const i64, argc: u32, name: &str, f: fn(f64) -> f64) -> i64 {
-    if argc < 1 {
-        fatal(&format!("{}: expected 1 argument", name));
-    }
-    f(f64::from_bits(*args as u64)).to_bits() as i64
+/// None: `x` is an `f64`'s raw bit pattern.
+unsafe fn rt_f64_unary(x: i64, f: fn(f64) -> f64) -> i64 {
+    f(f64::from_bits(x as u64)).to_bits() as i64
 }
 
 macro_rules! rt_f64_unary_exports {
     ($($export:ident => $method:ident,)*) => {$(
         #[no_mangle]
-        pub unsafe extern "C" fn $export(args: *const i64, argc: u32) -> i64 {
-            rt_f64_unary(args, argc, stringify!($export), <f64 as num_traits::Float>::$method)
+        pub unsafe extern "C" fn $export(x: i64) -> i64 {
+            rt_f64_unary(x, <f64 as num_traits::Float>::$method)
         }
     )*};
 }
@@ -111,18 +96,15 @@ macro_rules! rt_f64_unary_exports {
 /// # Safety
 ///
 /// As [`rt_f64_unary`].
-unsafe fn rt_f32_unary(args: *const i64, argc: u32, name: &str, f: fn(f32) -> f32) -> i64 {
-    if argc < 1 {
-        fatal(&format!("{}: expected 1 argument", name));
-    }
-    f64::from(f(f64::from_bits(*args as u64) as f32)).to_bits() as i64
+unsafe fn rt_f32_unary(x: i64, f: fn(f32) -> f32) -> i64 {
+    f64::from(f(f64::from_bits(x as u64) as f32)).to_bits() as i64
 }
 
 macro_rules! rt_f32_unary_exports {
     ($($export:ident => $method:ident,)*) => {$(
         #[no_mangle]
-        pub unsafe extern "C" fn $export(args: *const i64, argc: u32) -> i64 {
-            rt_f32_unary(args, argc, stringify!($export), <f32 as num_traits::Float>::$method)
+        pub unsafe extern "C" fn $export(x: i64) -> i64 {
+            rt_f32_unary(x, <f32 as num_traits::Float>::$method)
         }
     )*};
 }

@@ -265,39 +265,27 @@ pub fn disable(n: i64) -> Result<(), String> {
 ///
 /// # Safety
 ///
-/// `args` must point to two readable `i64`s, the second the address of a
+/// The words must be valid, the second the address of a
 /// coroutine-ABI body that takes nothing.
 #[no_mangle]
-pub unsafe extern "C" fn rt_interrupt_register(args: *const i64, argc: u32) -> i64 {
-    if argc < 2 {
-        typelisp_abi::fatal("rt_interrupt_register: expected the vector-table entry and the handler");
-    }
-    let vector = *args as usize;
+pub unsafe extern "C" fn rt_interrupt_register(vector: i64, body: i64) -> i64 {
+    let vector = vector as usize;
     if vector >= VECTORS {
         typelisp_abi::fatal(&format!("rt_interrupt_register: there is no vector-table entry {}", vector));
     }
     TYPELISP_INTERRUPT_RUN.store(run as fn(usize) as *mut (), SeqCst);
-    HANDLERS[vector].store(*args.add(1) as usize, SeqCst);
+    HANDLERS[vector].store(body as usize, SeqCst);
     0
-}
-
-/// The interrupt number a builtin's `int` argument holds: the raw word, as
-/// compiled code passes an `int` to a builtin.
-unsafe fn interrupt_number(args: *const i64, argc: u32, who: &str) -> i64 {
-    if argc < 1 {
-        typelisp_abi::fatal(&format!("{}: expected 1 argument", who));
-    }
-    *args
 }
 
 /// `(enable-interrupt n)` for compiled code.
 ///
 /// # Safety
 ///
-/// `args` must point to one raw `int`.
+/// The word must be one raw `int`.
 #[no_mangle]
-pub unsafe extern "C-unwind" fn rt_interrupt_enable(args: *const i64, argc: u32) -> i64 {
-    match enable(interrupt_number(args, argc, "rt_interrupt_enable")) {
+pub unsafe extern "C-unwind" fn rt_interrupt_enable(x: i64) -> i64 {
+    match enable(x) {
         Ok(()) => 0,
         Err(msg) => raise(msg).into_word(),
     }
@@ -307,10 +295,10 @@ pub unsafe extern "C-unwind" fn rt_interrupt_enable(args: *const i64, argc: u32)
 ///
 /// # Safety
 ///
-/// `args` must point to one raw `int`.
+/// The word must be one raw `int`.
 #[no_mangle]
-pub unsafe extern "C-unwind" fn rt_interrupt_disable(args: *const i64, argc: u32) -> i64 {
-    match disable(interrupt_number(args, argc, "rt_interrupt_disable")) {
+pub unsafe extern "C-unwind" fn rt_interrupt_disable(x: i64) -> i64 {
+    match disable(x) {
         Ok(()) => 0,
         Err(msg) => raise(msg).into_word(),
     }

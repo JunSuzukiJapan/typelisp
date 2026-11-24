@@ -35,7 +35,7 @@
 
 use std::cell::Cell;
 
-use typelisp_abi::{active_heap, encode, fatal, tagged_arg};
+use typelisp_abi::{active_heap, decode, encode, fatal};
 
 use crate::eval::interp::{with_active_interp, Interp};
 
@@ -64,17 +64,14 @@ thread_local! {
 ///
 /// # Safety
 ///
-/// `args` must point to 5 valid `i64`s, the first pair naming immortal
+/// The words must be valid, the first pair naming immortal
 /// bytes, the second immortal words.
 #[no_mangle]
-pub unsafe extern "C" fn rt_eval_state(args: *const i64, argc: u32) -> i64 {
-    if argc < 5 {
-        fatal("rt_eval_state: expected 5 arguments");
-    }
-    let bytes = std::slice::from_raw_parts(*args as usize as *const u8, *args.add(1) as usize);
-    let ns_words = std::slice::from_raw_parts(*args.add(2) as usize as *const i64, *args.add(3) as usize);
+pub unsafe extern "C" fn rt_eval_state(bytes: i64, bytes_len: i64, ns_words: i64, ns_len: i64, release: i64) -> i64 {
+    let bytes = std::slice::from_raw_parts(bytes as usize as *const u8, bytes_len as usize);
+    let ns_words = std::slice::from_raw_parts(ns_words as usize as *const i64, ns_len as usize);
     let ns = typelisp_mem::type_words::read_ns(ns_words);
-    crate::release::set_release(*args.add(4) != 0);
+    crate::release::set_release(release != 0);
     EVAL_DUMP.with(|c| c.set(Some((bytes, ns))));
     0
 }
@@ -93,7 +90,7 @@ pub unsafe extern "C" fn rt_eval_state(args: *const i64, argc: u32) -> i64 {
 ///
 /// A `Heap` must be registered on this thread.
 #[no_mangle]
-pub unsafe extern "C" fn rt_eval_init(_args: *const i64, _argc: u32) -> i64 {
+pub unsafe extern "C" fn rt_eval_init() -> i64 {
     let (bytes, ns) = match EVAL_DUMP.with(|c| c.get()) {
         Some(b) => b,
         None => fatal("rt_eval_init: the environment dump was never registered"),
@@ -125,20 +122,17 @@ pub unsafe extern "C" fn rt_eval_init(_args: *const i64, _argc: u32) -> i64 {
 const NO_INTERPRETER_HERE: &str = "{}: the interpreter runs on the main thread, and this call was made on another \
      inside a call that cannot move there (a print method, say)";
 
-/// `eval` for compiled code: `args[0]` is the form, tagged; the result is the
+/// `eval` for compiled code: `form` is the form, tagged; the result is the
 /// tagged `Result<Sexpr, EvalError>`.
 ///
 /// # Safety
 ///
-/// `args` must point to at least 1 valid tagged `i64`; a `Heap` must be
+/// The words must be valid; a `Heap` must be
 /// registered on this thread, and either an `Interp` (JIT) or a completed
 /// [`rt_eval_init`] (AOT).
 #[no_mangle]
-pub unsafe extern "C-unwind" fn rt_eval(args: *const i64, argc: u32) -> i64 {
-    if argc < 1 {
-        fatal("rt_eval: expected 1 argument");
-    }
-    let form = tagged_arg(args, 0);
+pub unsafe extern "C-unwind" fn rt_eval(form: i64) -> i64 {
+    let form = decode(form);
     let heap = active_heap();
 
     // AOT first, and by [`AOT_ENV`] rather than by asking whether there is an
@@ -166,7 +160,7 @@ pub unsafe extern "C-unwind" fn rt_eval(args: *const i64, argc: u32) -> i64 {
     }
 }
 
-/// `macroexpand-1` for compiled code: `args[0]` is the form and `args[1]`
+/// `macroexpand-1` for compiled code: `form` is the form and `environment`
 /// the `Option<Environment>`, tagged; the result is the tagged
 /// `Result<Option<Sexpr>, EvalError>`.
 ///
@@ -174,11 +168,11 @@ pub unsafe extern "C-unwind" fn rt_eval(args: *const i64, argc: u32) -> i64 {
 ///
 /// Same as [`rt_eval`]'s.
 #[no_mangle]
-pub unsafe extern "C-unwind" fn rt_macroexpand_1(args: *const i64, argc: u32) -> i64 {
-    expand_shim(args, argc, "rt_macroexpand_1", Interp::macroexpand_1_form)
+pub unsafe extern "C-unwind" fn rt_macroexpand_1(form: i64, environment: i64) -> i64 {
+    expand_shim(form, environment, "rt_macroexpand_1", Interp::macroexpand_1_form)
 }
 
-/// `macroexpand` for compiled code: `args[0]` is the form and `args[1]` the
+/// `macroexpand` for compiled code: `form` is the form and `environment` the
 /// `Option<Environment>`, tagged; the result is the tagged
 /// `Result<Option<Sexpr>, EvalError>`.
 ///
@@ -186,8 +180,8 @@ pub unsafe extern "C-unwind" fn rt_macroexpand_1(args: *const i64, argc: u32) ->
 ///
 /// Same as [`rt_eval`]'s.
 #[no_mangle]
-pub unsafe extern "C-unwind" fn rt_macroexpand(args: *const i64, argc: u32) -> i64 {
-    expand_shim(args, argc, "rt_macroexpand", Interp::macroexpand_form)
+pub unsafe extern "C-unwind" fn rt_macroexpand(form: i64, environment: i64) -> i64 {
+    expand_shim(form, environment, "rt_macroexpand", Interp::macroexpand_form)
 }
 
 /// The half [`rt_macroexpand_1`] and [`rt_macroexpand`] share: find the
@@ -196,17 +190,11 @@ pub unsafe extern "C-unwind" fn rt_macroexpand(args: *const i64, argc: u32) -> i
 /// # Safety
 ///
 /// Same as [`rt_eval`]'s.
-unsafe fn expand_shim(
-    args: *const i64,
-    argc: u32,
-    who: &str,
+unsafe fn expand_shim(form: i64, environment: i64, who: &str,
     f: impl Fn(&Interp, &mut typelisp_mem::Heap, typelisp_mem::Value, typelisp_mem::Value) -> Result<typelisp_mem::Value, crate::eval::interp::EvalError>,
 ) -> i64 {
-    if argc < 2 {
-        fatal(&format!("{}: expected 2 arguments", who));
-    }
-    let form = tagged_arg(args, 0);
-    let environment = tagged_arg(args, 1);
+    let form = decode(form);
+    let environment = decode(environment);
     let heap = active_heap();
     let env = AOT_ENV.with(|c| c.get());
     let result = if env.is_null() {
@@ -243,14 +231,14 @@ unsafe fn expand_shim(
 ///
 /// # Safety
 ///
-/// [`typelisp_rt::rt_run_program`]'s: `argc` must be 3, and `args` must
-/// describe a valid initialiser array, its count, and an entry address, all
+/// [`typelisp_rt::rt_run_program`]'s: the words must describe a valid
+/// initialiser array, its count, and an entry address, all
 /// `coroutine_fn_type` — plus a completed [`rt_eval_init`] must already have
 /// run on this thread (`AOT_ENV` must be set; the generated `main` always
 /// calls it first when it emits a call to this shim at all).
 #[no_mangle]
-pub unsafe extern "C" fn rt_run_program_interp(args: *const i64, argc: u32) -> i64 {
-    run_program_interp(args, argc, false)
+pub unsafe extern "C" fn rt_run_program_interp(inits: i64, count: i64, entry: i64) -> i64 {
+    run_program_interp(inits, count, entry, false)
 }
 
 /// [`rt_run_program_interp`] for a `main` declared to return `int`: the
@@ -262,8 +250,8 @@ pub unsafe extern "C" fn rt_run_program_interp(args: *const i64, argc: u32) -> i
 ///
 /// [`rt_run_program_interp`]'s.
 #[no_mangle]
-pub unsafe extern "C" fn rt_run_program_interp_int(args: *const i64, argc: u32) -> i64 {
-    run_program_interp(args, argc, true)
+pub unsafe extern "C" fn rt_run_program_interp_int(inits: i64, count: i64, entry: i64) -> i64 {
+    run_program_interp(inits, count, entry, true)
 }
 
 /// The half [`rt_run_program_interp`] and [`rt_run_program_interp_int`]
@@ -274,8 +262,8 @@ pub unsafe extern "C" fn rt_run_program_interp_int(args: *const i64, argc: u32) 
 /// # Safety
 ///
 /// [`rt_run_program_interp`]'s.
-unsafe fn run_program_interp(args: *const i64, argc: u32, main_returns_int: bool) -> i64 {
-    let program = typelisp_rt::read_program(args, argc, "rt_run_program_interp");
+unsafe fn run_program_interp(inits: i64, count: i64, entry: i64, main_returns_int: bool) -> i64 {
+    let program = typelisp_rt::read_program(inits, count, entry);
     let interp = match AOT_ENV.with(|c| c.get()) {
         p if !p.is_null() => &*p,
         _ => fatal("rt_run_program_interp: no environment — rt_eval_init has not run on this thread"),

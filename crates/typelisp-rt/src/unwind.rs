@@ -18,7 +18,7 @@ use typelisp_mem::Value;
 /// None beyond the ordinary compiled-function-ABI contract — unlike every
 /// other `rt_*` function here, this one never touches the active `Heap`.
 #[no_mangle]
-pub unsafe extern "C" fn rt_match_fail(_args: *const i64, _argc: u32) -> i64 {
+pub unsafe extern "C" fn rt_match_fail() -> i64 {
     fatal("match: no pattern arm matched (the checker should have guaranteed exhaustiveness)")
 }
 
@@ -29,14 +29,11 @@ pub unsafe extern "C" fn rt_match_fail(_args: *const i64, _argc: u32) -> i64 {
 ///
 /// # Safety
 ///
-/// `argc` must be `>= 1`, `args[0]` must decode to a `Value::Str`; a `Heap`
+/// , `message` must decode to a `Value::Str`; a `Heap`
 /// must already be registered on this thread.
 #[no_mangle]
-pub unsafe extern "C-unwind" fn rt_panic(args: *const i64, argc: u32) -> i64 {
-    if argc < 1 {
-        fatal("rt_panic: expected 1 argument");
-    }
-    let message = match decode(*args) {
+pub unsafe extern "C-unwind" fn rt_panic(message: i64) -> i64 {
+    let message = match decode(message) {
         Value::Str(id) => active_heap().string(id).to_string(),
         _ => fatal("rt_panic: argument is not a Str"),
     };
@@ -52,7 +49,7 @@ pub unsafe extern "C-unwind" fn rt_panic(args: *const i64, argc: u32) -> i64 {
 ///
 /// None: it reads a thread-local and touches no argument.
 #[no_mangle]
-pub unsafe extern "C" fn rt_unwinding(_args: *const i64, _argc: u32) -> i64 {
+pub unsafe extern "C" fn rt_unwinding() -> i64 {
     i64::from(typelisp_abi::is_raised())
 }
 
@@ -249,25 +246,22 @@ pub fn unwind_throw() -> typelisp_abi::Raised {
 ///
 /// # Safety
 ///
-/// `argc` must be `>= 2`; `args[0]` must decode to a `Value::Symbol` and
-/// `args[1]` to the thrown value already in its tagged form (the island
+/// `tag` must decode to a `Value::Symbol` and
+/// `value` to the thrown value already in its tagged form (the island
 /// converts by the node's baked-in representation kind before calling). A
 /// `Heap` must be registered on this thread.
 #[no_mangle]
-pub unsafe extern "C-unwind" fn rt_throw(args: *const i64, argc: u32) -> i64 {
-    if argc < 2 {
-        fatal("rt_throw: expected 2 arguments (tag, value)");
-    }
-    let tag = match decode(*args) {
+pub unsafe extern "C-unwind" fn rt_throw(tag: i64, value: i64) -> i64 {
+    let tag = match decode(tag) {
         Value::Symbol(id) => id,
         _ => fatal("rt_throw: tag is not a symbol"),
     };
-    let value = decode(*args.add(1));
+    let value = decode(value);
     park_throw(tag, value);
     unwind_throw().into_word()
 }
 
-/// Whether the throw currently in flight carries tag `args[0]` — a `catch`'s
+/// Whether the throw currently in flight carries tag `tag` — a `catch`'s
 /// dispatch block asking "is this one mine?". Returns the compiled `bool`
 /// encoding (`1`/`0`), like every `rt_*` predicate.
 ///
@@ -281,14 +275,11 @@ pub unsafe extern "C-unwind" fn rt_throw(args: *const i64, argc: u32) -> i64 {
 ///
 /// # Safety
 ///
-/// `argc` must be `>= 1` and `args[0]` must decode to a `Value::Symbol`; a
+/// `tag` must decode to a `Value::Symbol`; a
 /// `Heap` must be registered on this thread.
 #[no_mangle]
-pub unsafe extern "C" fn rt_throw_matches(args: *const i64, argc: u32) -> i64 {
-    if argc < 1 {
-        fatal("rt_throw_matches: expected 1 argument");
-    }
-    let tag = match decode(*args) {
+pub unsafe extern "C" fn rt_throw_matches(tag: i64) -> i64 {
+    let tag = match decode(tag) {
         Value::Symbol(id) => id,
         _ => fatal("rt_throw_matches: tag is not a symbol"),
     };
@@ -321,7 +312,7 @@ pub unsafe extern "C" fn rt_throw_matches(args: *const i64, argc: u32) -> i64 {
 ///
 /// A `Heap` must be registered on this thread.
 #[no_mangle]
-pub unsafe extern "C" fn rt_throw_take_value(_args: *const i64, _argc: u32) -> i64 {
+pub unsafe extern "C" fn rt_throw_take_value() -> i64 {
     CAUGHT_UNWIND.with(|cell| *cell.borrow_mut() = None);
     match take_throw() {
         Some((_, value)) => {

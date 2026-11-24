@@ -25,13 +25,11 @@ use std::rc::Rc;
 
 use inkwell::memory_buffer::MemoryBuffer;
 use inkwell::module::Module;
-use inkwell::AddressSpace;
 
 use typelisp_mem::{Heap, RootScope, SymRef, Value};
 
 use crate::check::repr::Repr;
 use crate::eval::interp::{str_rt, EvalError, Interp, Uncompilable};
-use crate::compile::externs::rt_extern_functions;
 use crate::compile::symbols::target_symbol_name;
 use crate::CompileTarget;
 
@@ -223,17 +221,13 @@ pub(crate) fn fresh_module_with_declarations(name: &str, items: &[CompileTarget]
     let ctx = crate::compile::llvm_context();
     let _guard = crate::compile::COMPILE_LOCK.lock().unwrap();
     let module = ctx.create_module(name);
-    let ptr_ty = ctx.ptr_type(AddressSpace::default());
-    let fn_ty = crate::compile::carriers::word().fn_type(&[ptr_ty.into(), ctx.i32_type().into()], false);
-    for (name, _) in rt_extern_functions() {
-        module.add_function(name, fn_ty, None);
-    }
+    crate::compile::externs::declare_runtime_functions(&module);
     // Under the coroutine ABI (Phase C2) a compiled Lisp function is
     // `i64 f(i64 frame)`, not `i64 f(i64*, i32)`.
     let lisp_fn_ty = if crate::compile::EMITTED_BODY_ABI == typelisp_abi::BODY_ABI_COROUTINE {
         crate::compile::carriers::word().fn_type(&[crate::compile::carriers::word().into()], false)
     } else {
-        fn_ty
+        crate::compile::llvm_builtins::compiled_fn_type()
     };
     for item in items {
         let sym = target_symbol_name(item);
@@ -665,9 +659,7 @@ pub fn disassemble_function(
             crate::compile::llvm_builtins::declare_external_compiled_function(&module, &target_symbol);
         }
     }
-    for (rt_name, _) in rt_extern_functions() {
-        crate::compile::llvm_builtins::declare_external_function(&module, rt_name);
-    }
+    crate::compile::externs::declare_runtime_functions(&module.borrow());
 
     add_compiled_function(interp, heap, module.clone(), target, &symbol)?;
 
@@ -778,9 +770,7 @@ pub fn compile_scc(interp: &Interp, heap: &mut Heap, members: &[CompileTarget]) 
     for member in members.iter().chain(&targets) {
         crate::compile::llvm_builtins::declare_external_compiled_function(&module, &target_symbol_name(member));
     }
-    for (rt_name, _) in rt_extern_functions() {
-        crate::compile::llvm_builtins::declare_external_function(&module, rt_name);
-    }
+    crate::compile::externs::declare_runtime_functions(&module.borrow());
 
     for member in members {
         add_compiled_function(interp, heap, module.clone(), member, &target_symbol_name(member))?;
@@ -794,7 +784,7 @@ pub fn compile_scc(interp: &Interp, heap: &mut Heap, members: &[CompileTarget]) 
             (target_symbol_name(t), addr)
         })
         .collect();
-    externals.extend(rt_extern_functions().iter().map(|(n, addr)| (n.to_string(), *addr)));
+    externals.extend(crate::compile::externs::runtime_addresses().map(|(n, addr)| (n.to_string(), addr)));
     // Mirrors `compile::aot::compile_file`'s own `verify()` call in the
     // same position, before handing the module to LLVM for real: a
     // typelisp-hosted `compiler.rs` bug that emits

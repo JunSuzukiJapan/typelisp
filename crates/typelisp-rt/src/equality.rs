@@ -294,7 +294,7 @@ fn equalp_hash(heap: &Heap, v: Value, depth: u32, h: &mut FixedHasher) {
 // belong next to what they call, and the fix if that ever matters is the same
 // one the printer got, a crate of its own.
 
-use crate::{active_heap, decode, encode, fatal};
+use crate::{active_heap, decode, encode};
 /// The three structural equality predicates for compiled code
 /// ([`crate::equality`]). Each takes two tagged `Sexpr` words and returns a
 /// raw `0`/`1` — a compiled `bool` is the bare machine word, not a tagged
@@ -305,15 +305,12 @@ use crate::{active_heap, decode, encode, fatal};
 ///
 /// # Safety
 ///
-/// `argc` must be `>= 2` and `args` must point to 2 valid tagged `i64`s; a
+/// The words must be valid; a
 /// `Heap` must be registered on this thread. Allocates nothing, so the result
 /// needs no GC-root protection.
 #[no_mangle]
-pub unsafe extern "C" fn rt_sexpr_eql(args: *const i64, argc: u32) -> i64 {
-    if argc < 2 {
-        fatal("rt_sexpr_eql: expected 2 arguments");
-    }
-    i64::from(eql_val(active_heap(), decode(*args), decode(*args.offset(1))))
+pub unsafe extern "C" fn rt_sexpr_eql(a: i64, b: i64) -> i64 {
+    i64::from(eql_val(active_heap(), decode(a), decode(b)))
 }
 
 /// `(eq a b)` on a value of any type for compiled code — the free function;
@@ -324,11 +321,8 @@ pub unsafe extern "C" fn rt_sexpr_eql(args: *const i64, argc: u32) -> i64 {
 ///
 /// Same as [`rt_sexpr_eql`].
 #[no_mangle]
-pub unsafe extern "C" fn rt_sexpr_eq(args: *const i64, argc: u32) -> i64 {
-    if argc < 2 {
-        fatal("rt_sexpr_eq: expected 2 arguments");
-    }
-    i64::from(eq_val(active_heap(), decode(*args), decode(*args.offset(1))))
+pub unsafe extern "C" fn rt_sexpr_eq(a: i64, b: i64) -> i64 {
+    i64::from(eq_val(active_heap(), decode(a), decode(b)))
 }
 
 /// `(equal a b)` for compiled code — see [`rt_sexpr_eql`].
@@ -337,11 +331,8 @@ pub unsafe extern "C" fn rt_sexpr_eq(args: *const i64, argc: u32) -> i64 {
 ///
 /// Same as [`rt_sexpr_eql`].
 #[no_mangle]
-pub unsafe extern "C" fn rt_sexpr_equal(args: *const i64, argc: u32) -> i64 {
-    if argc < 2 {
-        fatal("rt_sexpr_equal: expected 2 arguments");
-    }
-    i64::from(equal_val(active_heap(), decode(*args), decode(*args.offset(1))))
+pub unsafe extern "C" fn rt_sexpr_equal(a: i64, b: i64) -> i64 {
+    i64::from(equal_val(active_heap(), decode(a), decode(b)))
 }
 
 /// `(equalp a b)` for compiled code — see [`rt_sexpr_eql`].
@@ -350,25 +341,19 @@ pub unsafe extern "C" fn rt_sexpr_equal(args: *const i64, argc: u32) -> i64 {
 ///
 /// Same as [`rt_sexpr_eql`].
 #[no_mangle]
-pub unsafe extern "C" fn rt_sexpr_equalp(args: *const i64, argc: u32) -> i64 {
-    if argc < 2 {
-        fatal("rt_sexpr_equalp: expected 2 arguments");
-    }
-    i64::from(equalp_val(active_heap(), decode(*args), decode(*args.offset(1))))
+pub unsafe extern "C" fn rt_sexpr_equalp(a: i64, b: i64) -> i64 {
+    i64::from(equalp_val(active_heap(), decode(a), decode(b)))
 }
 
 /// `(sxhash-eq v)` for compiled code: a tagged word in, a tagged `int` out.
 ///
 /// # Safety
 ///
-/// `args` must point to 1 valid tagged `i64`; a `Heap` must be registered on
+/// The words must be valid; a `Heap` must be registered on
 /// this thread.
 #[no_mangle]
-pub unsafe extern "C" fn rt_sxhash_eq(args: *const i64, argc: u32) -> i64 {
-    if argc < 1 {
-        fatal("rt_sxhash_eq: expected 1 argument");
-    }
-    encode(Value::Int(sxhash_eq_val(active_heap(), decode(*args))))
+pub unsafe extern "C" fn rt_sxhash_eq(x: i64) -> i64 {
+    encode(Value::Int(sxhash_eq_val(active_heap(), decode(x))))
 }
 
 /// `(sxhash-eql v)` for compiled code — see [`rt_sxhash_eq`].
@@ -377,11 +362,8 @@ pub unsafe extern "C" fn rt_sxhash_eq(args: *const i64, argc: u32) -> i64 {
 ///
 /// Same as [`rt_sxhash_eq`].
 #[no_mangle]
-pub unsafe extern "C" fn rt_sxhash_eql(args: *const i64, argc: u32) -> i64 {
-    if argc < 1 {
-        fatal("rt_sxhash_eql: expected 1 argument");
-    }
-    encode(Value::Int(sxhash_eql_val(active_heap(), decode(*args))))
+pub unsafe extern "C" fn rt_sxhash_eql(x: i64) -> i64 {
+    encode(Value::Int(sxhash_eql_val(active_heap(), decode(x))))
 }
 
 /// `(sxhash-equalp v)` for compiled code — see [`rt_sxhash_eq`].
@@ -390,9 +372,6 @@ pub unsafe extern "C" fn rt_sxhash_eql(args: *const i64, argc: u32) -> i64 {
 ///
 /// Same as [`rt_sxhash_eq`].
 #[no_mangle]
-pub unsafe extern "C" fn rt_sxhash_equalp(args: *const i64, argc: u32) -> i64 {
-    if argc < 1 {
-        fatal("rt_sxhash_equalp: expected 1 argument");
-    }
-    encode(Value::Int(sxhash_equalp_val(active_heap(), decode(*args))))
+pub unsafe extern "C" fn rt_sxhash_equalp(x: i64) -> i64 {
+    encode(Value::Int(sxhash_equalp_val(active_heap(), decode(x))))
 }

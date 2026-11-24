@@ -18,15 +18,12 @@ use typelisp_mem::{Heap, Value};
 ///
 /// # Safety
 ///
-/// `argc` must be `>= 2` and `args` must point to at least 2 valid `i64`s;
+/// The words must be valid;
 /// a `Heap` must already be registered on this thread.
 #[no_mangle]
-pub unsafe extern "C" fn rt_cons(args: *const i64, argc: u32) -> i64 {
-    if argc < 2 {
-        fatal("rt_cons: expected 2 arguments");
-    }
-    let car = decode(*args);
-    let cdr = decode(*args.add(1));
+pub unsafe extern "C" fn rt_cons(car: i64, cdr: i64) -> i64 {
+    let car = decode(car);
+    let cdr = decode(cdr);
     match active_heap().cons(car, cdr) {
         Ok(v) => encode(v),
         Err(_) => fatal("rt_cons: heap exhausted, no cons cell could be reclaimed"),
@@ -41,11 +38,11 @@ pub unsafe extern "C" fn rt_cons(args: *const i64, argc: u32) -> i64 {
 ///
 /// # Safety
 ///
-/// `argc` must be `>= 1` and `args` must point to at least 1 valid `i64`; a
+/// The words must be valid; a
 /// `Heap` must already be registered on this thread.
 #[no_mangle]
-pub unsafe extern "C-unwind" fn rt_car(args: *const i64, argc: u32) -> i64 {
-    cons_half(args, argc, "sexpr-car", Heap::car)
+pub unsafe extern "C-unwind" fn rt_car(arg: i64) -> i64 {
+    cons_half(arg, "sexpr-car", Heap::car)
 }
 
 /// `(cdr c)` for compiled code — see [`rt_car`]'s doc comment.
@@ -54,8 +51,8 @@ pub unsafe extern "C-unwind" fn rt_car(args: *const i64, argc: u32) -> i64 {
 ///
 /// Same as [`rt_car`].
 #[no_mangle]
-pub unsafe extern "C-unwind" fn rt_cdr(args: *const i64, argc: u32) -> i64 {
-    cons_half(args, argc, "sexpr-cdr", Heap::cdr)
+pub unsafe extern "C-unwind" fn rt_cdr(arg: i64) -> i64 {
+    cons_half(arg, "sexpr-cdr", Heap::cdr)
 }
 
 /// The body of [`rt_car`] and [`rt_cdr`], which differ only in the half they
@@ -65,16 +62,10 @@ pub unsafe extern "C-unwind" fn rt_cdr(args: *const i64, argc: u32) -> i64 {
 /// are `Option<Sexpr>` now, so this is `None` in and `None` out — and it has
 /// to agree with the interpreter's `sexpr-car`/`sexpr-cdr`, or the same walk
 /// would end differently depending on whether its caller was compiled.
-unsafe fn cons_half(
-    args: *const i64,
-    argc: u32,
-    who: &str,
+unsafe fn cons_half(arg: i64, who: &str,
     half: fn(&Heap, Value) -> Result<Value, typelisp_mem::Error>,
 ) -> i64 {
-    if argc < 1 {
-        fatal(&format!("{}: expected 1 argument", who));
-    }
-    let arg = decode(*args);
+    let arg = decode(arg);
     if arg.is_empty() {
         return encode(arg);
     }
@@ -91,11 +82,11 @@ unsafe fn cons_half(
 ///
 /// # Safety
 ///
-/// `argc` must be `>= 2` and `args` must point to at least 2 valid `i64`s;
+/// The words must be valid;
 /// a `Heap` must already be registered on this thread.
 #[no_mangle]
-pub unsafe extern "C" fn rt_set_car(args: *const i64, argc: u32) -> i64 {
-    set_cons_half(args, argc, "rt_set_car", Heap::set_car)
+pub unsafe extern "C" fn rt_set_car(c: i64, val: i64) -> i64 {
+    set_cons_half(c, val, "rt_set_car", Heap::set_car)
 }
 
 /// `(rplacd c val)` for compiled code — see [`rt_set_car`]'s doc comment.
@@ -104,23 +95,17 @@ pub unsafe extern "C" fn rt_set_car(args: *const i64, argc: u32) -> i64 {
 ///
 /// Same as [`rt_set_car`].
 #[no_mangle]
-pub unsafe extern "C" fn rt_set_cdr(args: *const i64, argc: u32) -> i64 {
-    set_cons_half(args, argc, "rt_set_cdr", Heap::set_cdr)
+pub unsafe extern "C" fn rt_set_cdr(c: i64, val: i64) -> i64 {
+    set_cons_half(c, val, "rt_set_cdr", Heap::set_cdr)
 }
 
 /// The body of [`rt_set_car`] and [`rt_set_cdr`], which differ only in the
 /// half they write.
-unsafe fn set_cons_half(
-    args: *const i64,
-    argc: u32,
-    who: &str,
+unsafe fn set_cons_half(c: i64, val: i64, who: &str,
     set: fn(&mut Heap, Value, Value) -> Result<(), typelisp_mem::Error>,
 ) -> i64 {
-    if argc < 2 {
-        fatal(&format!("{}: expected 2 arguments", who));
-    }
-    let c = decode(*args);
-    let val = decode(*args.add(1));
+    let c = decode(c);
+    let val = decode(val);
     match set(active_heap(), c, val) {
         Ok(()) => 0,
         Err(_) => fatal(&format!("{}: first argument is not a cons", who)),
@@ -146,13 +131,10 @@ unsafe fn set_cons_half(
 ///
 /// # Safety
 ///
-/// `argc` must be `>= 1` and `args` must point to at least 1 valid `i64`.
+/// Each word must be a value of the type the signature gives it.
 #[no_mangle]
-pub unsafe extern "C" fn rt_consp(args: *const i64, argc: u32) -> i64 {
-    if argc < 1 {
-        fatal("rt_consp: expected 1 argument");
-    }
-    i64::from(matches!(decode(*args), Value::Cons(_)))
+pub unsafe extern "C" fn rt_consp(x: i64) -> i64 {
+    i64::from(matches!(decode(x), Value::Cons(_)))
 }
 
 /// `(sexpr-null x)`: `1` if the tagged value is the empty list `()`.
@@ -161,11 +143,8 @@ pub unsafe extern "C" fn rt_consp(args: *const i64, argc: u32) -> i64 {
 ///
 /// Same as [`rt_consp`].
 #[no_mangle]
-pub unsafe extern "C" fn rt_null(args: *const i64, argc: u32) -> i64 {
-    if argc < 1 {
-        fatal("rt_null: expected 1 argument");
-    }
-    i64::from(matches!(decode(*args), Value::Empty))
+pub unsafe extern "C" fn rt_null(x: i64) -> i64 {
+    i64::from(matches!(decode(x), Value::Empty))
 }
 
 /// `(sexpr-atom x)`: `1` if the tagged value is *not* a cons cell — the
@@ -175,11 +154,8 @@ pub unsafe extern "C" fn rt_null(args: *const i64, argc: u32) -> i64 {
 ///
 /// Same as [`rt_consp`].
 #[no_mangle]
-pub unsafe extern "C" fn rt_atom(args: *const i64, argc: u32) -> i64 {
-    if argc < 1 {
-        fatal("rt_atom: expected 1 argument");
-    }
-    i64::from(!matches!(decode(*args), Value::Cons(_)))
+pub unsafe extern "C" fn rt_atom(x: i64) -> i64 {
+    i64::from(!matches!(decode(x), Value::Cons(_)))
 }
 
 /// `(sexpr-symp x)`: `1` if the tagged value is an interned symbol.
@@ -188,11 +164,8 @@ pub unsafe extern "C" fn rt_atom(args: *const i64, argc: u32) -> i64 {
 ///
 /// Same as [`rt_consp`].
 #[no_mangle]
-pub unsafe extern "C" fn rt_symp(args: *const i64, argc: u32) -> i64 {
-    if argc < 1 {
-        fatal("rt_symp: expected 1 argument");
-    }
-    i64::from(matches!(decode(*args), Value::Symbol(_)))
+pub unsafe extern "C" fn rt_symp(x: i64) -> i64 {
+    i64::from(matches!(decode(x), Value::Symbol(_)))
 }
 
 /// `(sexpr-int x)`: an `int` node's value — the tagged word itself, a
@@ -205,11 +178,8 @@ pub unsafe extern "C" fn rt_symp(args: *const i64, argc: u32) -> i64 {
 ///
 /// Same as [`rt_consp`].
 #[no_mangle]
-pub unsafe extern "C-unwind" fn rt_sexpr_int(args: *const i64, argc: u32) -> i64 {
-    if argc < 1 {
-        fatal("rt_sexpr_int: expected 1 argument");
-    }
-    let w = *args;
+pub unsafe extern "C-unwind" fn rt_sexpr_int(w: i64) -> i64 {
+    let w = w;
     match decode(w) {
         Value::Int(_) => w,
         Value::Boxed(id) if active_heap().is_bignum(id) => {
@@ -228,11 +198,8 @@ pub unsafe extern "C-unwind" fn rt_sexpr_int(args: *const i64, argc: u32) -> i64
 ///
 /// Same as [`rt_consp`].
 #[no_mangle]
-pub unsafe extern "C-unwind" fn rt_sexpr_bool(args: *const i64, argc: u32) -> i64 {
-    if argc < 1 {
-        fatal("rt_sexpr_bool: expected 1 argument");
-    }
-    match decode(*args) {
+pub unsafe extern "C-unwind" fn rt_sexpr_bool(x: i64) -> i64 {
+    match decode(x) {
         Value::Bool(b) => i64::from(b),
         _ => raise("sexpr-bool: expected a Bool Sexpr node".to_string()).into_word(),
     }
@@ -245,11 +212,8 @@ pub unsafe extern "C-unwind" fn rt_sexpr_bool(args: *const i64, argc: u32) -> i6
 ///
 /// Same as [`rt_consp`].
 #[no_mangle]
-pub unsafe extern "C-unwind" fn rt_sexpr_char(args: *const i64, argc: u32) -> i64 {
-    if argc < 1 {
-        fatal("rt_sexpr_char: expected 1 argument");
-    }
-    match decode(*args) {
+pub unsafe extern "C-unwind" fn rt_sexpr_char(x: i64) -> i64 {
+    match decode(x) {
         Value::Char(c) => c as i64,
         _ => raise("sexpr-char: expected a Char Sexpr node".to_string()).into_word(),
     }
@@ -264,12 +228,9 @@ pub unsafe extern "C-unwind" fn rt_sexpr_char(args: *const i64, argc: u32) -> i6
 ///
 /// Same as [`rt_consp`].
 #[no_mangle]
-pub unsafe extern "C-unwind" fn rt_sexpr_str(args: *const i64, argc: u32) -> i64 {
-    if argc < 1 {
-        fatal("rt_sexpr_str: expected 1 argument");
-    }
-    match decode(*args) {
-        Value::Str(_) => *args,
+pub unsafe extern "C-unwind" fn rt_sexpr_str(x: i64) -> i64 {
+    match decode(x) {
+        Value::Str(_) => x,
         _ => raise("sexpr-str: expected a Str Sexpr node".to_string()).into_word(),
     }
 }
@@ -283,11 +244,8 @@ pub unsafe extern "C-unwind" fn rt_sexpr_str(args: *const i64, argc: u32) -> i64
 ///
 /// Same as [`rt_consp`], plus a registered `Heap` (this allocates).
 #[no_mangle]
-pub unsafe extern "C-unwind" fn rt_sym_name(args: *const i64, argc: u32) -> i64 {
-    if argc < 1 {
-        fatal("rt_sym_name: expected 1 argument");
-    }
-    match decode(*args) {
+pub unsafe extern "C-unwind" fn rt_sym_name(x: i64) -> i64 {
+    match decode(x) {
         Value::Symbol(id) => {
             let heap = active_heap();
             let name = id.name().to_string();

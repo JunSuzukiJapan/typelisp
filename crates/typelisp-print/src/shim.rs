@@ -34,7 +34,7 @@
 //! `unwind-protect` region that should see them.
 
 use typelisp_mem::prelude::*;
-use typelisp_abi::{active_heap, encode, fatal, raise, tagged_arg, Raised};
+use typelisp_abi::{active_heap, decode, encode, fatal, raise, Raised};
 use typelisp_mem::symbols::well_known_symbol;
 use typelisp_mem::{wk, Value};
 
@@ -76,41 +76,39 @@ fn check_argc(argc: u32, n: usize, who: &str) {
     }
 }
 
-/// `pprint`/`pprint-fill`/`pprint-linear`/`pprint-tabular` — `args[0]` names
-/// which (as a string, so one shim serves all four), `args[1]` is the object
-/// and `args[2]` is `pprint-tabular`'s column width as a bare `i64`.
+/// `pprint`/`pprint-fill`/`pprint-linear`/`pprint-tabular` — `which` names
+/// which (as a string, so one shim serves all four), `value` is the object
+/// and `colinc` is `pprint-tabular`'s column width as a bare `i64`.
 ///
 /// # Safety
 ///
-/// `args` must point to at least 3 valid `i64`s in those representations; a
+/// The words must be valid; a
 /// `Heap` must be registered on this thread.
 #[no_mangle]
-pub unsafe extern "C-unwind" fn rt_pprint(args: *const i64, argc: u32) -> i64 {
-    check_argc(argc, 3, "rt_pprint");
-    let which = tagged_arg(args, 0);
-    let value = tagged_arg(args, 1);
-    let colinc = Value::Int(*args.add(2));
+pub unsafe extern "C-unwind" fn rt_pprint(which: i64, value: i64, colinc: i64) -> i64 {
+    let which = decode(which);
+    let value = decode(value);
+    let colinc = Value::Int(colinc);
     if run(wk::F_PPRINT_RT, vec![which, value, colinc]).is_err() {
         return 0;
     }
     0
 }
 
-/// Opens a logical block: `args[0]` is the list `pprint-pop` walks,
-/// `args[1]`/`args[3]` the prefix and suffix strings, `args[2]` the
+/// Opens a logical block: `obj` is the list `pprint-pop` walks,
+/// `prefix`/`suffix` the prefix and suffix strings, `per_line` the
 /// per-line-prefix flag as a bare `0`/`1`.
 ///
 /// # Safety
 ///
-/// `args` must point to at least 4 valid `i64`s in those representations; a
+/// The words must be valid; a
 /// `Heap` must be registered on this thread.
 #[no_mangle]
-pub unsafe extern "C-unwind" fn rt_pprint_block_start(args: *const i64, argc: u32) -> i64 {
-    check_argc(argc, 4, "rt_pprint_block_start");
-    let obj = tagged_arg(args, 0);
-    let prefix = tagged_arg(args, 1);
-    let per_line = Value::Bool(*args.add(2) != 0);
-    let suffix = tagged_arg(args, 3);
+pub unsafe extern "C-unwind" fn rt_pprint_block_start(obj: i64, prefix: i64, per_line: i64, suffix: i64) -> i64 {
+    let obj = decode(obj);
+    let prefix = decode(prefix);
+    let per_line = Value::Bool(per_line != 0);
+    let suffix = decode(suffix);
     if run(wk::F_PPRINT_BLOCK_START_RT, vec![obj, prefix, per_line, suffix]).is_err() {
         return 0;
     }
@@ -123,7 +121,7 @@ pub unsafe extern "C-unwind" fn rt_pprint_block_start(args: *const i64, argc: u3
 ///
 /// A `Heap` must be registered on this thread.
 #[no_mangle]
-pub unsafe extern "C-unwind" fn rt_pprint_block_end(_args: *const i64, _argc: u32) -> i64 {
+pub unsafe extern "C-unwind" fn rt_pprint_block_end() -> i64 {
     if run(wk::F_PPRINT_BLOCK_END_RT, Vec::new()).is_err() {
         return 0;
     }
@@ -134,46 +132,43 @@ pub unsafe extern "C-unwind" fn rt_pprint_block_end(_args: *const i64, _argc: u3
 ///
 /// # Safety
 ///
-/// `args` must point to at least 1 valid tagged `i64`; a `Heap` must be
+/// The words must be valid; a `Heap` must be
 /// registered on this thread.
 #[no_mangle]
-pub unsafe extern "C-unwind" fn rt_pprint_newline(args: *const i64, argc: u32) -> i64 {
-    check_argc(argc, 1, "rt_pprint_newline");
-    if run(wk::F_PPRINT_NEWLINE, vec![tagged_arg(args, 0)]).is_err() {
+pub unsafe extern "C-unwind" fn rt_pprint_newline(x: i64) -> i64 {
+    if run(wk::F_PPRINT_NEWLINE, vec![decode(x)]).is_err() {
         return 0;
     }
     0
 }
 
-/// `(pprint-indent :block|:current n)` — `args[1]` is a bare `i64`.
+/// `(pprint-indent :block|:current n)` — `n` is a bare `i64`.
 ///
 /// # Safety
 ///
-/// `args` must point to at least 2 valid `i64`s in those representations; a
+/// The words must be valid; a
 /// `Heap` must be registered on this thread.
 #[no_mangle]
-pub unsafe extern "C-unwind" fn rt_pprint_indent(args: *const i64, argc: u32) -> i64 {
-    check_argc(argc, 2, "rt_pprint_indent");
-    let kind = tagged_arg(args, 0);
-    let n = Value::Int(*args.add(1));
+pub unsafe extern "C-unwind" fn rt_pprint_indent(kind: i64, n: i64) -> i64 {
+    let kind = decode(kind);
+    let n = Value::Int(n);
     if run(wk::F_PPRINT_INDENT, vec![kind, n]).is_err() {
         return 0;
     }
     0
 }
 
-/// `(pprint-tab kind colnum colinc)` — `args[1]`/`args[2]` are bare `i64`s.
+/// `(pprint-tab kind colnum colinc)` — `colnum`/`colinc` are bare `i64`s.
 ///
 /// # Safety
 ///
-/// `args` must point to at least 3 valid `i64`s in those representations; a
+/// The words must be valid; a
 /// `Heap` must be registered on this thread.
 #[no_mangle]
-pub unsafe extern "C-unwind" fn rt_pprint_tab(args: *const i64, argc: u32) -> i64 {
-    check_argc(argc, 3, "rt_pprint_tab");
-    let kind = tagged_arg(args, 0);
-    let colnum = Value::Int(*args.add(1));
-    let colinc = Value::Int(*args.add(2));
+pub unsafe extern "C-unwind" fn rt_pprint_tab(kind: i64, colnum: i64, colinc: i64) -> i64 {
+    let kind = decode(kind);
+    let colnum = Value::Int(colnum);
+    let colinc = Value::Int(colinc);
     if run(wk::F_PPRINT_TAB, vec![kind, colnum, colinc]).is_err() {
         return 0;
     }
@@ -187,7 +182,7 @@ pub unsafe extern "C-unwind" fn rt_pprint_tab(args: *const i64, argc: u32) -> i6
 ///
 /// A `Heap` must be registered on this thread.
 #[no_mangle]
-pub unsafe extern "C-unwind" fn rt_pprint_pop(_args: *const i64, _argc: u32) -> i64 {
+pub unsafe extern "C-unwind" fn rt_pprint_pop() -> i64 {
     match run(wk::F_PPRINT_POP, Vec::new()) {
         Ok(v) => encode(v),
         Err(_) => 0,
@@ -200,7 +195,7 @@ pub unsafe extern "C-unwind" fn rt_pprint_pop(_args: *const i64, _argc: u32) -> 
 ///
 /// A `Heap` must be registered on this thread.
 #[no_mangle]
-pub unsafe extern "C-unwind" fn rt_pprint_list_exhausted(_args: *const i64, _argc: u32) -> i64 {
+pub unsafe extern "C-unwind" fn rt_pprint_list_exhausted() -> i64 {
     match run(wk::F_PPRINT_LIST_EXHAUSTED, Vec::new()) {
         Ok(Value::Bool(b)) => i64::from(b),
         Err(_) => 0,
@@ -220,7 +215,7 @@ struct Args(*const i64);
 
 impl Args {
     unsafe fn tagged(&self, i: usize) -> typelisp_mem::Value {
-        tagged_arg(self.0, i)
+        decode(*self.0.add(i))
     }
 
     unsafe fn int(&self, i: usize) -> i64 {

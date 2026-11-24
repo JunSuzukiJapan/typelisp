@@ -5,7 +5,7 @@
 //! linking the reader. The same arrangement `typelisp_print::shim` has.
 
 use typelisp_mem::prelude::*;
-use typelisp_abi::{active_heap, encode, fatal, tagged_arg};
+use typelisp_abi::{active_heap, decode, encode, fatal};
 use typelisp_mem::{spec, Heap, StdModule, TypeId, TypeSpec, Value};
 
 use crate::reader::Reader;
@@ -117,20 +117,17 @@ pub fn read_datum_at_builtin_with(
     }
 }
 
-/// `read` for compiled code: `args[0]` is the source string, tagged; the
+/// `read` for compiled code: `source` is the source string, tagged; the
 /// result is the tagged `Result`.
 ///
 /// # Safety
 ///
-/// `args` must point to at least 1 valid tagged `i64`; a `Heap` must be
+/// The words must be valid; a `Heap` must be
 /// registered on this thread.
 #[no_mangle]
-pub unsafe extern "C" fn rt_read(args: *const i64, argc: u32) -> i64 {
-    if argc < 1 {
-        fatal("rt_read: expected 1 argument");
-    }
+pub unsafe extern "C" fn rt_read(source: i64) -> i64 {
     let heap = active_heap();
-    let source = match tagged_arg(args, 0) {
+    let source = match decode(source) {
         Value::Str(id) => heap.string(id).to_string(),
         other => fatal(&format!("rt_read: argument is not a string, got {:?}", other)),
     };
@@ -143,19 +140,16 @@ pub unsafe extern "C" fn rt_read(args: *const i64, argc: u32) -> i64 {
 ///
 /// # Safety
 ///
-/// `args` must point to at least 3 valid `i64`s, the first a tagged `Value`;
+/// The words must be valid, the first a tagged `Value`;
 /// a `Heap` must be registered on this thread.
 #[no_mangle]
-pub unsafe extern "C" fn rt_read_datum_at(args: *const i64, argc: u32) -> i64 {
-    if argc < 3 {
-        fatal("rt_read_datum_at: expected 3 arguments");
-    }
+pub unsafe extern "C" fn rt_read_datum_at(source: i64, start: i64, preserve: i64) -> i64 {
     let heap = active_heap();
-    let source = match tagged_arg(args, 0) {
+    let source = match decode(source) {
         Value::Str(id) => heap.string(id).to_string(),
         other => fatal(&format!("rt_read_datum_at: argument is not a string, got {:?}", other)),
     };
-    let start = *args.add(1);
-    let preserve = *args.add(2) != 0;
+    let start = start;
+    let preserve = preserve != 0;
     encode(read_datum_at_builtin(heap, &source, start, preserve))
 }

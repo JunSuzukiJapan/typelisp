@@ -27,15 +27,12 @@ use typelisp_mem::{NarrowInt, TypeId, Value};
 ///
 /// # Safety
 ///
-/// `argc` must be `>= 1` and `args` must point to at least 1 valid `i64`
+/// The words must be valid
 /// (the `f64`'s `to_bits()` reinterpreted as `i64`); a `Heap` must already
 /// be registered on this thread.
 #[no_mangle]
-pub unsafe extern "C" fn rt_f64_new(args: *const i64, argc: u32) -> i64 {
-    if argc < 1 {
-        fatal("rt_f64_new: expected 1 argument");
-    }
-    let f = f64::from_bits(*args as u64);
+pub unsafe extern "C" fn rt_f64_new(f: i64) -> i64 {
+    let f = f64::from_bits(f as u64);
     encode(active_heap().alloc_f64(f))
 }
 
@@ -52,15 +49,12 @@ pub unsafe extern "C" fn rt_f64_new(args: *const i64, argc: u32) -> i64 {
 ///
 /// Same as [`rt_f64_new`].
 #[no_mangle]
-pub unsafe extern "C" fn rt_f32_new(args: *const i64, argc: u32) -> i64 {
-    if argc < 1 {
-        fatal("rt_f32_new: expected 1 argument");
-    }
-    let f = f64::from_bits(*args as u64);
+pub unsafe extern "C" fn rt_f32_new(f: i64) -> i64 {
+    let f = f64::from_bits(f as u64);
     encode(active_heap().alloc_f32(f as f32))
 }
 
-/// Reads the `f64` bit pattern out of a boxed `Sexpr` float — `args[0]` is a
+/// Reads the `f64` bit pattern out of a boxed `Sexpr` float — `x` is a
 /// tagged `Sexpr` value (as [`rt_car`] etc. take), unlike `rt_f64_new`'s
 /// raw payload. Fatal if it isn't actually a boxed float — the checker is
 /// responsible for guaranteeing that never happens, same convention as
@@ -70,11 +64,8 @@ pub unsafe extern "C" fn rt_f32_new(args: *const i64, argc: u32) -> i64 {
 ///
 /// Same as [`rt_f64_new`].
 #[no_mangle]
-pub unsafe extern "C" fn rt_f64_value(args: *const i64, argc: u32) -> i64 {
-    if argc < 1 {
-        fatal("rt_f64_value: expected 1 argument");
-    }
-    match decode(*args) {
+pub unsafe extern "C" fn rt_f64_value(x: i64) -> i64 {
+    match decode(x) {
         // Positively `is_f64`, not "any box": every other `BoxedObj` kind
         // would make `f64_value` *panic*, and a panic out of this `nounwind`
         // shim aborts the process instead of reporting anything — so the
@@ -94,11 +85,8 @@ pub unsafe extern "C" fn rt_f64_value(args: *const i64, argc: u32) -> i64 {
 ///
 /// Same as [`rt_f64_new`].
 #[no_mangle]
-pub unsafe extern "C" fn rt_f32_value(args: *const i64, argc: u32) -> i64 {
-    if argc < 1 {
-        fatal("rt_f32_value: expected 1 argument");
-    }
-    match decode(*args) {
+pub unsafe extern "C" fn rt_f32_value(x: i64) -> i64 {
+    match decode(x) {
         Value::Boxed(id) if active_heap().is_f32(id) => {
             f64::from(active_heap().f32_value(id)).to_bits() as i64
         }
@@ -115,11 +103,8 @@ pub unsafe extern "C" fn rt_f32_value(args: *const i64, argc: u32) -> i64 {
 ///
 /// Same as [`rt_f64_new`].
 #[no_mangle]
-pub unsafe extern "C-unwind" fn rt_sexpr_f64(args: *const i64, argc: u32) -> i64 {
-    if argc < 1 {
-        fatal("rt_sexpr_f64: expected 1 argument");
-    }
-    match decode(*args) {
+pub unsafe extern "C-unwind" fn rt_sexpr_f64(x: i64) -> i64 {
+    match decode(x) {
         Value::Boxed(id) if active_heap().is_f64(id) => active_heap().f64_value(id).to_bits() as i64,
         _ => raise("sexpr-f64: expected an f64 Sexpr node".to_string()).into_word(),
     }
@@ -131,11 +116,8 @@ pub unsafe extern "C-unwind" fn rt_sexpr_f64(args: *const i64, argc: u32) -> i64
 ///
 /// Same as [`rt_f64_new`].
 #[no_mangle]
-pub unsafe extern "C-unwind" fn rt_sexpr_f32(args: *const i64, argc: u32) -> i64 {
-    if argc < 1 {
-        fatal("rt_sexpr_f32: expected 1 argument");
-    }
-    match decode(*args) {
+pub unsafe extern "C-unwind" fn rt_sexpr_f32(x: i64) -> i64 {
+    match decode(x) {
         Value::Boxed(id) if active_heap().is_f32(id) => f64::from(active_heap().f32_value(id)).to_bits() as i64,
         _ => raise("sexpr-f32: expected an f32 Sexpr node".to_string()).into_word(),
     }
@@ -211,14 +193,11 @@ macro_rules! narrow_shims {
         ///
         /// # Safety
         ///
-        /// `argc` must be `>= 1` and `args` must point to a valid `i64`; a
+        /// The words must be valid; a
         /// `Heap` must already be registered on this thread.
         #[no_mangle]
-        pub unsafe extern "C" fn $boxer(args: *const i64, argc: u32) -> i64 {
-            if argc < 1 {
-                fatal(concat!(stringify!($boxer), ": expected 1 argument"));
-            }
-            encode(active_heap().alloc_narrow(NarrowInt::$variant(*args as $t)))
+        pub unsafe extern "C" fn $boxer(x: i64) -> i64 {
+            encode(active_heap().alloc_narrow(NarrowInt::$variant(x as $t)))
         }
 
         /// The raw register word inside a box of exactly this type.
@@ -227,11 +206,8 @@ macro_rules! narrow_shims {
         ///
         /// Same as the box shim.
         #[no_mangle]
-        pub unsafe extern "C" fn $unboxer(args: *const i64, argc: u32) -> i64 {
-            if argc < 1 {
-                fatal(concat!(stringify!($unboxer), ": expected 1 argument"));
-            }
-            narrow_value_of(*args, FixedType::$variant, stringify!($unboxer))
+        pub unsafe extern "C" fn $unboxer(x: i64) -> i64 {
+            narrow_value_of(x, FixedType::$variant, stringify!($unboxer))
         }
     )*};
 }
@@ -251,14 +227,11 @@ macro_rules! sexpr_readers {
         ///
         /// # Safety
         ///
-        /// `argc` must be `>= 1` and `args` must point to a valid `i64`; a
+        /// The words must be valid; a
         /// `Heap` must already be registered on this thread.
         #[no_mangle]
-        pub unsafe extern "C-unwind" fn $reader(args: *const i64, argc: u32) -> i64 {
-            if argc < 1 {
-                fatal(concat!(stringify!($reader), ": expected 1 argument"));
-            }
-            sexpr_narrow_value(*args, FixedType::$variant)
+        pub unsafe extern "C-unwind" fn $reader(x: i64) -> i64 {
+            sexpr_narrow_value(x, FixedType::$variant)
         }
     )*};
 }
@@ -277,17 +250,14 @@ sexpr_readers! {
 /// `u32`/`i32`, `11`/`12` for a `Sexpr` vector/array box, `0` for everything else — *including* non-boxed values, so it's total over
 /// every tagged word and `compile-sexpr-tag-test` can call it without a
 /// prior tag check (a `kind == 1` result already implies `TAG_BOXED`).
-/// `args[0]` is a tagged `Sexpr` value, like [`rt_f64_value`]'s.
+/// `x` is a tagged `Sexpr` value, like [`rt_f64_value`]'s.
 ///
 /// # Safety
 ///
 /// Same as [`rt_f64_new`].
 #[no_mangle]
-pub unsafe extern "C" fn rt_box_kind(args: *const i64, argc: u32) -> i64 {
-    if argc < 1 {
-        fatal("rt_box_kind: expected 1 argument");
-    }
-    match decode(*args) {
+pub unsafe extern "C" fn rt_box_kind(x: i64) -> i64 {
+    match decode(x) {
         Value::Boxed(id) => {
             let heap = active_heap();
             if heap.is_f64(id) {
