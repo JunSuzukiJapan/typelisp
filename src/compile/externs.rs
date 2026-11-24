@@ -369,7 +369,7 @@ const NEVER_RAISING_SHIMS: [&str; 24] = [
     "rt_truncate_sexpr_roots",
     "rt_print_field_template",
     "rt_print_field_name",
-    "rt_print_name_import",
+    "rt_print_names",
     "rt_global_new",
     "rt_f64_new",
     "rt_f64_value",
@@ -881,7 +881,7 @@ pub(crate) fn rt_extern_functions() -> Vec<(&'static str, usize)> {
 
 /// The shims every target has: `typelisp-rt`'s, the printer's, the reader's
 /// and `rt_llvm_call`.
-fn rt_shims() -> [(&'static str, usize); 324] {
+fn rt_shims() -> [(&'static str, usize); 323] {
     use typelisp_rt::c_mem::{
         rt_c_alloc, rt_c_arena_close, rt_c_arena_open, rt_c_index, rt_c_load, rt_c_offset, rt_c_ptr_check, rt_c_store,
         rt_c_volatile_load, rt_c_volatile_store,
@@ -904,7 +904,7 @@ fn rt_shims() -> [(&'static str, usize); 324] {
     };
     use typelisp_print::aot::{
         rt_print_enum_variant, rt_print_field_name, rt_print_field_template, rt_print_global,
-        rt_print_name_import, rt_print_name_module, rt_print_object_method,
+        rt_print_names, rt_print_object_method,
     };
     use typelisp_read::shim::{rt_read, rt_read_datum_at};
     use typelisp_rt::coroutine::{
@@ -1079,8 +1079,7 @@ fn rt_shims() -> [(&'static str, usize); 324] {
         // The module the executable's type names are written for, and the
         // types it has brought in. AOT-only: the interpreter's checker sets
         // them as it moves between modules.
-        ("rt_print_name_module", rt_print_name_module as *const () as usize),
-        ("rt_print_name_import", rt_print_name_import as *const () as usize),
+        ("rt_print_names", rt_print_names as *const () as usize),
         ("rt_car", rt_car as *const () as usize),
         ("rt_cdr", rt_cdr as *const () as usize),
         ("rt_cons", rt_cons as *const () as usize),

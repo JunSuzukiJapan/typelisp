@@ -227,7 +227,9 @@ pub unsafe fn run_entry(
 /// What a generated `main` hands the program entry: the initialisers and
 /// the entry point, as coroutine-ABI addresses.
 pub struct Program {
-    pub inits: Vec<crate::coroutine::CoroutineFn>,
+    /// One per global, in id order: its initialiser, or `None` for one the
+    /// executable left out ([`crate::global_skip`]).
+    pub inits: Vec<Option<crate::coroutine::CoroutineFn>>,
     pub entry: crate::coroutine::CoroutineFn,
 }
 
@@ -241,7 +243,11 @@ pub unsafe fn read_program(args: *const i64, argc: u32, what: &str) -> Program {
         fatal(&format!("{}: expected 3 arguments (the initialiser array, its count and the entry point)", what));
     }
     let words = collect_words(*args as usize as *const i64, *args.add(1));
-    let inits = words.into_iter().map(|w| core::mem::transmute::<usize, crate::coroutine::CoroutineFn>(w as usize)).collect();
+    // A 0 is a global the executable left out.
+    let inits = words
+        .into_iter()
+        .map(|w| (w != 0).then(|| core::mem::transmute::<usize, crate::coroutine::CoroutineFn>(w as usize)))
+        .collect();
     let entry: crate::coroutine::CoroutineFn = core::mem::transmute(*args.add(2) as usize);
     Program { inits, entry }
 }
@@ -301,7 +307,12 @@ pub unsafe fn run_program(program: &Program, start: Option<StartThreads>) -> Res
     for init in &program.inits {
         // An initialiser's value is the global's storage id, already stored
         // by the body itself (`compile-global-init`); nothing here reads it.
-        run(heap, *init, true)?;
+        match init {
+            Some(init) => {
+                run(heap, *init, true)?;
+            }
+            None => crate::global_skip(),
+        }
     }
     run(heap, program.entry, false)
 }
@@ -330,7 +341,12 @@ unsafe fn run_alone(program: &Program) -> Result<Value, i64> {
     for init in &program.inits {
         // An initialiser's value is the global's storage id, already stored
         // by the body itself (`compile-global-init`); nothing here reads it.
-        run(*init)?;
+        match init {
+            Some(init) => {
+                run(*init)?;
+            }
+            None => crate::global_skip(),
+        }
     }
     run(program.entry).map(typelisp_abi::decode)
 }

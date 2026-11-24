@@ -227,9 +227,17 @@ fn symbols(elf: &Path) -> Vec<String> {
 }
 
 /// The parts of the runtime a program reaches only through what it does: the
-/// scheduler (a task, a channel, `sleep`), writing through the printer, and
-/// arbitrary-precision integers.
-const USED_ONLY_WHEN_USED: [&str; 4] = ["typelisp_rt::sched::", "typelisp_print::format::", "typelisp_print::pprint::", "num_bigint::"];
+/// scheduler (a task, a channel, `sleep`), writing through the printer,
+/// arbitrary-precision integers, and the symbol and type tables (a value
+/// made with its type, a name written).
+const USED_ONLY_WHEN_USED: [&str; 6] = [
+    "typelisp_rt::sched::",
+    "typelisp_print::format::",
+    "typelisp_print::pprint::",
+    "num_bigint::",
+    "typelisp_mem::symbols::SymTable",
+    "typelisp_mem::type_shape::TypeTable",
+];
 
 /// Whether the symbol `name` is code of the module `part`: a function of it,
 /// or a method of one of its types. A type of it named among the type
@@ -239,15 +247,32 @@ fn of_module(name: &str, part: &str) -> bool {
 }
 
 /// A program that starts no task, writes nothing and makes no bignum has
-/// none of them in its executable; one that does has them all.
+/// none of them in its executable — one that only drives a register, as
+/// blinking an LED does, included; one that does has them all.
 #[test]
 fn what_a_program_does_not_use_is_left_out() {
-    let elf = built("board_left_out", "(defun main () int 42)", "prog.elf", &board_flags(&[]));
-    assert_eq!(run_board(&elf).status.code(), Some(42));
-    let names = symbols(&elf);
-    for part in USED_ONLY_WHEN_USED {
-        let found: Vec<&String> = names.iter().filter(|n| of_module(n, part)).collect();
-        assert!(found.is_empty(), "{} is linked in: {:?}", part, &found[..found.len().min(5)]);
+    let blink = r#"
+(defun wait-a-bit () ()
+  (let ((i (the i32 0)))
+    (while (< i (the i32 10))
+      (setf i (+ i (the i32 1))))
+    ()))
+(defun main () int
+  (let ((n (the i32 0)))
+    (while (< n (the i32 3))
+      (unsafe (volatile-write-u32 #x40004000 #x2A))
+      (wait-a-bit)
+      (setf n (+ n (the i32 1)))))
+  42)
+"#;
+    for (name, source) in [("board_left_out", "(defun main () int 42)"), ("board_left_out_blink", blink)] {
+        let elf = built(name, source, "prog.elf", &board_flags(&[]));
+        assert_eq!(run_board(&elf).status.code(), Some(42), "{}", name);
+        let names = symbols(&elf);
+        for part in USED_ONLY_WHEN_USED {
+            let found: Vec<&String> = names.iter().filter(|n| of_module(n, part)).collect();
+            assert!(found.is_empty(), "{}: {} is linked in: {:?}", name, part, &found[..found.len().min(5)]);
+        }
     }
     let elf = built(
         "board_left_in",

@@ -48,20 +48,28 @@ pub struct PrintShared {
     /// The module whose reader type names are written for, and what it has
     /// brought in — CL's `*package*` as the printer sees it. The checker
     /// sets it as it moves between modules; an AOT executable's startup
-    /// registers its entry module's (`rt_print_name_module`,
-    /// `rt_print_name_import`). Shared with the workers like the rest, so a
+    /// registers its entry module's (`rt_print_names`). Shared with the workers like the rest, so a
     /// task prints names the way the thread that started it does.
     pub(crate) name_view: RwLock<Arc<typelisp_mem::NameView>>,
 }
 
-/// How this thread writes paths now — see [`PrintShared::name_view`].
+/// How this thread writes paths now — see [`PrintShared::name_view`]. The
+/// first time an executable asks, the names its startup registered are
+/// decoded ([`crate::aot::registered_names`]).
 pub fn name_view() -> Arc<typelisp_mem::NameView> {
+    if let Some(view) = crate::aot::registered_names() {
+        set_name_view(view);
+    }
     Arc::clone(&print_shared().name_view.read())
 }
 
 /// Makes `view` how this thread (and the workers sharing its tables) write
 /// paths.
+///
+/// A view set this way replaces the one an executable's startup registered,
+/// which is then never decoded ([`crate::aot::registered_names`]).
 pub fn set_name_view(view: typelisp_mem::NameView) {
+    crate::aot::forget_registered_names();
     let shared = print_shared();
     let mut slot = shared.name_view.write();
     if **slot != view {

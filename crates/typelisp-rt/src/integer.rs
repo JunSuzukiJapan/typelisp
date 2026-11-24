@@ -412,6 +412,15 @@ pub unsafe extern "C" fn rt_integer_from_word(args: *const i64, argc: u32) -> i6
 /// Same as [`integer_single`].
 #[no_mangle]
 pub unsafe extern "C-unwind" fn rt_int_not_fixnum(args: *const i64, argc: u32) -> i64 {
-    let a = integer_single(args, argc, "rt_int_not_fixnum");
-    raise(format!("an integer argument does not fit a fixnum: {}", a.into_big())).into_word()
+    if argc < 1 {
+        fatal("rt_int_not_fixnum: expected 1 argument");
+    }
+    // Written through `bignum_text`, so that a program that makes no bignum
+    // (and calls this only on a path it never takes) does not carry the
+    // arbitrary-precision arithmetic for the message.
+    let text = match decode(*args) {
+        Value::Boxed(id) if active_heap().is_bignum(id) => active_heap().bignum_text(id),
+        _ => fatal("rt_int_not_fixnum: the argument is not a bignum"),
+    };
+    raise(format!("an integer argument does not fit a fixnum: {}", text)).into_word()
 }

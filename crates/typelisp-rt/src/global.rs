@@ -101,7 +101,19 @@ pub unsafe extern "C" fn rt_global_new(args: *const i64, argc: u32) -> i64 {
 /// rather than let a panic try to unwind through compiled native code; a
 /// plain Rust-to-Rust caller may still choose to panic on it.
 pub fn global_perm_idx(id: usize) -> Option<usize> {
-    shared::rt_shared().globals.read().get(id).copied()
+    shared::rt_shared().globals.read().get(id).copied().filter(|&i| i != UNUSED)
+}
+
+/// What [`global_skip`] leaves in a global's place.
+const UNUSED: usize = usize::MAX;
+
+/// Takes the next global id without making a slot for it: the global of an
+/// initialiser an executable left out, because nothing it can run reads it
+/// (`compile::aot`). The ids after it are the ones the compiled code
+/// expects; this one is never read, and [`global_perm_idx`] does not know
+/// it.
+pub fn global_skip() {
+    shared::rt_shared().globals.write().push(UNUSED);
 }
 
 /// Reads global `id`'s (an [`rt_global_new`] return value) current value.

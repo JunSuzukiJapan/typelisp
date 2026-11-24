@@ -284,6 +284,28 @@ fn printer_variables_take_effect_in_a_compiled_executable() {
 /// either way: written from that module, which the program runs in, so by its
 /// last segment. The `eval` is checked in that same module, so a bare name
 /// still reaches the program's own type.
+/// The same without `eval`: the executable writes the names from the entry
+/// file's module by itself, with no checker in it to say so.
+#[test]
+fn the_entry_files_types_print_with_its_module_without_eval() {
+    let dir = tmp_dir();
+    let src_path = dir.join("entry_module_no_eval.typl");
+    let out_path = dir.join("entry_module_no_eval");
+    std::fs::write(
+        &src_path,
+        r#"(defstruct point (x int) (y int))
+           (defun main () () (println "~s" (make-instance 'point :x 1 :y 2)))
+           (main)"#,
+    )
+    .expect("failed to write test source file");
+    typelisp::compile::aot::compile_file(src_path.to_str().unwrap(), out_path.to_str().unwrap())
+        .expect("compile_file failed");
+    let compiled = Command::new(&out_path).output().expect("failed to run the compiled executable");
+    let interpreted = Command::new(env!("CARGO_BIN_EXE_typl")).arg(&src_path).output().expect("failed to run typl");
+    assert_eq!(String::from_utf8_lossy(&interpreted.stdout), "#<point x: 1 y: 2>\n");
+    assert_eq!(String::from_utf8_lossy(&compiled.stdout), "#<point x: 1 y: 2>\n");
+}
+
 #[test]
 fn the_entry_files_types_print_with_its_module_as_under_typl() {
     let dir = tmp_dir();

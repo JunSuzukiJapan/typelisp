@@ -214,10 +214,28 @@ LLVM 22 には AVR のバックエンドがある。判断の材料は次の 3 �
 
 振る舞いの変わったところ:
 
-- WebAssembly のモジュールは、スケジューラの無いプログラムでは `typelisp.now` と `typelisp.sleep` を import しない（`aot_wasm_js_test`）。
+- WebAssembly のモジュールは、スケジューラの無いプログラムでは `typelisp.now` と `typelisp.sleep` を、乱数を使わないプログラムでは `typelisp.unix_time` を import しない（`aot_wasm_js_test`）。
 - ネイティブの実行ファイルは、タスクの無いプログラムでは `TYPELISP_THREADS` を読まない（ワーカーのスレッドを持たないので）。不正な値を断るのはタスクのあるプログラムだけ（`os_threads_test`）。
 
 番人: `aot_embedded_test` の `what_a_program_does_not_use_is_left_out`。`int` を返すだけのプログラムにスケジューラ・書式エンジン・pretty printer・`num_bigint` のコードが無く、それらを使うプログラムには有ることを、実行ファイルの記号で確かめる。
 
-残り（150,084 バイトの時点、単独で切ったときの減り方）: 記号表の初期化（`SymTable::new`、約 22KB）、名前の登録（約 14KB）、prelude の大域変数の初期化（約 13KB）、型表の初期化（約 11KB）。あとは記号表・型表・ヒープ・ハッシュ表の土台が細かく並ぶ。
+続き（2026-11-24、ユーザー: 「記号表・型表はLチカには1つもいらない」「preludeの関数・マクロもLチカにはほぼ不要」）。prelude の関数はもともと関数ごとに落ちていて、マクロは実行ファイルに入らない。prelude で残っていたのは大域変数の初期化で、それが型表と記号表を引き込んでいた。
+
+- volatile の番地（`int`）を語に直す `rt_int_not_fixnum` のエラー文も `bignum_text` を通す。Lチカに多倍長が入っていた（198,744 → 153,540）。
+- prelude の大域変数: 読まれるものだけ初期化する（`aot.rs` の `leave_out_unread_globals`）。どの本体がどの大域変数を読むかはコア IR から集める（`collect_targets` の `globals`、項目ごとと初期化の式ごと）。IR では番号が定数の書き込みでしか残らないので IR からは読まない。`main` から初期化の表を通らずに届く本体、走る初期化とそこから届く本体、印字器が書くなら制御変数、を増えなくなるまで足す。プログラム自身の `defvar` は必ず走る。`eval` を呼ぶ実行ファイルは全部。外した初期化は表の 0 になり、ランタイムは番号だけ進める（`typelisp_rt::global_skip`、読むと未知の番号として止まる）。
+- 型表: 届くコードがその表を読まないなら、初期化の関数を呼ばない（`type_table::table_of`、`reach::reached` の `globals`）。
+- 名前の登録: `rt_print_name_module`/`rt_print_name_import` を `rt_print_names` 1 つにし、`main` は定数の表の番地を渡すだけ。解読（記号を作る）は `name_view()` が初めて呼ばれたときに行う（`typelisp_print::aot::registered_names`）。名前を使うコード（印字器、`throw` のタグの不一致、C ポインタの検査）が入っているときだけ解読のコードが入る。`set_name_view` で明示的に設定した名前表が勝つ（`eval` の初期化）。
+- 見つかった不具合: コンパイラが登録していた名前表は root のモジュールのもので、`eval` の無い実行ファイルは型名を完全なパスで書いていた（`#<entry_module::point ...>`、`typl` は `#<point ...>`）。入口のモジュールの名前表を登録する（`chk.set_current_ns(eval_ns)`）。テストは `eval` のある場合しか無かった（`the_entry_files_types_print_with_its_module_without_eval` を追加）。
+
+測定（thumbv7em、release のランタイム、コード）:
+
+| 時点 | `(defun main () int 42)` | Lチカ |
+|---|---|---|
+| 上の表の最後 | 150,084 | 198,744 |
+| `rt_int_not_fixnum` | | 153,540 |
+| 大域変数 | 137,236 | 141,032 |
+| 型表 | 114,640 | 118,428 |
+| 名前の登録 | 64,752 | 68,560 |
+
+Lチカの実行ファイルに記号表・型表は無い（番人のテストに `SymTable`/`TypeTable` と Lチカのプログラムを追加）。残り約 6 万 9 千バイトは、ヒープとメモリ確保、コンパイル済みコードのフレームの駆動（コルーチンの ABI、`FrameStack`）、Rust の書式（実行時エラーの文）、割り込みの表など。Uno（フラッシュ 32KB、RAM 2KB）には、フレームなしで直接呼ぶ AVR 向けの小さな実行の仕方が別に要る（未相談）。
 

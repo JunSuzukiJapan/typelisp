@@ -107,12 +107,13 @@ fn imports(wasm: &Path) -> String {
 
 /// The module imports only what the loader gives it, and of that only what
 /// the program uses: the clock and `sleep` come with the scheduler, which a
-/// program that never waits does without.
+/// program that never waits does without, and the time of day with the
+/// random state, which a program that draws no random number does without.
 #[test]
 fn the_module_imports_only_the_loader_s_functions() {
     let wasm = module("wasmjs_imports", r#"(defun main () () (println "x"))"#, &[]);
-    assert_eq!(imports(&wasm), "typelisp.exit typelisp.unix_time typelisp.write\n");
-    let wasm = module("wasmjs_imports_sleep", r#"(defun main () () (sleep 0.01) (println "x"))"#, &[]);
+    assert_eq!(imports(&wasm), "typelisp.exit typelisp.write\n");
+    let wasm = module("wasmjs_imports_sleep", r#"(defun main () () (sleep 0.01) (println "x ~a" (random 1)))"#, &[]);
     assert_eq!(imports(&wasm), "typelisp.exit typelisp.now typelisp.sleep typelisp.unix_time typelisp.write\n");
 }
 

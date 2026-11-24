@@ -226,7 +226,6 @@ pub fn exported_tables(module: &Module<'static>) -> Result<Vec<(GlobalValue<'sta
         LLVMGetInitializer, LLVMGetOperand, LLVMIsAConstantExpr, LLVMIsAConstantInt, LLVMIsAGlobalVariable, LLVMTypeOf,
     };
     use inkwell::llvm_sys::LLVMOpcode;
-    use inkwell::values::{AsValueRef, InstructionOpcode};
 
     // The global a `ptrtoint` constant takes the address of.
     let address_of = |v: inkwell::llvm_sys::prelude::LLVMValueRef| unsafe {
@@ -242,24 +241,7 @@ pub fn exported_tables(module: &Module<'static>) -> Result<Vec<(GlobalValue<'sta
         if !is_init_function(&name) {
             continue;
         }
-        // What `settle_for_export` stores into `rt_types_define`'s arguments:
-        // the shapes' address, their length in words and the table's address.
-        let mut stored = Vec::new();
-        for block in init.get_basic_blocks() {
-            let mut instr = block.get_first_instruction();
-            while let Some(i) = instr {
-                if i.get_opcode() == InstructionOpcode::Store {
-                    stored.push(unsafe { LLVMGetOperand(i.as_value_ref(), 0) });
-                }
-                instr = i.get_next_instruction();
-            }
-        }
-        let [shapes, _, table] = stored[..] else {
-            return Err(format!("internal error: `{}` stores {} words, not `rt_types_define`'s 3", name, stored.len()));
-        };
-        let (Some(shapes), Some(table)) = (address_of(shapes), address_of(table)) else {
-            return Err(format!("internal error: `{}` does not hand `rt_types_define` two globals' addresses", name));
-        };
+        let (shapes, table) = init_arguments(init)?;
         let shapes = unsafe { LLVMGetInitializer(shapes) };
         let len = unsafe { LLVMGetArrayLength2(LLVMTypeOf(shapes)) };
         let mut words = Vec::with_capacity(len as usize);
@@ -287,3 +269,48 @@ pub fn exported_tables(module: &Module<'static>) -> Result<Vec<(GlobalValue<'sta
     }
     Ok(tables)
 }
+
+/// The table the init function `init` ([`init_functions`]) fills.
+pub fn table_of(init: inkwell::values::FunctionValue<'static>) -> Result<GlobalValue<'static>, String> {
+    let (_, table) = init_arguments(init)?;
+    // SAFETY: a global variable of `init`'s module.
+    Ok(unsafe { GlobalValue::new(table) })
+}
+
+/// The shapes' and the table's globals that the init function `init` hands
+/// `rt_types_define`: what [`settle_for_export`] stores into its arguments,
+/// the shapes' address, their length in words and the table's address.
+fn init_arguments(
+    init: inkwell::values::FunctionValue<'static>,
+) -> Result<(inkwell::llvm_sys::prelude::LLVMValueRef, inkwell::llvm_sys::prelude::LLVMValueRef), String> {
+    use inkwell::llvm_sys::core::{LLVMGetConstOpcode, LLVMGetOperand, LLVMIsAConstantExpr, LLVMIsAGlobalVariable};
+    use inkwell::llvm_sys::LLVMOpcode;
+    use inkwell::values::{AsValueRef, InstructionOpcode};
+    let name = init.get_name().to_string_lossy().into_owned();
+    // The global a `ptrtoint` constant takes the address of.
+    let address_of = |v: inkwell::llvm_sys::prelude::LLVMValueRef| unsafe {
+        if LLVMIsAConstantExpr(v).is_null() || LLVMGetConstOpcode(v) != LLVMOpcode::LLVMPtrToInt {
+            return None;
+        }
+        let g = LLVMGetOperand(v, 0);
+        (!LLVMIsAGlobalVariable(g).is_null()).then_some(g)
+    };
+    let mut stored = Vec::new();
+    for block in init.get_basic_blocks() {
+        let mut instr = block.get_first_instruction();
+        while let Some(i) = instr {
+            if i.get_opcode() == InstructionOpcode::Store {
+                stored.push(unsafe { LLVMGetOperand(i.as_value_ref(), 0) });
+            }
+            instr = i.get_next_instruction();
+        }
+    }
+    let [shapes, _, table] = stored[..] else {
+        return Err(format!("internal error: `{}` stores {} words, not `rt_types_define`'s 3", name, stored.len()));
+    };
+    match (address_of(shapes), address_of(table)) {
+        (Some(shapes), Some(table)) => Ok((shapes, table)),
+        _ => Err(format!("internal error: `{}` does not hand `rt_types_define` two globals' addresses", name)),
+    }
+}
+

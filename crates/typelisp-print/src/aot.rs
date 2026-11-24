@@ -24,6 +24,7 @@
 
 use typelisp_mem::prelude::*;
 use core::cell::RefCell;
+use core::sync::atomic::{AtomicPtr, Ordering};
 
 use typelisp_abi::{decode, encode, fatal};
 use typelisp_mem::{Heap, TypeId, Value};
@@ -358,49 +359,61 @@ pub unsafe extern "C" fn rt_print_global(args: *const i64, argc: u32) -> i64 {
     0
 }
 
-/// Registers the module the executable's type names are written for:
-/// `args` is `[words_ptr, words_len]`, the module as the words
-/// `typelisp_mem::type_words::ns_words` writes, a constant in the executable.
-/// See [`crate::shared::PrintShared::name_view`].
+/// The executable's type names, as [`rt_print_names`] registered them and
+/// until the first name is written: decoding them interns symbols, which a
+/// program that never writes a name does not need, so the decoding is done
+/// by what writes one ([`crate::shared::name_view`]) and linked in with it.
+static NAMES: AtomicPtr<i64> = AtomicPtr::new(core::ptr::null_mut());
+
+/// Registers how the executable writes type names: `args[0]` is the
+/// address of a constant table, `[module_ptr, module_len, n]` and then `n`
+/// times `[words_ptr, words_len, name_ptr, name_len]` — the module the
+/// names are written for as the words `typelisp_mem::type_words::ns_words`
+/// writes, and each type it has brought in, as the words
+/// `typelisp_mem::type_words::definition_words` writes, with the name it is
+/// brought in under. See [`crate::shared::PrintShared::name_view`].
 ///
 /// # Safety
 ///
-/// `args` must point to 2 valid `i64`s describing those words, whose strings
-/// are constants.
+/// `args` must point to 1 valid `i64`, the address of such a table, whose
+/// words and strings are constants.
 #[no_mangle]
-pub unsafe extern "C" fn rt_print_name_module(args: *const i64, argc: u32) -> i64 {
-    if argc < 2 {
-        fatal("rt_print_name_module: expected 2 arguments");
+pub unsafe extern "C" fn rt_print_names(args: *const i64, argc: u32) -> i64 {
+    if argc < 1 {
+        fatal("rt_print_names: expected 1 argument");
     }
-    let words = core::slice::from_raw_parts(*args as usize as *const i64, *args.add(1) as usize);
-    let module = typelisp_mem::type_words::read_ns(words);
-    let view = crate::shared::name_view();
-    crate::shared::set_name_view(typelisp_mem::NameView::new(module, view.imports().clone()));
+    NAMES.store(*args as usize as *mut i64, Ordering::SeqCst);
     0
 }
 
-/// Registers one type the module of [`rt_print_name_module`] has brought
-/// in: `args` is `[words_ptr, words_len, name_ptr, name_len]`, the
-/// definition as the words `typelisp_mem::type_words::definition_words`
-/// writes and the name it is brought in under.
-///
-/// # Safety
-///
-/// `args` must point to 4 valid `i64`s in those representations, whose
-/// strings are constants.
-#[no_mangle]
-pub unsafe extern "C" fn rt_print_name_import(args: *const i64, argc: u32) -> i64 {
-    if argc < 4 {
-        fatal("rt_print_name_import: expected 4 arguments");
+/// Drops the names [`rt_print_names`] registered without decoding them: a
+/// view set since replaces them.
+pub(crate) fn forget_registered_names() {
+    NAMES.store(core::ptr::null_mut(), Ordering::SeqCst);
+}
+
+/// The names [`rt_print_names`] registered, decoded, the first time this is
+/// asked; `None` after that, and when none were.
+pub(crate) fn registered_names() -> Option<typelisp_mem::NameView> {
+    let table = NAMES.swap(core::ptr::null_mut(), Ordering::SeqCst);
+    if table.is_null() {
+        return None;
     }
-    let words = core::slice::from_raw_parts(*args as usize as *const i64, *args.add(1) as usize);
-    let definition = typelisp_mem::type_words::read_definition(words);
-    let name = static_str(args, 2, "rt_print_name_import");
-    let view = crate::shared::name_view();
-    let mut imports = view.imports().clone();
-    imports.insert(definition, name);
-    crate::shared::set_name_view(typelisp_mem::NameView::new(view.module(), imports));
-    0
+    // SAFETY: the table `rt_print_names` was given, a constant of the
+    // executable laid out as it says.
+    unsafe {
+        let words = |at: *const i64| core::slice::from_raw_parts(*at as usize as *const i64, *at.add(1) as usize);
+        let module = typelisp_mem::type_words::read_ns(words(table));
+        let n = *table.add(2) as usize;
+        let mut imports = typelisp_mem::collections::HashMap::new();
+        for i in 0..n {
+            let entry = table.add(3 + 4 * i);
+            let definition = typelisp_mem::type_words::read_definition(words(entry));
+            let name = static_str(entry, 2, "rt_print_names");
+            imports.insert(definition, name);
+        }
+        Some(typelisp_mem::NameView::new(module, imports))
+    }
 }
 
 /// Installs [`AOT_HOOKS`] once. Idempotent, so each registration shim can

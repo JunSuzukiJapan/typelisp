@@ -72,6 +72,47 @@ pub(super) fn uses(module: &Module<'static>, entry: FunctionValue<'static>, refu
     found
 }
 
+/// What [`reached`] found.
+pub(super) struct Reached {
+    /// The names of the functions reached, defined or only declared (a shim).
+    pub functions: std::collections::HashSet<String>,
+    /// The globals the code reached refers to.
+    pub globals: std::collections::HashSet<LLVMValueRef>,
+}
+
+/// Everything `roots` reach in `module`, walked as [`uses`] walks, except
+/// that the global `opaque` is not looked into.
+pub(super) fn reached(module: &Module<'static>, roots: &[FunctionValue<'static>], opaque: Option<LLVMValueRef>) -> Reached {
+    let mut seen_fns: std::collections::HashSet<LLVMValueRef> = roots.iter().map(|f| f.as_value_ref()).collect();
+    let mut queue: VecDeque<LLVMValueRef> = seen_fns.iter().copied().collect();
+    let mut found = Reached { functions: Default::default(), globals: Default::default() };
+    while let Some(func) = queue.pop_front() {
+        let name = value_name(func);
+        let Some(f) = module.get_function(&name) else { continue };
+        found.functions.insert(name);
+        let mut referenced = Vec::new();
+        for block in f.get_basic_blocks() {
+            let mut instr = block.get_first_instruction();
+            while let Some(i) = instr {
+                let v = i.as_value_ref();
+                for k in 0..unsafe { LLVMGetNumOperands(v) } {
+                    let operand = unsafe { LLVMGetOperand(v, k as u32) };
+                    let mut seen: Vec<LLVMValueRef> = opaque.into_iter().collect();
+                    functions_in(operand, &mut referenced, &mut seen);
+                    found.globals.extend(seen.into_iter().filter(|g| Some(*g) != opaque && unsafe { !LLVMIsAGlobalVariable(*g).is_null() }));
+                }
+                instr = i.get_next_instruction();
+            }
+        }
+        for callee in referenced {
+            if seen_fns.insert(callee) {
+                queue.push_back(callee);
+            }
+        }
+    }
+    found
+}
+
 /// The functions `v` names, looking through constant expressions and into
 /// the initialisers of the globals it names. `seen` is the globals and
 /// constants already looked through, so a self-referencing initialiser ends.

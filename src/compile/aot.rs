@@ -721,6 +721,40 @@ pub fn compile_file_with(source_path: &str, output_path: &str, options: &BuildOp
         })
         .collect::<Result<_, String>>()?;
 
+    // Which globals each compiled body reads or assigns, by id: what decides
+    // which of the prelude's globals the executable initialises
+    // (`build_main_wrapper`). Read off the bodies' core forms, where a
+    // global is still named — the IR addresses it by an id stored as a
+    // constant, which says nothing a walk can rely on.
+    let globals_read = |heap: &Heap, forms: &[Value]| -> Result<Vec<usize>, String> {
+        let targets = crate::compile::core_bridge::collect_targets(heap, forms).map_err(|e| e.to_string())?;
+        targets
+            .globals
+            .iter()
+            .map(|path| {
+                interp
+                    .compiled_global_id(path)
+                    .ok_or_else(|| format!("internal error: global `{}` is read and was never promoted", path))
+            })
+            .collect()
+    };
+    let mut body_globals: std::collections::HashMap<String, Vec<usize>> = std::collections::HashMap::new();
+    for item in items.iter().chain(&prelude.items) {
+        let (_, body) = interp.compiled_fn_body(item).map_err(|e| e.to_string())?;
+        body_globals.insert(target_symbol_name(item), globals_read(&heap, &body)?);
+    }
+    let globals = Globals {
+        inits: all_inits
+            .iter()
+            .zip(&eval_globals)
+            .enumerate()
+            .map(|(i, ((_, form), (_, id)))| {
+                Ok(GlobalInit { id: *id, reads: globals_read(&heap, std::slice::from_ref(form))?, always: i >= prelude.global_inits.len() })
+            })
+            .collect::<Result<_, String>>()?,
+        bodies: body_globals,
+    };
+
     // The printer control variables' compiled ids, for the startup to
     // register: the prelude defines all of them, so each was promoted with
     // the rest of its globals above.
@@ -767,6 +801,11 @@ pub fn compile_file_with(source_path: &str, output_path: &str, options: &BuildOp
     // `typl file.typl` places it (`run_file`), so a bare name in it resolves
     // to the program's own definition.
     let eval_ns = typelisp_front::mem::symbols::ns_of(&entry_segs);
+    // The executable's type names are written from that same module, as
+    // `typl file.typl` writes them: the view the printer's registration
+    // carries (`emit_print_registration`) is the one the checker publishes
+    // for it.
+    chk.set_current_ns(eval_ns);
 
     // Under the whole-build guard above (no second take here: rebinding
     // `_guard` in this scope would drop the outer one first).
@@ -801,6 +840,7 @@ pub fn compile_file_with(source_path: &str, output_path: &str, options: &BuildOp
             &m,
             &target_symbol_name(&CompileTarget::Fn(entry_path)),
             &global_init_names,
+            &globals,
             &interp.vtable_descriptors(),
             &interp.upcast_descriptors(),
             &interp.enum_variant_descriptors(),
@@ -947,6 +987,7 @@ fn build_main_wrapper(
     module: &Module<'static>,
     entry_symbol: &str,
     global_init_names: &[String],
+    globals: &Globals,
     vtables: &[(u32, Vec<(Path, typelisp_mem::SymRef)>)],
     upcasts: &[(u32, u32, u32)],
     enum_variants: &[(Path, usize, String)],
@@ -1287,6 +1328,9 @@ fn build_main_wrapper(
         .map_err(|e| format!("failed to truncate exit code: {}", e))?;
     builder.build_return(Some(&exit_code)).map_err(|e| format!("failed to build entry-point return: {}", e))?;
 
+    // Whether the executable writes through the printer, which reads the
+    // printer control variables.
+    let mut writes = false;
     if let Some(register) = print_register {
         // What the printer needs to write a value, only when the executable
         // can write one: asked of the finished `main`, whose registration
@@ -1300,20 +1344,19 @@ fn build_main_wrapper(
         } else {
             None
         };
-        let writes = reaches(writes_through_the_printer);
+        writes = reaches(writes_through_the_printer);
         emit_print_registration(
             ctx, module, register, enum_variants, field_templates, field_names, print_objects, live.as_ref(), writes, printer_globals,
         )?;
     }
 
-    // The types the executable's code reads, the prelude's included: interned
-    // first of all, since everything after reads them out of the tables.
-    crate::compile::type_table::settle_for_export(module)?;
-    let first = entry_block.get_first_instruction().expect("`main` was just given a body");
-    builder.position_before(&first);
-    for init in crate::compile::type_table::init_functions(module) {
-        let f = module.get_function(&init).expect("an init function the module defines");
-        builder.build_call(f, &[], "").map_err(|e| format!("failed to build the call to `{}`: {}", init, e))?;
+
+    // The prelude's globals nothing the executable can run reads are left
+    // out: their initialisers, and what those make, are not linked in. The
+    // program's own `defvar`s all run, as `typl` runs them. Not for an
+    // executable that calls `eval`, whose forms can read any global.
+    if eval_env.is_none() {
+        leave_out_unread_globals(module, main_fn, globals, if writes { printer_globals } else { &[] })?;
     }
 
     // A program that nothing it can run makes wait — no task, thread,
@@ -1331,6 +1374,106 @@ fn build_main_wrapper(
             unsafe { scheduled.delete() };
         }
     }
+
+    // The types the executable's code reads, the prelude's included: interned
+    // first of all, since everything after reads them out of the tables. A
+    // table nothing the executable can run reads from is not interned, and
+    // with it go the shapes and what interns them. Asked last, of the
+    // finished `main`, whose initialiser array now names only the
+    // initialisers that run.
+    crate::compile::type_table::settle_for_export(module)?;
+    let read = reach::reached(module, &[main_fn], None).globals;
+    let first = entry_block.get_first_instruction().expect("`main` was just given a body");
+    builder.position_before(&first);
+    for init in crate::compile::type_table::init_functions(module) {
+        let f = module.get_function(&init).expect("an init function the module defines");
+        let table = crate::compile::type_table::table_of(f)?;
+        if read.contains(&inkwell::values::AsValueRef::as_value_ref(&table)) {
+            builder.build_call(f, &[], "").map_err(|e| format!("failed to build the call to `{}`: {}", init, e))?;
+        }
+    }
+    Ok(())
+}
+
+/// What each global's initialiser and each compiled body read, by global
+/// id: what decides which globals an executable initialises
+/// ([`leave_out_unread_globals`]).
+#[derive(Default)]
+struct Globals {
+    /// One per initialiser, in the order `main` runs them.
+    inits: Vec<GlobalInit>,
+    /// Each body's symbol, with the globals it reads or assigns.
+    bodies: std::collections::HashMap<String, Vec<usize>>,
+}
+
+struct GlobalInit {
+    /// The global it initialises.
+    id: usize,
+    /// The globals its form reads.
+    reads: Vec<usize>,
+    /// A `defvar` of the program's own, which runs whether or not anything
+    /// reads it.
+    always: bool,
+}
+
+/// Replaces, in `main`'s initialiser array (`tl_global_inits`), the
+/// initialiser of every global nothing the executable can run reads with 0,
+/// which the runtime takes as "no slot" (`typelisp_rt::global_skip`).
+///
+/// A global is read when a body reached from `main` — not through the
+/// array — reads it, when the initialiser of a global that runs reads it,
+/// or when it is one of `printer_globals`; a global runs when it is read or
+/// is the program's own. The bodies those initialisers reach count too, so
+/// the walk goes on until it finds nothing new.
+fn leave_out_unread_globals(
+    module: &Module<'static>,
+    main_fn: inkwell::values::FunctionValue<'static>,
+    globals: &Globals,
+    printer_globals: &[(&str, usize)],
+) -> Result<(), String> {
+    let Some(array) = module.get_global("tl_global_inits") else { return Ok(()) };
+    let init_fns: Vec<inkwell::values::FunctionValue<'static>> = (0..globals.inits.len())
+        .map(|i| {
+            module
+                .get_function(&format!("$global_init${}", i))
+                .ok_or_else(|| format!("internal error: global initialiser {} is not in the module", i))
+        })
+        .collect::<Result<_, String>>()?;
+    let mut read: std::collections::HashSet<usize> = printer_globals.iter().map(|(_, id)| *id).collect();
+    loop {
+        let runs = |init: &GlobalInit| init.always || read.contains(&init.id);
+        let mut roots = vec![main_fn];
+        let mut now = read.clone();
+        for (init, f) in globals.inits.iter().zip(&init_fns) {
+            if runs(init) {
+                roots.push(*f);
+                now.extend(&init.reads);
+            }
+        }
+        for name in reach::reached(module, &roots, Some(inkwell::values::AsValueRef::as_value_ref(&array))).functions {
+            if let Some(ids) = globals.bodies.get(&name) {
+                now.extend(ids);
+            }
+        }
+        if now == read {
+            break;
+        }
+        read = now;
+    }
+    let i64_ty = module.get_context().i64_type();
+    let words: Vec<inkwell::values::IntValue<'static>> = globals
+        .inits
+        .iter()
+        .zip(&init_fns)
+        .map(|(init, f)| {
+            if init.always || read.contains(&init.id) {
+                f.as_global_value().as_pointer_value().const_to_int(i64_ty)
+            } else {
+                i64_ty.const_zero()
+            }
+        })
+        .collect();
+    array.set_initializer(&i64_ty.const_array(&words));
     Ok(())
 }
 
@@ -1555,24 +1698,31 @@ fn emit_print_registration(
             call(&builder, "rt_print_global", &[name_ptr, name_len, i64_ty.const_int(*id as u64, false)])?;
         }
     }
-    // Type names are written for the module the program was checked in,
-    // as the interpreter writes them — the view the checker left behind.
+    // Type names are written for the entry file's module, as the interpreter
+    // writes them — the view the checker publishes for it (`compile_file`).
     let view = typelisp_print::shared::name_view();
     let words = |name: &str, words: &[typelisp_mem::type_words::Word]| {
         let (global, len) = crate::compile::type_table::constant_words(module, name, words);
         (global.as_pointer_value().const_to_int(i64_ty), i64_ty.const_int(len as u64, false))
     };
     let (module_ptr, module_len) = words("print_name_module", &typelisp_mem::type_words::ns_words(view.module()));
-    call(&builder, "rt_print_name_module", &[module_ptr, module_len])?;
     // In the order of the names, so the executable is the same each time.
     let mut imports: Vec<(&(typelisp_mem::NsId, typelisp_mem::symbols::SymRef), &&'static str)> = view.imports().iter().collect();
     imports.sort_by_key(|(_, name)| **name);
+    // One table, which the runtime decodes only when a name is written
+    // (`typelisp_print::aot::rt_print_names`).
+    let mut table = vec![module_ptr, module_len, i64_ty.const_int(imports.len() as u64, false)];
     for (i, ((ns, sym), name)) in imports.into_iter().enumerate() {
         let (def_ptr, def_len) =
             words(&format!("print_name_import${}", i), &typelisp_mem::type_words::definition_words(*ns, *sym));
         let (name_ptr, name_len) = literal(&builder, name)?;
-        call(&builder, "rt_print_name_import", &[def_ptr, def_len, name_ptr, name_len])?;
+        table.extend([def_ptr, def_len, name_ptr, name_len]);
     }
+    let names = module.add_global(i64_ty.array_type(table.len() as u32), None, "print_names");
+    names.set_initializer(&i64_ty.const_array(&table));
+    names.set_constant(true);
+    names.set_linkage(inkwell::module::Linkage::Private);
+    call(&builder, "rt_print_names", &[names.as_pointer_value().const_to_int(i64_ty)])?;
     builder.build_return(None).map_err(|e| format!("failed to build the printer registration's return: {}", e))?;
     Ok(())
 }
@@ -1893,7 +2043,7 @@ mod tests {
         builder.build_call(exit, &[code.into()], "").unwrap();
         builder.build_unreachable().unwrap();
 
-        build_main_wrapper(ctx, &module, "tl_main", &[], &[], &[], &[], &[], &[], &[], &[], &[], &[], None, false, super::Target::Host, super::HeapInit { cells: typelisp_rt::DEFAULT_AOT_HEAP_CAPACITY, fixed: false, max_memory: None }).expect("build_main_wrapper failed");
+        build_main_wrapper(ctx, &module, "tl_main", &[], &super::Globals::default(), &[], &[], &[], &[], &[], &[], &[], &[], &[], None, false, super::Target::Host, super::HeapInit { cells: typelisp_rt::DEFAULT_AOT_HEAP_CAPACITY, fixed: false, max_memory: None }).expect("build_main_wrapper failed");
         module.verify().expect("module failed verification");
 
         let out_path = tmp_path("rt_ping_test");
@@ -1932,7 +2082,7 @@ mod tests {
         };
         builder.build_return(Some(&result)).unwrap();
 
-        build_main_wrapper(ctx, &module, "tl_main", &[], &[], &[], &[], &[], &[], &[], &[], &[], &[], None, false, super::Target::Host, super::HeapInit { cells: typelisp_rt::DEFAULT_AOT_HEAP_CAPACITY, fixed: false, max_memory: None }).expect("build_main_wrapper failed");
+        build_main_wrapper(ctx, &module, "tl_main", &[], &super::Globals::default(), &[], &[], &[], &[], &[], &[], &[], &[], &[], None, false, super::Target::Host, super::HeapInit { cells: typelisp_rt::DEFAULT_AOT_HEAP_CAPACITY, fixed: false, max_memory: None }).expect("build_main_wrapper failed");
         module.verify().expect("module failed verification");
 
         let out_path = tmp_path("rt_heap_init_test");

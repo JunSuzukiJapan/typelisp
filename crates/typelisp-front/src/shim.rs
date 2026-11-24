@@ -285,7 +285,13 @@ unsafe fn run_program_interp(args: *const i64, argc: u32, main_returns_int: bool
     // the id -> slot table is the runtime's, as under `rt_run_program`.
     typelisp_print::aot::set_global_slots(typelisp_rt::global_perm_idx);
     let heap = active_heap();
-    let inits: Vec<usize> = program.inits.iter().map(|f| *f as usize).collect();
+    // An executable that calls `eval` can read any global, and initialises
+    // every one (`compile::aot`).
+    let inits: Vec<usize> = program
+        .inits
+        .iter()
+        .map(|f| f.unwrap_or_else(|| fatal("rt_run_program_interp: a global was left out of an executable that calls eval")) as usize)
+        .collect();
     let entry = program.entry as usize;
     let ret = if main_returns_int { crate::check::repr::Repr::Int } else { crate::check::repr::Repr::Unit };
     let code = match run_program_result(interp, heap, &inits, entry, ret, main_returns_int) {
