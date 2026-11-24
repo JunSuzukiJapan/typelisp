@@ -2,6 +2,7 @@
 //! system's half of [`SchedShared::install_threads`], and the program entries
 //! of an executable whose tasks run on them.
 
+use typelisp_mem::Word;
 use typelisp_mem::prelude::*;
 use typelisp_mem::Heap;
 
@@ -219,7 +220,7 @@ fn start_program_threads(
 ///
 /// `rt_run_program`'s.
 #[no_mangle]
-pub unsafe extern "C" fn rt_run_program_threads(inits: i64, count: i64, entry: i64) -> i64 {
+pub unsafe extern "C" fn rt_run_program_threads(inits: Word, count: Word, entry: Word) -> Word {
     typelisp_rt::run_entry(inits, count, entry, false, |program| typelisp_rt::run_program(program, Some(start_program_threads)))
 }
 
@@ -229,6 +230,6 @@ pub unsafe extern "C" fn rt_run_program_threads(inits: i64, count: i64, entry: i
 ///
 /// `rt_run_program`'s.
 #[no_mangle]
-pub unsafe extern "C" fn rt_run_program_threads_int(inits: i64, count: i64, entry: i64) -> i64 {
+pub unsafe extern "C" fn rt_run_program_threads_int(inits: Word, count: Word, entry: Word) -> Word {
     typelisp_rt::run_entry(inits, count, entry, true, |program| typelisp_rt::run_program(program, Some(start_program_threads)))
 }

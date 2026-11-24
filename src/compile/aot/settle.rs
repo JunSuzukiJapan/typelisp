@@ -183,7 +183,7 @@ fn volatile_accesses(f: FunctionValue<'static>) -> Result<(), String> {
         let ty = crate::compile::carriers::int(bits);
         let answer = if store {
             let value = word(2).ok_or("internal error: a volatile write of no word")?;
-            let value = b.build_int_truncate(value, ty, "register_value").map_err(failed)?;
+            let value = if bits < 32 { b.build_int_truncate(value, ty, "register_value").map_err(failed)? } else { value };
             let i = b.build_store(ptr, value).map_err(failed)?;
             i.set_volatile(true).map_err(|e| format!("a volatile write: {:?}", e))?;
             i.set_alignment(bits / 8).map_err(|e| format!("a volatile write: {:?}", e))?;
@@ -193,7 +193,11 @@ fn volatile_accesses(f: FunctionValue<'static>) -> Result<(), String> {
             let i = v.as_instruction().ok_or("internal error: a load is an instruction")?;
             i.set_volatile(true).map_err(|e| format!("a volatile read: {:?}", e))?;
             i.set_alignment(bits / 8).map_err(|e| format!("a volatile read: {:?}", e))?;
-            b.build_int_z_extend(v, word_ty, "word").map_err(failed)?
+            if bits < 32 {
+                b.build_int_z_extend(v, ctx.i32_type(), "wide").map_err(failed)?
+            } else {
+                v
+            }
         };
         drop_check(call);
         let old: IntValue<'static> = call.try_into().map_err(|()| "internal error: a volatile access answers a word".to_string())?;

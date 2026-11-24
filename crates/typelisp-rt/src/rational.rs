@@ -12,6 +12,7 @@
 //! `rational` word as it stands, which is how `int`'s own `/` (whose result
 //! is a `rational`) uses [`rt_rational_div`] directly.
 
+use typelisp_mem::Word;
 use typelisp_mem::prelude::*;
 use num_bigint::Sign;
 use num_rational::BigRational;
@@ -43,7 +44,7 @@ pub fn rational_result(heap: &mut Heap, r: BigRational) -> Value {
 /// # Safety
 ///
 /// A `Heap` must be registered on this thread.
-unsafe fn rational_arg(word: i64, who: &str) -> BigRational {
+unsafe fn rational_arg(word: Word, who: &str) -> BigRational {
     match rational_of(active_heap(), decode(word)) {
         Some(r) => r,
         None => fatal(&format!("{who}: argument is neither an int nor a ratio")),
@@ -53,7 +54,7 @@ unsafe fn rational_arg(word: i64, who: &str) -> BigRational {
 /// # Safety
 ///
 /// A `Heap` must be registered on this thread.
-unsafe fn answer(r: BigRational) -> i64 {
+unsafe fn answer(r: BigRational) -> Word {
     encode(rational_result(active_heap(), r))
 }
 
@@ -63,7 +64,7 @@ unsafe fn answer(r: BigRational) -> i64 {
 ///
 /// Same as [`rational_arg`].
 #[no_mangle]
-pub unsafe extern "C" fn rt_rational_add(a: i64, b: i64) -> i64 {
+pub unsafe extern "C" fn rt_rational_add(a: Word, b: Word) -> Word {
     let (a, b) = (rational_arg(a, "rt_rational_add"), rational_arg(b, "rt_rational_add"));
     answer(a + b)
 }
@@ -74,7 +75,7 @@ pub unsafe extern "C" fn rt_rational_add(a: i64, b: i64) -> i64 {
 ///
 /// Same as [`rational_arg`].
 #[no_mangle]
-pub unsafe extern "C" fn rt_rational_sub(a: i64, b: i64) -> i64 {
+pub unsafe extern "C" fn rt_rational_sub(a: Word, b: Word) -> Word {
     let (a, b) = (rational_arg(a, "rt_rational_sub"), rational_arg(b, "rt_rational_sub"));
     answer(a - b)
 }
@@ -85,7 +86,7 @@ pub unsafe extern "C" fn rt_rational_sub(a: i64, b: i64) -> i64 {
 ///
 /// Same as [`rational_arg`].
 #[no_mangle]
-pub unsafe extern "C" fn rt_rational_mul(a: i64, b: i64) -> i64 {
+pub unsafe extern "C" fn rt_rational_mul(a: Word, b: Word) -> Word {
     let (a, b) = (rational_arg(a, "rt_rational_mul"), rational_arg(b, "rt_rational_mul"));
     answer(a * b)
 }
@@ -97,7 +98,7 @@ pub unsafe extern "C" fn rt_rational_mul(a: i64, b: i64) -> i64 {
 ///
 /// Same as [`rational_arg`].
 #[no_mangle]
-pub unsafe extern "C-unwind" fn rt_rational_div(a: i64, b: i64) -> i64 {
+pub unsafe extern "C-unwind" fn rt_rational_div(a: Word, b: Word) -> Word {
     let (a, b) = (rational_arg(a, "rt_rational_div"), rational_arg(b, "rt_rational_div"));
     if b.numer().sign() == Sign::NoSign {
         return raise("divide by zero".to_string()).into_word();
@@ -111,7 +112,7 @@ pub unsafe extern "C-unwind" fn rt_rational_div(a: i64, b: i64) -> i64 {
 ///
 /// Same as [`rational_arg`].
 #[no_mangle]
-pub unsafe extern "C" fn rt_rational_cmp(a: i64, b: i64) -> i64 {
+pub unsafe extern "C" fn rt_rational_cmp(a: Word, b: Word) -> Word {
     let (a, b) = (rational_arg(a, "rt_rational_cmp"), rational_arg(b, "rt_rational_cmp"));
     match a.cmp(&b) {
         core::cmp::Ordering::Less => -1,
@@ -127,7 +128,7 @@ pub unsafe extern "C" fn rt_rational_cmp(a: i64, b: i64) -> i64 {
 ///
 /// Same as [`rational_arg`].
 #[no_mangle]
-pub unsafe extern "C" fn rt_rational_from_ratio(x: i64) -> i64 {
+pub unsafe extern "C" fn rt_rational_from_ratio(x: Word) -> Word {
     let r = rational_arg(x, "rt_rational_from_ratio");
     if r.is_integer() {
         answer(r)
@@ -143,7 +144,7 @@ pub unsafe extern "C" fn rt_rational_from_ratio(x: i64) -> i64 {
 ///
 /// Same as [`rational_arg`].
 #[no_mangle]
-pub unsafe extern "C" fn rt_rational_to_ratio(x: i64) -> i64 {
+pub unsafe extern "C" fn rt_rational_to_ratio(x: Word) -> Word {
     let r = rational_arg(x, "rt_rational_to_ratio");
     encode(active_heap().alloc_ratio(r))
 }
@@ -154,7 +155,7 @@ pub unsafe extern "C" fn rt_rational_to_ratio(x: i64) -> i64 {
 ///
 /// Same as [`rational_arg`].
 #[no_mangle]
-pub unsafe extern "C" fn rt_rational_to_int(x: i64) -> i64 {
+pub unsafe extern "C" fn rt_rational_to_int(x: Word) -> Word {
     let r = rational_arg(x, "rt_rational_to_int");
     encode(active_heap().int_from_bigint(r.to_integer()))
 }
@@ -166,9 +167,9 @@ pub unsafe extern "C" fn rt_rational_to_int(x: i64) -> i64 {
 ///
 /// Same as [`rational_arg`].
 #[no_mangle]
-pub unsafe extern "C" fn rt_rational_is_int(x: i64) -> i64 {
+pub unsafe extern "C" fn rt_rational_is_int(x: Word) -> bool {
     let r = rational_arg(x, "rt_rational_is_int");
-    i64::from(r.is_integer())
+    r.is_integer()
 }
 
 /// `rational->float`: the raw `f64` bits, rounded.
@@ -177,10 +178,10 @@ pub unsafe extern "C" fn rt_rational_is_int(x: i64) -> i64 {
 ///
 /// Same as [`rational_arg`].
 #[no_mangle]
-pub unsafe extern "C" fn rt_rational_to_float(x: i64) -> i64 {
+pub unsafe extern "C" fn rt_rational_to_float(x: Word) -> f64 {
     let r = rational_arg(x, "rt_rational_to_float");
     match r.to_f64() {
-        Some(f) => f.to_bits() as i64,
+        Some(f) => f,
         None => fatal("rt_rational_to_float: conversion failed"),
     }
 }
@@ -191,7 +192,7 @@ pub unsafe extern "C" fn rt_rational_to_float(x: i64) -> i64 {
 ///
 /// Same as [`rational_arg`].
 #[no_mangle]
-pub unsafe extern "C" fn rt_rational_numerator(x: i64) -> i64 {
+pub unsafe extern "C" fn rt_rational_numerator(x: Word) -> Word {
     let r = rational_arg(x, "rt_rational_numerator");
     encode(active_heap().int_from_bigint(r.numer().clone()))
 }
@@ -202,7 +203,7 @@ pub unsafe extern "C" fn rt_rational_numerator(x: i64) -> i64 {
 ///
 /// Same as [`rational_arg`].
 #[no_mangle]
-pub unsafe extern "C" fn rt_rational_denominator(x: i64) -> i64 {
+pub unsafe extern "C" fn rt_rational_denominator(x: Word) -> Word {
     let r = rational_arg(x, "rt_rational_denominator");
     encode(active_heap().int_from_bigint(r.denom().clone()))
 }

@@ -2,6 +2,7 @@
 //! directions: encoding arguments and decoding results, entering a compiled
 //! body, and the hooks compiled code calls back into the interpreter through.
 
+use typelisp_mem::Word;
 use std::rc::Rc;
 use typelisp_mem::RootScope;
 use crate::{BoxId, Heap, Value};
@@ -68,20 +69,20 @@ pub(crate) fn decode_crossing_return(heap: &mut Heap, raw: i64, ret: &Repr) -> R
         // declaration promised — a mismatch here means the compiled side
         // and this side disagree about the ABI, which is an internal
         // error rather than anything a program can cause.
-        Repr::Str => match typelisp_rt::decode(raw) {
+        Repr::Str => match typelisp_rt::decode(raw as Word) {
             v @ Value::Str(_) => v,
             other => return Err(crossing_mismatch("a string", other)),
         },
-        Repr::Sym => match typelisp_rt::decode(raw) {
+        Repr::Sym => match typelisp_rt::decode(raw as Word) {
             v @ Value::Symbol(_) => v,
             other => return Err(crossing_mismatch("a Symbol", other)),
         },
-        Repr::Ratio => match typelisp_rt::decode(raw) {
+        Repr::Ratio => match typelisp_rt::decode(raw as Word) {
             v @ Value::Boxed(id) if heap.is_ratio(id) => v,
             other => return Err(crossing_mismatch("a ratio", other)),
         },
         // A `rational` is the word of the `int` or `ratio` it is.
-        Repr::Rational => match typelisp_rt::decode(raw) {
+        Repr::Rational => match typelisp_rt::decode(raw as Word) {
             v @ Value::Int(_) => v,
             v @ Value::Boxed(id) if heap.is_bignum(id) || heap.is_ratio(id) => v,
             other => return Err(crossing_mismatch("a rational (int or ratio)", other)),
@@ -91,7 +92,7 @@ pub(crate) fn decode_crossing_return(heap: &mut Heap, raw: i64, ret: &Repr) -> R
         // (`Heap::canonical_int`'s invariant, checked here so that a
         // compiled body that boxed a small value is caught at the
         // boundary rather than the next `eq`).
-        Repr::Int => match typelisp_rt::decode(raw) {
+        Repr::Int => match typelisp_rt::decode(raw as Word) {
             v @ Value::Int(_) => v,
             v @ Value::Boxed(id) if heap.is_bignum(id) => {
                 if heap.bignum_fits_fixnum(id) {
@@ -104,7 +105,7 @@ pub(crate) fn decode_crossing_return(heap: &mut Heap, raw: i64, ret: &Repr) -> R
             }
             other => return Err(crossing_mismatch("an int (fixnum or bignum)", other)),
         },
-        Repr::RandomState => match typelisp_rt::decode(raw) {
+        Repr::RandomState => match typelisp_rt::decode(raw as Word) {
             v @ Value::Boxed(id) if heap.is_random_state(id) => v,
             other => return Err(crossing_mismatch("a random-state", other)),
         },
@@ -122,7 +123,7 @@ pub(crate) fn decode_crossing_return(heap: &mut Heap, raw: i64, ret: &Repr) -> R
         | Repr::Fn
         | Repr::Scope(_)
         | Repr::Vector(_)
-        | Repr::HashTable(..) => typelisp_rt::decode(raw),
+        | Repr::HashTable(..) => typelisp_rt::decode(raw as Word),
         // A still-generic type variable. Nothing compiled can return one:
         // a generic body is monomorphized before it is compiled, so
         // reaching here is a bug in whatever produced the signature.
@@ -133,6 +134,43 @@ pub(crate) fn decode_crossing_return(heap: &mut Heap, raw: i64, ret: &Repr) -> R
             ))
         }
     })
+}
+
+/// How many bits a value of `repr` takes where it crosses: a float's or a
+/// fixed-width integer's own width, a word otherwise. A value wider than a
+/// word is the words it takes, in order (`typelisp_mem::value_words`).
+pub(crate) fn crossing_bits(repr: &Repr) -> u32 {
+    use typelisp_mem::fixed::FixedType;
+    match repr {
+        Repr::F64 => 64,
+        Repr::Narrow(FixedType::I32 | FixedType::U32) | Repr::Char => 32,
+        Repr::RawWord => Word::BITS.max(std::ffi::c_long::BITS),
+        _ => Word::BITS,
+    }
+}
+
+/// The values in `words`, the arguments a call with these parameter
+/// representations left: each raw, as [`decode_crossing_return`] takes it.
+pub(crate) fn crossing_values(words: &[Word], reprs: &[Repr]) -> Result<Vec<i64>, EvalError> {
+    let mut rest = words;
+    let mut values = Vec::with_capacity(reprs.len());
+    for r in reprs {
+        let n = typelisp_mem::words_for(crossing_bits(r));
+        if rest.len() < n {
+            return Err(arity_mismatch(words.len(), reprs.len()));
+        }
+        let (mine, others) = rest.split_at(n);
+        values.push(typelisp_mem::raw_value(mine));
+        rest = others;
+    }
+    if !rest.is_empty() {
+        return Err(arity_mismatch(words.len(), reprs.len()));
+    }
+    Ok(values)
+}
+
+fn arity_mismatch(words: usize, params: usize) -> EvalError {
+    EvalError::Internal(format!("arity mismatch: the closure takes {} argument(s), given {} words", params, words))
 }
 
 /// One value's worth of `Interp::encode_crossing_args` — see
@@ -168,8 +206,8 @@ pub(crate) fn encode_crossing_value(heap: &Heap, v: &Value, repr: &Repr) -> Resu
         // `encode` would abort on a `Value::Int` past the fixnum range
         // and happily tag any other box, and neither is an `int`.
         Repr::Int => match v {
-            Value::Int(n) if typelisp_mem::fixnum_fits(*n) => Ok(typelisp_rt::encode(*v)),
-            Value::Boxed(id) if heap.is_bignum(*id) => Ok(typelisp_rt::encode(*v)),
+            Value::Int(n) if typelisp_mem::fixnum_fits(*n) => Ok(typelisp_rt::encode(*v) as i64),
+            Value::Boxed(id) if heap.is_bignum(*id) => Ok(typelisp_rt::encode(*v) as i64),
             other => Err(EvalError::Internal(format!("compiled call: expected an int argument (fixnum or bignum), got {:?}", other))),
         },
         Repr::Bool => match v {
@@ -227,7 +265,7 @@ pub(crate) fn encode_crossing_value(heap: &Heap, v: &Value, repr: &Repr) -> Resu
         // as a field holds it (`Value::Int` for a narrow payload, which
         // `encode` tags as a fixnum — the field encoding), its `None`
         // the empty list.
-        _ => Ok(typelisp_rt::encode(*v)),
+        _ => Ok(typelisp_rt::encode(*v) as i64),
     }
 }
 
@@ -235,16 +273,16 @@ pub(crate) fn encode_crossing_value(heap: &Heap, v: &Value, repr: &Repr) -> Resu
 /// already in the compiled representation — [`CompiledBody::call`] for a
 /// caller that holds the two facts rather than the body (a worker thread's
 /// printer, which cannot hold the interpreter's `Rc`).
-pub(crate) fn call_body(address: usize, abi: u8, args: &[i64]) -> i64 {
+pub(crate) fn call_body(address: usize, abi: u8, args: &[Word]) -> i64 {
     if abi == typelisp_abi::BODY_ABI_COROUTINE {
         return call_coroutine(address, args);
     }
     // SAFETY: `address` comes from a symbol the backend resolved out of a
     // module that defines it, so it points at a function built under the
     // shared ABI. `CompiledFn::new`/`new_multi` are the only producers.
-    let f: unsafe extern "C-unwind" fn(*const i64, u32) -> i64 =
-        unsafe { std::mem::transmute::<usize, unsafe extern "C-unwind" fn(*const i64, u32) -> i64>(address) };
-    unsafe { f(args.as_ptr(), args.len() as u32) }
+    let f: unsafe extern "C-unwind" fn(*const Word, u32) -> Word =
+        unsafe { std::mem::transmute::<usize, unsafe extern "C-unwind" fn(*const Word, u32) -> Word>(address) };
+    unsafe { f(args.as_ptr(), args.len() as u32) as i64 }
 }
 
 /// This is the boundary an *interpreted* caller sits at: the interpreter is
@@ -255,7 +293,7 @@ pub(crate) fn call_body(address: usize, abi: u8, args: &[i64]) -> i64 {
 /// the chain as a panic when it would wait — so nothing about suspension
 /// comes out of here. The interpreter's own nested evaluation
 /// (`Interp::run_to_completion`) draws the same line for the same reason.
-fn call_coroutine(address: usize, args: &[i64]) -> i64 {
+fn call_coroutine(address: usize, args: &[Word]) -> i64 {
     // SAFETY: same provenance as the classic branch — a symbol resolved out of
     // a module that defines it, declared under `coroutine_fn_type`.
     let f: typelisp_rt::coroutine::CoroutineFn =
@@ -265,7 +303,7 @@ fn call_coroutine(address: usize, args: &[i64]) -> i64 {
     // `run_to_end`, not `run`: an `apply` of an interpreted function value
     // underneath has to happen on *this* Rust frame, because this frame is
     // what the caller is waiting on. See `FrameStack::run_to_end`.
-    let applied = |closure: i64, argv: &[i64]| unsafe {
+    let applied = |closure: Word, argv: &[Word]| unsafe {
         typelisp_rt::apply_on_this_frame(closure, argv, "a compiled function reached from the interpreter")
     };
     match stack.run_to_end(heap, f, args, &[], applied) {
@@ -275,7 +313,7 @@ fn call_coroutine(address: usize, args: &[i64]) -> i64 {
         Err(typelisp_rt::coroutine::Paused::Applying { .. } | typelisp_rt::coroutine::Paused::ApplyingDyn { .. }) => typelisp_abi::raise(
             "a compiled function applied an interpreted value that the drive did not resolve".to_string(),
         )
-        .into_word(),
+        .into_zero(),
         // Resolved by `run_to_end` too — answered or refused into the chain.
         Err(typelisp_rt::coroutine::Paused::Suspended) => typelisp_abi::fatal(
             "a compiled function suspended and the drive did not resolve it — a driver on a machine frame must use `run_to_end`",
@@ -283,7 +321,7 @@ fn call_coroutine(address: usize, args: &[i64]) -> i64 {
         // The unwind was travelling towards a `catch` that is not in this
         // chain; raising it again puts it back on the path it was on, and
         // the caller's `catch_compiled_panic` takes it.
-        Err(typelisp_rt::coroutine::Paused::Unwinding) => typelisp_rt::coroutine::resume_unwinding().into_word(),
+        Err(typelisp_rt::coroutine::Paused::Unwinding) => typelisp_rt::coroutine::resume_unwinding().into_zero(),
     }
 }
 
@@ -347,7 +385,7 @@ impl Interp {
         heap: &mut Heap,
         argv: &[Value],
         param_reprs: &[Repr],
-    ) -> Result<(Vec<i64>, usize, usize), EvalError> {
+    ) -> Result<(Vec<Word>, usize, usize), EvalError> {
         let roots_on_entry = heap.root_count();
         // A `defun`/`defmethod`'s `sig` lists only its fixed parameters; a
         // `&rest` one that reached compilation would land in the "no declared
@@ -403,9 +441,9 @@ impl Interp {
         argv: &[Value],
         param_reprs: &[Repr],
         rest: bool,
-    ) -> Result<(Vec<i64>, usize), EvalError> {
+    ) -> Result<(Vec<Word>, usize), EvalError> {
         let mut crossing_roots = 0usize;
-        let mut int_args: Vec<i64> = Vec::with_capacity(argv.len());
+        let mut int_args: Vec<Word> = Vec::with_capacity(argv.len());
         // Root every argument up front, before the encode loop below
         // allocates anything. (Rooting a scalar is a no-op for the collector,
         // so the pass does not bother telling them apart.) A later argument's
@@ -449,7 +487,7 @@ impl Interp {
                 ))),
             };
             match encoded {
-                Ok(n) => int_args.push(n),
+                Ok(n) => int_args.extend(typelisp_mem::value_words(n, param_repr.map_or(Word::BITS, crossing_bits))),
                 Err(e) => {
                     for _ in 0..crossing_roots {
                         heap.pop_root();
@@ -519,21 +557,21 @@ impl Interp {
     /// it is driven by the task and can suspend — the same reason a *named*
     /// coroutine-ABI body is driven rather than called. This function's own
     /// caller only ever names a classic one.
-    pub(super) fn call_closure_box(heap: &Heap, id: BoxId, args: &[i64]) -> i64 {
+    pub(super) fn call_closure_box(heap: &Heap, id: BoxId, args: &[Word]) -> i64 {
         debug_assert!(
             heap.compiled_closure_body_abi(id) != typelisp_abi::BODY_ABI_COROUTINE,
             "call_closure_box: a coroutine-ABI closure must be driven through CompiledEnter, not called"
         );
         let env_len = heap.compiled_closure_env_len(id);
         let mask = heap.compiled_closure_mask(id);
-        let env: Vec<i64> = (0..env_len)
+        let env: Vec<Word> = (0..env_len)
             .map(|i| {
                 let v = heap.compiled_closure_env_get(id, i);
                 if mask & (1 << i) != 0 {
                     typelisp_rt::encode(v)
                 } else {
                     match v {
-                        Value::Int(raw) => raw,
+                        Value::Int(raw) => raw as Word,
                         other => unreachable!("compiled closure env slot {} holds a non-raw value {:?} for an unmasked slot", i, other),
                     }
                 }
@@ -548,8 +586,8 @@ impl Interp {
         // always points at a function with this signature.
         // A `(panic ...)` in this closure's body comes back as a raise
         // waiting on the thread, for the caller's `catch_compiled_panic`.
-        let f: unsafe extern "C-unwind" fn(*const i64, u32, *const i64, u32) -> i64 = unsafe { std::mem::transmute(fn_ptr) };
-        unsafe { f(args.as_ptr(), args.len() as u32, env.as_ptr(), env.len() as u32) }
+        let f: unsafe extern "C-unwind" fn(*const Word, u32, *const Word, u32) -> Word = unsafe { std::mem::transmute(fn_ptr) };
+        unsafe { f(args.as_ptr(), args.len() as u32, env.as_ptr(), env.len() as u32) as i64 }
     }
 
     /// Registers this thread's `Heap` and `Interp` for the compiled code
@@ -609,7 +647,7 @@ impl Interp {
     /// and reifying it produces exactly the closure an interpreted
     /// `(method-ref ...)` would — carrying the parameter and return
     /// representations the caller decodes by.
-    pub(super) fn dyn_slot_closure(&self, heap: &mut Heap, vtable: u32, slot: u32) -> Result<i64, EvalError> {
+    pub(super) fn dyn_slot_closure(&self, heap: &mut Heap, vtable: u32, slot: u32) -> Result<Word, EvalError> {
         let target = self
             .vtables
             .borrow()
@@ -640,7 +678,7 @@ impl Interp {
     /// both just `i64`s). A built-in used as a function value has no
     /// signature to read, which is why it is rejected before it can ever
     /// cross — see [`Self::encode_crossing_value`].
-    fn apply_interpreted(&self, heap: &mut Heap, closure: i64, argv: &[i64]) -> Result<i64, EvalError> {
+    fn apply_interpreted(&self, heap: &mut Heap, closure: Word, argv: &[Word]) -> Result<i64, EvalError> {
         let f = typelisp_rt::decode(closure);
         let id = match f {
             Value::Boxed(id) if heap.is_closure(id) => id,
@@ -656,13 +694,7 @@ impl Interp {
         let param_reprs = super::core_eval::param_reprs(heap, params)?;
         let ret = Repr::read(heap, heap.closure_ret(id))
             .ok_or_else(|| EvalError::Internal("the closure has no declared return representation".to_string()))?;
-        if argv.len() != param_reprs.len() {
-            return Err(EvalError::Internal(format!(
-                "arity mismatch: the closure takes {} argument(s), given {}",
-                param_reprs.len(),
-                argv.len()
-            )));
-        }
+        let raws = crossing_values(argv, &param_reprs)?;
 
         let mut s = RootScope::new(heap);
         // The closure box is reachable from the caller's compiled frame,
@@ -670,8 +702,8 @@ impl Interp {
         // rooted on its side, but their *decoded* forms (a float
         // argument allocates a box) are new objects reachable from nothing.
         s.push_root(f);
-        let mut args = Vec::with_capacity(argv.len());
-        for (raw, r) in argv.iter().zip(&param_reprs) {
+        let mut args = Vec::with_capacity(raws.len());
+        for (raw, r) in raws.iter().zip(&param_reprs) {
             let v = self.decode_compiled_return(&mut s, *raw, r)?;
             s.push_root(v);
             args.push(v);
@@ -769,7 +801,7 @@ fn crossing_mismatch(what: &str, got: Value) -> EvalError {
 /// `args` must point to `argc` valid `i64`s, and both a `Heap`
 /// ([`typelisp_rt::set_active_heap`]) and an `Interp`
 /// ([`Interp::enter_compiled`]) must be registered on this thread.
-unsafe extern "C-unwind" fn rt_apply_interpreted(closure: i64, args: *const i64, argc: u32) -> i64 {
+unsafe extern "C-unwind" fn rt_apply_interpreted(closure: Word, args: *const Word, argc: u32) -> i64 {
     let interp = ACTIVE_INTERP.with(|cell| cell.get());
     if interp.is_null() {
         typelisp_rt::fatal("applying a function value from compiled code: no interpreter is registered on this thread");
@@ -779,7 +811,7 @@ unsafe extern "C-unwind" fn rt_apply_interpreted(closure: i64, args: *const i64,
     let argv = std::slice::from_raw_parts(args, argc as usize);
     match interp.apply_interpreted(heap, closure, argv) {
         Ok(w) => w,
-        Err(e) => crate::eval::crossing::unwind_interpreted_failure(e).into_word(),
+        Err(e) => crate::eval::crossing::unwind_interpreted_failure(e).into_zero(),
     }
 }
 
@@ -800,7 +832,7 @@ unsafe extern "C-unwind" fn rt_apply_interpreted(closure: i64, args: *const i64,
 /// # Safety
 ///
 /// Both a `Heap` and an `Interp` must be registered on this thread.
-unsafe extern "C-unwind" fn rt_dyn_slot_closure(vtable: u32, slot: u32) -> i64 {
+unsafe extern "C-unwind" fn rt_dyn_slot_closure(vtable: u32, slot: u32) -> Word {
     let interp = ACTIVE_INTERP.with(|cell| cell.get());
     if interp.is_null() {
         typelisp_rt::fatal("a :dyn call with an interpreted implementation: no interpreter is registered on this thread");

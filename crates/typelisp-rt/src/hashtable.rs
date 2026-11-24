@@ -1,5 +1,6 @@
 //! `HashTable<K,V>` primitives.
 
+use typelisp_mem::Word;
 use typelisp_mem::prelude::*;
 use typelisp_abi::{active_heap, decode, encode, fatal};
 use typelisp_mem::{BoxId, Value};
@@ -25,7 +26,7 @@ use crate::type_arg;
 /// A `Heap` must already be registered on this thread, `key` must be a
 /// type's word, and `hash`/`test` tagged function values.
 #[no_mangle]
-pub unsafe extern "C" fn rt_hashtable_new(key: i64, hash: i64, test: i64) -> i64 {
+pub unsafe extern "C" fn rt_hashtable_new(key: Word, hash: Word, test: Word) -> Word {
     // The table's own runtime identity, spelled by the checker and handed
     // down through the island (`typeck::method` -> `hashtable-op`'s name
     // slot): `HashTable<string,i32>` and `HashTable<string,string>` are
@@ -42,7 +43,7 @@ pub unsafe extern "C" fn rt_hashtable_new(key: i64, hash: i64, test: i64) -> i64
 /// A `Heap` must already be registered on this thread, `id` must be a
 /// tagged `HashTable` and `which` a raw `0` or `1`.
 #[no_mangle]
-pub unsafe extern "C" fn rt_hashtable_function(id: i64, which: i64) -> i64 {
+pub unsafe extern "C" fn rt_hashtable_function(id: Word, which: Word) -> Word {
     let id = match decode(id) {
         Value::Boxed(id) => id,
         _ => fatal("rt_hashtable_function: first argument is not a boxed HashTable"),
@@ -51,16 +52,16 @@ pub unsafe extern "C" fn rt_hashtable_function(id: i64, which: i64) -> i64 {
 }
 
 /// The bucket family: `(rt-hashtable-bucket-* ht hash ...)` for compiled
-/// code. `hash` and every index are raw `i64`s (an `i32` in the language);
+/// code. `hash` and every index are raw `Word`s (an `i32` in the language);
 /// keys and values are already-tagged `Sexpr`s, as a struct field is.
 ///
 /// # Safety
 ///
 /// `argc >= 2`, `id` a boxed `HashTable`; a `Heap` must be registered.
 #[no_mangle]
-pub unsafe extern "C" fn rt_hashtable_bucket_count(id: i64, hash: i64) -> i64 {
+pub unsafe extern "C" fn rt_hashtable_bucket_count(id: Word, hash: Word) -> Word {
     let id = hashtable_arg(id, "rt_hashtable_bucket_count");
-    active_heap().hashtable_bucket_count(id, hash) as i64
+    active_heap().hashtable_bucket_count(id, hash as i64) as Word
 }
 
 /// The `i`th key in `hash`'s bucket, still tagged — the caller decodes it
@@ -70,9 +71,9 @@ pub unsafe extern "C" fn rt_hashtable_bucket_count(id: i64, hash: i64) -> i64 {
 ///
 /// `argc >= 3`, `id` a boxed `HashTable`; a `Heap` must be registered.
 #[no_mangle]
-pub unsafe extern "C" fn rt_hashtable_bucket_key(id: i64, hash: i64, i: i64) -> i64 {
+pub unsafe extern "C" fn rt_hashtable_bucket_key(id: Word, hash: Word, i: Word) -> Word {
     let id = hashtable_arg(id, "rt_hashtable_bucket_key");
-    encode(active_heap().hashtable_bucket_key(id, hash, bucket_index(i, "rt_hashtable_bucket_key")))
+    encode(active_heap().hashtable_bucket_key(id, hash as i64, bucket_index(i, "rt_hashtable_bucket_key")))
 }
 
 /// The `i`th value in `hash`'s bucket. See [`rt_hashtable_bucket_key`].
@@ -81,9 +82,9 @@ pub unsafe extern "C" fn rt_hashtable_bucket_key(id: i64, hash: i64, i: i64) -> 
 ///
 /// `argc >= 3`, `id` a boxed `HashTable`; a `Heap` must be registered.
 #[no_mangle]
-pub unsafe extern "C" fn rt_hashtable_bucket_value(id: i64, hash: i64, i: i64) -> i64 {
+pub unsafe extern "C" fn rt_hashtable_bucket_value(id: Word, hash: Word, i: Word) -> Word {
     let id = hashtable_arg(id, "rt_hashtable_bucket_value");
-    encode(active_heap().hashtable_bucket_value(id, hash, bucket_index(i, "rt_hashtable_bucket_value")))
+    encode(active_heap().hashtable_bucket_value(id, hash as i64, bucket_index(i, "rt_hashtable_bucket_value")))
 }
 
 /// Writes `key -> val` at index `i` of `hash`'s bucket, appending when `i` is
@@ -94,12 +95,12 @@ pub unsafe extern "C" fn rt_hashtable_bucket_value(id: i64, hash: i64, i: i64) -
 ///
 /// `argc >= 5`, `id` a boxed `HashTable`; a `Heap` must be registered.
 #[no_mangle]
-pub unsafe extern "C" fn rt_hashtable_bucket_put(id: i64, hash: i64, i: i64, key: i64, val: i64) -> i64 {
+pub unsafe extern "C" fn rt_hashtable_bucket_put(id: Word, hash: Word, i: Word, key: Word, val: Word) -> Word {
     let id = hashtable_arg(id, "rt_hashtable_bucket_put");
     let i = bucket_index(i, "rt_hashtable_bucket_put");
     let key = decode(key);
     let val = decode(val);
-    active_heap().hashtable_bucket_put(id, hash, i, key, val);
+    active_heap().hashtable_bucket_put(id, hash as i64, i, key, val);
     0
 }
 
@@ -109,17 +110,17 @@ pub unsafe extern "C" fn rt_hashtable_bucket_put(id: i64, hash: i64, i: i64, key
 ///
 /// `argc >= 3`, `id` a boxed `HashTable`; a `Heap` must be registered.
 #[no_mangle]
-pub unsafe extern "C" fn rt_hashtable_bucket_delete(id: i64, hash: i64, i: i64) -> i64 {
+pub unsafe extern "C" fn rt_hashtable_bucket_delete(id: Word, hash: Word, i: Word) -> Word {
     let id = hashtable_arg(id, "rt_hashtable_bucket_delete");
     let i = bucket_index(i, "rt_hashtable_bucket_delete");
-    active_heap().hashtable_bucket_delete(id, hash, i);
+    active_heap().hashtable_bucket_delete(id, hash as i64, i);
     0
 }
 
 /// A bucket index. Negative is an internal-invariant break — every index a
 /// caller passes came from `bucket-count` — so it traps rather than wrapping
 /// into an enormous `usize`.
-fn bucket_index(n: i64, who: &str) -> usize {
+fn bucket_index(n: Word, who: &str) -> usize {
     match usize::try_from(n) {
         Ok(i) => i,
         Err(_) => fatal(&format!("{}: negative bucket index {}", who, n)),
@@ -127,18 +128,18 @@ fn bucket_index(n: i64, who: &str) -> usize {
 }
 
 /// `(rt-hashtable-count ht)` for compiled code — the entry count as a raw
-/// `i64` (`HashTable<K,V>::count`, like `rt_struct_field_count`'s raw result).
+/// `Word` (`HashTable<K,V>::count`, like `rt_struct_field_count`'s raw result).
 ///
 /// # Safety
 ///
 /// `argc >= 1`, `id` a boxed `HashTable`; a `Heap` must be registered.
 #[no_mangle]
-pub unsafe extern "C" fn rt_hashtable_count(id: i64) -> i64 {
+pub unsafe extern "C" fn rt_hashtable_count(id: Word) -> Word {
     let id = match decode(id) {
         Value::Boxed(id) => id,
         _ => fatal("rt_hashtable_count: first argument is not a boxed HashTable"),
     };
-    active_heap().hashtable_count(id) as i64
+    active_heap().hashtable_count(id) as Word
 }
 
 /// `(rt-hashtable-clear ht)` for compiled code — empties the map in place,
@@ -148,7 +149,7 @@ pub unsafe extern "C" fn rt_hashtable_count(id: i64) -> i64 {
 ///
 /// `argc >= 1`, `id` a boxed `HashTable`; a `Heap` must be registered.
 #[no_mangle]
-pub unsafe extern "C" fn rt_hashtable_clear(id: i64) -> i64 {
+pub unsafe extern "C" fn rt_hashtable_clear(id: Word) -> Word {
     let id = match decode(id) {
         Value::Boxed(id) => id,
         _ => fatal("rt_hashtable_clear: first argument is not a boxed HashTable"),
@@ -164,7 +165,7 @@ pub unsafe extern "C" fn rt_hashtable_clear(id: i64) -> i64 {
 /// # Safety
 ///
 /// `argc >= 1`, `x` a boxed `HashTable`; a `Heap` must be registered.
-unsafe fn hashtable_arg(x: i64, who: &str) -> BoxId {
+unsafe fn hashtable_arg(x: Word, who: &str) -> BoxId {
     match decode(x) {
         Value::Boxed(id) => id,
         _ => fatal(&format!("{who}: first argument is not a boxed HashTable")),
@@ -180,7 +181,7 @@ unsafe fn hashtable_arg(x: i64, who: &str) -> BoxId {
 ///
 /// See [`hashtable_arg`].
 #[no_mangle]
-pub unsafe extern "C" fn rt_hashtable_keys(id: i64, key: i64) -> i64 {
+pub unsafe extern "C" fn rt_hashtable_keys(id: Word, key: Word) -> Word {
     let id = hashtable_arg(id, "rt_hashtable_keys");
     // `key` is the result's own type — a `Vector<K>`, whose instantiation
     // no value here carries. See `rt_hashtable_new`.
@@ -196,7 +197,7 @@ pub unsafe extern "C" fn rt_hashtable_keys(id: i64, key: i64) -> i64 {
 ///
 /// See [`hashtable_arg`].
 #[no_mangle]
-pub unsafe extern "C" fn rt_hashtable_values(id: i64, key: i64) -> i64 {
+pub unsafe extern "C" fn rt_hashtable_values(id: Word, key: Word) -> Word {
     let id = hashtable_arg(id, "rt_hashtable_values");
     let key = type_arg(key, "rt_hashtable_values");
     let fields: Vec<Value> = active_heap().hashtable_pairs(id).into_iter().map(|(_, v)| v).collect();
@@ -215,7 +216,7 @@ pub unsafe extern "C" fn rt_hashtable_values(id: i64, key: i64) -> i64 {
 ///
 /// See [`hashtable_arg`].
 #[no_mangle]
-pub unsafe extern "C" fn rt_hashtable_entries(id: i64, vec_key: i64) -> i64 {
+pub unsafe extern "C" fn rt_hashtable_entries(id: Word, vec_key: Word) -> Word {
     let id = hashtable_arg(id, "rt_hashtable_entries");
     // Two identities, one handed in: the result is a `Vector<cons-cell<K,V>>`,
     // so each cell's type is the vector type's one argument.

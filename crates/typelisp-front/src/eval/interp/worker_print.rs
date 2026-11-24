@@ -23,6 +23,7 @@
 //! if a drive is running and a worker may be printing now
 //! ([`Interp::printer_tables_changed`]).
 
+use typelisp_mem::Word;
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
@@ -142,7 +143,8 @@ fn worker_print_object(heap: &mut Heap, v: Value, escape: bool) -> Result<Option
         Some(PrintMethod::Interpreted) => return Err(interpreted_off_main(&format!("print-object of `{}`", type_path))),
         Some(PrintMethod::Compiled { address, abi, receiver }) => (*address, *abi, receiver.clone()),
     };
-    let args = [encode(heap, v, &receiver)?, i64::from(escape)];
+    let mut args: Vec<Word> = typelisp_mem::value_words(encode(heap, v, &receiver)?, super::crossing_bits(&receiver)).collect();
+    args.push(Word::from(escape));
     PRINTING.with(|p| p.borrow_mut().push(v));
     let result = call(address, abi, &args);
     PRINTING.with(|p| {
@@ -161,9 +163,9 @@ fn encode(heap: &Heap, v: Value, repr: &Repr) -> Result<i64, String> {
 /// Calls a printer method's compiled body and reads back its tagged string
 /// — a failure inside it (a `(panic ...)`) comes back as the printer's error,
 /// as `Interp::enter`'s does on the interpreter's thread.
-fn call(address: usize, abi: u8, args: &[i64]) -> Result<Value, String> {
+fn call(address: usize, abi: u8, args: &[Word]) -> Result<Value, String> {
     crate::eval::crossing::catch_compiled_panic(|| super::call_body(address, abi, args))
-        .map(typelisp_rt::decode)
+        .map(|v| typelisp_rt::decode(v as Word))
         .map_err(|e| e.to_string())
 }
 

@@ -13,7 +13,7 @@
 //! `compile-file`'s linker step needs.
 //!
 //! Every function here is declared under the exact same ABI as a compiled
-//! typelisp function (`unsafe extern "C" fn(*const i64, u32) -> i64`,
+//! typelisp function (`unsafe extern "C" fn(*const Word, u32) -> Word`,
 //! `typelisp::compile::CompiledSignature`) — so the existing cross-function-
 //! call wiring (JIT: the `externals` list of
 //! `typelisp::compile::CompiledFn::new`; AOT: ordinary linker symbol
@@ -72,7 +72,7 @@ pub mod __shim {
     pub use alloc::format;
     pub use alloc::vec::Vec;
     pub use typelisp_mem::symbols::well_known_symbol;
-    pub use typelisp_mem::Value;
+    pub use typelisp_mem::{Value, Word};
 }
 
 /// Returns `x + 1`. No real runtime behavior depends on this — see the
@@ -82,7 +82,7 @@ pub mod __shim {
 ///
 /// None.
 #[no_mangle]
-pub unsafe extern "C" fn rt_ping(x: i64) -> i64 {
+pub unsafe extern "C" fn rt_ping(x: isize) -> isize {
     x + 1
 }
 
@@ -140,7 +140,7 @@ pub use io_shims::*;
 
 #[cfg(test)]
 mod tests {
-    use typelisp_mem::{Heap, PathId, StrId, Value};
+    use typelisp_mem::{Heap, PathId, StrId, Value, Word};
 
     use super::{
         active_heap, decode, encode, reset_global_table, rt_car, rt_cdr, rt_cons, rt_global_get, rt_global_new, rt_global_set,
@@ -199,7 +199,7 @@ mod tests {
 
     #[test]
     fn encode_decode_round_trips_every_immediate_variant() {
-        for n in [0i64, 1, -1, 42, -42, i64::MIN >> 1, i64::MAX >> 1] {
+        for n in [0i64, 1, -1, 42, -42, (Word::MIN >> 1) as i64, (Word::MAX >> 1) as i64] {
             assert_eq!(decode(encode(Value::Int(n))), Value::Int(n), "Int({})", n);
         }
         for c in ['a', 'Z', '0', '\u{10FFFF}', '\0'] {
@@ -447,7 +447,7 @@ mod tests {
     /// The word of the type at `path` (walked down the module tree from the
     /// root) applied to the types `args` are the words of — what a compiled
     /// call site reads out of its type table and hands the shims.
-    fn make_type(path: &[&str], args: &[i64]) -> i64 {
+    fn make_type(path: &[&str], args: &[Word]) -> Word {
         use typelisp_mem::symbols::{child_ns, intern_in, NsId};
         let (name, modules) = path.split_last().expect("a path names something");
         let ns = modules.iter().fold(NsId::ROOT, |ns, seg| child_ns(ns, seg));
@@ -465,8 +465,8 @@ mod tests {
     /// path (here, another `rt_*` call) rather than reborrowing the original
     /// `&mut heap` binding directly, which Stacked Borrows treats as
     /// invalidating the raw pointer.
-    fn make_str(s: &str) -> i64 {
-        let args: Vec<i64> = s.chars().map(|c| c as i64).collect();
+    fn make_str(s: &str) -> Word {
+        let args: Vec<Word> = s.chars().map(|c| c as Word).collect();
         unsafe { rt_str_new(args.as_ptr(), args.len() as u32) }
     }
 
@@ -510,7 +510,7 @@ mod tests {
 
         let tagged = make_str("hi");
         let args = [tagged, 1];
-        assert_eq!(unsafe { rt_str_ref(args[0], args[1]) }, 'i' as i64);
+        assert_eq!(unsafe { rt_str_ref(args[0], args[1]) }, 'i' as u32);
     }
 
     #[test]
@@ -521,8 +521,8 @@ mod tests {
         let a = make_str("hi");
         let b = make_str("hi");
         let c = make_str("bye");
-        assert_eq!(unsafe { rt_str_eq(a, b) }, 1, "separately allocated, equal content");
-        assert_eq!(unsafe { rt_str_eq(a, c) }, 0);
+        assert!(unsafe { rt_str_eq(a, b) }, "separately allocated, equal content");
+        assert!(!unsafe { rt_str_eq(a, c) });
     }
 
     #[test]
@@ -534,20 +534,20 @@ mod tests {
         let b = make_str("hello");
         let c = make_str("HELLO");
         let d = make_str("world");
-        assert_eq!(unsafe { rt_str_equalp(a, b) }, 1, "differ only in case");
-        assert_eq!(unsafe { rt_str_equalp(a, c) }, 1);
-        assert_eq!(unsafe { rt_str_equalp(a, d) }, 0);
-        assert_eq!(unsafe { rt_str_eq(a, b) }, 0, "plain `eq` still distinguishes case");
+        assert!(unsafe { rt_str_equalp(a, b) }, "differ only in case");
+        assert!(unsafe { rt_str_equalp(a, c) });
+        assert!(!unsafe { rt_str_equalp(a, d) });
+        assert!(!unsafe { rt_str_eq(a, b) }, "plain `eq` still distinguishes case");
     }
 
     #[test]
     fn rt_char_equalp_is_ascii_case_insensitive() {
         // `char` args are raw code points, not tagged Sexprs — no active heap
         // is needed.
-        assert_eq!(unsafe { rt_char_equalp('A' as i64, 'a' as i64) }, 1, "A equalp a");
-        assert_eq!(unsafe { rt_char_equalp('A' as i64, 'A' as i64) }, 1);
-        assert_eq!(unsafe { rt_char_equalp('A' as i64, 'b' as i64) }, 0);
-        assert_eq!(unsafe { rt_char_equalp('1' as i64, '1' as i64) }, 1, "non-letters compare by value");
+        assert!(unsafe { rt_char_equalp('A' as u32, 'a' as u32) }, "A equalp a");
+        assert!(unsafe { rt_char_equalp('A' as u32, 'A' as u32) });
+        assert!(!unsafe { rt_char_equalp('A' as u32, 'b' as u32) });
+        assert!(unsafe { rt_char_equalp('1' as u32, '1' as u32) }, "non-letters compare by value");
     }
 
     #[test]
@@ -558,9 +558,9 @@ mod tests {
         let a = make_str("abc");
         let b = make_str("abd");
         let a2 = make_str("abc");
-        assert_eq!(unsafe { rt_str_lt(a, b) }, 1);
-        assert_eq!(unsafe { rt_str_lt(b, a) }, 0);
-        assert_eq!(unsafe { rt_str_lt(a, a2) }, 0, "equal content is not strictly less");
+        assert!(unsafe { rt_str_lt(a, b) });
+        assert!(!unsafe { rt_str_lt(b, a) });
+        assert!(!unsafe { rt_str_lt(a, a2) }, "equal content is not strictly less");
     }
 
     #[test]
@@ -702,8 +702,8 @@ mod tests {
         // slot 0 (masked): a tagged int; slot 1 (unmasked): raw float bits,
         // stored and handed back verbatim.
         let tagged_int = encode(Value::Int(7));
-        let raw_bits = (1.5f64).to_bits() as i64;
-        let fn_ptr = 0x1000i64; // opaque at this layer — only stored
+        let raw_bits = (1.5f64).to_bits() as Word;
+        let fn_ptr = 0x1000isize; // opaque at this layer — only stored
         let args = [fn_ptr, 0b01, tagged_int, raw_bits];
         let clo = unsafe { rt_closure_new(args.as_ptr(), 4) };
 

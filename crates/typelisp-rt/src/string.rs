@@ -1,5 +1,6 @@
 //! Strings and characters.
 
+use typelisp_mem::Word;
 use typelisp_mem::prelude::*;
 use typelisp_abi::{active_heap, decode, encode, fatal, raise};
 use typelisp_mem::Value;
@@ -35,7 +36,7 @@ use typelisp_mem::Value;
 /// `args` must point to at least `argc` valid, readable `i64`s, each a valid
 /// Unicode scalar value; a `Heap` must already be registered on this thread.
 #[no_mangle]
-pub unsafe extern "C" fn rt_str_new(args: *const i64, argc: u32) -> i64 {
+pub unsafe extern "C" fn rt_str_new(args: *const Word, argc: u32) -> Word {
     let mut s = String::with_capacity(argc as usize);
     for i in 0..argc as isize {
         let scalar = *args.offset(i) as u32;
@@ -57,12 +58,12 @@ pub unsafe extern "C" fn rt_str_new(args: *const i64, argc: u32) -> i64 {
 /// encoding a `Value::Str`; a `Heap` must already be registered on this
 /// thread.
 #[no_mangle]
-pub unsafe extern "C" fn rt_str_length(id: i64) -> i64 {
+pub unsafe extern "C" fn rt_str_length(id: Word) -> Word {
     let id = match decode(id) {
         Value::Str(id) => id,
         _ => fatal("rt_str_length: argument is not a Str"),
     };
-    active_heap().string(id).chars().count() as i64
+    active_heap().string(id).chars().count() as Word
 }
 
 /// `str::ref` for compiled code — the `i`-th Unicode scalar value of
@@ -80,20 +81,19 @@ pub unsafe extern "C" fn rt_str_length(id: i64) -> i64 {
 /// the first encoding a `Value::Str`; a `Heap` must already be registered on
 /// this thread.
 #[no_mangle]
-pub unsafe extern "C-unwind" fn rt_str_ref(id: i64, idx: i64) -> i64 {
+pub unsafe extern "C-unwind" fn rt_str_ref(id: Word, idx: Word) -> u32 {
     let id = match decode(id) {
         Value::Str(id) => id,
         _ => fatal("rt_str_ref: first argument is not a Str"),
     };
-    let idx = idx;
     let found = if idx >= 0 { active_heap().string(id).chars().nth(idx as usize) } else { None };
     match found {
-        Some(c) => c as i64,
+        Some(c) => c.into(),
         // The length is only walked on the failing path, so an in-range
         // `ref` still costs one `chars().nth`.
         None => {
             let len = active_heap().string(id).chars().count();
-            raise(format!("ref: index {} out of range (length {})", idx, len)).into_word()
+            raise(format!("ref: index {} out of range (length {})", idx, len)).into_zero()
         }
     }
 }
@@ -110,7 +110,7 @@ pub unsafe extern "C-unwind" fn rt_str_ref(id: i64, idx: i64) -> i64 {
 /// both encoding a `Value::Str`; a `Heap` must already be registered on this
 /// thread.
 #[no_mangle]
-pub unsafe extern "C" fn rt_str_eq(a: i64, b: i64) -> i64 {
+pub unsafe extern "C" fn rt_str_eq(a: Word, b: Word) -> bool {
     let a = match decode(a) {
         Value::Str(id) => id,
         _ => fatal("rt_str_eq: first argument is not a Str"),
@@ -120,7 +120,7 @@ pub unsafe extern "C" fn rt_str_eq(a: i64, b: i64) -> i64 {
         _ => fatal("rt_str_eq: second argument is not a Str"),
     };
     let heap = active_heap();
-    i64::from(*heap.string(a) == *heap.string(b))
+    *heap.string(a) == *heap.string(b)
 }
 
 /// `str::lt` for compiled code — lexicographic (code-point order) content
@@ -132,7 +132,7 @@ pub unsafe extern "C" fn rt_str_eq(a: i64, b: i64) -> i64 {
 ///
 /// Same as [`rt_str_eq`].
 #[no_mangle]
-pub unsafe extern "C" fn rt_str_lt(a: i64, b: i64) -> i64 {
+pub unsafe extern "C" fn rt_str_lt(a: Word, b: Word) -> bool {
     let a = match decode(a) {
         Value::Str(id) => id,
         _ => fatal("rt_str_lt: first argument is not a Str"),
@@ -142,7 +142,7 @@ pub unsafe extern "C" fn rt_str_lt(a: i64, b: i64) -> i64 {
         _ => fatal("rt_str_lt: second argument is not a Str"),
     };
     let heap = active_heap();
-    i64::from(*heap.string(a) < *heap.string(b))
+    *heap.string(a) < *heap.string(b)
 }
 
 /// `str::equalp` for compiled code — ASCII case-insensitive content equality
@@ -156,7 +156,7 @@ pub unsafe extern "C" fn rt_str_lt(a: i64, b: i64) -> i64 {
 ///
 /// Same as [`rt_str_eq`].
 #[no_mangle]
-pub unsafe extern "C" fn rt_str_equalp(a: i64, b: i64) -> i64 {
+pub unsafe extern "C" fn rt_str_equalp(a: Word, b: Word) -> bool {
     let a = match decode(a) {
         Value::Str(id) => id,
         _ => fatal("rt_str_equalp: first argument is not a Str"),
@@ -166,7 +166,7 @@ pub unsafe extern "C" fn rt_str_equalp(a: i64, b: i64) -> i64 {
         _ => fatal("rt_str_equalp: second argument is not a Str"),
     };
     let heap = active_heap();
-    i64::from(heap.string(a).eq_ignore_ascii_case(&heap.string(b)))
+    heap.string(a).eq_ignore_ascii_case(&heap.string(b))
 }
 
 /// `char::equalp` for compiled code — ASCII case-insensitive equality
@@ -183,15 +183,13 @@ pub unsafe extern "C" fn rt_str_equalp(a: i64, b: i64) -> i64 {
 /// Each word must be a value of the type the signature gives it.
 /// No `Heap` is needed (both operands are immediates).
 #[no_mangle]
-pub unsafe extern "C" fn rt_char_equalp(a: i64, b: i64) -> i64 {
-    let a = a;
-    let b = b;
-    match (char::from_u32(a as u32), char::from_u32(b as u32)) {
-        (Some(x), Some(y)) => i64::from(x.eq_ignore_ascii_case(&y)),
+pub unsafe extern "C" fn rt_char_equalp(a: u32, b: u32) -> bool {
+    match (char::from_u32(a), char::from_u32(b)) {
+        (Some(x), Some(y)) => x.eq_ignore_ascii_case(&y),
         // A compiled `char` always holds a valid scalar value; a mismatch here
         // would be an internal invariant break, but two non-`char` bit
         // patterns can still only be "equalp" if bit-identical.
-        _ => i64::from(a == b),
+        _ => a == b,
     }
 }
 
@@ -207,8 +205,8 @@ pub unsafe extern "C" fn rt_char_equalp(a: i64, b: i64) -> i64 {
 ///
 /// Each word must be a value of the type the signature gives it.
 #[no_mangle]
-pub unsafe extern "C" fn rt_char_upcase(a: i64) -> i64 {
-    char_map(a, |c| c.to_ascii_uppercase() as i64)
+pub unsafe extern "C" fn rt_char_upcase(a: u32) -> u32 {
+    char_arg(a).to_ascii_uppercase().into()
 }
 
 /// See [`rt_char_upcase`].
@@ -217,8 +215,8 @@ pub unsafe extern "C" fn rt_char_upcase(a: i64) -> i64 {
 ///
 /// Each word must be a value of the type the signature gives it.
 #[no_mangle]
-pub unsafe extern "C" fn rt_char_downcase(a: i64) -> i64 {
-    char_map(a, |c| c.to_ascii_lowercase() as i64)
+pub unsafe extern "C" fn rt_char_downcase(a: u32) -> u32 {
+    char_arg(a).to_ascii_lowercase().into()
 }
 
 /// `char::alphap` — CL's `alpha-char-p`, ASCII-only like the interpreter's.
@@ -228,8 +226,8 @@ pub unsafe extern "C" fn rt_char_downcase(a: i64) -> i64 {
 ///
 /// Each word must be a value of the type the signature gives it.
 #[no_mangle]
-pub unsafe extern "C" fn rt_char_alphap(a: i64) -> i64 {
-    char_map(a, |c| i64::from(c.is_ascii_alphabetic()))
+pub unsafe extern "C" fn rt_char_alphap(a: u32) -> bool {
+    char_arg(a).is_ascii_alphabetic()
 }
 
 /// `char::digitp` — the `bool` predicate, not CL's weight-returning
@@ -240,8 +238,8 @@ pub unsafe extern "C" fn rt_char_alphap(a: i64) -> i64 {
 ///
 /// Each word must be a value of the type the signature gives it.
 #[no_mangle]
-pub unsafe extern "C" fn rt_char_digitp(a: i64) -> i64 {
-    char_map(a, |c| i64::from(c.is_ascii_digit()))
+pub unsafe extern "C" fn rt_char_digitp(a: u32) -> bool {
+    char_arg(a).is_ascii_digit()
 }
 
 /// The one-code-point-in, one-word-out shape the four `char` shims above
@@ -253,11 +251,8 @@ pub unsafe extern "C" fn rt_char_digitp(a: i64) -> i64 {
 /// # Safety
 ///
 /// None: `a` is a character's scalar value.
-unsafe fn char_map(a: i64, f: impl FnOnce(char) -> i64) -> i64 {
-    match char::from_u32(a as u32) {
-        Some(c) => f(c),
-        None => a,
-    }
+fn char_arg(a: u32) -> char {
+    char::from_u32(a).unwrap_or_else(|| fatal("a char argument is not a Unicode scalar value"))
 }
 
 /// `int->char` for compiled code: the identity on the word, plus the
@@ -272,13 +267,11 @@ unsafe fn char_map(a: i64, f: impl FnOnce(char) -> i64) -> i64 {
 ///
 /// Each word must be a value of the type the signature gives it.
 #[no_mangle]
-pub unsafe extern "C-unwind" fn rt_int_to_char(n: i64) -> i64 {
-    let n = n;
-    let valid = n >= 0 && n <= i64::from(u32::MAX) && char::from_u32(n as u32).is_some();
-    if !valid {
-        return raise(format!("int->char: {} is not a valid Unicode scalar value", n)).into_word();
+pub unsafe extern "C-unwind" fn rt_int_to_char(n: i64) -> u32 {
+    match u32::try_from(n).ok().filter(|n| char::from_u32(*n).is_some()) {
+        Some(c) => c,
+        None => raise(format!("int->char: {} is not a valid Unicode scalar value", n)).into_zero(),
     }
-    n
 }
 
 /// `str::append` for compiled code — concatenates the content of
@@ -290,7 +283,7 @@ pub unsafe extern "C-unwind" fn rt_int_to_char(n: i64) -> i64 {
 ///
 /// Same as [`rt_str_eq`].
 #[no_mangle]
-pub unsafe extern "C" fn rt_str_append(a: i64, b: i64) -> i64 {
+pub unsafe extern "C" fn rt_str_append(a: Word, b: Word) -> Word {
     let a = match decode(a) {
         Value::Str(id) => id,
         _ => fatal("rt_str_append: first argument is not a Str"),
@@ -310,7 +303,7 @@ pub unsafe extern "C" fn rt_str_append(a: i64, b: i64) -> i64 {
 /// # Safety
 ///
 /// Same as [`rt_str_eq`], for `id` alone.
-unsafe fn str_map_case(id: i64, who: &str, up: bool) -> i64 {
+unsafe fn str_map_case(id: Word, who: &str, up: bool) -> Word {
     let id = match decode(id) {
         Value::Str(id) => id,
         _ => fatal(&format!("{who}: argument is not a Str")),
@@ -331,7 +324,7 @@ unsafe fn str_map_case(id: i64, who: &str, up: bool) -> i64 {
 ///
 /// Same as [`str_map_case`].
 #[no_mangle]
-pub unsafe extern "C" fn rt_str_upcase(id: i64) -> i64 {
+pub unsafe extern "C" fn rt_str_upcase(id: Word) -> Word {
     str_map_case(id, "rt_str_upcase", true)
 }
 
@@ -342,7 +335,7 @@ pub unsafe extern "C" fn rt_str_upcase(id: i64) -> i64 {
 ///
 /// Same as [`str_map_case`].
 #[no_mangle]
-pub unsafe extern "C" fn rt_str_downcase(id: i64) -> i64 {
+pub unsafe extern "C" fn rt_str_downcase(id: Word) -> Word {
     str_map_case(id, "rt_str_downcase", false)
 }
 
@@ -361,16 +354,14 @@ pub unsafe extern "C" fn rt_str_downcase(id: i64) -> i64 {
 /// the first encoding a `Value::Str`; a `Heap` must already be registered on
 /// this thread.
 #[no_mangle]
-pub unsafe extern "C-unwind" fn rt_str_substring(id: i64, start: i64, end: i64) -> i64 {
+pub unsafe extern "C-unwind" fn rt_str_substring(id: Word, start: Word, end: Word) -> Word {
     let id = match decode(id) {
         Value::Str(id) => id,
         _ => fatal("rt_str_substring: first argument is not a Str"),
     };
-    let start = start;
-    let end = end;
     let heap = active_heap();
     let chars: Vec<char> = heap.string(id).chars().collect();
-    let len = chars.len() as i64;
+    let len = chars.len() as Word;
     if start < 0 || end > len || start > end {
         return raise(format!("substring: invalid range {}..{} (length {})", start, end, len)).into_word();
     }

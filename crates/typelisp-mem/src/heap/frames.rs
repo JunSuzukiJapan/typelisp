@@ -3,6 +3,7 @@
 
 use crate::prelude::*;
 use crate::symbols::SymRef;
+use crate::tagged::{raw_value, value_words, Word, VALUE_WORDS};
 use crate::value::{BoxId, BoxedObj, TypeId, Value};
 use super::Heap;
 
@@ -20,7 +21,7 @@ use super::Heap;
 /// frame was closed is the caller's bug.
 #[derive(Clone, Copy, Debug)]
 pub struct FrameRaw {
-    words: *mut i64,
+    words: *mut Word,
     len: usize,
     mask: *const u64,
 }
@@ -37,7 +38,7 @@ impl FrameRaw {
     ///
     /// `data` must be the address of a live frame's words, as
     /// [`Heap::open_frame`] handed it out.
-    pub unsafe fn from_data(data: *mut i64) -> FrameRaw {
+    pub unsafe fn from_data(data: *mut Word) -> FrameRaw {
         FrameRaw {
             words: data,
             len: *data.sub(FRAME_HEADER - FRAME_HEADER_LEN) as usize,
@@ -46,7 +47,7 @@ impl FrameRaw {
     }
 
     /// The address of the word array — the frame's name.
-    pub fn data(self) -> *mut i64 {
+    pub fn data(self) -> *mut Word {
         self.words
     }
 
@@ -61,7 +62,7 @@ impl FrameRaw {
     /// # Safety
     ///
     /// The frame must still be live.
-    pub unsafe fn word(self, idx: usize) -> i64 {
+    pub unsafe fn word(self, idx: usize) -> Word {
         assert!(idx < self.len, "frame slot {} out of range", idx);
         *self.words.add(idx)
     }
@@ -69,9 +70,33 @@ impl FrameRaw {
     /// # Safety
     ///
     /// The frame must still be live.
-    pub unsafe fn set_word(self, idx: usize, w: i64) {
+    pub unsafe fn set_word(self, idx: usize, w: Word) {
         assert!(idx < self.len, "frame slot {} out of range", idx);
         *self.words.add(idx) = w;
+    }
+
+    /// The 64 bits starting at slot `idx`: a value as wide as any is, in as
+    /// many words as that takes, the low one first. The words above a
+    /// narrower value are whatever was there.
+    ///
+    /// # Safety
+    ///
+    /// The frame must still be live.
+    pub unsafe fn value(self, idx: usize) -> i64 {
+        assert!(idx + VALUE_WORDS <= self.len, "frame slot {} out of range", idx);
+        raw_value(core::slice::from_raw_parts(self.words.add(idx), VALUE_WORDS))
+    }
+
+    /// Writes all 64 bits [`value`](Self::value) reads.
+    ///
+    /// # Safety
+    ///
+    /// The frame must still be live.
+    pub unsafe fn set_value(self, idx: usize, v: i64) {
+        assert!(idx + VALUE_WORDS <= self.len, "frame slot {} out of range", idx);
+        for (i, w) in value_words(v, i64::BITS).enumerate() {
+            *self.words.add(idx + i) = w;
+        }
     }
 
     /// Whether slot `idx` holds a tagged word the collector traces.
@@ -123,13 +148,13 @@ const FRAME_CHUNK_MAX: usize = 1 << 16;
 /// address its name for as long as it is open.
 #[derive(Default)]
 pub(super) struct FrameArena {
-    chunks: Vec<Box<[i64]>>,
+    chunks: Vec<Box<[Word]>>,
     /// How much of each chunk is in use, from its start.
     used: Vec<usize>,
     /// The chunk the next frame goes in, or the last one when it is full.
     cur: usize,
     /// The open frames' word addresses, innermost last.
-    pub(super) open: Vec<*mut i64>,
+    pub(super) open: Vec<*mut Word>,
 }
 
 // SAFETY: `open` points into `chunks`, which the arena owns; the root stack it
@@ -151,16 +176,16 @@ impl FrameArena {
             }
             if self.cur == self.chunks.len() {
                 let size = self.chunks.last().map_or(FRAME_CHUNK_MIN, |c| (c.len() * 2).min(FRAME_CHUNK_MAX));
-                self.chunks.push(vec![0i64; size.max(need)].into_boxed_slice());
+                self.chunks.push(vec![0; size.max(need)].into_boxed_slice());
                 self.used.push(0);
             }
         }
         let at = self.used[self.cur];
         self.used[self.cur] = at + need;
         let block = &mut self.chunks[self.cur][at..at + need];
-        block[FRAME_HEADER_DEPTH] = depth as i64;
-        block[FRAME_HEADER_LEN] = nslots as i64;
-        block[FRAME_HEADER_MASK] = mask as usize as i64;
+        block[FRAME_HEADER_DEPTH] = depth as Word;
+        block[FRAME_HEADER_LEN] = nslots as Word;
+        block[FRAME_HEADER_MASK] = mask as usize as Word;
         block[FRAME_HEADER..].fill(0);
         let data = block[FRAME_HEADER..].as_mut_ptr();
         self.open.push(data);
@@ -223,7 +248,7 @@ impl Heap {
     ///
     /// `data` must be the address of a frame [`open_frame`](Self::open_frame)
     /// opened on the running task's root stack and not yet closed.
-    pub unsafe fn close_frame(&mut self, data: *mut i64) {
+    pub unsafe fn close_frame(&mut self, data: *mut Word) {
         let depth = *data.sub(FRAME_HEADER - FRAME_HEADER_DEPTH) as usize;
         self.truncate_roots(depth);
     }

@@ -2122,7 +2122,7 @@ mod tests {
         let entry = ctx.append_basic_block(tl_main, "entry");
         builder.position_at_end(entry);
         let forty_one = crate::compile::carriers::word().const_int(41, false);
-        let sig = crate::compile::runtime_abi::shim(typelisp_rt::rt_ping as unsafe extern "C" fn(i64) -> i64).sig;
+        let sig = crate::compile::runtime_abi::shim(typelisp_rt::rt_ping as unsafe extern "C" fn(typelisp_mem::Word) -> typelisp_mem::Word).sig;
         let rt_ping = crate::compile::runtime_abi::declare(&module, "rt_ping", &sig);
         let (_, result) = crate::compile::runtime_abi::call_declared(&builder, rt_ping, &sig, &[forty_one.into()]).unwrap();
         // A `main` that returns normally exits 0 whatever it answers
@@ -2162,7 +2162,7 @@ mod tests {
         let builder = ctx.create_builder();
         let entry = ctx.append_basic_block(tl_main, "entry");
         builder.position_at_end(entry);
-        let sig = crate::compile::runtime_abi::shim(typelisp_rt::rt_heap_live_count as unsafe extern "C" fn() -> i64).sig;
+        let sig = crate::compile::runtime_abi::shim(typelisp_rt::rt_heap_live_count as unsafe extern "C" fn() -> typelisp_mem::Word).sig;
         let rt_heap_live_count = crate::compile::runtime_abi::declare(&module, "rt_heap_live_count", &sig);
         let (_, result) = crate::compile::runtime_abi::call_declared(&builder, rt_heap_live_count, &sig, &[]).unwrap();
         builder.build_return(Some(&result)).unwrap();

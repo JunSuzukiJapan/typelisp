@@ -343,7 +343,7 @@ pub fn llvm_context() -> &'static Context {
 /// `extern "C-unwind"`, not `extern "C"`: `typelisp_rt::rt_panic` unwinds, and
 /// an `extern "C"` pointer would promise Rust that the callee cannot — a
 /// promise broken the moment a `(panic ...)` fires.
-pub type CompiledSignature = unsafe extern "C-unwind" fn(*const i64, u32) -> i64;
+pub type CompiledSignature = unsafe extern "C-unwind" fn(*const typelisp_mem::Word, u32) -> typelisp_mem::Word;
 
 /// A JIT-compiled function: its entry address, and a share of the code that
 /// address is in.
@@ -452,7 +452,8 @@ impl CompiledFn {
     /// [`catch_compiled_panic`], which takes it.
     ///
     pub fn call(&self, args: &[i64]) -> i64 {
-        <Self as crate::eval::interp::CompiledBody>::call(self, args)
+        let words: Vec<typelisp_mem::Word> = args.iter().map(|a| *a as typelisp_mem::Word).collect();
+        <Self as crate::eval::interp::CompiledBody>::call(self, &words)
     }
 
     /// This function's own JIT-resolved address — what a *later* `compile`d
@@ -532,7 +533,7 @@ mod tests {
         let builder = ctx.create_builder();
         let entry = ctx.append_basic_block(caller, "entry");
         builder.position_at_end(entry);
-        let sig = crate::compile::runtime_abi::shim(rt_ping as unsafe extern "C" fn(i64) -> i64).sig;
+        let sig = crate::compile::runtime_abi::shim(rt_ping as unsafe extern "C" fn(typelisp_mem::Word) -> typelisp_mem::Word).sig;
         let rt_ping_decl = crate::compile::runtime_abi::declare(&module, "rt_ping", &sig);
         let forty_one = crate::compile::carriers::word().const_int(41, false);
         let (_, result) = crate::compile::runtime_abi::call_declared(&builder, rt_ping_decl, &sig, &[forty_one.into()]).unwrap();
@@ -567,7 +568,7 @@ mod tests {
         let builder = ctx.create_builder();
         let entry = ctx.append_basic_block(caller, "entry");
         builder.position_at_end(entry);
-        let sig = crate::compile::runtime_abi::shim(rt_heap_live_count as unsafe extern "C" fn() -> i64).sig;
+        let sig = crate::compile::runtime_abi::shim(rt_heap_live_count as unsafe extern "C" fn() -> typelisp_mem::Word).sig;
         let rt_heap_live_count_decl = crate::compile::runtime_abi::declare(&module, "rt_heap_live_count", &sig);
         let (_, result) = crate::compile::runtime_abi::call_declared(&builder, rt_heap_live_count_decl, &sig, &[]).unwrap();
         builder.build_return(Some(&result)).unwrap();

@@ -1,5 +1,6 @@
 //! Enum values (`Option`/`Result`/`defenum`) and the `Sexpr` downcast test.
 
+use typelisp_mem::Word;
 use typelisp_mem::prelude::*;
 use typelisp_abi::{active_heap, decode, encode, fatal};
 use typelisp_mem::Value;
@@ -28,7 +29,7 @@ use crate::type_arg;
 /// `i64`s, and `args[0]` must be a type's word; a `Heap` must
 /// already be registered on this thread.
 #[no_mangle]
-pub unsafe extern "C" fn rt_data_new(args: *const i64, argc: u32) -> i64 {
+pub unsafe extern "C" fn rt_data_new(args: *const Word, argc: u32) -> Word {
     if argc < 2 {
         fatal("rt_data_new: expected at least 2 arguments (type, variant)");
     }
@@ -57,12 +58,12 @@ pub unsafe extern "C" fn rt_data_new(args: *const i64, argc: u32) -> i64 {
 /// decoding to a `Value::Boxed` enum; a `Heap` must already be registered
 /// on this thread.
 #[no_mangle]
-pub unsafe extern "C" fn rt_data_variant(id: i64) -> i64 {
+pub unsafe extern "C" fn rt_data_variant(id: Word) -> Word {
     let id = match decode(id) {
         Value::Boxed(id) if active_heap().is_enum(id) => id,
         _ => fatal("rt_data_variant: argument is not a boxed enum value"),
     };
-    active_heap().enum_variant(id) as i64
+    active_heap().enum_variant(id) as Word
 }
 
 /// `(rt-data-field v idx)` for compiled code — the `idx`-th field of boxed
@@ -79,7 +80,7 @@ pub unsafe extern "C" fn rt_data_variant(id: i64) -> i64 {
 /// the first decoding to a `Value::Boxed` enum; a `Heap` must already be
 /// registered on this thread.
 #[no_mangle]
-pub unsafe extern "C" fn rt_data_field(id: i64, idx: i64) -> i64 {
+pub unsafe extern "C" fn rt_data_field(id: Word, idx: Word) -> Word {
     let id = match decode(id) {
         Value::Boxed(id) if active_heap().is_enum(id) => id,
         _ => fatal("rt_data_field: first argument is not a boxed enum value"),
@@ -116,21 +117,19 @@ pub unsafe extern "C" fn rt_data_field(id: i64, idx: i64) -> i64 {
 /// `type_key` must be a type's word; a `Heap` must already be
 /// registered on this thread.
 #[no_mangle]
-pub unsafe extern "C" fn rt_sexpr_instance_test(v: i64, type_key: i64, variant: i64) -> i64 {
+pub unsafe extern "C" fn rt_sexpr_instance_test(v: Word, type_key: Word, variant: Word) -> bool {
     let v = decode(v);
     let type_key = type_arg(type_key, "rt_sexpr_instance_test");
     let id = match v {
         Value::Boxed(id) => id,
-        _ => return 0,
+        _ => return false,
     };
-    let variant = variant;
     let heap = active_heap();
-    let matches = if heap.is_struct(id) {
+    if heap.is_struct(id) {
         heap.struct_type_key(id) == type_key
     } else if heap.is_enum(id) {
-        heap.enum_type_key(id) == type_key && (variant < 0 || heap.enum_variant(id) as i64 == variant)
+        heap.enum_type_key(id) == type_key && (variant < 0 || heap.enum_variant(id) as Word == variant)
     } else {
         false
-    };
-    matches as i64
+    }
 }

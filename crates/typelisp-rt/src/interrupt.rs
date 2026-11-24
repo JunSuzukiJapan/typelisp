@@ -38,6 +38,7 @@
 //! - Leave by `panic` or `throw`: the program it stopped cannot be made to
 //!   see either, so the program ends as an uncaught one would end it.
 
+use typelisp_mem::Word;
 use typelisp_mem::prelude::*;
 use core::sync::atomic::{AtomicBool, AtomicPtr, AtomicU32, AtomicUsize, Ordering::SeqCst};
 
@@ -268,7 +269,7 @@ pub fn disable(n: i64) -> Result<(), String> {
 /// The words must be valid, the second the address of a
 /// coroutine-ABI body that takes nothing.
 #[no_mangle]
-pub unsafe extern "C" fn rt_interrupt_register(vector: i64, body: i64) -> i64 {
+pub unsafe extern "C" fn rt_interrupt_register(vector: Word, body: Word) -> Word {
     let vector = vector as usize;
     if vector >= VECTORS {
         typelisp_abi::fatal(&format!("rt_interrupt_register: there is no vector-table entry {}", vector));
@@ -284,8 +285,8 @@ pub unsafe extern "C" fn rt_interrupt_register(vector: i64, body: i64) -> i64 {
 ///
 /// The word must be one raw `int`.
 #[no_mangle]
-pub unsafe extern "C-unwind" fn rt_interrupt_enable(x: i64) -> i64 {
-    match enable(x) {
+pub unsafe extern "C-unwind" fn rt_interrupt_enable(x: Word) -> Word {
+    match enable(x as i64) {
         Ok(()) => 0,
         Err(msg) => raise(msg).into_word(),
     }
@@ -297,8 +298,8 @@ pub unsafe extern "C-unwind" fn rt_interrupt_enable(x: i64) -> i64 {
 ///
 /// The word must be one raw `int`.
 #[no_mangle]
-pub unsafe extern "C-unwind" fn rt_interrupt_disable(x: i64) -> i64 {
-    match disable(x) {
+pub unsafe extern "C-unwind" fn rt_interrupt_disable(x: Word) -> Word {
+    match disable(x as i64) {
         Ok(()) => 0,
         Err(msg) => raise(msg).into_word(),
     }

@@ -1,5 +1,6 @@
 //! Construction, arithmetic and conversion of boxed bignums and ratios.
 
+use typelisp_mem::Word;
 use typelisp_mem::prelude::*;
 use typelisp_abi::{active_heap, decode, encode, fatal, raise};
 use typelisp_mem::Value;
@@ -41,7 +42,7 @@ use num_traits::{FromPrimitive, ToPrimitive};
 /// # Safety
 ///
 /// A `Heap` must already be registered on this thread.
-unsafe fn bignum_arg(word: i64, who: &str) -> BigInt {
+unsafe fn bignum_arg(word: Word, who: &str) -> BigInt {
     match decode(word) {
         // An `int` in either shape: `rt_bignum_new` answers a fixnum for a
         // literal that fits one (a ratio literal's numerator, say).
@@ -57,7 +58,7 @@ unsafe fn bignum_arg(word: i64, who: &str) -> BigInt {
 /// # Safety
 ///
 /// Same as [`bignum_arg`].
-unsafe fn ratio_arg(word: i64, who: &str) -> BigRational {
+unsafe fn ratio_arg(word: Word, who: &str) -> BigRational {
     match decode(word) {
         Value::Boxed(id) => active_heap().ratio_value(id).clone(),
         _ => fatal(&format!("{who}: argument is not a boxed ratio")),
@@ -76,7 +77,7 @@ unsafe fn ratio_arg(word: i64, who: &str) -> BigRational {
 /// `argc` must be `>= 1` and `args` must point to at least `argc` valid
 /// `i64`s; a `Heap` must already be registered on this thread.
 #[no_mangle]
-pub unsafe extern "C" fn rt_bignum_new(args: *const i64, argc: u32) -> i64 {
+pub unsafe extern "C" fn rt_bignum_new(args: *const Word, argc: u32) -> Word {
     if argc < 1 {
         fatal("rt_bignum_new: expected at least 1 argument (the sign)");
     }
@@ -115,7 +116,7 @@ pub unsafe extern "C" fn rt_bignum_new(args: *const i64, argc: u32) -> i64 {
 /// , both decoding to boxed bignums; a `Heap` must
 /// already be registered on this thread.
 #[no_mangle]
-pub unsafe extern "C" fn rt_ratio_from_bignums(numer: i64, denom: i64) -> i64 {
+pub unsafe extern "C" fn rt_ratio_from_bignums(numer: Word, denom: Word) -> Word {
     let (numer, denom) = (bignum_arg(numer, "rt_ratio_from_bignums"), bignum_arg(denom, "rt_ratio_from_bignums"));
     if denom.sign() == Sign::NoSign {
         fatal("rt_ratio_from_bignums: zero denominator");
@@ -133,7 +134,7 @@ pub unsafe extern "C" fn rt_ratio_from_bignums(numer: i64, denom: i64) -> i64 {
 ///
 /// Same as [`rt_int_to_bignum`].
 #[no_mangle]
-pub unsafe extern "C" fn rt_int_to_ratio(x: i64) -> i64 {
+pub unsafe extern "C" fn rt_int_to_ratio(x: i64) -> Word {
     encode(active_heap().alloc_ratio(BigRational::from_integer(BigInt::from(x))))
 }
 
@@ -148,8 +149,7 @@ pub unsafe extern "C" fn rt_int_to_ratio(x: i64) -> i64 {
 /// , `f` an `f64`'s raw bit pattern; a `Heap` must
 /// be registered.
 #[no_mangle]
-pub unsafe extern "C-unwind" fn rt_float_to_int(f: i64) -> i64 {
-    let f = f64::from_bits(f as u64);
+pub unsafe extern "C-unwind" fn rt_float_to_int(f: f64) -> Word {
     match BigInt::from_f64(f) {
         Some(n) => encode(active_heap().int_from_bigint(n)),
         None => raise(format!("float->int: {} is not finite", f)).into_word(),
@@ -165,8 +165,7 @@ pub unsafe extern "C-unwind" fn rt_float_to_int(f: i64) -> i64 {
 ///
 /// Same as [`rt_float_to_int`].
 #[no_mangle]
-pub unsafe extern "C" fn rt_float_to_ratio(f: i64) -> i64 {
-    let f = f64::from_bits(f as u64);
+pub unsafe extern "C" fn rt_float_to_ratio(f: f64) -> Word {
     match BigRational::from_float(f) {
         Some(r) => encode(active_heap().alloc_ratio(r)),
         None => fatal("rt_float_to_ratio: value is not finite"),
@@ -179,7 +178,7 @@ pub unsafe extern "C" fn rt_float_to_ratio(f: i64) -> i64 {
 ///
 /// Same as [`ratio_pair`].
 #[no_mangle]
-pub unsafe extern "C" fn rt_ratio_add(a: i64, b: i64) -> i64 {
+pub unsafe extern "C" fn rt_ratio_add(a: Word, b: Word) -> Word {
     let (a, b) = (ratio_arg(a, "rt_ratio_add"), ratio_arg(b, "rt_ratio_add"));
     encode(active_heap().alloc_ratio(a + b))
 }
@@ -190,7 +189,7 @@ pub unsafe extern "C" fn rt_ratio_add(a: i64, b: i64) -> i64 {
 ///
 /// Same as [`ratio_pair`].
 #[no_mangle]
-pub unsafe extern "C" fn rt_ratio_sub(a: i64, b: i64) -> i64 {
+pub unsafe extern "C" fn rt_ratio_sub(a: Word, b: Word) -> Word {
     let (a, b) = (ratio_arg(a, "rt_ratio_sub"), ratio_arg(b, "rt_ratio_sub"));
     encode(active_heap().alloc_ratio(a - b))
 }
@@ -201,7 +200,7 @@ pub unsafe extern "C" fn rt_ratio_sub(a: i64, b: i64) -> i64 {
 ///
 /// Same as [`ratio_pair`].
 #[no_mangle]
-pub unsafe extern "C" fn rt_ratio_mul(a: i64, b: i64) -> i64 {
+pub unsafe extern "C" fn rt_ratio_mul(a: Word, b: Word) -> Word {
     let (a, b) = (ratio_arg(a, "rt_ratio_mul"), ratio_arg(b, "rt_ratio_mul"));
     encode(active_heap().alloc_ratio(a * b))
 }
@@ -215,7 +214,7 @@ pub unsafe extern "C" fn rt_ratio_mul(a: i64, b: i64) -> i64 {
 ///
 /// Same as [`ratio_pair`].
 #[no_mangle]
-pub unsafe extern "C-unwind" fn rt_ratio_div(a: i64, b: i64) -> i64 {
+pub unsafe extern "C-unwind" fn rt_ratio_div(a: Word, b: Word) -> Word {
     let (a, b) = (ratio_arg(a, "rt_ratio_div"), ratio_arg(b, "rt_ratio_div"));
     if b.numer().sign() == Sign::NoSign {
         return raise("divide by zero".to_string()).into_word();
@@ -231,7 +230,7 @@ pub unsafe extern "C-unwind" fn rt_ratio_div(a: i64, b: i64) -> i64 {
 ///
 /// Same as [`ratio_pair`].
 #[no_mangle]
-pub unsafe extern "C" fn rt_ratio_cmp(a: i64, b: i64) -> i64 {
+pub unsafe extern "C" fn rt_ratio_cmp(a: Word, b: Word) -> Word {
     let (a, b) = (ratio_arg(a, "rt_ratio_cmp"), ratio_arg(b, "rt_ratio_cmp"));
     match a.cmp(&b) {
         core::cmp::Ordering::Less => -1,
@@ -248,7 +247,7 @@ pub unsafe extern "C" fn rt_ratio_cmp(a: i64, b: i64) -> i64 {
 /// , `x` a boxed ratio; a `Heap` must be
 /// registered.
 #[no_mangle]
-pub unsafe extern "C" fn rt_ratio_to_int(x: i64) -> i64 {
+pub unsafe extern "C" fn rt_ratio_to_int(x: Word) -> Word {
     let r = ratio_arg(x, "rt_ratio_to_int");
     encode(active_heap().int_from_bigint(r.to_integer()))
 }
@@ -259,13 +258,12 @@ pub unsafe extern "C" fn rt_ratio_to_int(x: i64) -> i64 {
 ///
 /// Same as [`rt_ratio_to_int`].
 #[no_mangle]
-pub unsafe extern "C" fn rt_ratio_to_float(x: i64) -> i64 {
+pub unsafe extern "C" fn rt_ratio_to_float(x: Word) -> f64 {
     let r = ratio_arg(x, "rt_ratio_to_float");
-    let f = match r.to_f64() {
+    match r.to_f64() {
         Some(f) => f,
         None => fatal("rt_ratio_to_float: conversion failed"),
-    };
-    f.to_bits() as i64
+    }
 }
 
 /// `numerator` for compiled code — the (already-reduced) numerator as an
@@ -275,7 +273,7 @@ pub unsafe extern "C" fn rt_ratio_to_float(x: i64) -> i64 {
 ///
 /// Same as [`rt_ratio_to_int`].
 #[no_mangle]
-pub unsafe extern "C" fn rt_ratio_numerator(x: i64) -> i64 {
+pub unsafe extern "C" fn rt_ratio_numerator(x: Word) -> Word {
     let r = ratio_arg(x, "rt_ratio_numerator");
     encode(active_heap().int_from_bigint(r.numer().clone()))
 }
@@ -286,7 +284,7 @@ pub unsafe extern "C" fn rt_ratio_numerator(x: i64) -> i64 {
 ///
 /// Same as [`rt_ratio_to_int`].
 #[no_mangle]
-pub unsafe extern "C" fn rt_ratio_denominator(x: i64) -> i64 {
+pub unsafe extern "C" fn rt_ratio_denominator(x: Word) -> Word {
     let r = ratio_arg(x, "rt_ratio_denominator");
     encode(active_heap().int_from_bigint(r.denom().clone()))
 }

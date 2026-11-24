@@ -25,20 +25,20 @@ use crate::collections::HashMap;
 use crate::symbols::{child_ns, intern_in, ns_name, ns_parent, NsId, SymRef};
 use crate::{TypeId, TypeShape};
 
-const NAMED: i64 = 0;
-const DYN: i64 = 1;
-const FN: i64 = 2;
-const PTR: i64 = 3;
-const CSTRUCT: i64 = 4;
-const UNIT: i64 = 5;
-const NEVER: i64 = 6;
-const PARAM: i64 = 7;
+const NAMED: crate::Word = 0;
+const DYN: crate::Word = 1;
+const FN: crate::Word = 2;
+const PTR: crate::Word = 3;
+const CSTRUCT: crate::Word = 4;
+const UNIT: crate::Word = 5;
+const NEVER: crate::Word = 6;
+const PARAM: crate::Word = 7;
 
 /// One word of the list, before it is placed in an executable: a number, or
 /// a string, which the executable writes as its address and its length.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Word {
-    Int(i64),
+    Int(crate::Word),
     Str(&'static str),
 }
 
@@ -60,10 +60,10 @@ impl TypeWords {
         let shape = crate::type_shape(ty);
         let mut words = Vec::new();
         let each = |this: &mut Self, words: &mut Vec<Word>, ids: &[TypeId]| {
-            words.push(Word::Int(ids.len() as i64));
+            words.push(Word::Int(ids.len() as crate::Word));
             for id in ids {
                 let pos = this.add(*id);
-                words.push(Word::Int(pos as i64));
+                words.push(Word::Int(pos as crate::Word));
             }
         };
         match &shape {
@@ -76,15 +76,15 @@ impl TypeWords {
             TypeShape::Fn(params, rest, ret) => {
                 words.push(Word::Int(FN));
                 each(self, &mut words, params);
-                let rest = rest.map_or(-1, |r| self.add(r) as i64);
+                let rest = rest.map_or(-1, |r| self.add(r) as crate::Word);
                 let ret = self.add(*ret);
                 words.push(Word::Int(rest));
-                words.push(Word::Int(ret as i64));
+                words.push(Word::Int(ret as crate::Word));
             }
             TypeShape::Ptr(pointee) => {
                 let pointee = self.add(*pointee);
                 words.push(Word::Int(PTR));
-                words.push(Word::Int(pointee as i64));
+                words.push(Word::Int(pointee as crate::Word));
             }
             TypeShape::CStruct(ns, sym) => {
                 words.push(Word::Int(CSTRUCT));
@@ -95,7 +95,7 @@ impl TypeWords {
             TypeShape::Never => words.push(Word::Int(NEVER)),
             TypeShape::Param(n) => {
                 words.push(Word::Int(PARAM));
-                words.push(Word::Int(i64::from(*n)));
+                words.push(Word::Int(*n as crate::Word));
             }
         }
         let pos = self.positions.len();
@@ -126,7 +126,7 @@ fn write_ns(words: &mut Vec<Word>, ns: NsId) {
         segments.push(ns_name(at).expect("a module with a parent has a name").name());
         at = parent;
     }
-    words.push(Word::Int(segments.len() as i64));
+    words.push(Word::Int(segments.len() as crate::Word));
     words.extend(segments.into_iter().rev().map(Word::Str));
 }
 
@@ -147,7 +147,7 @@ pub fn ns_words(ns: NsId) -> Vec<Word> {
 /// # Safety
 ///
 /// As [`define`].
-pub unsafe fn read_ns(words: &[i64]) -> NsId {
+pub unsafe fn read_ns(words: &[crate::Word]) -> NsId {
     Reader { words, at: 0 }.ns()
 }
 
@@ -164,7 +164,7 @@ pub fn definition_words(ns: NsId, sym: SymRef) -> Vec<Word> {
 /// # Safety
 ///
 /// As [`define`].
-pub unsafe fn read_definition(words: &[i64]) -> (NsId, SymRef) {
+pub unsafe fn read_definition(words: &[crate::Word]) -> (NsId, SymRef) {
     let mut reader = Reader { words, at: 0 };
     let ns = reader.ns();
     (ns, reader.sym())
@@ -177,7 +177,7 @@ pub unsafe fn read_definition(words: &[i64]) -> (NsId, SymRef) {
 /// Each string's two words must be the address of `length` bytes of valid
 /// UTF-8 that stay alive while this runs — what an executable's constant
 /// strings are.
-pub unsafe fn define(words: &[i64]) -> Vec<TypeId> {
+pub unsafe fn define(words: &[crate::Word]) -> Vec<TypeId> {
     let mut reader = Reader { words, at: 0 };
     let mut ids: Vec<TypeId> = Vec::new();
     while reader.at < words.len() {
@@ -217,12 +217,12 @@ pub unsafe fn define(words: &[i64]) -> Vec<TypeId> {
 }
 
 struct Reader<'w> {
-    words: &'w [i64],
+    words: &'w [crate::Word],
     at: usize,
 }
 
 impl Reader<'_> {
-    fn next(&mut self) -> i64 {
+    fn next(&mut self) -> crate::Word {
         let w = self.words[self.at];
         self.at += 1;
         w
@@ -263,12 +263,12 @@ mod tests {
 
     /// What an executable does with the list: each string becomes its
     /// address and length.
-    fn placed(words: &[Word]) -> Vec<i64> {
+    fn placed(words: &[Word]) -> Vec<crate::Word> {
         words
             .iter()
             .flat_map(|w| match w {
-                Word::Int(n) => vec![*n],
-                Word::Str(s) => vec![s.as_ptr() as i64, s.len() as i64],
+                Word::Int(n) => vec![*n as crate::Word],
+                Word::Str(s) => vec![s.as_ptr() as crate::Word, s.len() as crate::Word],
             })
             .collect()
     }

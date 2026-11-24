@@ -1,5 +1,6 @@
 //! Global variables (`defvar`/`defconstant`) for compiled code.
 
+use typelisp_mem::Word;
 use typelisp_abi::{active_heap, decode, encode, fatal};
 use typelisp_mem::{Heap, Value};
 use crate::shared;
@@ -76,9 +77,9 @@ pub fn global_new(heap: &mut Heap, v: Value) -> usize {
 /// The words must be valid; a
 /// `Heap` must already be registered on this thread.
 #[no_mangle]
-pub unsafe extern "C" fn rt_global_new(v: i64) -> i64 {
+pub unsafe extern "C" fn rt_global_new(v: Word) -> Word {
     let v = decode(v);
-    global_new(active_heap(), v) as i64
+    global_new(active_heap(), v) as Word
 }
 
 /// [`global_new`]'s id -> `Heap::permanent_root` position lookup, `pub` for
@@ -120,7 +121,7 @@ pub fn global_skip() {
 /// A `Heap` must already be registered on this thread; `id` must be a value `rt_global_new` actually
 /// returned on this thread since the last [`reset_global_table`].
 #[no_mangle]
-pub unsafe extern "C" fn rt_global_get(id: i64) -> i64 {
+pub unsafe extern "C" fn rt_global_get(id: Word) -> Word {
     let id = id as usize;
     let perm_idx = global_perm_idx(id).unwrap_or_else(|| fatal("rt_global_get: unknown global id"));
     encode(active_heap().permanent_root(perm_idx))
@@ -134,7 +135,7 @@ pub unsafe extern "C" fn rt_global_get(id: i64) -> i64 {
 ///
 /// Same as [`rt_global_get`], and `tagged` must be a valid tagged word.
 #[no_mangle]
-pub unsafe extern "C" fn rt_global_set(id: i64, tagged: i64) -> i64 {
+pub unsafe extern "C" fn rt_global_set(id: Word, tagged: Word) -> Word {
     let id = id as usize;
     let tagged = tagged;
     let perm_idx = global_perm_idx(id).unwrap_or_else(|| fatal("rt_global_set: unknown global id"));

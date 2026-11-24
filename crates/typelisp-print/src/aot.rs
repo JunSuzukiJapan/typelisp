@@ -22,6 +22,7 @@
 //! executable, which is why `build_main_wrapper` emits them only when the
 //! module actually calls a printing shim.
 
+use typelisp_mem::Word;
 use typelisp_mem::prelude::*;
 use core::cell::RefCell;
 use core::sync::atomic::{AtomicPtr, Ordering};
@@ -189,8 +190,8 @@ fn aot_print_object(heap: &mut Heap, v: Value, escape: bool) -> Result<Option<St
     // the startup sequence `build_main_wrapper` generates, and the address it
     // passes is a `ptrtoint` of a function the same file compiled under the
     // shared compiled-function ABI.
-    let f: unsafe extern "C-unwind" fn(*const i64, u32) -> i64 = unsafe { core::mem::transmute(addr) };
-    let args = [encode(v), i64::from(escape)];
+    let f: unsafe extern "C-unwind" fn(*const Word, u32) -> Word = unsafe { core::mem::transmute(addr) };
+    let args = [encode(v), Word::from(escape)];
     PRINTING.with(|p| p.borrow_mut().push(v));
     let result = unsafe { f(args.as_ptr(), 2) };
     PRINTING.with(|p| {
@@ -216,7 +217,7 @@ fn aot_print_object(heap: &mut Heap, v: Value, escape: bool) -> Result<Option<St
 /// The two words must be a pointer to `len` valid UTF-8 bytes that outlive
 /// the process — which every caller satisfies, since the only ones are
 /// startup calls whose arguments are LLVM global string constants.
-unsafe fn static_str(ptr: i64, len: i64, who: &str) -> &'static str {
+unsafe fn static_str(ptr: Word, len: Word, who: &str) -> &'static str {
     let (ptr, len) = (ptr as usize as *const u8, len as usize);
     match core::str::from_utf8(core::slice::from_raw_parts(ptr, len)) {
         Ok(s) => s,
@@ -226,7 +227,7 @@ unsafe fn static_str(ptr: i64, len: i64, who: &str) -> &'static str {
 
 /// The definition the type `word` instantiates — a word an executable's
 /// startup read out of its type table.
-fn definition_arg(word: i64, who: &str) -> Definition {
+fn definition_arg(word: Word, who: &str) -> Definition {
     let ty = type_arg(word, who);
     match definition_of(ty) {
         Ok(def) => def,
@@ -235,7 +236,7 @@ fn definition_arg(word: i64, who: &str) -> Definition {
 }
 
 /// The type `w` names.
-fn type_arg(w: i64, who: &str) -> TypeId {
+fn type_arg(w: Word, who: &str) -> TypeId {
     TypeId::from_word(w).unwrap_or_else(|| fatal(&format!("{}: {} is no type", who, w)))
 }
 
@@ -250,7 +251,7 @@ fn type_arg(w: i64, who: &str) -> TypeId {
 /// `name_ptr` must point to `name_len` bytes of UTF-8 that live as long as
 /// the process.
 #[no_mangle]
-pub unsafe extern "C" fn rt_print_enum_variant(ty: i64, variant: i64, name_ptr: i64, name_len: i64) -> i64 {
+pub unsafe extern "C" fn rt_print_enum_variant(ty: Word, variant: Word, name_ptr: Word, name_len: Word) -> Word {
     let def = definition_arg(ty, "rt_print_enum_variant");
     let variant = variant as usize;
     let name = static_str(name_ptr, name_len, "rt_print_enum_variant");
@@ -277,11 +278,11 @@ pub const EVERY_FIELD: i64 = -1;
 ///
 /// None: every word is checked.
 #[no_mangle]
-pub unsafe extern "C" fn rt_print_field_template(ty: i64, variant: i64, index: i64, template: i64) -> i64 {
+pub unsafe extern "C" fn rt_print_field_template(ty: Word, variant: Word, index: Word, template: Word) -> Word {
     let def = definition_arg(ty, "rt_print_field_template");
     let template = type_arg(template, "rt_print_field_template");
     install();
-    crate::shared::print_shared().field_templates.write().insert((def, variant, index), template);
+    crate::shared::print_shared().field_templates.write().insert((def, variant as i64, index as i64), template);
     0
 }
 
@@ -291,11 +292,11 @@ pub unsafe extern "C" fn rt_print_field_template(ty: i64, variant: i64, index: i
 ///
 /// As [`rt_print_enum_variant`].
 #[no_mangle]
-pub unsafe extern "C" fn rt_print_field_name(ty: i64, index: i64, name_ptr: i64, name_len: i64) -> i64 {
+pub unsafe extern "C" fn rt_print_field_name(ty: Word, index: Word, name_ptr: Word, name_len: Word) -> Word {
     let def = definition_arg(ty, "rt_print_field_name");
     let name = static_str(name_ptr, name_len, "rt_print_field_name");
     install();
-    crate::shared::print_shared().field_names.write().insert((def, index), name.to_string());
+    crate::shared::print_shared().field_names.write().insert((def, index as i64), name.to_string());
     0
 }
 
@@ -307,7 +308,7 @@ pub unsafe extern "C" fn rt_print_field_name(ty: i64, index: i64, name_ptr: i64,
 /// `addr` must be 0 or the address of a function compiled under the shared
 /// compiled-function ABI.
 #[no_mangle]
-pub unsafe extern "C" fn rt_print_object_method(ty: i64, addr: i64) -> i64 {
+pub unsafe extern "C" fn rt_print_object_method(ty: Word, addr: Word) -> Word {
     let ty = type_arg(ty, "rt_print_object_method");
     let addr = addr as usize;
     install();
@@ -321,7 +322,7 @@ pub unsafe extern "C" fn rt_print_object_method(ty: i64, addr: i64) -> i64 {
 ///
 /// As [`rt_print_enum_variant`].
 #[no_mangle]
-pub unsafe extern "C" fn rt_print_global(name_ptr: i64, name_len: i64, id: i64) -> i64 {
+pub unsafe extern "C" fn rt_print_global(name_ptr: Word, name_len: Word, id: Word) -> Word {
     let name = static_str(name_ptr, name_len, "rt_print_global");
     let id = id as usize;
     install();
@@ -333,7 +334,7 @@ pub unsafe extern "C" fn rt_print_global(name_ptr: i64, name_len: i64, id: i64) 
 /// until the first name is written: decoding them interns symbols, which a
 /// program that never writes a name does not need, so the decoding is done
 /// by what writes one ([`crate::shared::name_view`]) and linked in with it.
-static NAMES: AtomicPtr<i64> = AtomicPtr::new(core::ptr::null_mut());
+static NAMES: AtomicPtr<Word> = AtomicPtr::new(core::ptr::null_mut());
 
 /// Registers how the executable writes type names: `x` is the
 /// address of a constant table, `[module_ptr, module_len, n]` and then `n`
@@ -348,8 +349,8 @@ static NAMES: AtomicPtr<i64> = AtomicPtr::new(core::ptr::null_mut());
 /// The words must be valid, the address of such a table, whose
 /// words and strings are constants.
 #[no_mangle]
-pub unsafe extern "C" fn rt_print_names(x: i64) -> i64 {
-    NAMES.store(x as usize as *mut i64, Ordering::SeqCst);
+pub unsafe extern "C" fn rt_print_names(x: Word) -> Word {
+    NAMES.store(x as usize as *mut Word, Ordering::SeqCst);
     0
 }
 
@@ -369,7 +370,7 @@ pub(crate) fn registered_names() -> Option<typelisp_mem::NameView> {
     // SAFETY: the table `rt_print_names` was given, a constant of the
     // executable laid out as it says.
     unsafe {
-        let words = |at: *const i64| core::slice::from_raw_parts(*at as usize as *const i64, *at.add(1) as usize);
+        let words = |at: *const Word| core::slice::from_raw_parts(*at as usize as *const Word, *at.add(1) as usize);
         let module = typelisp_mem::type_words::read_ns(words(table));
         let n = *table.add(2) as usize;
         let mut imports = typelisp_mem::collections::HashMap::new();

@@ -34,7 +34,7 @@ pub mod dribble;
 // `concat!` takes literals only. `scripts/regen-abi-version.sh` is what
 // rewrites them, and only when that description changed or the typelisp
 // version's MAJOR.MINOR did.
-macro_rules! with_abi_version { ($then:ident) => { $then!(0, 3, 78) }; }
+macro_rules! with_abi_version { ($then:ident) => { $then!(0, 3, 80) }; }
 
 macro_rules! dotted { ($major:literal, $minor:literal, $patch:literal) => { concat!($major, ".", $minor, ".", $patch) }; }
 
@@ -216,8 +216,13 @@ pub struct Raised(());
 impl Raised {
     /// What a shim returns once it has raised. No compiled code reads it:
     /// the caller checks for the raise before it uses the value.
-    pub fn into_word(self) -> i64 {
+    pub fn into_word(self) -> Word {
         0
+    }
+
+    /// [`into_word`](Self::into_word) for a shim whose result is not a word.
+    pub fn into_zero<T: Default>(self) -> T {
+        T::default()
     }
 }
 
@@ -325,17 +330,17 @@ pub fn unwind_interpreted_error() -> Raised {
 // was waiting for.
 
 /// The function is finished; its value is in frame slot 0.
-pub const STATUS_RETURN: i64 = 0;
+pub const STATUS_RETURN: Word = 0;
 /// The function wants to call another; the driver runs the callee and
 /// resumes this frame with the result in slot 0.
-pub const STATUS_CALL: i64 = 1;
+pub const STATUS_CALL: Word = 1;
 /// The function is suspending (a task yielded, slept, or blocked). The
 /// scheduler decides when its frame runs again.
-pub const STATUS_SUSPEND: i64 = 2;
+pub const STATUS_SUSPEND: Word = 2;
 /// The function is unwinding — a `throw`, a `panic`, or a non-local exit
 /// that leaves this frame. Phase C4 gives this a payload; until then no
 /// compiled function produces it.
-pub const STATUS_UNWIND: i64 = 3;
+pub const STATUS_UNWIND: Word = 3;
 
 /// A compiled body under the original ABI: `i64 f(const i64 *args, u32 argc)`,
 /// running to completion and returning its value.
@@ -403,7 +408,7 @@ pub const FRAME_RESERVED_SLOTS: usize = 3;
 /// tagged, sitting in Rust `Vec`s the collector does not trace.
 pub mod call_state {
     use typelisp_mem::prelude::*;
-    use typelisp_mem::Heap;
+    use typelisp_mem::{Heap, Word};
 
     /// How many emptied argument vectors [`State`] keeps.
     const SPARE_ARGS_LEN: usize = 8;
@@ -417,7 +422,7 @@ pub mod call_state {
         /// The callee allocates its own frame, not the caller: only the callee
         /// knows how many slots it needs, and under mutual recursion the
         /// caller may be compiled before the callee exists at all.
-        pending_args: Vec<i64>,
+        pending_args: Vec<Word>,
         /// The captured values a not-yet-entered closure body will copy into
         /// its own frame, alongside `pending_args`.
         ///
@@ -425,7 +430,7 @@ pub mod call_state {
         /// separate indices — a capture and a parameter are different names in
         /// different lists, and concatenating them would make every prologue
         /// know how long the other list was.
-        pending_env: Vec<i64>,
+        pending_env: Vec<Word>,
         /// The frames prologues have opened on their way in, innermost last,
         /// by the address of their words. The driver cannot learn one any
         /// other way — it is made inside the callee, after the call has
@@ -442,7 +447,7 @@ pub mod call_state {
         /// outermost's, which surfaced as "a coroutine function did not
         /// publish its frame on entry" — blamed on the callee, whose prologue
         /// had in fact published.
-        current_frames: Vec<i64>,
+        current_frames: Vec<Word>,
         /// What a frame is asking the driver to call, set immediately before
         /// it returns `STATUS_CALL`.
         pending_call: Option<Pending>,
@@ -453,10 +458,13 @@ pub mod call_state {
         /// More than one, because a callee usually names its own first call
         /// before its entry has returned to the driver, and so before its
         /// arguments' vector has come back here.
-        spare_args: Vec<Vec<i64>>,
+        spare_args: Vec<Vec<Word>>,
         /// What a frame is asking to wait for, set immediately before it
         /// returns `STATUS_SUSPEND`: a `SUSPEND_*` kind and up to two payload
         /// words.
+        ///
+        /// The payloads are 64 bits whatever the word is: a `sleep`'s seconds
+        /// are an `f64`'s bits.
         ///
         /// **Raw words, not a `Waiting`.** The scheduler's own type names a
         /// `TaskId` and an `Instant`, both of which live in the front end;
@@ -465,11 +473,11 @@ pub mod call_state {
         /// over anyway. The front end turns them back into a `Waiting`, which
         /// is the same division `pending_call` makes between an address and a
         /// `CoroutineFn`.
-        pending_suspend: Option<(i64, i64, i64)>,
+        pending_suspend: Option<(Word, i64, i64)>,
         /// The arms a `select` is waiting on, when the kind is
         /// [`SUSPEND_CHAN_SELECT`]. Its own field because the number of them
         /// is the program's, and the payload has room for two words.
-        pending_select: Vec<i64>,
+        pending_select: Vec<Word>,
     }
 
     impl State {
@@ -488,7 +496,7 @@ pub mod call_state {
         /// Hands a callee about to be entered its arguments and captures,
         /// and answers how many frames are published, for
         /// [`entered`](Self::entered). The vectors are moved in, not copied.
-        pub fn enter(&mut self, args: Vec<i64>, env: Vec<i64>) -> usize {
+        pub fn enter(&mut self, args: Vec<Word>, env: Vec<Word>) -> usize {
             self.pending_args = args;
             self.pending_env = env;
             self.current_frames.len()
@@ -499,7 +507,7 @@ pub mod call_state {
         /// nested entry left above that dropped — an unwind travels between
         /// a publish and its take, so such entries are owned by nobody. The
         /// argument vector, read by now, goes back for the next call.
-        pub fn entered(&mut self, published: usize) -> Option<i64> {
+        pub fn entered(&mut self, published: usize) -> Option<Word> {
             let frame = if self.current_frames.len() > published { self.current_frames.pop() } else { None };
             self.current_frames.truncate(published);
             if self.spare_args.len() < SPARE_ARGS_LEN {
@@ -510,7 +518,7 @@ pub mod call_state {
 
         /// Publishes the frame a prologue just opened, by the address of its
         /// words, for its driver to take.
-        pub fn publish_frame(&mut self, data: i64) {
+        pub fn publish_frame(&mut self, data: Word) {
             self.current_frames.push(data);
         }
 
@@ -518,7 +526,7 @@ pub mod call_state {
         /// prologue reads exactly as many as it has parameters, so a miss is
         /// a broken calling convention rather than a case to paper over — the
         /// caller turns it into a fatal error rather than a zero.
-        pub fn pending_arg(&self, i: usize) -> Result<i64, usize> {
+        pub fn pending_arg(&self, i: usize) -> Result<Word, usize> {
             self.pending_args.get(i).copied().ok_or(self.pending_args.len())
         }
 
@@ -532,13 +540,13 @@ pub mod call_state {
 
         /// The `i`th pending capture — same contract as
         /// [`pending_arg`](Self::pending_arg).
-        pub fn pending_env(&self, i: usize) -> Result<i64, usize> {
+        pub fn pending_env(&self, i: usize) -> Result<Word, usize> {
             self.pending_env.get(i).copied().ok_or(self.pending_env.len())
         }
 
         /// An empty vector to gather a call's arguments in, reusing the last
         /// one [`entered`](Self::entered) gave back.
-        pub fn args_buffer(&mut self, capacity: usize) -> Vec<i64> {
+        pub fn args_buffer(&mut self, capacity: usize) -> Vec<Word> {
             let mut v = self.spare_args.pop().unwrap_or_default();
             v.clear();
             v.reserve(capacity);
@@ -574,11 +582,11 @@ pub mod call_state {
 
     /// `(yield)` — nothing to wait for; the task gives up the rest of its
     /// turn. Payload unused.
-    pub const SUSPEND_YIELD: i64 = 0;
+    pub const SUSPEND_YIELD: Word = 0;
     /// `(sleep secs)` — the clock. Payload: the seconds as `f64::to_bits`.
-    pub const SUSPEND_SLEEP: i64 = 1;
+    pub const SUSPEND_SLEEP: Word = 1;
     /// `(wait t)` — another task's result. Payload: its scheduler id.
-    pub const SUSPEND_WAIT: i64 = 2;
+    pub const SUSPEND_WAIT: Word = 2;
     /// A loop's own safepoint (Phase C7) — nobody asked; the back edge of a
     /// compiled `loop` offered. Payload unused.
     ///
@@ -588,7 +596,7 @@ pub mod call_state {
     /// Folding it into `SUSPEND_YIELD` would have made an explicit `(yield)`
     /// silently do nothing in a `print-object` method or a reader macro,
     /// which is a different promise from the one `(yield)` makes.
-    pub const SUSPEND_SAFEPOINT: i64 = 3;
+    pub const SUSPEND_SAFEPOINT: Word = 3;
 
     /// `(Chan::new cap)` — make a channel. Payload: the capacity.
     ///
@@ -602,35 +610,35 @@ pub mod call_state {
     /// So three of these six always resume at once (`new`/`len`/`cap`, and
     /// `close` unless it is a second one), exactly as
     /// [`SUSPEND_SAFEPOINT`] does. Only `send` and `recv` can really park.
-    pub const SUSPEND_CHAN_NEW: i64 = 4;
+    pub const SUSPEND_CHAN_NEW: Word = 4;
     /// `(len ch)` — how many values are buffered. Payload: the handle.
-    pub const SUSPEND_CHAN_LEN: i64 = 5;
+    pub const SUSPEND_CHAN_LEN: Word = 5;
     /// `(cap ch)` — the channel's capacity. Payload: the handle.
-    pub const SUSPEND_CHAN_CAP: i64 = 6;
+    pub const SUSPEND_CHAN_CAP: Word = 6;
     /// `(close ch)` — close it. Payload: the handle.
-    pub const SUSPEND_CHAN_CLOSE: i64 = 7;
+    pub const SUSPEND_CHAN_CLOSE: Word = 7;
     /// `(send ch v)` — hand a value over, waiting for room. Payloads: the
     /// handle and the value, **both tagged** (the value by the suspension
     /// site, per its own `Repr::field_kind`, because a raw word does not say
     /// what it is).
-    pub const SUSPEND_CHAN_SEND: i64 = 8;
+    pub const SUSPEND_CHAN_SEND: Word = 8;
     /// `(recv ch)` — take a value, waiting for one. Payloads: the handle and
     /// the `Option<T>` type form the answer is built with.
-    pub const SUSPEND_CHAN_RECV: i64 = 9;
+    pub const SUSPEND_CHAN_RECV: Word = 9;
     /// `(select ...)` — any one of several channel operations. The arms
     /// travel in [`take_pending_select`] rather than in the payload words:
     /// how many there are is the program's business.
-    pub const SUSPEND_CHAN_SELECT: i64 = 10;
+    pub const SUSPEND_CHAN_SELECT: Word = 10;
     /// `(net-wait h interest)` — a socket becoming ready. Payloads: the
     /// stream handle and the interest code (`typelisp_rt::os::Interest`),
     /// **both raw** — two plain integers, like `sleep`'s bits. The front end
     /// resolves the handle to a descriptor, exactly as it does for the
     /// interpreted call.
-    pub const SUSPEND_IO: i64 = 11;
+    pub const SUSPEND_IO: Word = 11;
     /// `(net-wait-for h interest secs)` — a socket becoming ready **or** the
     /// clock running out. Payloads: `(handle << 1) | interest` and the
     /// seconds as `f64::to_bits`. Answers with a tagged `bool`.
-    pub const SUSPEND_IO_FOR: i64 = 12;
+    pub const SUSPEND_IO_FOR: Word = 12;
     /// `(task (f a b))` — start a task. Payload: a **tagged** compiled closure
     /// that makes the call and answers with the result tagged, built by the
     /// site that wrote the `task` (`core_bridge::translate_spawn_call`).
@@ -639,24 +647,24 @@ pub mod call_state {
     /// are: the table of tasks belongs to the scheduler, and only the driver
     /// can reach it. It always resumes at once, like `SUSPEND_CHAN_NEW`, and
     /// the answer is the `Task<T>` handle.
-    pub const SUSPEND_TASK: i64 = 13;
+    pub const SUSPEND_TASK: Word = 13;
     /// `(thread (f a b))` — start a task on an OS thread of its own. Payload:
     /// the same closure [`SUSPEND_TASK`] carries, built by the same site; only
     /// where the scheduler runs it differs. Resumes at once with the
     /// `Thread<T>` handle.
-    pub const SUSPEND_THREAD: i64 = 14;
+    pub const SUSPEND_THREAD: Word = 14;
     /// Before a call only the interpreter can answer (`eval`, `read`, ...):
     /// go on on the thread the interpreter runs on. Payload unused. Answered
     /// at once — by the interpreter's own task, and by every driver that has
     /// nowhere to move to — except in a compiled task a worker is stepping,
     /// which stops there and moves (`sched::Progress::NeedsMain`).
-    pub const SUSPEND_MAIN: i64 = 15;
+    pub const SUSPEND_MAIN: Word = 15;
 
     /// Records the arms of a `select`, as `[n, has-else, kind, chan, extra]...`
     /// with every word **tagged** — the array is a compiled frame's slots,
     /// which the collector walks, so a raw integer in one would be read as a
     /// pointer.
-    pub fn set_pending_select(words: &[i64]) {
+    pub fn set_pending_select(words: &[Word]) {
         with(|s| {
             s.pending_select.clear();
             s.pending_select.extend_from_slice(words);
@@ -664,12 +672,12 @@ pub mod call_state {
     }
 
     /// Takes them back out.
-    pub fn take_pending_select() -> Vec<i64> {
+    pub fn take_pending_select() -> Vec<Word> {
         with(|s| core::mem::take(&mut s.pending_select))
     }
 
     /// Records what the frame about to return `STATUS_SUSPEND` is waiting for.
-    pub fn set_pending_suspend(kind: i64, payload: i64) {
+    pub fn set_pending_suspend(kind: Word, payload: i64) {
         with(|s| s.pending_suspend = Some((kind, payload, 0)));
     }
 
@@ -679,14 +687,14 @@ pub mod call_state {
     /// handle and one other word), and a `Vec` here would allocate on a path
     /// that must not — the shim runs with a compiled frame's arguments in
     /// slots the collector is not looking at.
-    pub fn set_pending_suspend_2(kind: i64, first: i64, second: i64) {
+    pub fn set_pending_suspend_2(kind: Word, first: i64, second: i64) {
         with(|s| s.pending_suspend = Some((kind, first, second)));
     }
 
     /// Takes it back out. `None` means a frame returned `STATUS_SUSPEND`
     /// without saying what it was waiting for, which is a broken convention
     /// rather than "waiting for nothing" — the caller says so and stops.
-    pub fn take_pending_suspend() -> Option<(i64, i64, i64)> {
+    pub fn take_pending_suspend() -> Option<(Word, i64, i64)> {
         with(|s| s.pending_suspend.take())
     }
 
@@ -711,7 +719,7 @@ pub mod call_state {
 
     /// Takes the innermost published frame, for a caller driving an entry by
     /// hand.
-    pub fn take_current_frame() -> Option<i64> {
+    pub fn take_current_frame() -> Option<Word> {
         with(|s| s.current_frames.pop())
     }
 
@@ -729,16 +737,16 @@ pub mod call_state {
     pub enum Pending {
         /// A statically-known compiled callee: its address, its arguments,
         /// and its captures.
-        Direct { target: usize, args: Vec<i64>, env: Vec<i64> },
+        Direct { target: usize, args: Vec<Word>, env: Vec<Word> },
         /// A function *value*, tagged, with its arguments in its own
         /// declared representations.
-        Apply { closure: i64, args: Vec<i64> },
+        Apply { closure: Word, args: Vec<Word> },
         /// A `:dyn` method: the vtable the trait object dispatches through,
         /// the slot the checker picked, and the arguments with the *concrete*
         /// receiver first. What the slot holds decides who runs it, exactly
         /// as for [`Pending::Apply`] — and it can hold nothing at all, when
         /// the concrete type's method is interpreted.
-        Dyn { vtable: u32, slot: u32, args: Vec<i64> },
+        Dyn { vtable: u32, slot: u32, args: Vec<Word> },
     }
 
     pub fn take_pending_call() -> Option<Pending> {
@@ -753,5 +761,5 @@ pub mod call_state {
 /// compiled-CPS work: a compiled frame holds tagged *words* rather than
 /// `Value`s, so the collector — which lives in `typelisp-mem`, below this
 /// crate — has to be able to decode them.
-pub use typelisp_mem::tagged::{decode, encode};
+pub use typelisp_mem::tagged::{decode, encode, Word};
 

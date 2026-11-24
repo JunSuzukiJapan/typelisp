@@ -1,5 +1,6 @@
 //! Fixed-width integer arithmetic and `f64` math.
 
+use typelisp_mem::Word;
 use typelisp_mem::fixed::Fault;
 use typelisp_abi::raise;
 
@@ -16,8 +17,7 @@ use typelisp_abi::raise;
 ///
 /// Each word must be a value of the type the signature gives it.
 #[no_mangle]
-pub unsafe extern "C-unwind" fn rt_int_div_fault(a: i64, b: i64) -> i64 {
-    let (a, b) = (a, b);
+pub unsafe extern "C-unwind" fn rt_int_div_fault(a: i64, b: i64) -> Word {
     let fault = if b == 0 { Fault::DivideByZero } else { Fault::Overflow { dividend: i128::from(a), divisor: i128::from(b) } };
     raise(fault.message()).into_word()
 }
@@ -30,7 +30,7 @@ pub unsafe extern "C-unwind" fn rt_int_div_fault(a: i64, b: i64) -> i64 {
 /// Takes the operands as [`rt_int_div_fault`] does, and reads neither: the
 /// divisor is zero.
 #[no_mangle]
-pub unsafe extern "C-unwind" fn rt_int_mod_fault(_dividend: i64, _divisor: i64) -> i64 {
+pub unsafe extern "C-unwind" fn rt_int_mod_fault(_dividend: i64, _divisor: i64) -> Word {
     raise(Fault::ModByZero.message()).into_word()
 }
 
@@ -44,10 +44,8 @@ pub unsafe extern "C-unwind" fn rt_int_mod_fault(_dividend: i64, _divisor: i64) 
 ///
 /// The words must be valid.
 #[no_mangle]
-pub unsafe extern "C" fn rt_int_fits_char(n: i64) -> i64 {
-    let n = n;
-    let in_u32_range = n >= 0 && n <= i64::from(u32::MAX);
-    (in_u32_range && char::from_u32(n as u32).is_some()) as i64
+pub unsafe extern "C" fn rt_int_fits_char(n: Word) -> bool {
+    u32::try_from(n).is_ok_and(|n| char::from_u32(n).is_some())
 }
 
 /// `try-float->f32`'s question — does `v` survive the round trip
@@ -63,48 +61,29 @@ pub unsafe extern "C" fn rt_int_fits_char(n: i64) -> i64 {
 /// The word must hold an
 /// `f64`'s bit pattern.
 #[no_mangle]
-pub unsafe extern "C" fn rt_f64_fits_f32(v: i64) -> i64 {
-    let v = f64::from_bits(v as u64);
-    (f64::from(v as f32).to_bits() == v.to_bits()) as i64
+pub unsafe extern "C" fn rt_f64_fits_f32(v: f64) -> bool {
+    f64::from(v as f32).to_bits() == v.to_bits()
 }
 
-/// Shared shape for the `f64` transcendental unaries that have no LLVM
-/// intrinsic in the LLVM version this project pins (`sin`/`cos`/`exp`/`log`
-/// do and go straight to LLVM IR in `compiler.rs` instead — see
-/// `llvm_builder_build_float_unary_intrinsic`): decode the raw bit-pattern
-/// argument, apply `f`, re-encode.
-///
-/// # Safety
-///
-/// None: `x` is an `f64`'s raw bit pattern.
-unsafe fn rt_f64_unary(x: i64, f: fn(f64) -> f64) -> i64 {
-    f(f64::from_bits(x as u64)).to_bits() as i64
-}
-
+/// The `f64` transcendental unaries that have no LLVM intrinsic in the LLVM
+/// version this project pins (`sin`/`cos`/`exp`/`log` do and go straight to
+/// LLVM IR in `compiler.rs` instead — see
+/// `llvm_builder_build_float_unary_intrinsic`).
 macro_rules! rt_f64_unary_exports {
     ($($export:ident => $method:ident,)*) => {$(
         #[no_mangle]
-        pub unsafe extern "C" fn $export(x: i64) -> i64 {
-            rt_f64_unary(x, <f64 as num_traits::Float>::$method)
+        pub unsafe extern "C" fn $export(x: f64) -> f64 {
+            <f64 as num_traits::Float>::$method(x)
         }
     )*};
 }
 
-/// [`rt_f64_unary`] for `f32`: the word holds an `f32`'s value as a `double`
-/// (exactly), and the function is computed in binary32.
-///
-/// # Safety
-///
-/// As [`rt_f64_unary`].
-unsafe fn rt_f32_unary(x: i64, f: fn(f32) -> f32) -> i64 {
-    f64::from(f(f64::from_bits(x as u64) as f32)).to_bits() as i64
-}
-
+/// Their `f32` counterparts, computed in binary32.
 macro_rules! rt_f32_unary_exports {
     ($($export:ident => $method:ident,)*) => {$(
         #[no_mangle]
-        pub unsafe extern "C" fn $export(x: i64) -> i64 {
-            rt_f32_unary(x, <f32 as num_traits::Float>::$method)
+        pub unsafe extern "C" fn $export(x: f32) -> f32 {
+            <f32 as num_traits::Float>::$method(x)
         }
     )*};
 }

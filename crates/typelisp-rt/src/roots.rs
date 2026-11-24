@@ -1,5 +1,6 @@
 //! GC root bookkeeping for compiled code.
 
+use typelisp_mem::Word;
 use typelisp_abi::{active_heap, decode, encode, fatal};
 
 // ---- Stage 4: GC root safety -------------------------------------------
@@ -24,7 +25,7 @@ use typelisp_abi::{active_heap, decode, encode, fatal};
 /// The words must be valid; a
 /// `Heap` must already be registered on this thread.
 #[no_mangle]
-pub unsafe extern "C" fn rt_push_sexpr_root(tagged: i64) -> i64 {
+pub unsafe extern "C" fn rt_push_sexpr_root(tagged: Word) -> Word {
     let tagged = tagged;
     active_heap().push_root(decode(tagged));
     tagged
@@ -41,7 +42,7 @@ pub unsafe extern "C" fn rt_push_sexpr_root(tagged: i64) -> i64 {
 ///
 /// A `Heap` must already be registered on this thread.
 #[no_mangle]
-pub unsafe extern "C" fn rt_pop_sexpr_root() -> i64 {
+pub unsafe extern "C" fn rt_pop_sexpr_root() -> Word {
     match active_heap().pop_root() {
         Some(v) => encode(v),
         None => fatal("rt_pop_sexpr_root: root stack was empty"),
@@ -72,7 +73,7 @@ pub unsafe extern "C" fn rt_pop_sexpr_root() -> i64 {
 ///
 /// Same as [`rt_push_sexpr_root`].
 #[no_mangle]
-pub unsafe extern "C" fn rt_push_permanent_sexpr_root(tagged: i64) -> i64 {
+pub unsafe extern "C" fn rt_push_permanent_sexpr_root(tagged: Word) -> Word {
     let tagged = tagged;
     active_heap().push_permanent_root(decode(tagged));
     tagged
@@ -97,8 +98,8 @@ pub unsafe extern "C" fn rt_push_permanent_sexpr_root(tagged: i64) -> i64 {
 ///
 /// A `Heap` must already be registered on this thread.
 #[no_mangle]
-pub unsafe extern "C" fn rt_root_count() -> i64 {
-    active_heap().root_count() as i64
+pub unsafe extern "C" fn rt_root_count() -> Word {
+    active_heap().root_count() as Word
 }
 
 /// `setf`'s GC-root counterpart to [`rt_push_sexpr_root`]: overwrites the
@@ -138,7 +139,7 @@ pub unsafe extern "C" fn rt_root_count() -> i64 {
 /// practice — it's always a value `rt_root_count` itself returned earlier in
 /// the same dynamic scope, never user input).
 #[no_mangle]
-pub unsafe extern "C" fn rt_set_sexpr_root(idx: i64, tagged: i64) -> i64 {
+pub unsafe extern "C" fn rt_set_sexpr_root(idx: Word, tagged: Word) -> Word {
     let idx = idx as usize;
     let tagged = tagged;
     active_heap().set_root(idx, decode(tagged));
@@ -169,7 +170,7 @@ pub unsafe extern "C" fn rt_set_sexpr_root(idx: i64, tagged: i64) -> i64 {
 /// The words must be valid; a
 /// `Heap` must already be registered on this thread.
 #[no_mangle]
-pub unsafe extern "C" fn rt_truncate_sexpr_roots(len: i64) -> i64 {
+pub unsafe extern "C" fn rt_truncate_sexpr_roots(len: Word) -> Word {
     let len = len as usize;
     active_heap().truncate_roots(len);
     0

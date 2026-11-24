@@ -20,6 +20,7 @@
 //! doesn't link the recursion, `BigRational`, or the boxed-object accessors it
 //! reaches through.
 
+use typelisp_mem::Word;
 use num_bigint::BigInt;
 use num_rational::BigRational;
 use typelisp_mem::collections::{fixed_hasher, FixedHasher};
@@ -309,8 +310,8 @@ use crate::{active_heap, decode, encode};
 /// `Heap` must be registered on this thread. Allocates nothing, so the result
 /// needs no GC-root protection.
 #[no_mangle]
-pub unsafe extern "C" fn rt_sexpr_eql(a: i64, b: i64) -> i64 {
-    i64::from(eql_val(active_heap(), decode(a), decode(b)))
+pub unsafe extern "C" fn rt_sexpr_eql(a: Word, b: Word) -> bool {
+    eql_val(active_heap(), decode(a), decode(b))
 }
 
 /// `(eq a b)` on a value of any type for compiled code — the free function;
@@ -321,8 +322,8 @@ pub unsafe extern "C" fn rt_sexpr_eql(a: i64, b: i64) -> i64 {
 ///
 /// Same as [`rt_sexpr_eql`].
 #[no_mangle]
-pub unsafe extern "C" fn rt_sexpr_eq(a: i64, b: i64) -> i64 {
-    i64::from(eq_val(active_heap(), decode(a), decode(b)))
+pub unsafe extern "C" fn rt_sexpr_eq(a: Word, b: Word) -> bool {
+    eq_val(active_heap(), decode(a), decode(b))
 }
 
 /// `(equal a b)` for compiled code — see [`rt_sexpr_eql`].
@@ -331,8 +332,8 @@ pub unsafe extern "C" fn rt_sexpr_eq(a: i64, b: i64) -> i64 {
 ///
 /// Same as [`rt_sexpr_eql`].
 #[no_mangle]
-pub unsafe extern "C" fn rt_sexpr_equal(a: i64, b: i64) -> i64 {
-    i64::from(equal_val(active_heap(), decode(a), decode(b)))
+pub unsafe extern "C" fn rt_sexpr_equal(a: Word, b: Word) -> bool {
+    equal_val(active_heap(), decode(a), decode(b))
 }
 
 /// `(equalp a b)` for compiled code — see [`rt_sexpr_eql`].
@@ -341,8 +342,8 @@ pub unsafe extern "C" fn rt_sexpr_equal(a: i64, b: i64) -> i64 {
 ///
 /// Same as [`rt_sexpr_eql`].
 #[no_mangle]
-pub unsafe extern "C" fn rt_sexpr_equalp(a: i64, b: i64) -> i64 {
-    i64::from(equalp_val(active_heap(), decode(a), decode(b)))
+pub unsafe extern "C" fn rt_sexpr_equalp(a: Word, b: Word) -> bool {
+    equalp_val(active_heap(), decode(a), decode(b))
 }
 
 /// `(sxhash-eq v)` for compiled code: a tagged word in, a tagged `int` out.
@@ -352,7 +353,7 @@ pub unsafe extern "C" fn rt_sexpr_equalp(a: i64, b: i64) -> i64 {
 /// The words must be valid; a `Heap` must be registered on
 /// this thread.
 #[no_mangle]
-pub unsafe extern "C" fn rt_sxhash_eq(x: i64) -> i64 {
+pub unsafe extern "C" fn rt_sxhash_eq(x: Word) -> Word {
     encode(Value::Int(sxhash_eq_val(active_heap(), decode(x))))
 }
 
@@ -362,7 +363,7 @@ pub unsafe extern "C" fn rt_sxhash_eq(x: i64) -> i64 {
 ///
 /// Same as [`rt_sxhash_eq`].
 #[no_mangle]
-pub unsafe extern "C" fn rt_sxhash_eql(x: i64) -> i64 {
+pub unsafe extern "C" fn rt_sxhash_eql(x: Word) -> Word {
     encode(Value::Int(sxhash_eql_val(active_heap(), decode(x))))
 }
 
@@ -372,6 +373,6 @@ pub unsafe extern "C" fn rt_sxhash_eql(x: i64) -> i64 {
 ///
 /// Same as [`rt_sxhash_eq`].
 #[no_mangle]
-pub unsafe extern "C" fn rt_sxhash_equalp(x: i64) -> i64 {
+pub unsafe extern "C" fn rt_sxhash_equalp(x: Word) -> Word {
     encode(Value::Int(sxhash_equalp_val(active_heap(), decode(x))))
 }

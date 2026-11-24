@@ -1,8 +1,9 @@
 //! Boxed scalars inside a `Sexpr`: `f64`/`f32` and the narrow integer widths,
 //! and the box-kind discriminator over them.
 
+use typelisp_mem::Word;
 use typelisp_mem::prelude::*;
-use typelisp_abi::{active_heap, decode, encode, fatal, raise};
+use typelisp_abi::{active_heap, decode, encode, fatal, raise, Raised};
 use typelisp_mem::fixed::FixedType;
 use typelisp_mem::{NarrowInt, TypeId, Value};
 
@@ -31,8 +32,7 @@ use typelisp_mem::{NarrowInt, TypeId, Value};
 /// (the `f64`'s `to_bits()` reinterpreted as `i64`); a `Heap` must already
 /// be registered on this thread.
 #[no_mangle]
-pub unsafe extern "C" fn rt_f64_new(f: i64) -> i64 {
-    let f = f64::from_bits(f as u64);
+pub unsafe extern "C" fn rt_f64_new(f: f64) -> Word {
     encode(active_heap().alloc_f64(f))
 }
 
@@ -49,9 +49,8 @@ pub unsafe extern "C" fn rt_f64_new(f: i64) -> i64 {
 ///
 /// Same as [`rt_f64_new`].
 #[no_mangle]
-pub unsafe extern "C" fn rt_f32_new(f: i64) -> i64 {
-    let f = f64::from_bits(f as u64);
-    encode(active_heap().alloc_f32(f as f32))
+pub unsafe extern "C" fn rt_f32_new(f: f32) -> Word {
+    encode(active_heap().alloc_f32(f))
 }
 
 /// Reads the `f64` bit pattern out of a boxed `Sexpr` float — `x` is a
@@ -64,7 +63,7 @@ pub unsafe extern "C" fn rt_f32_new(f: i64) -> i64 {
 ///
 /// Same as [`rt_f64_new`].
 #[no_mangle]
-pub unsafe extern "C" fn rt_f64_value(x: i64) -> i64 {
+pub unsafe extern "C" fn rt_f64_value(x: Word) -> f64 {
     match decode(x) {
         // Positively `is_f64`, not "any box": every other `BoxedObj` kind
         // would make `f64_value` *panic*, and a panic out of this `nounwind`
@@ -72,7 +71,7 @@ pub unsafe extern "C" fn rt_f64_value(x: i64) -> i64 {
         // doc'd fatal has to be an explicit test. An `f32` box is refused
         // here too: widening it would be this shim deciding a width its
         // caller already knew.
-        Value::Boxed(id) if active_heap().is_f64(id) => active_heap().f64_value(id).to_bits() as i64,
+        Value::Boxed(id) if active_heap().is_f64(id) => active_heap().f64_value(id),
         _ => fatal("rt_f64_value: argument is not a boxed f64"),
     }
 }
@@ -85,10 +84,10 @@ pub unsafe extern "C" fn rt_f64_value(x: i64) -> i64 {
 ///
 /// Same as [`rt_f64_new`].
 #[no_mangle]
-pub unsafe extern "C" fn rt_f32_value(x: i64) -> i64 {
+pub unsafe extern "C" fn rt_f32_value(x: Word) -> f32 {
     match decode(x) {
         Value::Boxed(id) if active_heap().is_f32(id) => {
-            f64::from(active_heap().f32_value(id)).to_bits() as i64
+            active_heap().f32_value(id)
         }
         _ => fatal("rt_f32_value: argument is not a boxed f32"),
     }
@@ -103,10 +102,10 @@ pub unsafe extern "C" fn rt_f32_value(x: i64) -> i64 {
 ///
 /// Same as [`rt_f64_new`].
 #[no_mangle]
-pub unsafe extern "C-unwind" fn rt_sexpr_f64(x: i64) -> i64 {
+pub unsafe extern "C-unwind" fn rt_sexpr_f64(x: Word) -> f64 {
     match decode(x) {
-        Value::Boxed(id) if active_heap().is_f64(id) => active_heap().f64_value(id).to_bits() as i64,
-        _ => raise("sexpr-f64: expected an f64 Sexpr node".to_string()).into_word(),
+        Value::Boxed(id) if active_heap().is_f64(id) => active_heap().f64_value(id),
+        _ => raise("sexpr-f64: expected an f64 Sexpr node".to_string()).into_zero(),
     }
 }
 
@@ -116,10 +115,10 @@ pub unsafe extern "C-unwind" fn rt_sexpr_f64(x: i64) -> i64 {
 ///
 /// Same as [`rt_f64_new`].
 #[no_mangle]
-pub unsafe extern "C-unwind" fn rt_sexpr_f32(x: i64) -> i64 {
+pub unsafe extern "C-unwind" fn rt_sexpr_f32(x: Word) -> f32 {
     match decode(x) {
-        Value::Boxed(id) if active_heap().is_f32(id) => f64::from(active_heap().f32_value(id)).to_bits() as i64,
-        _ => raise("sexpr-f32: expected an f32 Sexpr node".to_string()).into_word(),
+        Value::Boxed(id) if active_heap().is_f32(id) => active_heap().f32_value(id),
+        _ => raise("sexpr-f32: expected an f32 Sexpr node".to_string()).into_zero(),
     }
 }
 
@@ -143,11 +142,11 @@ pub unsafe extern "C-unwind" fn rt_sexpr_f32(x: i64) -> i64 {
 /// # Safety
 ///
 /// A `Heap` must already be registered on this thread.
-unsafe fn narrow_value_of(v: i64, ty: FixedType, who: &str) -> i64 {
+unsafe fn narrow_value_of(v: Word, ty: FixedType, who: &str) -> NarrowInt {
     if let Value::Boxed(id) = decode(v) {
         if let Some(n) = active_heap().narrow_box(id) {
             if n.ty() == ty {
-                return n.word();
+                return n;
             }
         }
     }
@@ -162,16 +161,16 @@ unsafe fn narrow_value_of(v: i64, ty: FixedType, who: &str) -> i64 {
 /// # Safety
 ///
 /// A `Heap` must already be registered on this thread.
-pub(crate) unsafe fn sexpr_narrow_value(v: i64, ty: FixedType) -> i64 {
+unsafe fn sexpr_narrow_value(v: Word, ty: FixedType) -> Result<NarrowInt, Raised> {
     if let Value::Boxed(id) = decode(v) {
         if let Some(n) = active_heap().narrow_box(id) {
             if n.ty() == ty {
-                return n.word();
+                return Ok(n);
             }
         }
     }
     let name = type_name(ty);
-    raise(format!("sexpr-{name}: expected a {name} Sexpr node")).into_word()
+    Err(raise(format!("sexpr-{name}: expected a {name} Sexpr node")))
 }
 
 fn type_name(ty: FixedType) -> &'static str {
@@ -196,8 +195,8 @@ macro_rules! narrow_shims {
         /// The words must be valid; a
         /// `Heap` must already be registered on this thread.
         #[no_mangle]
-        pub unsafe extern "C" fn $boxer(x: i64) -> i64 {
-            encode(active_heap().alloc_narrow(NarrowInt::$variant(x as $t)))
+        pub unsafe extern "C" fn $boxer(x: $t) -> Word {
+            encode(active_heap().alloc_narrow(NarrowInt::$variant(x)))
         }
 
         /// The raw register word inside a box of exactly this type.
@@ -206,8 +205,11 @@ macro_rules! narrow_shims {
         ///
         /// Same as the box shim.
         #[no_mangle]
-        pub unsafe extern "C" fn $unboxer(x: i64) -> i64 {
-            narrow_value_of(x, FixedType::$variant, stringify!($unboxer))
+        pub unsafe extern "C" fn $unboxer(x: Word) -> $t {
+            match narrow_value_of(x, FixedType::$variant, stringify!($unboxer)) {
+                NarrowInt::$variant(n) => n,
+                _ => unreachable!("narrow_value_of answers a box of the type it was asked for"),
+            }
         }
     )*};
 }
@@ -221,7 +223,7 @@ narrow_shims! {
 }
 
 macro_rules! sexpr_readers {
-    ($($reader:ident: $variant:ident;)*) => {$(
+    ($($reader:ident: $variant:ident, $t:ident;)*) => {$(
         /// `(sexpr-W x)`: the raw word inside a node of this type, raising
         /// the interpreter's panic for a node of any other.
         ///
@@ -230,18 +232,22 @@ macro_rules! sexpr_readers {
         /// The words must be valid; a
         /// `Heap` must already be registered on this thread.
         #[no_mangle]
-        pub unsafe extern "C-unwind" fn $reader(x: i64) -> i64 {
-            sexpr_narrow_value(x, FixedType::$variant)
+        pub unsafe extern "C-unwind" fn $reader(x: Word) -> $t {
+            match sexpr_narrow_value(x, FixedType::$variant) {
+                Ok(NarrowInt::$variant(n)) => n,
+                Ok(_) => unreachable!("sexpr_narrow_value answers a box of the type it was asked for"),
+                Err(raised) => raised.into_zero(),
+            }
         }
     )*};
 }
 sexpr_readers! {
-    rt_sexpr_i8: I8;
-    rt_sexpr_i16: I16;
-    rt_sexpr_i32: I32;
-    rt_sexpr_u8: U8;
-    rt_sexpr_u16: U16;
-    rt_sexpr_u32: U32;
+    rt_sexpr_i8: I8, i8;
+    rt_sexpr_i16: I16, i16;
+    rt_sexpr_i32: I32, i32;
+    rt_sexpr_u8: U8, u8;
+    rt_sexpr_u16: U16, u16;
+    rt_sexpr_u32: U32, u32;
 }
 
 /// Discriminates the numeric boxed `Sexpr` kinds that share `TAG_BOXED`'s
@@ -256,7 +262,7 @@ sexpr_readers! {
 ///
 /// Same as [`rt_f64_new`].
 #[no_mangle]
-pub unsafe extern "C" fn rt_box_kind(x: i64) -> i64 {
+pub unsafe extern "C" fn rt_box_kind(x: Word) -> Word {
     match decode(x) {
         Value::Boxed(id) => {
             let heap = active_heap();

@@ -1,5 +1,6 @@
 //! Trait objects and vtables.
 
+use typelisp_mem::Word;
 use typelisp_mem::prelude::*;
 use core::cell::Cell;
 use typelisp_abi::{active_heap, decode, encode, fatal};
@@ -77,7 +78,7 @@ pub fn vtable_define(id: u32, slots: Vec<(usize, u8)>) {
 /// The words must be valid; a
 /// `Heap` must already be registered on this thread.
 #[no_mangle]
-pub unsafe extern "C" fn rt_dyn_new(vtable_id: i64, value: i64) -> i64 {
+pub unsafe extern "C" fn rt_dyn_new(vtable_id: Word, value: Word) -> Word {
     let vtable_id = vtable_id as u32;
     let value = decode(value);
     encode(active_heap().alloc_dyn(vtable_id, value))
@@ -90,9 +91,9 @@ pub unsafe extern "C" fn rt_dyn_new(vtable_id: i64, value: i64) -> i64 {
 /// , `x` must be a tagged `BoxedObj::Dyn`, and a
 /// `Heap` must be registered on this thread.
 #[no_mangle]
-pub unsafe extern "C" fn rt_dyn_vtable(x: i64) -> i64 {
+pub unsafe extern "C" fn rt_dyn_vtable(x: Word) -> Word {
     match decode(x) {
-        Value::Boxed(id) if active_heap().is_dyn(id) => active_heap().dyn_vtable_id(id) as i64,
+        Value::Boxed(id) if active_heap().is_dyn(id) => active_heap().dyn_vtable_id(id) as Word,
         _ => fatal("rt_dyn_vtable: not a trait object"),
     }
 }
@@ -103,7 +104,7 @@ pub unsafe extern "C" fn rt_dyn_vtable(x: i64) -> i64 {
 ///
 /// Same as [`rt_dyn_vtable`].
 #[no_mangle]
-pub unsafe extern "C" fn rt_dyn_value(x: i64) -> i64 {
+pub unsafe extern "C" fn rt_dyn_value(x: Word) -> Word {
     match decode(x) {
         Value::Boxed(id) if active_heap().is_dyn(id) => encode(active_heap().dyn_value(id)),
         _ => fatal("rt_dyn_value: not a trait object"),
@@ -125,7 +126,7 @@ pub(crate) fn vtable_slot_addr(id: usize, slot: usize) -> (usize, u8) {
 /// interpreter exists to ask, so a missing hook is an invariant break rather
 /// than a limitation — the same reading [`apply_on_this_frame`] makes of a
 /// missing apply hook.
-pub(crate) unsafe fn reify_dyn_slot(vtable: u32, slot: u32, what: &str) -> Result<i64, typelisp_abi::Raised> {
+pub(crate) unsafe fn reify_dyn_slot(vtable: u32, slot: u32, what: &str) -> Result<Word, typelisp_abi::Raised> {
     match DYN_SLOT_CLOSURE.with(|cell| cell.get()) {
         Some(hook) => {
             let closure = hook(vtable, slot);
@@ -141,7 +142,7 @@ pub(crate) unsafe fn reify_dyn_slot(vtable: u32, slot: u32, what: &str) -> Resul
 /// How [`reify_dyn_slot`] asks the interpreter for the closure standing
 /// behind an unfilled vtable slot — `(vtable id, slot) -> a tagged
 /// interpreted closure value`.
-pub type DynSlotClosureFn = unsafe extern "C-unwind" fn(u32, u32) -> i64;
+pub type DynSlotClosureFn = unsafe extern "C-unwind" fn(u32, u32) -> Word;
 
 typelisp_mem::thread_local! {
     static DYN_SLOT_CLOSURE: Cell<Option<DynSlotClosureFn>> = const { Cell::new(None) };
@@ -159,22 +160,22 @@ pub fn set_dyn_slot_closure(f: Option<DynSlotClosureFn>) {
 pub(crate) enum Callee {
     /// A compiled body under the coroutine ABI, with its captures. It can
     /// only be *driven*, so it joins a chain.
-    Coroutine { f: crate::coroutine::CoroutineFn, env: Vec<i64> },
+    Coroutine { f: crate::coroutine::CoroutineFn, env: Vec<Word> },
     /// A compiled body under the original ABI, with its captures. It runs to
     /// completion by construction, so calling it is enough.
-    Classic { f: ClassicClosureFn, env: Vec<i64> },
+    Classic { f: ClassicClosureFn, env: Vec<Word> },
     /// Not compiled. Only an interpreter can run it, and only whoever owns a
     /// continuation stack can let it suspend.
     Interpreted,
 }
 
 /// A classic-ABI closure body: arguments and captures as two arrays.
-pub(crate) type ClassicClosureFn = unsafe extern "C-unwind" fn(*const i64, u32, *const i64, u32) -> i64;
+pub(crate) type ClassicClosureFn = unsafe extern "C-unwind" fn(*const Word, u32, *const Word, u32) -> Word;
 
 /// A classic-ABI method body: one argument array. Every address in a vtable
 /// comes from `CompiledFn::address` for a method compiled under the plain
 /// `compiled_fn_type` signature.
-pub(crate) type ClassicMethodFn = unsafe extern "C-unwind" fn(*const i64, u32) -> i64;
+pub(crate) type ClassicMethodFn = unsafe extern "C-unwind" fn(*const Word, u32) -> Word;
 
 /// Reads a function value's captures and decides who can run its body.
 ///
@@ -187,7 +188,7 @@ pub(crate) type ClassicMethodFn = unsafe extern "C-unwind" fn(*const i64, u32) -
 ///
 /// `closure` must be a tagged compiled- or interpreted-closure box in the
 /// heap registered on this thread.
-pub(crate) unsafe fn resolve_closure(closure: i64) -> Callee {
+pub(crate) unsafe fn resolve_closure(closure: Word) -> Callee {
     let id = match decode(closure) {
         Value::Boxed(id) => id,
         other => fatal(&format!("apply: callee is not a function value: {:?}", other)),
@@ -196,7 +197,7 @@ pub(crate) unsafe fn resolve_closure(closure: i64) -> Callee {
     let Some((fn_ptr, body_abi, mask)) = active_heap().compiled_closure_parts(id, &mut captured) else {
         return Callee::Interpreted;
     };
-    let env: Vec<i64> = captured
+    let env: Vec<Word> = captured
         .into_iter()
         .enumerate()
         .map(|(i, v)| {
@@ -204,7 +205,7 @@ pub(crate) unsafe fn resolve_closure(closure: i64) -> Callee {
                 encode(v)
             } else {
                 match v {
-                    Value::Int(raw) => raw,
+                    Value::Int(raw) => raw as Word,
                     other => fatal(&format!("apply: unmasked closure slot {} holds a non-raw value {:?}", i, other)),
                 }
             }
@@ -243,7 +244,7 @@ pub(crate) unsafe fn resolve_closure(closure: i64) -> Callee {
 /// , `value` must be a tagged `BoxedObj::Dyn`, and a
 /// `Heap` must be registered on this thread.
 #[no_mangle]
-pub unsafe extern "C" fn rt_dyn_upcast(trait_id: i64, value: i64) -> i64 {
+pub unsafe extern "C" fn rt_dyn_upcast(trait_id: Word, value: Word) -> Word {
     let trait_id = trait_id as u32;
     let value = decode(value);
     let Value::Boxed(id) = value else {
@@ -277,9 +278,9 @@ pub unsafe extern "C" fn rt_dyn_upcast(trait_id: i64, value: i64) -> i64 {
 /// `word_count` words of a list `TypeWords` wrote (its strings placed as
 /// constants), and `table` to as many writable words as the list has types.
 #[no_mangle]
-pub unsafe extern "C" fn rt_types_define(words: i64, words_len: i64, table: i64) -> i64 {
-    let words = core::slice::from_raw_parts(words as usize as *const i64, words_len as usize);
-    let table = table as usize as *mut i64;
+pub unsafe extern "C" fn rt_types_define(words: Word, words_len: Word, table: Word) -> Word {
+    let words = core::slice::from_raw_parts(words as usize as *const Word, words_len as usize);
+    let table = table as usize as *mut Word;
     for (i, id) in typelisp_mem::type_words::define(words).into_iter().enumerate() {
         *table.add(i) = id.word();
     }
@@ -296,7 +297,7 @@ pub unsafe extern "C" fn rt_types_define(words: i64, words_len: i64, table: i64)
 ///
 /// Each word must be a value of the type the signature gives it.
 #[no_mangle]
-pub unsafe extern "C" fn rt_upcast_set(from: i64, trait_id: i64, to: i64) -> i64 {
+pub unsafe extern "C" fn rt_upcast_set(from: Word, trait_id: Word, to: Word) -> Word {
     upcast_define(from as u32, trait_id as u32, to as u32);
     0
 }
@@ -311,7 +312,7 @@ pub unsafe extern "C" fn rt_upcast_set(from: i64, trait_id: i64, to: i64) -> i64
 ///
 /// Each word must be a value of the type the signature gives it.
 #[no_mangle]
-pub unsafe extern "C" fn rt_vtable_set(id: i64, slot: i64, ptr: i64, body_abi: i64) -> i64 {
+pub unsafe extern "C" fn rt_vtable_set(id: Word, slot: Word, ptr: Word, body_abi: Word) -> Word {
     let id = id as usize;
     let slot = slot as usize;
     let ptr = ptr as usize;

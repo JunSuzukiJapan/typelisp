@@ -4,6 +4,7 @@
 //! gives: `typelisp-rt` cannot depend on this crate without every program
 //! linking the reader. The same arrangement `typelisp_print::shim` has.
 
+use typelisp_mem::Word;
 use typelisp_mem::prelude::*;
 use typelisp_abi::{active_heap, decode, encode, fatal};
 use typelisp_mem::{spec, Heap, StdModule, TypeId, TypeSpec, Value};
@@ -125,7 +126,7 @@ pub fn read_datum_at_builtin_with(
 /// The words must be valid; a `Heap` must be
 /// registered on this thread.
 #[no_mangle]
-pub unsafe extern "C" fn rt_read(source: i64) -> i64 {
+pub unsafe extern "C" fn rt_read(source: Word) -> Word {
     let heap = active_heap();
     let source = match decode(source) {
         Value::Str(id) => heap.string(id).to_string(),
@@ -143,13 +144,11 @@ pub unsafe extern "C" fn rt_read(source: i64) -> i64 {
 /// The words must be valid, the first a tagged `Value`;
 /// a `Heap` must be registered on this thread.
 #[no_mangle]
-pub unsafe extern "C" fn rt_read_datum_at(source: i64, start: i64, preserve: i64) -> i64 {
+pub unsafe extern "C" fn rt_read_datum_at(source: Word, start: Word, preserve: bool) -> Word {
     let heap = active_heap();
     let source = match decode(source) {
         Value::Str(id) => heap.string(id).to_string(),
         other => fatal(&format!("rt_read_datum_at: argument is not a string, got {:?}", other)),
     };
-    let start = start;
-    let preserve = preserve != 0;
-    encode(read_datum_at_builtin(heap, &source, start, preserve))
+    encode(read_datum_at_builtin(heap, &source, start as i64, preserve))
 }

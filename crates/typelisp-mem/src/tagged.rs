@@ -1,4 +1,4 @@
-//! The tagged-`i64` representation compiled code uses for a [`Value`].
+//! The tagged word compiled code uses for a [`Value`]: [`Word`].
 //!
 //! **Why this lives in `typelisp-mem` and not in `typelisp-abi`.** It was in
 //! `typelisp-abi` until the compiled-CPS work (Phase C): the encoding is
@@ -22,7 +22,7 @@
 //! bit it can get and the one class arithmetic touches directly.
 //!
 //! ```text
-//! ....0      fixnum      n << 1, 63-bit signed
+//! ....0      fixnum      n << 1, signed, one bit narrower than the word
 //! ..001      cons        address | 1     (a `Cell` is 8-byte aligned)
 //! ..011      symbol      address | 3     (a `Symbol` header is 8-byte aligned)
 //! ..101      boxed       (BoxId << 3) | 5
@@ -42,7 +42,7 @@
 //! of the words, and the collector's question "does this slot reference the
 //! heap?" is answered for a fixnum by one bit.
 //!
-//! Why a fixnum is 63 bits and not 64: some bit has to say "not a pointer".
+//! Why a fixnum is one bit narrower than the word (63 bits): some bit has to say "not a pointer".
 //! The language has no 64-bit integer type for exactly this reason
 //! (`docs/ja/reference/functions/numbers.md` §1); the arbitrary-precision `int` promotes to a
 //! bignum box above this range instead of dropping bits, and [`encode`]
@@ -53,6 +53,43 @@
 use crate::prelude::*;
 use crate::value::{BoxId, PathId, StrId, Value};
 use crate::{ConsRef, SymRef};
+
+/// A tagged word. Signed, because a fixnum is.
+///
+/// `isize` where it can be, so that a word is a type of its own to the table
+/// of the runtime's signatures (`typelisp::compile::runtime_abi`), which a
+/// 64-bit host builds.
+#[cfg(target_pointer_width = "64")]
+pub type Word = isize;
+/// Compiled code carries 64-bit words on every target.
+#[cfg(not(target_pointer_width = "64"))]
+pub type Word = i64;
+
+/// How many words the widest value (an `f64`, a 64-bit C integer) takes.
+pub const VALUE_WORDS: usize = i64::BITS.div_ceil(Word::BITS) as usize;
+
+/// How many words a value `bits` wide takes.
+pub fn words_for(bits: u32) -> usize {
+    bits.div_ceil(Word::BITS) as usize
+}
+
+/// The words a value `bits` wide is held in, the low one first. `v` is the
+/// value extended to 64 bits, so a value narrower than a word is one word,
+/// extended to it.
+pub fn value_words(v: i64, bits: u32) -> impl Iterator<Item = Word> {
+    (0..words_for(bits)).map(move |i| (v >> (i as u32 * Word::BITS)) as Word)
+}
+
+/// The value [`value_words`] wrote, extended to 64 bits from the sign of the
+/// last word.
+pub fn raw_value(words: &[Word]) -> i64 {
+    let mut v = 0i64;
+    for (i, w) in words.iter().enumerate() {
+        let shift = i as u32 * Word::BITS;
+        v = (v & !(-1i64 << shift)) | ((*w as i64) << shift);
+    }
+    v
+}
 
 /// Which tag layout this runtime encodes and decodes. Recorded in every dump
 /// beside the body ABI (`UnitState::body_layout` / `emits_layout`), for the
@@ -84,39 +121,39 @@ pub const LAYOUT_FIXNUM_ONE_BIT: u8 = 1;
 pub const LAYOUT_OPTION_NICHE: u8 = 2;
 
 /// A fixnum is `n << FIXNUM_SHIFT` with the low bit clear.
-pub const FIXNUM_SHIFT: i64 = 1;
-pub const FIXNUM_MIN: i64 = -(1 << 62);
-pub const FIXNUM_MAX: i64 = (1 << 62) - 1;
+pub const FIXNUM_SHIFT: Word = 1;
+pub const FIXNUM_MIN: i64 = (Word::MIN >> FIXNUM_SHIFT) as i64;
+pub const FIXNUM_MAX: i64 = (Word::MAX >> FIXNUM_SHIFT) as i64;
 
 /// The three-bit classes. A fixnum is any word with bit 0 clear, so it has
 /// no entry here: `FIXNUM_MASK`/`FIXNUM_TAG` are its test.
-pub const FIXNUM_MASK: i64 = 0b1;
-pub const FIXNUM_TAG: i64 = 0b0;
-pub const LOW_MASK: i64 = 0b111;
-pub const TAG_CONS: i64 = 0b001;
-pub const TAG_SYMBOL: i64 = 0b011;
-pub const TAG_BOXED: i64 = 0b101;
-pub const TAG_SMALL: i64 = 0b111;
+pub const FIXNUM_MASK: Word = 0b1;
+pub const FIXNUM_TAG: Word = 0b0;
+pub const LOW_MASK: Word = 0b111;
+pub const TAG_CONS: Word = 0b001;
+pub const TAG_SYMBOL: Word = 0b011;
+pub const TAG_BOXED: Word = 0b101;
+pub const TAG_SMALL: Word = 0b111;
 
 /// The small classes: `LOW_MASK` bits are `TAG_SMALL`, bits 3-5 are one of
 /// these, and the payload starts at `SMALL_SHIFT`.
-pub const SMALL_MASK: i64 = 0b111_111;
-pub const SMALL_SHIFT: i64 = 6;
-pub const TAG_IMMEDIATE: i64 = (0 << 3) | TAG_SMALL;
-pub const TAG_CHAR: i64 = (1 << 3) | TAG_SMALL;
-pub const TAG_STR: i64 = (2 << 3) | TAG_SMALL;
-pub const TAG_PATH: i64 = (3 << 3) | TAG_SMALL;
+pub const SMALL_MASK: Word = 0b111_111;
+pub const SMALL_SHIFT: Word = 6;
+pub const TAG_IMMEDIATE: Word = (0 << 3) | TAG_SMALL;
+pub const TAG_CHAR: Word = (1 << 3) | TAG_SMALL;
+pub const TAG_STR: Word = (2 << 3) | TAG_SMALL;
+pub const TAG_PATH: Word = (3 << 3) | TAG_SMALL;
 
 /// `BoxId` sits above the three-bit class.
-pub const BOXED_SHIFT: i64 = 3;
+pub const BOXED_SHIFT: Word = 3;
 
-pub const IMMEDIATE_NIL: i64 = 0;
-pub const IMMEDIATE_FALSE: i64 = 1;
-pub const IMMEDIATE_TRUE: i64 = 2;
+pub const IMMEDIATE_NIL: Word = 0;
+pub const IMMEDIATE_FALSE: Word = 1;
+pub const IMMEDIATE_TRUE: Word = 2;
 
 /// The empty list as a word — `Value::Empty`'s encoding, and `Option<T>`'s
 /// `None` under the niche. The island writes the same constant.
-pub const NIL_WORD: i64 = (IMMEDIATE_NIL << SMALL_SHIFT) | TAG_IMMEDIATE;
+pub const NIL_WORD: Word = (IMMEDIATE_NIL << SMALL_SHIFT) | TAG_IMMEDIATE;
 
 /// Whether `n` survives `encode` as a fixnum.
 pub fn fixnum_fits(n: i64) -> bool {
@@ -135,8 +172,8 @@ fn corrupt(msg: &str) -> ! {
     crate::host::abort()
 }
 
-/// Encodes a `Value` into the tagged `i64` representation compiled code
-/// uses for a `Sexpr`. `Value::Boxed` needs no allocation here — a `BoxId`
+/// Encodes a `Value` into the tagged word compiled code uses for a
+/// `Sexpr`. `Value::Boxed` needs no allocation here — a `BoxId`
 /// is already just a small integer index, exactly like `Str`/`Path`; the
 /// caller must have already allocated the box (via e.g. `Heap::alloc_f64`)
 /// the same way a `Value::Cons` must already be a live heap cell before
@@ -146,11 +183,21 @@ fn corrupt(msg: &str) -> ! {
 /// encoding, and the producers that can make one (the reader, `int`
 /// arithmetic) are required to have boxed it as a bignum already
 /// (`Heap::canonical_int`). Truncating here would be the silent loss of
-/// bits the 63-bit layout exists to make impossible.
-pub fn encode(v: Value) -> i64 {
+/// bits the layout exists to make impossible.
+pub fn encode(v: Value) -> Word {
     match try_encode(v) {
         Ok(w) => w,
-        Err(n) => corrupt(&format!("encode: {} does not fit a 63-bit fixnum and was not boxed", n)),
+        Err(n) => corrupt(&format!("encode: {} does not fit a fixnum and was not boxed", n)),
+    }
+}
+
+/// `payload` above a tag's bits. Aborts when the word has no room for it: a
+/// heap with more boxes or strings than a 32-bit word can number.
+fn above(payload: u32, shift: Word) -> Word {
+    let wide = u64::from(payload) << shift;
+    match Word::try_from(wide) {
+        Ok(w) => w,
+        Err(_) => corrupt(&format!("encode: the payload {} does not fit the word", payload)),
     }
 }
 
@@ -158,32 +205,32 @@ pub fn encode(v: Value) -> i64 {
 /// `Value::Int` outside the fixnum range. For the producers that have to
 /// decide between a fixnum and a bignum box before a word exists, and for
 /// tests — `encode` itself aborts, as a runtime-corruption condition must.
-pub fn try_encode(v: Value) -> Result<i64, i64> {
+pub fn try_encode(v: Value) -> Result<Word, i64> {
     Ok(match v {
         Value::Int(n) => {
             if !fixnum_fits(n) {
                 return Err(n);
             }
-            n << FIXNUM_SHIFT
+            (n as Word) << FIXNUM_SHIFT
         }
-        Value::Cons(c) => (c.addr() as i64) | TAG_CONS,
+        Value::Cons(c) => (c.addr() as Word) | TAG_CONS,
         // The address itself, `Cons`-style: a `Symbol` header is 8-byte
         // aligned, so the low 3 bits are the tag's to use.
-        Value::Symbol(s) => (s.addr() as i64) | TAG_SYMBOL,
-        Value::Str(id) => ((id.as_u32() as i64) << SMALL_SHIFT) | TAG_STR,
-        Value::Char(c) => ((c as i64) << SMALL_SHIFT) | TAG_CHAR,
-        Value::Path(id) => ((id.as_u32() as i64) << SMALL_SHIFT) | TAG_PATH,
+        Value::Symbol(s) => (s.addr() as Word) | TAG_SYMBOL,
+        Value::Str(id) => above(id.as_u32(), SMALL_SHIFT) | TAG_STR,
+        Value::Char(c) => above(c as u32, SMALL_SHIFT) | TAG_CHAR,
+        Value::Path(id) => above(id.as_u32(), SMALL_SHIFT) | TAG_PATH,
         Value::Empty => NIL_WORD,
         Value::Bool(false) => (IMMEDIATE_FALSE << SMALL_SHIFT) | TAG_IMMEDIATE,
         Value::Bool(true) => (IMMEDIATE_TRUE << SMALL_SHIFT) | TAG_IMMEDIATE,
-        Value::Boxed(id) => ((id.as_u32() as i64) << BOXED_SHIFT) | TAG_BOXED,
+        Value::Boxed(id) => above(id.as_u32(), BOXED_SHIFT) | TAG_BOXED,
     })
 }
 
 /// The inverse of [`encode`].
-pub fn decode(tagged: i64) -> Value {
+pub fn decode(tagged: Word) -> Value {
     if tagged & FIXNUM_MASK == FIXNUM_TAG {
-        return Value::Int(tagged >> FIXNUM_SHIFT);
+        return Value::Int((tagged >> FIXNUM_SHIFT) as i64);
     }
     match tagged & LOW_MASK {
         TAG_CONS => Value::Cons(unsafe { ConsRef::from_addr((tagged & !LOW_MASK) as usize) }),
@@ -216,7 +263,7 @@ pub fn decode(tagged: i64) -> Value {
 /// the small class has to look at its sub-tag (a `Str` and a `Path` are
 /// interned in the heap and swept; a char and the immediates reference
 /// nothing).
-pub fn references_heap(tagged: i64) -> bool {
+pub fn references_heap(tagged: Word) -> bool {
     if tagged & FIXNUM_MASK == FIXNUM_TAG {
         return false;
     }

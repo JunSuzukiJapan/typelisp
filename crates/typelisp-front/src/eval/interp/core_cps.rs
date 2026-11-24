@@ -31,6 +31,7 @@
 //! drops a frame's values) and the `set_state` that re-roots what the next
 //! state carries. Nothing in between touches the heap.
 
+use typelisp_mem::Word;
 use typelisp_mem::{wk, Heap, SymRef, TypeId, Value};
 use typelisp_rt::sched::{self, chan_id_of, io_deadline, io_wait, task_id_of, ChanOp, Progress, SchedError, SelectOp, Waiting, Wake};
 
@@ -1295,10 +1296,7 @@ impl Interp {
     /// encodes to a word the collector never follows.
     fn deliver_wake(&self, heap: &mut Heap, task: &mut Task, v: Value, repr: &Repr) -> Result<(), EvalError> {
         let (words, roots) = self.encode_crossing_args(heap, &[v], std::slice::from_ref(repr), false)?;
-        let word = *words.first().ok_or_else(|| {
-            EvalError::Internal("delivering a wake value produced no word".to_string())
-        })?;
-        task.compiled.set_top_value(heap, word);
+        task.compiled.set_top_value(heap, typelisp_mem::raw_value(&words));
         for _ in 0..roots {
             heap.pop_root();
         }
@@ -1326,8 +1324,8 @@ impl Interp {
         heap: &mut Heap,
         task: &mut Task,
         drive: DriveCtx,
-        closure: i64,
-        argv: &[i64],
+        closure: Word,
+        argv: &[Word],
     ) -> Result<State, EvalError> {
         let f = typelisp_rt::decode(closure);
         let id = match f {
@@ -1350,13 +1348,7 @@ impl Interp {
         let ret = Repr::read(heap, heap.closure_ret(id)).ok_or_else(|| {
             EvalError::Internal("the applied closure has no declared return representation".to_string())
         })?;
-        if argv.len() != reprs.len() {
-            return Err(EvalError::Internal(format!(
-                "arity mismatch: the applied closure takes {} argument(s), given {}",
-                reprs.len(),
-                argv.len()
-            )));
-        }
+        let raws = super::crossing_values(argv, &reprs)?;
 
         task.stack.push(heap, Frame::DriveCompiled { drive, wake: ret }, None);
         // The box is reachable only from the caller's compiled frame, which
@@ -1365,8 +1357,8 @@ impl Interp {
         // them.
         let base = heap.root_count();
         heap.push_root(f);
-        let mut args = Vec::with_capacity(argv.len());
-        for (raw, r) in argv.iter().zip(&reprs) {
+        let mut args = Vec::with_capacity(raws.len());
+        for (raw, r) in raws.iter().zip(&reprs) {
             let v = self.decode_compiled_return(heap, *raw, r)?;
             heap.push_root(v);
             args.push(v);
@@ -2049,11 +2041,10 @@ impl Interp {
                 args.len()
             )));
         }
-        let words = args
-            .iter()
-            .zip(&params)
-            .map(|(v, r)| super::encode_crossing_value(heap, v, r))
-            .collect::<Result<Vec<i64>, EvalError>>()?;
+        let mut words: Vec<Word> = Vec::with_capacity(args.len());
+        for (v, r) in args.iter().zip(&params) {
+            words.extend(typelisp_mem::value_words(super::encode_crossing_value(heap, v, r)?, super::crossing_bits(r)));
+        }
         let held = core::list(heap, &args).map_err(heap_err)?;
         heap.push_root(held);
         let answer: sched::AnswerDecoder = Box::new(move |heap: &mut Heap, word: i64| {
@@ -2088,7 +2079,7 @@ impl Interp {
                 Value::Cons(_) => Ok(typelisp_rt::encode(*f)),
                 other => Err(EvalError::Internal(format!("thread: a closure body form is not a core form: {:?}", other))),
             })
-            .collect::<Result<Vec<i64>, EvalError>>()?;
+            .collect::<Result<Vec<Word>, EvalError>>()?;
         let known = self.thread_entries.borrow().get(&key).cloned();
         let path = match known {
             Some(path) => path,

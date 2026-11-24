@@ -31,6 +31,7 @@
 //! widened to `f64` bits, a `bool` as 0/1, a pointer as its address. The
 //! interpreter converts its values to and from those words around the call.
 
+use typelisp_mem::Word;
 use typelisp_mem::prelude::*;
 use alloc::alloc::Layout;
 use alloc::collections::BTreeMap;
@@ -286,7 +287,7 @@ pub unsafe fn volatile_store(addr: i64, kind: i64, word: i64) -> Result<(), Stri
 }
 
 /// A type argument, as `TypeId::word` writes one.
-fn type_arg(word: i64, who: &str) -> TypeId {
+fn type_arg(word: Word, who: &str) -> TypeId {
     TypeId::from_word(word).unwrap_or_else(|| fatal(&format!("{}: expected a type, got {:#x}", who, word)))
 }
 
@@ -296,8 +297,8 @@ fn type_arg(word: i64, who: &str) -> TypeId {
 ///
 /// None: it reads nothing.
 #[no_mangle]
-pub unsafe extern "C" fn rt_c_arena_open() -> i64 {
-    arena_open() as i64
+pub unsafe extern "C" fn rt_c_arena_open() -> Word {
+    arena_open() as Word
 }
 
 /// `(" c-arena-close" ARENA)`.
@@ -306,7 +307,7 @@ pub unsafe extern "C" fn rt_c_arena_open() -> i64 {
 ///
 /// `arena` must be open.
 #[no_mangle]
-pub unsafe extern "C" fn rt_c_arena_close(arena: i64) -> i64 {
+pub unsafe extern "C" fn rt_c_arena_close(arena: Word) -> Word {
     if let Err(msg) = arena_close(arena as u64) {
         fatal(&msg);
     }
@@ -322,7 +323,7 @@ pub unsafe extern "C" fn rt_c_arena_close(arena: i64) -> i64 {
 /// `args` must point to `argc` readable `i64`s, at least four and an even
 /// number, and a `Heap` must be registered on this thread.
 #[no_mangle]
-pub unsafe extern "C-unwind" fn rt_c_alloc(args: *const i64, argc: u32) -> i64 {
+pub unsafe extern "C-unwind" fn rt_c_alloc(args: *const Word, argc: u32) -> Word {
     if argc < 4 {
         fatal("rt_c_alloc: expected 4 arguments");
     }
@@ -331,8 +332,8 @@ pub unsafe extern "C-unwind" fn rt_c_alloc(args: *const i64, argc: u32) -> i64 {
         fatal("rt_c_alloc: an offset without its type");
     }
     let positions = a[4..].chunks(2).map(|p| (p[0] as usize, type_arg(p[1], "rt_c_alloc"))).collect();
-    match alloc(a[0] as u64, a[1], a[2] as usize, a[3] as usize, positions) {
-        Ok(p) => p as i64,
+    match alloc(a[0] as u64, a[1] as i64, a[2] as usize, a[3] as usize, positions) {
+        Ok(p) => p as Word,
         Err(msg) => raise(msg).into_word(),
     }
 }
@@ -343,7 +344,7 @@ pub unsafe extern "C-unwind" fn rt_c_alloc(args: *const i64, argc: u32) -> i64 {
 ///
 /// A `Heap` must be registered on this thread.
 #[no_mangle]
-pub unsafe extern "C-unwind" fn rt_c_ptr_check(addr: i64, ty: i64) -> i64 {
+pub unsafe extern "C-unwind" fn rt_c_ptr_check(addr: Word, ty: Word) -> Word {
     match check(addr as usize, type_arg(ty, "rt_c_ptr_check")) {
         Ok(()) => addr,
         Err(msg) => raise(msg).into_word(),
@@ -356,9 +357,9 @@ pub unsafe extern "C-unwind" fn rt_c_ptr_check(addr: i64, ty: i64) -> i64 {
 ///
 /// A `Heap` must be registered on this thread.
 #[no_mangle]
-pub unsafe extern "C-unwind" fn rt_c_index(addr: i64, i: i64, size: i64, ty: i64) -> i64 {
-    match index(addr as usize, i, size as usize, type_arg(ty, "rt_c_index")) {
-        Ok(p) => p as i64,
+pub unsafe extern "C-unwind" fn rt_c_index(addr: Word, i: Word, size: Word, ty: Word) -> Word {
+    match index(addr as usize, i as i64, size as usize, type_arg(ty, "rt_c_index")) {
+        Ok(p) => p as Word,
         Err(msg) => raise(msg).into_word(),
     }
 }
@@ -369,7 +370,7 @@ pub unsafe extern "C-unwind" fn rt_c_index(addr: i64, i: i64, size: i64, ty: i64
 ///
 /// None: it only adds.
 #[no_mangle]
-pub unsafe extern "C" fn rt_c_offset(addr: i64, offset: i64) -> i64 {
+pub unsafe extern "C" fn rt_c_offset(addr: Word, offset: Word) -> Word {
     addr.wrapping_add(offset)
 }
 
@@ -379,8 +380,8 @@ pub unsafe extern "C" fn rt_c_offset(addr: i64, offset: i64) -> i64 {
 ///
 /// The words must describe a readable value.
 #[no_mangle]
-pub unsafe extern "C" fn rt_c_load(addr: i64, offset: i64, kind: i64) -> i64 {
-    load(addr.wrapping_add(offset) as usize, kind)
+pub unsafe extern "C" fn rt_c_load(addr: Word, offset: Word, kind: Word) -> i64 {
+    load(addr.wrapping_add(offset) as usize, kind as i64)
 }
 
 /// `(" c-store" ADDR OFFSET KIND WORD)`.
@@ -389,8 +390,8 @@ pub unsafe extern "C" fn rt_c_load(addr: i64, offset: i64, kind: i64) -> i64 {
 ///
 /// The words must describe a writable value.
 #[no_mangle]
-pub unsafe extern "C" fn rt_c_store(addr: i64, offset: i64, kind: i64, word: i64) -> i64 {
-    store(addr.wrapping_add(offset) as usize, kind, word);
+pub unsafe extern "C" fn rt_c_store(addr: Word, offset: Word, kind: Word, word: i64) -> Word {
+    store(addr.wrapping_add(offset) as usize, kind as i64, word);
     0
 }
 
@@ -400,10 +401,10 @@ pub unsafe extern "C" fn rt_c_store(addr: i64, offset: i64, kind: i64, word: i64
 ///
 /// The words must name a readable register.
 #[no_mangle]
-pub unsafe extern "C-unwind" fn rt_c_volatile_load(addr: i64, kind: i64) -> i64 {
-    match volatile_load(addr, kind) {
-        Ok(word) => word,
-        Err(msg) => raise(msg).into_word(),
+pub unsafe extern "C-unwind" fn rt_c_volatile_load(addr: Word, kind: Word) -> u32 {
+    match volatile_load(addr as i64, kind as i64) {
+        Ok(word) => word as u32,
+        Err(msg) => raise(msg).into_zero(),
     }
 }
 
@@ -413,8 +414,8 @@ pub unsafe extern "C-unwind" fn rt_c_volatile_load(addr: i64, kind: i64) -> i64 
 ///
 /// The words must name a writable register.
 #[no_mangle]
-pub unsafe extern "C-unwind" fn rt_c_volatile_store(addr: i64, kind: i64, word: i64) -> i64 {
-    match volatile_store(addr, kind, word) {
+pub unsafe extern "C-unwind" fn rt_c_volatile_store(addr: Word, kind: Word, word: u32) -> Word {
+    match volatile_store(addr as i64, kind as i64, i64::from(word)) {
         Ok(()) => 0,
         Err(msg) => raise(msg).into_word(),
     }

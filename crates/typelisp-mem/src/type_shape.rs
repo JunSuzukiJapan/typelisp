@@ -197,12 +197,12 @@ impl TypeId {
 
     /// The id as compiled code holds it: a tagged fixnum, so that a frame
     /// slot or an argument holding one is a word the collector can read.
-    pub fn word(self) -> i64 {
+    pub fn word(self) -> crate::Word {
         crate::encode(crate::Value::Int(i64::from(self.0)))
     }
 
     /// The id a [`Self::word`] carried, or `None` when the word is not one.
-    pub fn from_word(w: i64) -> Option<TypeId> {
+    pub fn from_word(w: crate::Word) -> Option<TypeId> {
         if w & crate::tagged::FIXNUM_MASK != crate::tagged::FIXNUM_TAG {
             return None;
         }

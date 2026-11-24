@@ -30,7 +30,7 @@ use typelisp::{load_compiler, load_prelude, Checker, Error, EvalError, Heap, Int
 fn run_coroutine_entry(engine: &JitCode, heap: &mut Heap, name: &str, args: &[i64]) -> i64 {
     let entry = unsafe { function::<typelisp::compile::coroutine::CoroutineFn>(engine, name) };
     let mut stack = typelisp::compile::coroutine::FrameStack::new();
-    stack.run(heap, entry, args).expect("the chain ran to an answer")
+    stack.run(heap, entry, &args.iter().map(|a| *a as typelisp_mem::Word).collect::<Vec<_>>()).expect("the chain ran to an answer")
 }
 
 fn run(src: &str) -> Result<Value, EvalError> {
@@ -7114,7 +7114,7 @@ fn a_compiled_recursion_runs_two_hundred_thousand_frames_deep() {
     let mut stack = typelisp::compile::coroutine::FrameStack::new();
     let entry: typelisp::compile::coroutine::CoroutineFn = unsafe { std::mem::transmute(sum_to as *const ()) };
     let n: i64 = 200_000;
-    let answer = stack.run(&mut heap, entry, &[n]).expect("the recursion ran to an answer");
+    let answer = stack.run(&mut heap, entry, &[n as typelisp_mem::Word]).expect("the recursion ran to an answer");
     assert_eq!(answer, n * (n + 1) / 2, "every frame added its own n on the way back up");
     assert_eq!(stack.depth(), 0, "and every frame was popped");
 }

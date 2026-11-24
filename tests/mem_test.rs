@@ -1976,13 +1976,13 @@ fn an_unmasked_frame_slot_is_never_read_as_a_reference() {
     let mut h = Heap::with_capacity(64);
     let f = unsafe { h.open_frame(2, std::ptr::null()) };
     unsafe {
-        f.set_word(0, ((9_999_i64) << 3) | 0b101);
-        f.set_word(1, i64::MIN);
+        f.set_word(0, ((9_999_isize) << 3) | 0b101);
+        f.set_word(1, isize::MIN);
     }
 
     h.gc();
 
-    assert_eq!(unsafe { f.word(0) }, ((9_999_i64) << 3) | 0b101, "the raw word is untouched");
+    assert_eq!(unsafe { f.word(0) }, ((9_999_isize) << 3) | 0b101, "the raw word is untouched");
     assert_eq!(h.box_count(), 0);
     assert_accounting(&h);
 }
@@ -2132,8 +2132,8 @@ fn a_frame_can_hold_more_than_sixty_four_slots() {
     // And the slots those would alias to if the word index were dropped hold
     // raw words that must never be traced.
     unsafe {
-        f.set_word(0, ((7_777_i64) << 3) | 0b101);
-        f.set_word(36, ((8_888_i64) << 3) | 0b101);
+        f.set_word(0, ((7_777_isize) << 3) | 0b101);
+        f.set_word(36, ((8_888_isize) << 3) | 0b101);
         assert!(!f.is_rooted(0), "slot 0 stayed unmasked");
         assert!(!f.is_rooted(36), "slot 36 stayed unmasked");
         assert!(f.is_rooted(64) && f.is_rooted(100));
@@ -2151,7 +2151,7 @@ fn a_frame_can_hold_more_than_sixty_four_slots() {
         };
         assert_eq!(h.struct_field(sid, 0), Value::Int(i as i64));
     }
-    assert_eq!(unsafe { f.word(0) }, ((7_777_i64) << 3) | 0b101, "the raw word is untouched");
+    assert_eq!(unsafe { f.word(0) }, ((7_777_isize) << 3) | 0b101, "the raw word is untouched");
     assert_accounting(&h);
 }
 
@@ -2255,8 +2255,8 @@ fn references_heap_is_two_level_for_the_small_class() {
 #[test]
 fn encoding_an_int_past_63_bits_is_refused() {
     use typelisp::{try_encode, FIXNUM_MAX, FIXNUM_MIN};
-    assert_eq!(try_encode(Value::Int(FIXNUM_MAX)), Ok(FIXNUM_MAX << 1));
-    assert_eq!(try_encode(Value::Int(FIXNUM_MIN)), Ok(FIXNUM_MIN << 1));
+    assert_eq!(try_encode(Value::Int(FIXNUM_MAX)), Ok((FIXNUM_MAX << 1) as isize));
+    assert_eq!(try_encode(Value::Int(FIXNUM_MIN)), Ok((FIXNUM_MIN << 1) as isize));
     assert_eq!(try_encode(Value::Int(FIXNUM_MAX + 1)), Err(FIXNUM_MAX + 1));
     assert_eq!(try_encode(Value::Int(FIXNUM_MIN - 1)), Err(FIXNUM_MIN - 1));
     assert_eq!(try_encode(Value::Int(i64::MAX)), Err(i64::MAX));

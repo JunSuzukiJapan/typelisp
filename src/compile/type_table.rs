@@ -234,14 +234,14 @@ pub fn exported_tables(module: &Module<'static>) -> Result<Vec<(GlobalValue<'sta
         for k in 0..len {
             let w = unsafe { LLVMGetAggregateElement(shapes, k as u32) };
             if unsafe { !LLVMIsAConstantInt(w).is_null() } {
-                words.push(unsafe { LLVMConstIntGetSExtValue(w) });
+                words.push(unsafe { LLVMConstIntGetSExtValue(w) } as typelisp_mem::Word);
             } else if let Some(string) = address_of(w) {
                 // The string's bytes where the module holds them, which live
                 // as long as the module: `define` reads them, and the length
                 // is the next word, as in the executable.
                 let mut n = 0;
                 let bytes = unsafe { LLVMGetAsString(LLVMGetInitializer(string), &mut n) };
-                words.push(bytes as usize as i64);
+                words.push(bytes as usize as typelisp_mem::Word);
             } else {
                 return Err(format!("internal error: word {} of `{}`'s shapes is neither a number nor a string's address", k, name));
             }

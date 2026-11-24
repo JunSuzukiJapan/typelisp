@@ -1,5 +1,6 @@
 //! `random-state`.
 
+use typelisp_mem::Word;
 use typelisp_mem::prelude::*;
 use typelisp_abi::{active_heap, decode, encode, fatal, raise};
 use typelisp_mem::{BoxId, Value};
@@ -79,7 +80,7 @@ pub fn seeded_random_state(seed: i64) -> u64 {
 ///
 /// A `Heap` must already be registered on this thread.
 #[no_mangle]
-pub unsafe extern "C" fn rt_make_random_state_fresh() -> i64 {
+pub unsafe extern "C" fn rt_make_random_state_fresh() -> Word {
     encode(active_heap().alloc_random_state(fresh_random_seed()))
 }
 
@@ -93,9 +94,8 @@ pub unsafe extern "C" fn rt_make_random_state_fresh() -> i64 {
 /// `seed` must decode to an integer; a `Heap`
 /// must already be registered on this thread.
 #[no_mangle]
-pub unsafe extern "C" fn rt_seed_random_state(seed: i64) -> i64 {
-    let seed = seed;
-    encode(active_heap().alloc_random_state(seeded_random_state(seed)))
+pub unsafe extern "C" fn rt_seed_random_state(seed: Word) -> Word {
+    encode(active_heap().alloc_random_state(seeded_random_state(seed as i64)))
 }
 
 /// Decodes `word` as a boxed random-state.
@@ -103,7 +103,7 @@ pub unsafe extern "C" fn rt_seed_random_state(seed: i64) -> i64 {
 /// # Safety
 ///
 /// A `Heap` must already be registered on this thread.
-unsafe fn random_state_arg(word: i64, who: &str) -> BoxId {
+unsafe fn random_state_arg(word: Word, who: &str) -> BoxId {
     match decode(word) {
         Value::Boxed(id) if active_heap().is_random_state(id) => id,
         _ => fatal(&format!("{who}: argument is not a random-state")),
@@ -122,7 +122,7 @@ unsafe fn random_state_arg(word: i64, who: &str) -> BoxId {
 /// `state` must decode to a boxed random-state; a `Heap` must already be
 /// registered on this thread.
 #[no_mangle]
-pub unsafe extern "C-unwind" fn rt_random_state_next(state: i64, bound: i64) -> i64 {
+pub unsafe extern "C-unwind" fn rt_random_state_next(state: Word, bound: Word) -> Word {
     let id = random_state_arg(state, "rt_random_state_next");
     if bound <= 0 {
         return raise(format!("random: bound must be positive, got {}", bound)).into_word();
@@ -130,7 +130,7 @@ pub unsafe extern "C-unwind" fn rt_random_state_next(state: i64, bound: i64) -> 
     let heap = active_heap();
     let next = xorshift64_step(heap.random_state_seed(id));
     heap.set_random_state_seed(id, next);
-    (next % bound as u64) as i64
+    (next % bound as u64) as Word
 }
 
 /// `random-state-copy` for compiled code — a new state starting where
@@ -143,7 +143,7 @@ pub unsafe extern "C-unwind" fn rt_random_state_next(state: i64, bound: i64) -> 
 /// `state` must decode to a boxed random-state; a `Heap` must already be
 /// registered on this thread.
 #[no_mangle]
-pub unsafe extern "C" fn rt_random_state_copy(state: i64) -> i64 {
+pub unsafe extern "C" fn rt_random_state_copy(state: Word) -> Word {
     let id = random_state_arg(state, "rt_random_state_copy");
     let heap = active_heap();
     let seed = heap.random_state_seed(id);

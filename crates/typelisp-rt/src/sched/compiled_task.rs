@@ -1,5 +1,6 @@
 //! A task that is a compiled chain and nothing else.
 
+use typelisp_mem::Word;
 use typelisp_mem::prelude::*;
 use typelisp_mem::{Heap, Value};
 use super::{pending_wait, wake_word, ChanOp, Progress, SchedError, TaskBody, Waiting, Wake};
@@ -141,7 +142,7 @@ enum CompiledState {
     /// Enter this with these argument words — an interpreted `thread`'s
     /// task. What the words point at is rooted in the state slots until the
     /// entry's prologue has copied them into its frame.
-    EnterWith(Entry, Vec<i64>),
+    EnterWith(Entry, Vec<Word>),
     /// Re-enter the standing chain with this word in its value slot.
     Resume(i64),
     /// Hand the standing chain the unwind parked for it (`deliver` of an
@@ -184,7 +185,7 @@ impl CompiledTask {
     /// arguments as values — rooted in the second state slot until the first
     /// step (a closure entry is rooted in the first). Built on the task's own
     /// root stack.
-    pub fn enter_with(heap: &mut Heap, entry: Entry, args: Vec<i64>, held: Value, answer: AnswerDecoder) -> CompiledTask {
+    pub fn enter_with(heap: &mut Heap, entry: Entry, args: Vec<Word>, held: Value, answer: AnswerDecoder) -> CompiledTask {
         let sbase = heap.root_count();
         heap.push_root(match &entry {
             Entry::Closure(c) => *c,
@@ -257,7 +258,7 @@ impl CompiledTask {
             Ok(_) if self.discard_answer => Progress::Done(Ok(Value::Empty)),
             Ok(word) => match &self.answer {
                 Some(answer) => Progress::Done(answer(heap, word).map_err(TaskFailure::Internal)),
-                None => Progress::Done(Ok(typelisp_abi::decode(word))),
+                None => Progress::Done(Ok(typelisp_abi::decode(word as Word))),
             },
             // The chain stays exactly as it is, rooted by the prologues that
             // built it; only the answer's shape has to be remembered.

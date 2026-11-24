@@ -46,7 +46,7 @@ pub use symbols::{wk, NsId, StdModule, SymRef, Symbol, BUILTIN_SYMBOLS, NOT_WELL
 pub use type_form::{existing_type_of_form, type_key_of_form, type_of_form};
 pub use type_shape::{find_type, instantiate, intern_spec, intern_type, spec, type_name, type_shape, TypeShape, TypeSpec};
 pub use tuple::{sexpr_tuple_arity, sexpr_tuple_type, tuple_type_arity, TUPLE_MAX_ARITY};
-pub use tagged::{decode, encode, fixnum_fits, references_heap, try_encode, FIXNUM_MAX, FIXNUM_MIN, NIL_WORD};
+pub use tagged::{decode, encode, fixnum_fits, references_heap, raw_value, try_encode, value_words, words_for, Word, VALUE_WORDS, FIXNUM_MAX, FIXNUM_MIN, NIL_WORD};
 pub use value::{BoxId, ConsRef, FloatBox, NarrowInt, PathId, StrId, TypeId, Value, BUILTIN_TYPES, NAMED_NOT_BUILT};
 pub use value::runtime_builds;
 

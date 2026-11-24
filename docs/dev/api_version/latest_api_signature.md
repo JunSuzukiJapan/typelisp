@@ -1,11 +1,11 @@
-# ABI バージョン 0.3.78
+# ABI バージョン 0.3.80
 
 `scripts/regen-abi-version.sh` が生成した文書。手で編集しない。
 
-コンパイラが生成するコードが、ABI バージョン 0.3.78 のランタイムライブラリについて仮定していることの一覧。
+コンパイラが生成するコードが、ABI バージョン 0.3.80 のランタイムライブラリについて仮定していることの一覧。
 ここに書かれていない前提(シムが引数をどう扱うか、生成コードがヒープを直接読む箇所など)は含まない。
 
-内容ハッシュ (FNV-1a 64): `b09c9106e95fbff7`
+内容ハッシュ (FNV-1a 64): `845e22275edd28c0`
 
 ## 呼び出し規約 (typelisp_abi)
 
@@ -78,6 +78,7 @@
 | IMMEDIATE_FALSE | 1 |
 | IMMEDIATE_TRUE | 2 |
 | NIL_WORD | 7 |
+| VALUE_WORDS | 1 |
 
 ## C メモリ (typelisp_rt::c_mem)
 
@@ -1020,431 +1021,431 @@
 
 | シンボル | LLVM の型 |
 |---|---|
-| `rt_atom` | `i64 (i64)` |
-| `rt_bignum_new` | `i64 (ptr, i32)` |
-| `rt_box_kind` | `i64 (i64)` |
-| `rt_c_alloc` | `i64 (ptr, i32)` |
-| `rt_c_arena_close` | `i64 (i64)` |
-| `rt_c_arena_open` | `i64 ()` |
-| `rt_c_index` | `i64 (i64, i64, i64, i64)` |
-| `rt_c_load` | `i64 (i64, i64, i64)` |
-| `rt_c_offset` | `i64 (i64, i64)` |
-| `rt_c_ptr_check` | `i64 (i64, i64)` |
-| `rt_c_store` | `i64 (i64, i64, i64, i64)` |
-| `rt_c_volatile_load` | `i64 (i64, i64)` |
-| `rt_c_volatile_store` | `i64 (i64, i64, i64)` |
-| `rt_car` | `i64 (i64)` |
-| `rt_cdr` | `i64 (i64)` |
-| `rt_cell_get` | `i64 (i64)` |
-| `rt_cell_new` | `i64 (i64)` |
-| `rt_cell_set` | `i64 (i64, i64)` |
-| `rt_char_alphap` | `i64 (i64)` |
-| `rt_char_digitp` | `i64 (i64)` |
-| `rt_char_downcase` | `i64 (i64)` |
-| `rt_char_equalp` | `i64 (i64, i64)` |
-| `rt_char_upcase` | `i64 (i64)` |
-| `rt_closure_env_get` | `i64 (i64, i64)` |
-| `rt_closure_env_len` | `i64 (i64)` |
-| `rt_closure_fnptr` | `i64 (i64)` |
-| `rt_closure_new` | `i64 (ptr, i32)` |
-| `rt_command_line_args` | `i64 ()` |
-| `rt_cons` | `i64 (i64, i64)` |
-| `rt_consp` | `i64 (i64)` |
-| `rt_coroutine_closure_new` | `i64 (ptr, i32)` |
-| `rt_data_field` | `i64 (i64, i64)` |
-| `rt_data_new` | `i64 (ptr, i32)` |
-| `rt_data_variant` | `i64 (i64)` |
-| `rt_dribble_start` | `i64 (i64)` |
-| `rt_dribble_stop` | `i64 ()` |
-| `rt_drive_body` | `i64 (i64, i64, i64)` |
-| `rt_dyn_new` | `i64 (i64, i64)` |
-| `rt_dyn_upcast` | `i64 (i64, i64)` |
-| `rt_dyn_value` | `i64 (i64)` |
-| `rt_dyn_vtable` | `i64 (i64)` |
-| `rt_ed_open` | `i64 (i64, i64)` |
-| `rt_eval` | `i64 (i64)` |
-| `rt_eval_init` | `i64 ()` |
-| `rt_eval_state` | `i64 (i64, i64, i64, i64, i64)` |
-| `rt_exit` | `i64 (i64)` |
-| `rt_f32_acos` | `i64 (i64)` |
-| `rt_f32_acosh` | `i64 (i64)` |
-| `rt_f32_asin` | `i64 (i64)` |
-| `rt_f32_asinh` | `i64 (i64)` |
-| `rt_f32_atan` | `i64 (i64)` |
-| `rt_f32_atanh` | `i64 (i64)` |
-| `rt_f32_cosh` | `i64 (i64)` |
-| `rt_f32_new` | `i64 (i64)` |
-| `rt_f32_sinh` | `i64 (i64)` |
-| `rt_f32_tan` | `i64 (i64)` |
-| `rt_f32_tanh` | `i64 (i64)` |
-| `rt_f32_value` | `i64 (i64)` |
-| `rt_f64_acos` | `i64 (i64)` |
-| `rt_f64_acosh` | `i64 (i64)` |
-| `rt_f64_asin` | `i64 (i64)` |
-| `rt_f64_asinh` | `i64 (i64)` |
-| `rt_f64_atan` | `i64 (i64)` |
-| `rt_f64_atanh` | `i64 (i64)` |
-| `rt_f64_cosh` | `i64 (i64)` |
-| `rt_f64_fits_f32` | `i64 (i64)` |
-| `rt_f64_new` | `i64 (i64)` |
-| `rt_f64_sinh` | `i64 (i64)` |
-| `rt_f64_tan` | `i64 (i64)` |
-| `rt_f64_tanh` | `i64 (i64)` |
-| `rt_f64_value` | `i64 (i64)` |
-| `rt_ffi_callback_address` | `i64 (i64, i64)` |
-| `rt_ffi_callback_enter` | `i64 ()` |
-| `rt_ffi_callback_invoke` | `i64 (ptr, i32)` |
-| `rt_ffi_callback_leave` | `i64 ()` |
-| `rt_ffi_callback_register` | `i64 (i64, i64, i64, i64)` |
-| `rt_ffi_cstring_free` | `i64 (i64)` |
-| `rt_ffi_cstring_new` | `i64 (i64)` |
-| `rt_ffi_enter_native` | `i64 ()` |
-| `rt_ffi_leave_native` | `i64 ()` |
-| `rt_ffi_string_from_cstr` | `i64 (i64)` |
-| `rt_file_create_directories` | `i64 (i64)` |
-| `rt_file_delete` | `i64 (i64)` |
-| `rt_file_directory_p` | `i64 (i64)` |
-| `rt_file_exists_p` | `i64 (i64)` |
-| `rt_file_list_directory` | `i64 (i64)` |
-| `rt_file_modified_date` | `i64 (i64)` |
-| `rt_file_owner_name` | `i64 (i64)` |
-| `rt_file_rename` | `i64 (i64, i64)` |
-| `rt_file_truename` | `i64 (i64)` |
-| `rt_float_to_int` | `i64 (i64)` |
-| `rt_float_to_ratio` | `i64 (i64)` |
-| `rt_fmt_as_list` | `i64 (ptr, i32)` |
-| `rt_fmt_block_close` | `i64 (ptr, i32)` |
-| `rt_fmt_block_open` | `i64 (ptr, i32)` |
-| `rt_fmt_bool` | `i64 (ptr, i32)` |
-| `rt_fmt_case_close` | `i64 (ptr, i32)` |
-| `rt_fmt_case_open` | `i64 (ptr, i32)` |
-| `rt_fmt_char` | `i64 (ptr, i32)` |
-| `rt_fmt_dollars` | `i64 (ptr, i32)` |
-| `rt_fmt_emit` | `i64 (ptr, i32)` |
-| `rt_fmt_empty` | `i64 (ptr, i32)` |
-| `rt_fmt_exponent` | `i64 (ptr, i32)` |
-| `rt_fmt_first` | `i64 (ptr, i32)` |
-| `rt_fmt_fixed` | `i64 (ptr, i32)` |
-| `rt_fmt_fresh_line` | `i64 (ptr, i32)` |
-| `rt_fmt_general` | `i64 (ptr, i32)` |
-| `rt_fmt_goto` | `i64 (ptr, i32)` |
-| `rt_fmt_indent` | `i64 (ptr, i32)` |
-| `rt_fmt_integer` | `i64 (ptr, i32)` |
-| `rt_fmt_integer_any` | `i64 (ptr, i32)` |
-| `rt_fmt_just_close` | `i64 (ptr, i32)` |
-| `rt_fmt_just_open` | `i64 (ptr, i32)` |
-| `rt_fmt_just_segment` | `i64 (ptr, i32)` |
-| `rt_fmt_length` | `i64 (ptr, i32)` |
-| `rt_fmt_newline` | `i64 (ptr, i32)` |
-| `rt_fmt_number` | `i64 (ptr, i32)` |
-| `rt_fmt_open` | `i64 (ptr, i32)` |
-| `rt_fmt_param` | `i64 (ptr, i32)` |
-| `rt_fmt_plural` | `i64 (ptr, i32)` |
-| `rt_fmt_rest` | `i64 (ptr, i32)` |
-| `rt_fmt_result` | `i64 (ptr, i32)` |
-| `rt_fmt_select` | `i64 (ptr, i32)` |
-| `rt_fmt_string` | `i64 (ptr, i32)` |
-| `rt_fmt_tab` | `i64 (ptr, i32)` |
-| `rt_fmt_text` | `i64 (ptr, i32)` |
-| `rt_fmt_value` | `i64 (ptr, i32)` |
-| `rt_fmt_words` | `i64 (ptr, i32)` |
-| `rt_frame_apply` | `i64 (ptr, i32)` |
-| `rt_frame_call` | `i64 (ptr, i32)` |
-| `rt_frame_call_env` | `i64 (ptr, i32)` |
-| `rt_frame_dyn_call` | `i64 (ptr, i32)` |
-| `rt_frame_open` | `i64 (i64, i64)` |
-| `rt_get_dispatch_macro_character` | `i64 (i64, i64)` |
-| `rt_get_internal_real_time` | `i64 ()` |
-| `rt_get_internal_run_time` | `i64 ()` |
-| `rt_get_macro_character` | `i64 (i64)` |
-| `rt_get_universal_time` | `i64 ()` |
-| `rt_getenv` | `i64 (i64)` |
-| `rt_global_get` | `i64 (i64)` |
-| `rt_global_new` | `i64 (i64)` |
-| `rt_global_set` | `i64 (i64, i64)` |
-| `rt_hashtable_bucket_count` | `i64 (i64, i64)` |
-| `rt_hashtable_bucket_delete` | `i64 (i64, i64, i64)` |
-| `rt_hashtable_bucket_key` | `i64 (i64, i64, i64)` |
-| `rt_hashtable_bucket_put` | `i64 (i64, i64, i64, i64, i64)` |
-| `rt_hashtable_bucket_value` | `i64 (i64, i64, i64)` |
-| `rt_hashtable_clear` | `i64 (i64)` |
-| `rt_hashtable_count` | `i64 (i64)` |
-| `rt_hashtable_entries` | `i64 (i64, i64)` |
-| `rt_hashtable_function` | `i64 (i64, i64)` |
-| `rt_hashtable_keys` | `i64 (i64, i64)` |
-| `rt_hashtable_new` | `i64 (i64, i64, i64)` |
-| `rt_hashtable_values` | `i64 (i64, i64)` |
-| `rt_heap_info` | `i64 ()` |
-| `rt_heap_init` | `i64 (i64, i64, i64)` |
-| `rt_home_directory` | `i64 ()` |
-| `rt_i16_box` | `i64 (i64)` |
-| `rt_i16_unbox` | `i64 (i64)` |
-| `rt_i32_box` | `i64 (i64)` |
-| `rt_i32_unbox` | `i64 (i64)` |
-| `rt_i8_box` | `i64 (i64)` |
-| `rt_i8_unbox` | `i64 (i64)` |
-| `rt_int_div_fault` | `i64 (i64, i64)` |
-| `rt_int_fits_char` | `i64 (i64)` |
-| `rt_int_mod_fault` | `i64 (i64, i64)` |
-| `rt_int_not_fixnum` | `i64 (i64)` |
-| `rt_int_to_char` | `i64 (i64)` |
-| `rt_int_to_ratio` | `i64 (i64)` |
-| `rt_integer_add` | `i64 (i64, i64)` |
-| `rt_integer_ash` | `i64 (i64, i64)` |
-| `rt_integer_cmp` | `i64 (i64, i64)` |
-| `rt_integer_div` | `i64 (i64, i64)` |
-| `rt_integer_fits_char` | `i64 (i64)` |
-| `rt_integer_fits_i16` | `i64 (i64)` |
-| `rt_integer_fits_i32` | `i64 (i64)` |
-| `rt_integer_fits_i8` | `i64 (i64)` |
-| `rt_integer_fits_u16` | `i64 (i64)` |
-| `rt_integer_fits_u32` | `i64 (i64)` |
-| `rt_integer_fits_u8` | `i64 (i64)` |
-| `rt_integer_from_c_ulong` | `i64 (i64)` |
-| `rt_integer_from_word` | `i64 (i64)` |
-| `rt_integer_integer_length` | `i64 (i64)` |
-| `rt_integer_logand` | `i64 (i64, i64)` |
-| `rt_integer_logbitp` | `i64 (i64, i64)` |
-| `rt_integer_logcount` | `i64 (i64)` |
-| `rt_integer_logior` | `i64 (i64, i64)` |
-| `rt_integer_lognot` | `i64 (i64)` |
-| `rt_integer_logtest` | `i64 (i64, i64)` |
-| `rt_integer_logxor` | `i64 (i64, i64)` |
-| `rt_integer_mod` | `i64 (i64, i64)` |
-| `rt_integer_mul` | `i64 (i64, i64)` |
-| `rt_integer_sub` | `i64 (i64, i64)` |
-| `rt_integer_to_c_long` | `i64 (i64)` |
-| `rt_integer_to_c_ulong` | `i64 (i64)` |
-| `rt_integer_to_char` | `i64 (i64)` |
-| `rt_integer_to_float` | `i64 (i64)` |
-| `rt_integer_to_i16` | `i64 (i64)` |
-| `rt_integer_to_i32` | `i64 (i64)` |
-| `rt_integer_to_i8` | `i64 (i64)` |
-| `rt_integer_to_ratio` | `i64 (i64)` |
-| `rt_integer_to_u16` | `i64 (i64)` |
-| `rt_integer_to_u32` | `i64 (i64)` |
-| `rt_integer_to_u8` | `i64 (i64)` |
-| `rt_intern` | `i64 (i64, i64)` |
-| `rt_intern_path` | `i64 (ptr, i32)` |
-| `rt_intern_symbol` | `i64 (ptr, i32)` |
-| `rt_interrupt_disable` | `i64 (i64)` |
-| `rt_interrupt_enable` | `i64 (i64)` |
-| `rt_interrupt_register` | `i64 (i64, i64)` |
-| `rt_keywordp` | `i64 (i64)` |
-| `rt_lisp_implementation_version` | `i64 ()` |
-| `rt_list_to_path` | `i64 (i64)` |
-| `rt_list_to_sexpr_tuple` | `i64 (i64)` |
-| `rt_list_to_sexpr_vector` | `i64 (i64)` |
-| `rt_lists_to_sexpr_array` | `i64 (i64, i64)` |
-| `rt_llvm_call` | `i64 (ptr, i32)` |
-| `rt_local_frame_close` | `i64 (i64)` |
-| `rt_local_frame_open` | `i64 (i64, i64)` |
-| `rt_loop_safepoint` | `i64 ()` |
-| `rt_machine_instance` | `i64 ()` |
-| `rt_machine_type` | `i64 ()` |
-| `rt_machine_version` | `i64 ()` |
-| `rt_macroexpand` | `i64 (i64, i64)` |
-| `rt_macroexpand_1` | `i64 (i64, i64)` |
-| `rt_main_answered` | `i64 (i64)` |
-| `rt_main_returned` | `i64 ()` |
-| `rt_make_random_state_fresh` | `i64 ()` |
-| `rt_match_fail` | `i64 ()` |
-| `rt_net_accept` | `i64 (i64)` |
-| `rt_net_buffered_p` | `i64 (i64)` |
-| `rt_net_connect_begin` | `i64 (i64)` |
-| `rt_net_connect_finish` | `i64 (i64)` |
-| `rt_net_fill` | `i64 (i64)` |
-| `rt_net_flush` | `i64 (i64)` |
-| `rt_net_listen` | `i64 (i64, i64)` |
-| `rt_net_local_address` | `i64 (i64)` |
-| `rt_net_peer_address` | `i64 (i64)` |
-| `rt_net_peer_subject` | `i64 (i64)` |
-| `rt_net_pop_byte` | `i64 (i64)` |
-| `rt_net_pop_char` | `i64 (i64)` |
-| `rt_net_push_byte` | `i64 (i64, i64)` |
-| `rt_net_push_string` | `i64 (i64, i64)` |
-| `rt_net_resolve_begin` | `i64 (i64, i64)` |
-| `rt_net_resolve_finish` | `i64 (i64)` |
-| `rt_net_server_name` | `i64 (i64)` |
-| `rt_net_set_keepalive` | `i64 (i64, i64)` |
-| `rt_net_set_keepalive_period` | `i64 (i64, i64)` |
-| `rt_net_set_nodelay` | `i64 (i64, i64)` |
-| `rt_net_shutdown_write` | `i64 (i64)` |
-| `rt_net_socket_error` | `i64 (i64)` |
-| `rt_net_tls_add_certificate` | `i64 (i64, i64, i64, i64)` |
-| `rt_net_tls_handshake` | `i64 (i64)` |
-| `rt_net_tls_listen` | `i64 (i64, i64, i64, i64, i64)` |
-| `rt_net_tls_start` | `i64 (i64, i64, i64, i64, i64)` |
-| `rt_net_udp_bind` | `i64 (i64, i64)` |
-| `rt_net_udp_last_sender` | `i64 (i64)` |
-| `rt_net_udp_recv` | `i64 (i64)` |
-| `rt_net_udp_send_to` | `i64 (i64, i64, i64)` |
-| `rt_net_unix_connect` | `i64 (i64)` |
-| `rt_net_unix_listen` | `i64 (i64)` |
-| `rt_null` | `i64 (i64)` |
-| `rt_panic` | `i64 (i64)` |
-| `rt_parse_float` | `i64 (i64)` |
-| `rt_path_to_list` | `i64 (i64)` |
-| `rt_pending_arg` | `i64 (i64)` |
-| `rt_pending_argc` | `i64 ()` |
-| `rt_pending_env` | `i64 (i64)` |
-| `rt_pending_envc` | `i64 ()` |
-| `rt_pop_sexpr_root` | `i64 ()` |
-| `rt_pprint` | `i64 (i64, i64, i64)` |
-| `rt_pprint_block_end` | `i64 ()` |
-| `rt_pprint_block_start` | `i64 (i64, i64, i64, i64)` |
-| `rt_pprint_indent` | `i64 (i64, i64)` |
-| `rt_pprint_list_exhausted` | `i64 ()` |
-| `rt_pprint_newline` | `i64 (i64)` |
-| `rt_pprint_pop` | `i64 ()` |
-| `rt_pprint_tab` | `i64 (i64, i64, i64)` |
-| `rt_print_enum_variant` | `i64 (i64, i64, i64, i64)` |
-| `rt_print_field_name` | `i64 (i64, i64, i64, i64)` |
-| `rt_print_field_template` | `i64 (i64, i64, i64, i64)` |
-| `rt_print_global` | `i64 (i64, i64, i64)` |
-| `rt_print_names` | `i64 (i64)` |
-| `rt_print_object_method` | `i64 (i64, i64)` |
-| `rt_push_permanent_sexpr_root` | `i64 (i64)` |
-| `rt_push_sexpr_root` | `i64 (i64)` |
-| `rt_random_state_copy` | `i64 (i64)` |
-| `rt_random_state_next` | `i64 (i64, i64)` |
-| `rt_ratio_add` | `i64 (i64, i64)` |
-| `rt_ratio_cmp` | `i64 (i64, i64)` |
-| `rt_ratio_denominator` | `i64 (i64)` |
-| `rt_ratio_div` | `i64 (i64, i64)` |
-| `rt_ratio_from_bignums` | `i64 (i64, i64)` |
-| `rt_ratio_mul` | `i64 (i64, i64)` |
-| `rt_ratio_numerator` | `i64 (i64)` |
-| `rt_ratio_sub` | `i64 (i64, i64)` |
-| `rt_ratio_to_float` | `i64 (i64)` |
-| `rt_ratio_to_int` | `i64 (i64)` |
-| `rt_rational_add` | `i64 (i64, i64)` |
-| `rt_rational_cmp` | `i64 (i64, i64)` |
-| `rt_rational_denominator` | `i64 (i64)` |
-| `rt_rational_div` | `i64 (i64, i64)` |
-| `rt_rational_from_ratio` | `i64 (i64)` |
-| `rt_rational_is_int` | `i64 (i64)` |
-| `rt_rational_mul` | `i64 (i64, i64)` |
-| `rt_rational_numerator` | `i64 (i64)` |
-| `rt_rational_sub` | `i64 (i64, i64)` |
-| `rt_rational_to_float` | `i64 (i64)` |
-| `rt_rational_to_int` | `i64 (i64)` |
-| `rt_rational_to_ratio` | `i64 (i64)` |
-| `rt_read` | `i64 (i64)` |
-| `rt_read_datum_at` | `i64 (i64, i64, i64)` |
-| `rt_root_count` | `i64 ()` |
-| `rt_run_entry` | `i64 (i64)` |
-| `rt_run_program` | `i64 (i64, i64, i64)` |
-| `rt_run_program_alone` | `i64 (i64, i64, i64)` |
-| `rt_run_program_alone_int` | `i64 (i64, i64, i64)` |
-| `rt_run_program_int` | `i64 (i64, i64, i64)` |
-| `rt_run_program_interp` | `i64 (i64, i64, i64)` |
-| `rt_run_program_interp_int` | `i64 (i64, i64, i64)` |
-| `rt_run_program_threads` | `i64 (i64, i64, i64)` |
-| `rt_run_program_threads_int` | `i64 (i64, i64, i64)` |
-| `rt_seed_random_state` | `i64 (i64)` |
-| `rt_set_car` | `i64 (i64, i64)` |
-| `rt_set_cdr` | `i64 (i64, i64)` |
-| `rt_set_dispatch_macro_character` | `i64 (i64, i64, i64)` |
-| `rt_set_macro_character` | `i64 (i64, i64)` |
-| `rt_set_sexpr_root` | `i64 (i64, i64)` |
-| `rt_sexpr_bool` | `i64 (i64)` |
-| `rt_sexpr_char` | `i64 (i64)` |
-| `rt_sexpr_eq` | `i64 (i64, i64)` |
-| `rt_sexpr_eql` | `i64 (i64, i64)` |
-| `rt_sexpr_equal` | `i64 (i64, i64)` |
-| `rt_sexpr_equalp` | `i64 (i64, i64)` |
-| `rt_sexpr_f32` | `i64 (i64)` |
-| `rt_sexpr_f64` | `i64 (i64)` |
-| `rt_sexpr_i16` | `i64 (i64)` |
-| `rt_sexpr_i32` | `i64 (i64)` |
-| `rt_sexpr_i8` | `i64 (i64)` |
-| `rt_sexpr_instance_test` | `i64 (i64, i64, i64)` |
-| `rt_sexpr_int` | `i64 (i64)` |
-| `rt_sexpr_str` | `i64 (i64)` |
-| `rt_sexpr_tuple_items` | `i64 (i64)` |
-| `rt_sexpr_u16` | `i64 (i64)` |
-| `rt_sexpr_u32` | `i64 (i64)` |
-| `rt_sexpr_u8` | `i64 (i64)` |
-| `rt_software_type` | `i64 ()` |
-| `rt_software_version` | `i64 ()` |
-| `rt_str_append` | `i64 (i64, i64)` |
-| `rt_str_downcase` | `i64 (i64)` |
-| `rt_str_eq` | `i64 (i64, i64)` |
-| `rt_str_equalp` | `i64 (i64, i64)` |
-| `rt_str_length` | `i64 (i64)` |
-| `rt_str_lt` | `i64 (i64, i64)` |
-| `rt_str_new` | `i64 (ptr, i32)` |
-| `rt_str_ref` | `i64 (i64, i64)` |
-| `rt_str_substring` | `i64 (i64, i64, i64)` |
-| `rt_str_upcase` | `i64 (i64)` |
-| `rt_stream_at_line_start` | `i64 (i64)` |
-| `rt_stream_close` | `i64 (i64)` |
-| `rt_stream_describe` | `i64 (i64)` |
-| `rt_stream_finish_output` | `i64 (i64)` |
-| `rt_stream_input_p` | `i64 (i64)` |
-| `rt_stream_listen` | `i64 (i64)` |
-| `rt_stream_open_file` | `i64 (i64, i64)` |
-| `rt_stream_open_p` | `i64 (i64)` |
-| `rt_stream_output_p` | `i64 (i64)` |
-| `rt_stream_position` | `i64 (i64)` |
-| `rt_stream_read_byte` | `i64 (i64)` |
-| `rt_stream_read_char` | `i64 (i64)` |
-| `rt_stream_stderr` | `i64 ()` |
-| `rt_stream_stdin` | `i64 ()` |
-| `rt_stream_stdout` | `i64 ()` |
-| `rt_stream_string_input` | `i64 (i64)` |
-| `rt_stream_string_output` | `i64 ()` |
-| `rt_stream_take_output_string` | `i64 (i64)` |
-| `rt_stream_unread_char` | `i64 (i64, i64)` |
-| `rt_stream_write_byte` | `i64 (i64, i64)` |
-| `rt_stream_write_string` | `i64 (i64, i64)` |
-| `rt_struct_field_count` | `i64 (i64)` |
-| `rt_struct_field_get` | `i64 (i64, i64)` |
-| `rt_struct_field_set` | `i64 (i64, i64, i64)` |
-| `rt_struct_new` | `i64 (ptr, i32)` |
-| `rt_struct_pop_field` | `i64 (i64)` |
-| `rt_struct_push_field` | `i64 (i64, i64)` |
-| `rt_suspend_chan_cap` | `i64 (i64)` |
-| `rt_suspend_chan_close` | `i64 (i64)` |
-| `rt_suspend_chan_len` | `i64 (i64)` |
-| `rt_suspend_chan_new` | `i64 (i64, i64)` |
-| `rt_suspend_chan_recv` | `i64 (i64, i64)` |
-| `rt_suspend_chan_select` | `i64 (ptr, i32)` |
-| `rt_suspend_chan_send` | `i64 (i64, i64)` |
-| `rt_suspend_io` | `i64 (i64, i64)` |
-| `rt_suspend_io_for` | `i64 (i64, i64, i64)` |
-| `rt_suspend_main` | `i64 ()` |
-| `rt_suspend_sleep` | `i64 (i64)` |
-| `rt_suspend_task` | `i64 (i64, i64)` |
-| `rt_suspend_thread` | `i64 (i64, i64)` |
-| `rt_suspend_wait` | `i64 (i64)` |
-| `rt_suspend_yield` | `i64 ()` |
-| `rt_sxhash_eq` | `i64 (i64)` |
-| `rt_sxhash_eql` | `i64 (i64)` |
-| `rt_sxhash_equalp` | `i64 (i64)` |
-| `rt_sym_name` | `i64 (i64)` |
-| `rt_symp` | `i64 (i64)` |
-| `rt_thread_available_parallelism` | `i64 ()` |
-| `rt_thread_current_id` | `i64 ()` |
-| `rt_throw` | `i64 (i64, i64)` |
-| `rt_throw_matches` | `i64 (i64)` |
-| `rt_throw_take_value` | `i64 ()` |
-| `rt_timezone_daylight_p` | `i64 (i64, i64)` |
-| `rt_timezone_offset_seconds` | `i64 (i64, i64)` |
-| `rt_truncate_sexpr_roots` | `i64 (i64)` |
-| `rt_types_define` | `i64 (i64, i64, i64)` |
-| `rt_u16_box` | `i64 (i64)` |
-| `rt_u16_unbox` | `i64 (i64)` |
-| `rt_u32_box` | `i64 (i64)` |
-| `rt_u32_unbox` | `i64 (i64)` |
-| `rt_u8_box` | `i64 (i64)` |
-| `rt_u8_unbox` | `i64 (i64)` |
-| `rt_unwinding` | `i64 ()` |
-| `rt_upcast_set` | `i64 (i64, i64, i64)` |
-| `rt_vector_to_sexpr_tuple` | `i64 (i64)` |
-| `rt_vtable_set` | `i64 (i64, i64, i64, i64)` |
-| `rt_wk_symbol` | `i64 (i64)` |
+| `rt_atom` | `bool (word)` |
+| `rt_bignum_new` | `word (ptr, u32)` |
+| `rt_box_kind` | `word (word)` |
+| `rt_c_alloc` | `word (ptr, u32)` |
+| `rt_c_arena_close` | `word (word)` |
+| `rt_c_arena_open` | `word ()` |
+| `rt_c_index` | `word (word, word, word, word)` |
+| `rt_c_load` | `i64 (word, word, word)` |
+| `rt_c_offset` | `word (word, word)` |
+| `rt_c_ptr_check` | `word (word, word)` |
+| `rt_c_store` | `word (word, word, word, i64)` |
+| `rt_c_volatile_load` | `u32 (word, word)` |
+| `rt_c_volatile_store` | `word (word, word, u32)` |
+| `rt_car` | `word (word)` |
+| `rt_cdr` | `word (word)` |
+| `rt_cell_get` | `word (word)` |
+| `rt_cell_new` | `word (word)` |
+| `rt_cell_set` | `word (word, word)` |
+| `rt_char_alphap` | `bool (u32)` |
+| `rt_char_digitp` | `bool (u32)` |
+| `rt_char_downcase` | `u32 (u32)` |
+| `rt_char_equalp` | `bool (u32, u32)` |
+| `rt_char_upcase` | `u32 (u32)` |
+| `rt_closure_env_get` | `word (word, word)` |
+| `rt_closure_env_len` | `word (word)` |
+| `rt_closure_fnptr` | `word (word)` |
+| `rt_closure_new` | `word (ptr, u32)` |
+| `rt_command_line_args` | `word ()` |
+| `rt_cons` | `word (word, word)` |
+| `rt_consp` | `bool (word)` |
+| `rt_coroutine_closure_new` | `word (ptr, u32)` |
+| `rt_data_field` | `word (word, word)` |
+| `rt_data_new` | `word (ptr, u32)` |
+| `rt_data_variant` | `word (word)` |
+| `rt_dribble_start` | `word (word)` |
+| `rt_dribble_stop` | `word ()` |
+| `rt_drive_body` | `word (word, word, word)` |
+| `rt_dyn_new` | `word (word, word)` |
+| `rt_dyn_upcast` | `word (word, word)` |
+| `rt_dyn_value` | `word (word)` |
+| `rt_dyn_vtable` | `word (word)` |
+| `rt_ed_open` | `word (word, word)` |
+| `rt_eval` | `word (word)` |
+| `rt_eval_init` | `word ()` |
+| `rt_eval_state` | `word (word, word, word, word, word)` |
+| `rt_exit` | `word (word)` |
+| `rt_f32_acos` | `float (float)` |
+| `rt_f32_acosh` | `float (float)` |
+| `rt_f32_asin` | `float (float)` |
+| `rt_f32_asinh` | `float (float)` |
+| `rt_f32_atan` | `float (float)` |
+| `rt_f32_atanh` | `float (float)` |
+| `rt_f32_cosh` | `float (float)` |
+| `rt_f32_new` | `word (float)` |
+| `rt_f32_sinh` | `float (float)` |
+| `rt_f32_tan` | `float (float)` |
+| `rt_f32_tanh` | `float (float)` |
+| `rt_f32_value` | `float (word)` |
+| `rt_f64_acos` | `double (double)` |
+| `rt_f64_acosh` | `double (double)` |
+| `rt_f64_asin` | `double (double)` |
+| `rt_f64_asinh` | `double (double)` |
+| `rt_f64_atan` | `double (double)` |
+| `rt_f64_atanh` | `double (double)` |
+| `rt_f64_cosh` | `double (double)` |
+| `rt_f64_fits_f32` | `bool (double)` |
+| `rt_f64_new` | `word (double)` |
+| `rt_f64_sinh` | `double (double)` |
+| `rt_f64_tan` | `double (double)` |
+| `rt_f64_tanh` | `double (double)` |
+| `rt_f64_value` | `double (word)` |
+| `rt_ffi_callback_address` | `word (word, word)` |
+| `rt_ffi_callback_enter` | `word ()` |
+| `rt_ffi_callback_invoke` | `word (ptr, u32)` |
+| `rt_ffi_callback_leave` | `word ()` |
+| `rt_ffi_callback_register` | `word (word, word, word, word)` |
+| `rt_ffi_cstring_free` | `word (word)` |
+| `rt_ffi_cstring_new` | `word (word)` |
+| `rt_ffi_enter_native` | `word ()` |
+| `rt_ffi_leave_native` | `word ()` |
+| `rt_ffi_string_from_cstr` | `word (word)` |
+| `rt_file_create_directories` | `word (word)` |
+| `rt_file_delete` | `word (word)` |
+| `rt_file_directory_p` | `bool (word)` |
+| `rt_file_exists_p` | `bool (word)` |
+| `rt_file_list_directory` | `word (word)` |
+| `rt_file_modified_date` | `word (word)` |
+| `rt_file_owner_name` | `word (word)` |
+| `rt_file_rename` | `word (word, word)` |
+| `rt_file_truename` | `word (word)` |
+| `rt_float_to_int` | `word (double)` |
+| `rt_float_to_ratio` | `word (double)` |
+| `rt_fmt_as_list` | `word (ptr, u32)` |
+| `rt_fmt_block_close` | `word (ptr, u32)` |
+| `rt_fmt_block_open` | `word (ptr, u32)` |
+| `rt_fmt_bool` | `bool (ptr, u32)` |
+| `rt_fmt_case_close` | `word (ptr, u32)` |
+| `rt_fmt_case_open` | `word (ptr, u32)` |
+| `rt_fmt_char` | `word (ptr, u32)` |
+| `rt_fmt_dollars` | `word (ptr, u32)` |
+| `rt_fmt_emit` | `word (ptr, u32)` |
+| `rt_fmt_empty` | `bool (ptr, u32)` |
+| `rt_fmt_exponent` | `word (ptr, u32)` |
+| `rt_fmt_first` | `word (ptr, u32)` |
+| `rt_fmt_fixed` | `word (ptr, u32)` |
+| `rt_fmt_fresh_line` | `word (ptr, u32)` |
+| `rt_fmt_general` | `word (ptr, u32)` |
+| `rt_fmt_goto` | `word (ptr, u32)` |
+| `rt_fmt_indent` | `word (ptr, u32)` |
+| `rt_fmt_integer` | `word (ptr, u32)` |
+| `rt_fmt_integer_any` | `word (ptr, u32)` |
+| `rt_fmt_just_close` | `word (ptr, u32)` |
+| `rt_fmt_just_open` | `word (ptr, u32)` |
+| `rt_fmt_just_segment` | `word (ptr, u32)` |
+| `rt_fmt_length` | `i32 (ptr, u32)` |
+| `rt_fmt_newline` | `word (ptr, u32)` |
+| `rt_fmt_number` | `word (ptr, u32)` |
+| `rt_fmt_open` | `word (ptr, u32)` |
+| `rt_fmt_param` | `i32 (ptr, u32)` |
+| `rt_fmt_plural` | `word (ptr, u32)` |
+| `rt_fmt_rest` | `word (ptr, u32)` |
+| `rt_fmt_result` | `word (ptr, u32)` |
+| `rt_fmt_select` | `i32 (ptr, u32)` |
+| `rt_fmt_string` | `word (ptr, u32)` |
+| `rt_fmt_tab` | `word (ptr, u32)` |
+| `rt_fmt_text` | `word (ptr, u32)` |
+| `rt_fmt_value` | `word (ptr, u32)` |
+| `rt_fmt_words` | `word (ptr, u32)` |
+| `rt_frame_apply` | `word (ptr, u32)` |
+| `rt_frame_call` | `word (ptr, u32)` |
+| `rt_frame_call_env` | `word (ptr, u32)` |
+| `rt_frame_dyn_call` | `word (ptr, u32)` |
+| `rt_frame_open` | `word (word, word)` |
+| `rt_get_dispatch_macro_character` | `word (u32, u32)` |
+| `rt_get_internal_real_time` | `word ()` |
+| `rt_get_internal_run_time` | `word ()` |
+| `rt_get_macro_character` | `word (u32)` |
+| `rt_get_universal_time` | `word ()` |
+| `rt_getenv` | `word (word)` |
+| `rt_global_get` | `word (word)` |
+| `rt_global_new` | `word (word)` |
+| `rt_global_set` | `word (word, word)` |
+| `rt_hashtable_bucket_count` | `word (word, word)` |
+| `rt_hashtable_bucket_delete` | `word (word, word, word)` |
+| `rt_hashtable_bucket_key` | `word (word, word, word)` |
+| `rt_hashtable_bucket_put` | `word (word, word, word, word, word)` |
+| `rt_hashtable_bucket_value` | `word (word, word, word)` |
+| `rt_hashtable_clear` | `word (word)` |
+| `rt_hashtable_count` | `word (word)` |
+| `rt_hashtable_entries` | `word (word, word)` |
+| `rt_hashtable_function` | `word (word, word)` |
+| `rt_hashtable_keys` | `word (word, word)` |
+| `rt_hashtable_new` | `word (word, word, word)` |
+| `rt_hashtable_values` | `word (word, word)` |
+| `rt_heap_info` | `word ()` |
+| `rt_heap_init` | `word (word, word, word)` |
+| `rt_home_directory` | `word ()` |
+| `rt_i16_box` | `word (i16)` |
+| `rt_i16_unbox` | `i16 (word)` |
+| `rt_i32_box` | `word (i32)` |
+| `rt_i32_unbox` | `i32 (word)` |
+| `rt_i8_box` | `word (i8)` |
+| `rt_i8_unbox` | `i8 (word)` |
+| `rt_int_div_fault` | `word (i64, i64)` |
+| `rt_int_fits_char` | `bool (word)` |
+| `rt_int_mod_fault` | `word (i64, i64)` |
+| `rt_int_not_fixnum` | `word (word)` |
+| `rt_int_to_char` | `u32 (i64)` |
+| `rt_int_to_ratio` | `word (i64)` |
+| `rt_integer_add` | `word (word, word)` |
+| `rt_integer_ash` | `word (word, word)` |
+| `rt_integer_cmp` | `word (word, word)` |
+| `rt_integer_div` | `word (word, word)` |
+| `rt_integer_fits_char` | `bool (word)` |
+| `rt_integer_fits_i16` | `bool (word)` |
+| `rt_integer_fits_i32` | `bool (word)` |
+| `rt_integer_fits_i8` | `bool (word)` |
+| `rt_integer_fits_u16` | `bool (word)` |
+| `rt_integer_fits_u32` | `bool (word)` |
+| `rt_integer_fits_u8` | `bool (word)` |
+| `rt_integer_from_c_ulong` | `word (u64)` |
+| `rt_integer_from_word` | `word (i64)` |
+| `rt_integer_integer_length` | `word (word)` |
+| `rt_integer_logand` | `word (word, word)` |
+| `rt_integer_logbitp` | `bool (word, word)` |
+| `rt_integer_logcount` | `word (word)` |
+| `rt_integer_logior` | `word (word, word)` |
+| `rt_integer_lognot` | `word (word)` |
+| `rt_integer_logtest` | `bool (word, word)` |
+| `rt_integer_logxor` | `word (word, word)` |
+| `rt_integer_mod` | `word (word, word)` |
+| `rt_integer_mul` | `word (word, word)` |
+| `rt_integer_sub` | `word (word, word)` |
+| `rt_integer_to_c_long` | `i64 (word)` |
+| `rt_integer_to_c_ulong` | `u64 (word)` |
+| `rt_integer_to_char` | `u32 (word)` |
+| `rt_integer_to_float` | `double (word)` |
+| `rt_integer_to_i16` | `i16 (word)` |
+| `rt_integer_to_i32` | `i32 (word)` |
+| `rt_integer_to_i8` | `i8 (word)` |
+| `rt_integer_to_ratio` | `word (word)` |
+| `rt_integer_to_u16` | `u16 (word)` |
+| `rt_integer_to_u32` | `u32 (word)` |
+| `rt_integer_to_u8` | `u8 (word)` |
+| `rt_intern` | `word (word, word)` |
+| `rt_intern_path` | `word (ptr, u32)` |
+| `rt_intern_symbol` | `word (ptr, u32)` |
+| `rt_interrupt_disable` | `word (word)` |
+| `rt_interrupt_enable` | `word (word)` |
+| `rt_interrupt_register` | `word (word, word)` |
+| `rt_keywordp` | `bool (word)` |
+| `rt_lisp_implementation_version` | `word ()` |
+| `rt_list_to_path` | `word (word)` |
+| `rt_list_to_sexpr_tuple` | `word (word)` |
+| `rt_list_to_sexpr_vector` | `word (word)` |
+| `rt_lists_to_sexpr_array` | `word (word, word)` |
+| `rt_llvm_call` | `word (ptr, u32)` |
+| `rt_local_frame_close` | `word (word)` |
+| `rt_local_frame_open` | `word (word, word)` |
+| `rt_loop_safepoint` | `word ()` |
+| `rt_machine_instance` | `word ()` |
+| `rt_machine_type` | `word ()` |
+| `rt_machine_version` | `word ()` |
+| `rt_macroexpand` | `word (word, word)` |
+| `rt_macroexpand_1` | `word (word, word)` |
+| `rt_main_answered` | `word (word)` |
+| `rt_main_returned` | `word ()` |
+| `rt_make_random_state_fresh` | `word ()` |
+| `rt_match_fail` | `word ()` |
+| `rt_net_accept` | `word (i32)` |
+| `rt_net_buffered_p` | `word (i32)` |
+| `rt_net_connect_begin` | `word (word)` |
+| `rt_net_connect_finish` | `word (i32)` |
+| `rt_net_fill` | `word (i32)` |
+| `rt_net_flush` | `word (i32)` |
+| `rt_net_listen` | `word (word, word)` |
+| `rt_net_local_address` | `word (i32)` |
+| `rt_net_peer_address` | `word (i32)` |
+| `rt_net_peer_subject` | `word (i32)` |
+| `rt_net_pop_byte` | `word (i32)` |
+| `rt_net_pop_char` | `word (i32)` |
+| `rt_net_push_byte` | `word (i32, word)` |
+| `rt_net_push_string` | `word (i32, word)` |
+| `rt_net_resolve_begin` | `word (word, word)` |
+| `rt_net_resolve_finish` | `word (i32)` |
+| `rt_net_server_name` | `word (i32)` |
+| `rt_net_set_keepalive` | `word (i32, bool)` |
+| `rt_net_set_keepalive_period` | `word (i32, word)` |
+| `rt_net_set_nodelay` | `word (i32, bool)` |
+| `rt_net_shutdown_write` | `word (i32)` |
+| `rt_net_socket_error` | `word (i32)` |
+| `rt_net_tls_add_certificate` | `word (i32, word, word, word)` |
+| `rt_net_tls_handshake` | `word (i32)` |
+| `rt_net_tls_listen` | `word (word, word, word, word, word)` |
+| `rt_net_tls_start` | `word (i32, word, word, word, word)` |
+| `rt_net_udp_bind` | `word (word, word)` |
+| `rt_net_udp_last_sender` | `word (i32)` |
+| `rt_net_udp_recv` | `word (i32)` |
+| `rt_net_udp_send_to` | `word (i32, word, word)` |
+| `rt_net_unix_connect` | `word (word)` |
+| `rt_net_unix_listen` | `word (word)` |
+| `rt_null` | `bool (word)` |
+| `rt_panic` | `word (word)` |
+| `rt_parse_float` | `word (word)` |
+| `rt_path_to_list` | `word (word)` |
+| `rt_pending_arg` | `word (word)` |
+| `rt_pending_argc` | `word ()` |
+| `rt_pending_env` | `word (word)` |
+| `rt_pending_envc` | `word ()` |
+| `rt_pop_sexpr_root` | `word ()` |
+| `rt_pprint` | `word (word, word, word)` |
+| `rt_pprint_block_end` | `word ()` |
+| `rt_pprint_block_start` | `word (word, word, bool, word)` |
+| `rt_pprint_indent` | `word (word, word)` |
+| `rt_pprint_list_exhausted` | `bool ()` |
+| `rt_pprint_newline` | `word (word)` |
+| `rt_pprint_pop` | `word ()` |
+| `rt_pprint_tab` | `word (word, word, word)` |
+| `rt_print_enum_variant` | `word (word, word, word, word)` |
+| `rt_print_field_name` | `word (word, word, word, word)` |
+| `rt_print_field_template` | `word (word, word, word, word)` |
+| `rt_print_global` | `word (word, word, word)` |
+| `rt_print_names` | `word (word)` |
+| `rt_print_object_method` | `word (word, word)` |
+| `rt_push_permanent_sexpr_root` | `word (word)` |
+| `rt_push_sexpr_root` | `word (word)` |
+| `rt_random_state_copy` | `word (word)` |
+| `rt_random_state_next` | `word (word, word)` |
+| `rt_ratio_add` | `word (word, word)` |
+| `rt_ratio_cmp` | `word (word, word)` |
+| `rt_ratio_denominator` | `word (word)` |
+| `rt_ratio_div` | `word (word, word)` |
+| `rt_ratio_from_bignums` | `word (word, word)` |
+| `rt_ratio_mul` | `word (word, word)` |
+| `rt_ratio_numerator` | `word (word)` |
+| `rt_ratio_sub` | `word (word, word)` |
+| `rt_ratio_to_float` | `double (word)` |
+| `rt_ratio_to_int` | `word (word)` |
+| `rt_rational_add` | `word (word, word)` |
+| `rt_rational_cmp` | `word (word, word)` |
+| `rt_rational_denominator` | `word (word)` |
+| `rt_rational_div` | `word (word, word)` |
+| `rt_rational_from_ratio` | `word (word)` |
+| `rt_rational_is_int` | `bool (word)` |
+| `rt_rational_mul` | `word (word, word)` |
+| `rt_rational_numerator` | `word (word)` |
+| `rt_rational_sub` | `word (word, word)` |
+| `rt_rational_to_float` | `double (word)` |
+| `rt_rational_to_int` | `word (word)` |
+| `rt_rational_to_ratio` | `word (word)` |
+| `rt_read` | `word (word)` |
+| `rt_read_datum_at` | `word (word, word, bool)` |
+| `rt_root_count` | `word ()` |
+| `rt_run_entry` | `word (word)` |
+| `rt_run_program` | `word (word, word, word)` |
+| `rt_run_program_alone` | `word (word, word, word)` |
+| `rt_run_program_alone_int` | `word (word, word, word)` |
+| `rt_run_program_int` | `word (word, word, word)` |
+| `rt_run_program_interp` | `word (word, word, word)` |
+| `rt_run_program_interp_int` | `word (word, word, word)` |
+| `rt_run_program_threads` | `word (word, word, word)` |
+| `rt_run_program_threads_int` | `word (word, word, word)` |
+| `rt_seed_random_state` | `word (word)` |
+| `rt_set_car` | `word (word, word)` |
+| `rt_set_cdr` | `word (word, word)` |
+| `rt_set_dispatch_macro_character` | `word (u32, u32, word)` |
+| `rt_set_macro_character` | `word (u32, word)` |
+| `rt_set_sexpr_root` | `word (word, word)` |
+| `rt_sexpr_bool` | `bool (word)` |
+| `rt_sexpr_char` | `u32 (word)` |
+| `rt_sexpr_eq` | `bool (word, word)` |
+| `rt_sexpr_eql` | `bool (word, word)` |
+| `rt_sexpr_equal` | `bool (word, word)` |
+| `rt_sexpr_equalp` | `bool (word, word)` |
+| `rt_sexpr_f32` | `float (word)` |
+| `rt_sexpr_f64` | `double (word)` |
+| `rt_sexpr_i16` | `i16 (word)` |
+| `rt_sexpr_i32` | `i32 (word)` |
+| `rt_sexpr_i8` | `i8 (word)` |
+| `rt_sexpr_instance_test` | `bool (word, word, word)` |
+| `rt_sexpr_int` | `word (word)` |
+| `rt_sexpr_str` | `word (word)` |
+| `rt_sexpr_tuple_items` | `word (word)` |
+| `rt_sexpr_u16` | `u16 (word)` |
+| `rt_sexpr_u32` | `u32 (word)` |
+| `rt_sexpr_u8` | `u8 (word)` |
+| `rt_software_type` | `word ()` |
+| `rt_software_version` | `word ()` |
+| `rt_str_append` | `word (word, word)` |
+| `rt_str_downcase` | `word (word)` |
+| `rt_str_eq` | `bool (word, word)` |
+| `rt_str_equalp` | `bool (word, word)` |
+| `rt_str_length` | `word (word)` |
+| `rt_str_lt` | `bool (word, word)` |
+| `rt_str_new` | `word (ptr, u32)` |
+| `rt_str_ref` | `u32 (word, word)` |
+| `rt_str_substring` | `word (word, word, word)` |
+| `rt_str_upcase` | `word (word)` |
+| `rt_stream_at_line_start` | `word (i32)` |
+| `rt_stream_close` | `word (i32)` |
+| `rt_stream_describe` | `word (i32)` |
+| `rt_stream_finish_output` | `word (i32)` |
+| `rt_stream_input_p` | `word (i32)` |
+| `rt_stream_listen` | `word (i32)` |
+| `rt_stream_open_file` | `word (word, word)` |
+| `rt_stream_open_p` | `bool (i32)` |
+| `rt_stream_output_p` | `word (i32)` |
+| `rt_stream_position` | `word (i32)` |
+| `rt_stream_read_byte` | `word (i32)` |
+| `rt_stream_read_char` | `word (i32)` |
+| `rt_stream_stderr` | `i32 ()` |
+| `rt_stream_stdin` | `i32 ()` |
+| `rt_stream_stdout` | `i32 ()` |
+| `rt_stream_string_input` | `i32 (word)` |
+| `rt_stream_string_output` | `i32 ()` |
+| `rt_stream_take_output_string` | `word (i32)` |
+| `rt_stream_unread_char` | `word (i32, u32)` |
+| `rt_stream_write_byte` | `word (i32, word)` |
+| `rt_stream_write_string` | `word (i32, word)` |
+| `rt_struct_field_count` | `word (word)` |
+| `rt_struct_field_get` | `word (word, word)` |
+| `rt_struct_field_set` | `word (word, word, word)` |
+| `rt_struct_new` | `word (ptr, u32)` |
+| `rt_struct_pop_field` | `word (word)` |
+| `rt_struct_push_field` | `word (word, word)` |
+| `rt_suspend_chan_cap` | `word (word)` |
+| `rt_suspend_chan_close` | `word (word)` |
+| `rt_suspend_chan_len` | `word (word)` |
+| `rt_suspend_chan_new` | `word (word, word)` |
+| `rt_suspend_chan_recv` | `word (word, word)` |
+| `rt_suspend_chan_select` | `word (ptr, u32)` |
+| `rt_suspend_chan_send` | `word (word, word)` |
+| `rt_suspend_io` | `word (i32, word)` |
+| `rt_suspend_io_for` | `word (i32, word, double)` |
+| `rt_suspend_main` | `word ()` |
+| `rt_suspend_sleep` | `word (double)` |
+| `rt_suspend_task` | `word (word, word)` |
+| `rt_suspend_thread` | `word (word, word)` |
+| `rt_suspend_wait` | `word (word)` |
+| `rt_suspend_yield` | `word ()` |
+| `rt_sxhash_eq` | `word (word)` |
+| `rt_sxhash_eql` | `word (word)` |
+| `rt_sxhash_equalp` | `word (word)` |
+| `rt_sym_name` | `word (word)` |
+| `rt_symp` | `bool (word)` |
+| `rt_thread_available_parallelism` | `word ()` |
+| `rt_thread_current_id` | `word ()` |
+| `rt_throw` | `word (word, word)` |
+| `rt_throw_matches` | `word (word)` |
+| `rt_throw_take_value` | `word ()` |
+| `rt_timezone_daylight_p` | `word (word, word)` |
+| `rt_timezone_offset_seconds` | `word (word, word)` |
+| `rt_truncate_sexpr_roots` | `word (word)` |
+| `rt_types_define` | `word (word, word, word)` |
+| `rt_u16_box` | `word (u16)` |
+| `rt_u16_unbox` | `u16 (word)` |
+| `rt_u32_box` | `word (u32)` |
+| `rt_u32_unbox` | `u32 (word)` |
+| `rt_u8_box` | `word (u8)` |
+| `rt_u8_unbox` | `u8 (word)` |
+| `rt_unwinding` | `word ()` |
+| `rt_upcast_set` | `word (word, word, word)` |
+| `rt_vector_to_sexpr_tuple` | `word (word)` |
+| `rt_vtable_set` | `word (word, word, word, word)` |
+| `rt_wk_symbol` | `word (word)` |
 
 ## 組み込み型
 

@@ -23,6 +23,7 @@
 //! again the moment the C function returns ([`resume_pending`], from
 //! `rt_ffi_leave_native`).
 
+use typelisp_mem::Word;
 use typelisp_mem::prelude::*;
 use core::any::Any;
 use core::cell::RefCell;
@@ -94,7 +95,7 @@ pub fn resume_pending() -> Result<(), Raised> {
 /// The words must be valid, and a `Heap` must be
 /// registered on this thread.
 #[no_mangle]
-pub unsafe extern "C-unwind" fn rt_ffi_callback_address(path: i64, ty: i64) -> i64 {
+pub unsafe extern "C-unwind" fn rt_ffi_callback_address(path: Word, ty: Word) -> Word {
     let (ns, sym) = match decode(path) {
         Value::Symbol(sym) => (sym.home(), sym),
         other => fatal(&format!("rt_ffi_callback_address: the function is not a symbol, got {:?}", other)),
@@ -102,13 +103,13 @@ pub unsafe extern "C-unwind" fn rt_ffi_callback_address(path: i64, ty: i64) -> i
     let ty = TypeId::from_word(ty)
         .unwrap_or_else(|| fatal("rt_ffi_callback_address: the function type is not a type"));
     if let Some(addr) = lookup((ns, sym, ty)) {
-        return addr as i64;
+        return addr as Word;
     }
     match FACTORY.get() {
         // The session keeps its own entries (they run code it compiled), so
         // nothing is registered here.
         Some(make) => match make((ns, sym, ty)) {
-            Ok(addr) => addr as i64,
+            Ok(addr) => addr as Word,
             Err(msg) => raise(msg).into_word(),
         },
         None => fatal("rt_ffi_callback_address: no entry was registered for this callback at startup"),
@@ -126,10 +127,10 @@ pub unsafe extern "C-unwind" fn rt_ffi_callback_address(path: i64, ty: i64) -> i
 /// The words must be valid; the last two must describe
 /// The words of a definition, whose strings are constants.
 #[no_mangle]
-pub unsafe extern "C" fn rt_ffi_callback_register(entry: i64, ty: i64, words: i64, words_len: i64) -> i64 {
+pub unsafe extern "C" fn rt_ffi_callback_register(entry: Word, ty: Word, words: Word, words_len: Word) -> Word {
     let ty = TypeId::from_word(ty)
         .unwrap_or_else(|| fatal("rt_ffi_callback_register: the function type is not a type"));
-    let words = core::slice::from_raw_parts(words as usize as *const i64, words_len as usize);
+    let words = core::slice::from_raw_parts(words as usize as *const Word, words_len as usize);
     let (ns, sym) = typelisp_mem::type_words::read_definition(words);
     register((ns, sym, ty), entry as usize);
     0
@@ -148,7 +149,7 @@ pub unsafe extern "C" fn rt_ffi_callback_register(entry: i64, ty: i64, words: i6
 ///
 /// Called only from an entry, as its first action.
 #[no_mangle]
-pub unsafe extern "C" fn rt_ffi_callback_enter() -> i64 {
+pub unsafe extern "C" fn rt_ffi_callback_enter() -> Word {
     if !typelisp_abi::heap_registered() {
         fatal(
             "a C callback was called on a thread that is not running typelisp — a callback can \
@@ -174,7 +175,7 @@ pub unsafe extern "C" fn rt_ffi_callback_enter() -> i64 {
 ///
 /// Called only from an entry, after [`rt_ffi_callback_enter`].
 #[no_mangle]
-pub unsafe extern "C" fn rt_ffi_callback_leave() -> i64 {
+pub unsafe extern "C" fn rt_ffi_callback_leave() -> Word {
     active_heap().enter_native();
     0
 }
@@ -197,7 +198,7 @@ pub unsafe extern "C" fn rt_ffi_callback_leave() -> i64 {
 /// words given, and run between [`rt_ffi_callback_enter`] and
 /// [`rt_ffi_callback_leave`].
 #[no_mangle]
-pub unsafe extern "C" fn rt_ffi_callback_invoke(args: *const i64, argc: u32) -> i64 {
+pub unsafe extern "C" fn rt_ffi_callback_invoke(args: *const Word, argc: u32) -> Word {
     if argc < 2 {
         fatal("rt_ffi_callback_invoke: expected the function and its argument count");
     }
@@ -209,7 +210,7 @@ pub unsafe extern "C" fn rt_ffi_callback_invoke(args: *const i64, argc: u32) -> 
     if argc as usize != 2 + 3 * n {
         fatal("rt_ffi_callback_invoke: the argument count does not match the words given");
     }
-    let triples: Vec<(i64, i64, i64)> =
+    let triples: Vec<(Word, Word, Word)> =
         (0..n).map(|i| (*args.add(2 + 3 * i), *args.add(3 + 3 * i), *args.add(4 + 3 * i))).collect();
     let run = || -> Result<i64, Raised> {
         let mut words = Vec::with_capacity(n);
@@ -233,7 +234,7 @@ pub unsafe extern "C" fn rt_ffi_callback_invoke(args: *const i64, argc: u32) -> 
         crate::drive_to_completion(f, &words, &[], "a C callback")
     };
     match run() {
-        Ok(v) => v,
+        Ok(v) => v as Word,
         // Kept rather than left raised: what C calls next must not see it,
         // and nothing but the thunk around the C call may raise it again.
         Err(_raised) => {
@@ -247,7 +248,7 @@ pub unsafe extern "C" fn rt_ffi_callback_invoke(args: *const i64, argc: u32) -> 
 /// A C string a callback was handed, copied onto the heap as a tagged string.
 /// Raises — inside the callback, where it is kept like any other failure —
 /// if it is null or not UTF-8.
-unsafe fn callback_string(p: i64) -> Result<i64, Raised> {
+unsafe fn callback_string(p: Word) -> Result<Word, Raised> {
     if p == 0 {
         return Err(raise(
             "ffi: C passed a callback a null pointer where a `string` was declared. Declare the \

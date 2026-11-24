@@ -1,5 +1,6 @@
 //! Turning a compiled task's suspension back into the `Waiting` it parks on.
 
+use typelisp_mem::Word;
 use typelisp_mem::prelude::*;
 use typelisp_mem::{Heap, TypeId, Value};
 use super::{chan_id_of, task_id_of, ChanOp, SchedError, SelectOp, Waiting, Wake};
@@ -57,7 +58,7 @@ pub fn sleep_wait(secs: f64) -> Result<Waiting, SchedError> {
 /// bridge put it there, because the operation's own word does not name the
 /// type the answer is built as. `what` is the operation and `ty` the type it
 /// should be, for the message a malformed site gets.
-fn key_word(word: i64, what: &str, ty: &str) -> Result<TypeId, SchedError> {
+fn key_word(word: Word, what: &str, ty: &str) -> Result<TypeId, SchedError> {
     TypeId::from_word(word).ok_or_else(|| {
         SchedError::Internal(format!("a compiled {} carried {} where its {} type should be", what, word, ty))
     })
@@ -92,7 +93,7 @@ pub fn pending_wait(heap: &mut Heap) -> Result<(Waiting, Wake), SchedError> {
         // `T` is, and the resume block decodes it with the kind the bridge
         // baked in: the same division `catch`/`throw` make for a thrown value.
         cs::SUSPEND_WAIT => {
-            let handle = typelisp_abi::decode(payload);
+            let handle = typelisp_abi::decode(payload as Word);
             Ok((Waiting::Task(task_id_of(heap, Some(handle))?), Wake::Tagged))
         }
         // Both words raw: a stream handle and an interest code are plain
@@ -119,40 +120,40 @@ pub fn pending_wait(heap: &mut Heap) -> Result<(Waiting, Wake), SchedError> {
         // The second word is the channel's type, which the bridge appended
         // at the site (as `recv`'s `Option<T>` is).
         cs::SUSPEND_CHAN_NEW => {
-            let key = key_word(second, "`Chan::new`", "`Chan<T>`")?;
+            let key = key_word(second as Word, "`Chan::new`", "`Chan<T>`")?;
             Ok((Waiting::Chan(ChanOp::New(payload, key)), Wake::Tagged))
         }
         // The closure is tagged, and the answer — the handle — comes back
         // tagged like every other typed wake value. The second word is the
         // handle's type, appended by the bridge.
         cs::SUSPEND_TASK => {
-            let key = key_word(second, "`task`", "`Task<T>`")?;
-            Ok((Waiting::Spawn(typelisp_abi::decode(payload), key), Wake::Tagged))
+            let key = key_word(second as Word, "`task`", "`Task<T>`")?;
+            Ok((Waiting::Spawn(typelisp_abi::decode(payload as Word), key), Wake::Tagged))
         }
         cs::SUSPEND_THREAD => {
-            let key = key_word(second, "`thread`", "`Thread<T>`")?;
-            Ok((Waiting::SpawnThread(typelisp_abi::decode(payload), key), Wake::Tagged))
+            let key = key_word(second as Word, "`thread`", "`Thread<T>`")?;
+            Ok((Waiting::SpawnThread(typelisp_abi::decode(payload as Word), key), Wake::Tagged))
         }
         cs::SUSPEND_MAIN => Ok((Waiting::Main, Wake::Unit)),
         // `Wake::Tagged` for every typed answer: a wake value always crosses
         // back **tagged**, whatever its type, and the resume block decodes it
         // with the kind the bridge baked in — the same division `wait` makes.
         cs::SUSPEND_CHAN_LEN => {
-            Ok((Waiting::Chan(ChanOp::Len(chan_id_of(heap, Some(typelisp_abi::decode(payload)))?)), Wake::Tagged))
+            Ok((Waiting::Chan(ChanOp::Len(chan_id_of(heap, Some(typelisp_abi::decode(payload as Word)))?)), Wake::Tagged))
         }
         cs::SUSPEND_CHAN_CAP => {
-            Ok((Waiting::Chan(ChanOp::Cap(chan_id_of(heap, Some(typelisp_abi::decode(payload)))?)), Wake::Tagged))
+            Ok((Waiting::Chan(ChanOp::Cap(chan_id_of(heap, Some(typelisp_abi::decode(payload as Word)))?)), Wake::Tagged))
         }
         cs::SUSPEND_CHAN_CLOSE => {
-            Ok((Waiting::Chan(ChanOp::Close(chan_id_of(heap, Some(typelisp_abi::decode(payload)))?)), Wake::Unit))
+            Ok((Waiting::Chan(ChanOp::Close(chan_id_of(heap, Some(typelisp_abi::decode(payload as Word)))?)), Wake::Unit))
         }
         cs::SUSPEND_CHAN_SEND => {
-            let c = chan_id_of(heap, Some(typelisp_abi::decode(payload)))?;
-            Ok((Waiting::Chan(ChanOp::Send(c, typelisp_abi::decode(second))), Wake::Unit))
+            let c = chan_id_of(heap, Some(typelisp_abi::decode(payload as Word)))?;
+            Ok((Waiting::Chan(ChanOp::Send(c, typelisp_abi::decode(second as Word))), Wake::Unit))
         }
         cs::SUSPEND_CHAN_RECV => {
-            let c = chan_id_of(heap, Some(typelisp_abi::decode(payload)))?;
-            let key = key_word(second, "`recv`", "`Option<T>`")?;
+            let c = chan_id_of(heap, Some(typelisp_abi::decode(payload as Word)))?;
+            let key = key_word(second as Word, "`recv`", "`Option<T>`")?;
             Ok((Waiting::Chan(ChanOp::Recv(c, key)), Wake::Tagged))
         }
         // The arms travel in their own slot, and every word in them is
@@ -160,7 +161,7 @@ pub fn pending_wait(heap: &mut Heap) -> Result<(Waiting, Wake), SchedError> {
         // the collector walks those.
         cs::SUSPEND_CHAN_SELECT => {
             let words = cs::take_pending_select();
-            let untag = |w: i64| w >> typelisp_mem::tagged::FIXNUM_SHIFT;
+            let untag = |w: Word| w >> typelisp_mem::tagged::FIXNUM_SHIFT;
             if words.len() < 2 {
                 return Err(SchedError::Internal("a compiled `select` carried no arms".to_string()));
             }

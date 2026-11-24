@@ -1,6 +1,7 @@
 //! The system builtins only a POSIX system can answer: CPU time, the host's
 //! name and OS release, a file's owner, and starting an editor.
 
+use typelisp_mem::Word;
 use typelisp_mem::{spec, wk, Heap, StdModule, TypeId, TypeSpec, Value};
 use typelisp_rt::result_value::{err_in, ok_in, option_in, TypeTable};
 use typelisp_rt::stream_builtin::FILE_ERROR;
@@ -142,7 +143,7 @@ pub fn ed_open(heap: &mut Heap, path: &str, line: i64) -> Value {
 /// A `Heap` must be
 /// registered on this thread.
 #[no_mangle]
-pub unsafe extern "C" fn rt_get_internal_run_time() -> i64 {
+pub unsafe extern "C" fn rt_get_internal_run_time() -> Word {
     let v = internal_time_value(active_heap(), get_internal_run_time());
     encode(v)
 }
@@ -156,7 +157,7 @@ pub unsafe extern "C" fn rt_get_internal_run_time() -> i64 {
 /// A `Heap` must be
 /// registered on this thread.
 #[no_mangle]
-pub unsafe extern "C" fn rt_machine_instance() -> i64 {
+pub unsafe extern "C" fn rt_machine_instance() -> Word {
     encode(machine_instance(active_heap()))
 }
 
@@ -167,7 +168,7 @@ pub unsafe extern "C" fn rt_machine_instance() -> i64 {
 /// A `Heap` must be
 /// registered on this thread.
 #[no_mangle]
-pub unsafe extern "C" fn rt_software_version() -> i64 {
+pub unsafe extern "C" fn rt_software_version() -> Word {
     encode(software_version(active_heap()))
 }
 
@@ -179,13 +180,13 @@ pub unsafe extern "C" fn rt_software_version() -> i64 {
 /// The words must be valid, the first
 /// encoding a `Value::Str`; a `Heap` must be registered on this thread.
 #[no_mangle]
-pub unsafe extern "C" fn rt_ed_open(path: i64, line: i64) -> i64 {
+pub unsafe extern "C" fn rt_ed_open(path: Word, line: Word) -> Word {
     let path = match decode(path) {
         Value::Str(id) => active_heap().string(id).to_string(),
         other => fatal(&format!("ed-open: argument is not a string, got {:?}", other)),
     };
     let line = line;
-    encode(ed_open(active_heap(), &path, line))
+    encode(ed_open(active_heap(), &path, line as i64))
 }
 
 /// `(file-owner-name path)` for compiled code: `path` is a tagged
@@ -196,7 +197,7 @@ pub unsafe extern "C" fn rt_ed_open(path: i64, line: i64) -> i64 {
 /// The word must encode a
 /// `Value::Str`; a `Heap` must be registered on this thread.
 #[no_mangle]
-pub unsafe extern "C" fn rt_file_owner_name(path: i64) -> i64 {
+pub unsafe extern "C" fn rt_file_owner_name(path: Word) -> Word {
     let path = match decode(path) {
         Value::Str(id) => active_heap().string(id).to_string(),
         other => fatal(&format!("file-owner-name: argument is not a string, got {:?}", other)),

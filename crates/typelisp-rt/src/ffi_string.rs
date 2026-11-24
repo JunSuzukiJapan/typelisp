@@ -1,5 +1,6 @@
 //! The C FFI's string conversions and native-section markers.
 
+use typelisp_mem::Word;
 use typelisp_mem::prelude::*;
 use typelisp_abi::{active_heap, decode, encode, fatal, raise};
 use typelisp_mem::Value;
@@ -28,7 +29,7 @@ use crate::ffi_callback;
 /// The words must be valid, and a `Heap` must be
 /// registered on this thread.
 #[no_mangle]
-pub unsafe extern "C-unwind" fn rt_ffi_cstring_new(s: i64) -> i64 {
+pub unsafe extern "C-unwind" fn rt_ffi_cstring_new(s: Word) -> Word {
     let s = match decode(s) {
         Value::Str(id) => active_heap().string(id).to_string(),
         other => fatal(&format!("rt_ffi_cstring_new: argument is not a string, got {:?}", other)),
@@ -37,7 +38,7 @@ pub unsafe extern "C-unwind" fn rt_ffi_cstring_new(s: i64) -> i64 {
     // C would read the prefix and call it the whole string. Raised, not
     // aborted — the program handed over a string it is allowed to hold.
     match alloc::ffi::CString::new(s) {
-        Ok(c) => c.into_raw() as i64,
+        Ok(c) => c.into_raw() as Word,
         Err(_) => raise(
             "ffi: a string argument contains a NUL character, which cannot be passed to C — \
              C would see only the part before it"
@@ -57,7 +58,7 @@ pub unsafe extern "C-unwind" fn rt_ffi_cstring_new(s: i64) -> i64 {
 /// A `Heap` must be registered on this thread and be running (not already
 /// native).
 #[no_mangle]
-pub unsafe extern "C" fn rt_ffi_enter_native() -> i64 {
+pub unsafe extern "C" fn rt_ffi_enter_native() -> Word {
     active_heap().enter_native();
     0
 }
@@ -73,7 +74,7 @@ pub unsafe extern "C" fn rt_ffi_enter_native() -> i64 {
 /// — the first point after the C call where typelisp runs again (see
 /// [`ffi_callback`]).
 #[no_mangle]
-pub unsafe extern "C-unwind" fn rt_ffi_leave_native() -> i64 {
+pub unsafe extern "C-unwind" fn rt_ffi_leave_native() -> Word {
     active_heap().leave_native();
     match ffi_callback::resume_pending() {
         Ok(()) => 0,
@@ -87,7 +88,7 @@ pub unsafe extern "C-unwind" fn rt_ffi_leave_native() -> i64 {
 ///
 /// `p` must be an address that call returned and that has not been freed.
 #[no_mangle]
-pub unsafe extern "C" fn rt_ffi_cstring_free(p: i64) -> i64 {
+pub unsafe extern "C" fn rt_ffi_cstring_free(p: Word) -> Word {
     let p = p as usize;
     if p != 0 {
         drop(alloc::ffi::CString::from_raw(p as *mut core::ffi::c_char));
@@ -108,7 +109,7 @@ pub unsafe extern "C" fn rt_ffi_cstring_free(p: i64) -> i64 {
 /// valid for the duration of this call. A `Heap` must be registered on this
 /// thread.
 #[no_mangle]
-pub unsafe extern "C-unwind" fn rt_ffi_string_from_cstr(p: i64) -> i64 {
+pub unsafe extern "C-unwind" fn rt_ffi_string_from_cstr(p: Word) -> Word {
     let p = p as usize;
     if p == 0 {
         // `string` has no value for "there wasn't one". Saying so beats

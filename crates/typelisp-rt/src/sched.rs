@@ -426,7 +426,7 @@ pub fn cannot_block_message(w: &Waiting) -> String {
 pub fn wake_word(wake: Wake, v: Value) -> i64 {
     match wake {
         Wake::Unit => 0,
-        Wake::Tagged => typelisp_abi::encode(v),
+        Wake::Tagged => typelisp_abi::encode(v) as i64,
     }
 }
 

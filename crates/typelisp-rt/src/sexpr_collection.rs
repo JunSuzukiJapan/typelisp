@@ -1,5 +1,6 @@
 //! Building `Sexpr` vectors, tuples and arrays from lists.
 
+use typelisp_mem::Word;
 use typelisp_mem::prelude::*;
 use typelisp_abi::{active_heap, decode, encode, fatal, raise, Raised};
 use typelisp_mem::{Heap, TypeId, Value};
@@ -38,7 +39,7 @@ fn proper_list_elements(heap: &Heap, list: Value, who: &str) -> Vec<Value> {
 /// The word must be a valid tagged word; a
 /// `Heap` must already be registered on this thread.
 #[no_mangle]
-pub unsafe extern "C" fn rt_list_to_sexpr_vector(list: i64) -> i64 {
+pub unsafe extern "C" fn rt_list_to_sexpr_vector(list: Word) -> Word {
     let heap = active_heap();
     let list = decode(list);
     let elems = proper_list_elements(heap, list, "rt_list_to_sexpr_vector");
@@ -69,7 +70,7 @@ fn sexpr_tuple_of(heap: &mut Heap, elems: Vec<Value>) -> Result<Value, Raised> {
 /// The word must be a valid tagged word; a
 /// `Heap` must already be registered on this thread.
 #[no_mangle]
-pub unsafe extern "C-unwind" fn rt_list_to_sexpr_tuple(list: i64) -> i64 {
+pub unsafe extern "C-unwind" fn rt_list_to_sexpr_tuple(list: Word) -> Word {
     let heap = active_heap();
     let list = decode(list);
     let elems = proper_list_elements(heap, list, "rt_list_to_sexpr_tuple");
@@ -90,7 +91,7 @@ pub unsafe extern "C-unwind" fn rt_list_to_sexpr_tuple(list: i64) -> i64 {
 /// The word must be a tagged vector box; a
 /// `Heap` must already be registered on this thread.
 #[no_mangle]
-pub unsafe extern "C-unwind" fn rt_vector_to_sexpr_tuple(v: i64) -> i64 {
+pub unsafe extern "C-unwind" fn rt_vector_to_sexpr_tuple(v: Word) -> Word {
     let heap = active_heap();
     let v = decode(v);
     let Value::Boxed(id) = v else { fatal("rt_vector_to_sexpr_tuple: argument is not a vector") };
@@ -113,7 +114,7 @@ pub unsafe extern "C-unwind" fn rt_vector_to_sexpr_tuple(v: i64) -> i64 {
 /// The word must be a tagged tuple box; a
 /// `Heap` must already be registered on this thread.
 #[no_mangle]
-pub unsafe extern "C" fn rt_sexpr_tuple_items(t: i64) -> i64 {
+pub unsafe extern "C" fn rt_sexpr_tuple_items(t: Word) -> Word {
     let heap = active_heap();
     let t = decode(t);
     let Value::Boxed(id) = t else { fatal("rt_sexpr_tuple_items: argument is not a tuple") };
@@ -134,7 +135,7 @@ pub unsafe extern "C" fn rt_sexpr_tuple_items(t: i64) -> i64 {
 /// The words must be valid tagged words; a
 /// `Heap` must already be registered on this thread.
 #[no_mangle]
-pub unsafe extern "C" fn rt_lists_to_sexpr_array(dims_list: i64, data_list: i64) -> i64 {
+pub unsafe extern "C" fn rt_lists_to_sexpr_array(dims_list: Word, data_list: Word) -> Word {
     let heap = active_heap();
     let dims_list = decode(dims_list);
     let data_list = decode(data_list);

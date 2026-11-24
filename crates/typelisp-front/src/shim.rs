@@ -33,6 +33,7 @@
 //! executable and are what the *program* runs; teaching the restore to reuse
 //! them would make an eval'd call faster, not different.
 
+use typelisp_mem::Word;
 use std::cell::Cell;
 
 use typelisp_abi::{active_heap, decode, encode, fatal};
@@ -67,9 +68,9 @@ thread_local! {
 /// The words must be valid, the first pair naming immortal
 /// bytes, the second immortal words.
 #[no_mangle]
-pub unsafe extern "C" fn rt_eval_state(bytes: i64, bytes_len: i64, ns_words: i64, ns_len: i64, release: i64) -> i64 {
+pub unsafe extern "C" fn rt_eval_state(bytes: Word, bytes_len: Word, ns_words: Word, ns_len: Word, release: Word) -> Word {
     let bytes = std::slice::from_raw_parts(bytes as usize as *const u8, bytes_len as usize);
-    let ns_words = std::slice::from_raw_parts(ns_words as usize as *const i64, ns_len as usize);
+    let ns_words = std::slice::from_raw_parts(ns_words as usize as *const Word, ns_len as usize);
     let ns = typelisp_mem::type_words::read_ns(ns_words);
     crate::release::set_release(release != 0);
     EVAL_DUMP.with(|c| c.set(Some((bytes, ns))));
@@ -90,7 +91,7 @@ pub unsafe extern "C" fn rt_eval_state(bytes: i64, bytes_len: i64, ns_words: i64
 ///
 /// A `Heap` must be registered on this thread.
 #[no_mangle]
-pub unsafe extern "C" fn rt_eval_init() -> i64 {
+pub unsafe extern "C" fn rt_eval_init() -> Word {
     let (bytes, ns) = match EVAL_DUMP.with(|c| c.get()) {
         Some(b) => b,
         None => fatal("rt_eval_init: the environment dump was never registered"),
@@ -131,7 +132,7 @@ const NO_INTERPRETER_HERE: &str = "{}: the interpreter runs on the main thread, 
 /// registered on this thread, and either an `Interp` (JIT) or a completed
 /// [`rt_eval_init`] (AOT).
 #[no_mangle]
-pub unsafe extern "C-unwind" fn rt_eval(form: i64) -> i64 {
+pub unsafe extern "C-unwind" fn rt_eval(form: Word) -> Word {
     let form = decode(form);
     let heap = active_heap();
 
@@ -168,7 +169,7 @@ pub unsafe extern "C-unwind" fn rt_eval(form: i64) -> i64 {
 ///
 /// Same as [`rt_eval`]'s.
 #[no_mangle]
-pub unsafe extern "C-unwind" fn rt_macroexpand_1(form: i64, environment: i64) -> i64 {
+pub unsafe extern "C-unwind" fn rt_macroexpand_1(form: Word, environment: Word) -> Word {
     expand_shim(form, environment, "rt_macroexpand_1", Interp::macroexpand_1_form)
 }
 
@@ -180,7 +181,7 @@ pub unsafe extern "C-unwind" fn rt_macroexpand_1(form: i64, environment: i64) ->
 ///
 /// Same as [`rt_eval`]'s.
 #[no_mangle]
-pub unsafe extern "C-unwind" fn rt_macroexpand(form: i64, environment: i64) -> i64 {
+pub unsafe extern "C-unwind" fn rt_macroexpand(form: Word, environment: Word) -> Word {
     expand_shim(form, environment, "rt_macroexpand", Interp::macroexpand_form)
 }
 
@@ -190,9 +191,9 @@ pub unsafe extern "C-unwind" fn rt_macroexpand(form: i64, environment: i64) -> i
 /// # Safety
 ///
 /// Same as [`rt_eval`]'s.
-unsafe fn expand_shim(form: i64, environment: i64, who: &str,
+unsafe fn expand_shim(form: Word, environment: Word, who: &str,
     f: impl Fn(&Interp, &mut typelisp_mem::Heap, typelisp_mem::Value, typelisp_mem::Value) -> Result<typelisp_mem::Value, crate::eval::interp::EvalError>,
-) -> i64 {
+) -> Word {
     let form = decode(form);
     let environment = decode(environment);
     let heap = active_heap();
@@ -237,7 +238,7 @@ unsafe fn expand_shim(form: i64, environment: i64, who: &str,
 /// run on this thread (`AOT_ENV` must be set; the generated `main` always
 /// calls it first when it emits a call to this shim at all).
 #[no_mangle]
-pub unsafe extern "C" fn rt_run_program_interp(inits: i64, count: i64, entry: i64) -> i64 {
+pub unsafe extern "C" fn rt_run_program_interp(inits: Word, count: Word, entry: Word) -> Word {
     run_program_interp(inits, count, entry, false)
 }
 
@@ -250,7 +251,7 @@ pub unsafe extern "C" fn rt_run_program_interp(inits: i64, count: i64, entry: i6
 ///
 /// [`rt_run_program_interp`]'s.
 #[no_mangle]
-pub unsafe extern "C" fn rt_run_program_interp_int(inits: i64, count: i64, entry: i64) -> i64 {
+pub unsafe extern "C" fn rt_run_program_interp_int(inits: Word, count: Word, entry: Word) -> Word {
     run_program_interp(inits, count, entry, true)
 }
 
@@ -262,7 +263,7 @@ pub unsafe extern "C" fn rt_run_program_interp_int(inits: i64, count: i64, entry
 /// # Safety
 ///
 /// [`rt_run_program_interp`]'s.
-unsafe fn run_program_interp(inits: i64, count: i64, entry: i64, main_returns_int: bool) -> i64 {
+unsafe fn run_program_interp(inits: Word, count: Word, entry: Word, main_returns_int: bool) -> Word {
     let program = typelisp_rt::read_program(inits, count, entry);
     let interp = match AOT_ENV.with(|c| c.get()) {
         p if !p.is_null() => &*p,
@@ -302,10 +303,10 @@ unsafe fn run_program_result(
     entry: usize,
     ret: crate::check::repr::Repr,
     main_returns_int: bool,
-) -> Result<i64, i64> {
+) -> Result<Word, Word> {
     match interp.run_compiled_program(heap, inits, entry, ret) {
         Ok(v) if main_returns_int => match v {
-            typelisp_mem::Value::Int(n) => Ok(n),
+            typelisp_mem::Value::Int(n) => Ok(n as Word),
             typelisp_mem::Value::Boxed(id) if heap.is_bignum(id) => {
                 fatal(&format!("main returned {}, which is not a process exit code", heap.bignum_text(id)))
             }

@@ -1,6 +1,7 @@
 //! Starting and finishing a compiled program: the AOT heap, the entry points an
 //! executable's `main` calls, and driving a compiled body from a machine frame.
 
+use typelisp_mem::Word;
 use typelisp_mem::prelude::*;
 use typelisp_abi::{active_heap, fatal, set_active_heap, CompiledPanic, CompiledThrow};
 use typelisp_mem::{Heap, Value};
@@ -38,7 +39,7 @@ pub const DEFAULT_AOT_HEAP_CAPACITY: usize = 1 << 16;
 /// `max_memory` the memory limit (0 for none), and `fixed` nonzero when the
 /// arena must not grow.
 #[no_mangle]
-pub unsafe extern "C" fn rt_heap_init(cells: i64, max_memory: i64, fixed: i64) -> i64 {
+pub unsafe extern "C" fn rt_heap_init(cells: Word, max_memory: Word, fixed: Word) -> Word {
     typelisp_mem::host::install_panic_report();
     if max_memory != 0 {
         crate::mem_limit::set_memory_limit(max_memory as usize);
@@ -61,8 +62,8 @@ pub unsafe extern "C" fn rt_heap_init(cells: i64, max_memory: i64, fixed: i64) -
 ///
 /// A `Heap` must already be registered on this thread (see [`active_heap`]).
 #[no_mangle]
-pub unsafe extern "C" fn rt_heap_live_count() -> i64 {
-    active_heap().live_count() as i64
+pub unsafe extern "C" fn rt_heap_live_count() -> Word {
+    active_heap().live_count() as Word
 }
 
 /// The exit code an AOT executable ends with when a `(panic ...)` reaches its
@@ -72,12 +73,12 @@ pub unsafe extern "C" fn rt_heap_live_count() -> i64 {
 /// `pub` for `typelisp_front::shim::rt_run_program_interp[_int]`, an
 /// `eval`-carrying AOT executable's own entry, which answers with the same
 /// code for the same reason — see [`exit_code`].
-pub const EXIT_CODE_PANIC: i64 = 1;
+pub const EXIT_CODE_PANIC: Word = 1;
 
 /// The exit code of a program whose `()`-returning `main` returned normally.
 /// Named, and not the value `main` answered, because that answer is the word
 /// `()` is encoded as, which differs between the entry shims' decodings.
-pub const EXIT_CODE_SUCCESS: i64 = 0;
+pub const EXIT_CODE_SUCCESS: Word = 0;
 
 /// Runs an AOT executable's compiled entry point (`tl_main`), returning its
 /// exit code — or, if a `(panic ...)` or an uncaught `throw` was raised out
@@ -97,8 +98,8 @@ pub const EXIT_CODE_SUCCESS: i64 = 0;
 /// generated `main` already called it that way. A `Heap` must already be
 /// registered on this thread (`rt_heap_init` runs first).
 #[no_mangle]
-pub unsafe extern "C" fn rt_run_entry(entry: i64) -> i64 {
-    let f: unsafe extern "C-unwind" fn(*const i64, u32) -> i64 = core::mem::transmute(entry as usize);
+pub unsafe extern "C" fn rt_run_entry(entry: Word) -> Word {
+    let f: unsafe extern "C-unwind" fn(*const Word, u32) -> Word = core::mem::transmute(entry as usize);
     // Only a `()`-returning `main` reaches this shim (`compile::aot` refuses
     // an `int` one under this ABI), and a `main` that returns normally exits
     // 0 — whatever word its `()` happens to be.
@@ -137,7 +138,7 @@ pub unsafe extern "C" fn rt_run_entry(entry: i64) -> i64 {
 /// `Heap` must already be registered on this thread (`rt_heap_init` runs
 /// first).
 #[no_mangle]
-pub unsafe extern "C" fn rt_run_program(inits: i64, count: i64, entry: i64) -> i64 {
+pub unsafe extern "C" fn rt_run_program(inits: Word, count: Word, entry: Word) -> Word {
     run_entry(inits, count, entry, false, |program| run_program(program, None))
 }
 
@@ -153,7 +154,7 @@ pub unsafe extern "C" fn rt_run_program(inits: i64, count: i64, entry: i64) -> i
 ///
 /// [`rt_run_program`]'s.
 #[no_mangle]
-pub unsafe extern "C" fn rt_run_program_int(inits: i64, count: i64, entry: i64) -> i64 {
+pub unsafe extern "C" fn rt_run_program_int(inits: Word, count: Word, entry: Word) -> Word {
     run_entry(inits, count, entry, true, |program| run_program(program, None))
 }
 
@@ -167,7 +168,7 @@ pub unsafe extern "C" fn rt_run_program_int(inits: i64, count: i64, entry: i64) 
 ///
 /// [`rt_run_program`]'s.
 #[no_mangle]
-pub unsafe extern "C" fn rt_run_program_alone(inits: i64, count: i64, entry: i64) -> i64 {
+pub unsafe extern "C" fn rt_run_program_alone(inits: Word, count: Word, entry: Word) -> Word {
     run_entry(inits, count, entry, false, |program| run_alone(program))
 }
 
@@ -178,7 +179,7 @@ pub unsafe extern "C" fn rt_run_program_alone(inits: i64, count: i64, entry: i64
 ///
 /// [`rt_run_program`]'s.
 #[no_mangle]
-pub unsafe extern "C" fn rt_run_program_alone_int(inits: i64, count: i64, entry: i64) -> i64 {
+pub unsafe extern "C" fn rt_run_program_alone_int(inits: Word, count: Word, entry: Word) -> Word {
     run_entry(inits, count, entry, true, |program| run_alone(program))
 }
 
@@ -197,12 +198,12 @@ pub type StartThreads = fn(&alloc::sync::Arc<crate::sched::SchedShared<crate::sc
 ///
 /// [`rt_run_program`]'s.
 pub unsafe fn run_entry(
-    inits: i64,
-    count: i64,
-    entry: i64,
+    inits: Word,
+    count: Word,
+    entry: Word,
     returns_int: bool,
-    run: impl FnOnce(&Program) -> Result<Value, i64>,
-) -> i64 {
+    run: impl FnOnce(&Program) -> Result<Value, Word>,
+) -> Word {
     let program = read_program(inits, count, entry);
     let result = run(&program);
     if !returns_int {
@@ -220,9 +221,9 @@ pub unsafe fn run_entry(
 }
 
 /// The exit code an `int`-returning `main`'s answer is.
-unsafe fn int_answer(answer: Value) -> i64 {
+unsafe fn int_answer(answer: Value) -> Word {
     match answer {
-        Value::Int(n) => n,
+        Value::Int(n) => n as Word,
         Value::Boxed(id) if active_heap().is_bignum(id) => {
             fatal(&format!("main returned {}, which is not a process exit code", active_heap().bignum_text(id)))
         }
@@ -239,7 +240,7 @@ unsafe fn int_answer(answer: Value) -> i64 {
 /// `word` must be a tagged `int` unless a raise is waiting; a `Heap` must be
 /// registered on this thread.
 #[no_mangle]
-pub unsafe extern "C" fn rt_main_answered(word: i64) -> i64 {
+pub unsafe extern "C" fn rt_main_answered(word: Word) -> Word {
     if typelisp_abi::raised().is_err() {
         return exit_code(EXIT_CODE_PANIC);
     }
@@ -252,7 +253,7 @@ pub unsafe extern "C" fn rt_main_answered(word: i64) -> i64 {
 ///
 /// A `Heap` must be registered on this thread.
 #[no_mangle]
-pub unsafe extern "C" fn rt_main_returned() -> i64 {
+pub unsafe extern "C" fn rt_main_returned() -> Word {
     exit_code(EXIT_CODE_SUCCESS)
 }
 
@@ -271,8 +272,8 @@ pub struct Program {
 /// # Safety
 ///
 /// [`rt_run_program`]'s.
-pub unsafe fn read_program(inits: i64, count: i64, entry: i64) -> Program {
-    let words = collect_words(inits as usize as *const i64, count);
+pub unsafe fn read_program(inits: Word, count: Word, entry: Word) -> Program {
+    let words = collect_words(inits as usize as *const Word, count);
     // A 0 is a global the executable left out.
     let inits = words
         .into_iter()
@@ -301,7 +302,7 @@ pub unsafe fn read_program(inits: i64, count: i64, entry: i64) -> Program {
 /// # Safety
 ///
 /// [`rt_run_program`]'s.
-pub unsafe fn run_program(program: &Program, start: Option<StartThreads>) -> Result<Value, i64> {
+pub unsafe fn run_program(program: &Program, start: Option<StartThreads>) -> Result<Value, Word> {
     let heap = active_heap();
     let sched = alloc::sync::Arc::new(crate::sched::SchedShared::<crate::sched::CompiledTask>::new());
     // The printer reads the prelude's control variables from their compiled
@@ -356,7 +357,7 @@ pub unsafe fn run_program(program: &Program, start: Option<StartThreads>) -> Res
 /// # Safety
 ///
 /// [`rt_run_program`]'s.
-unsafe fn run_alone(program: &Program) -> Result<Value, i64> {
+unsafe fn run_alone(program: &Program) -> Result<Value, Word> {
     typelisp_print::aot::set_global_slots(global_perm_idx);
     let run = |f: crate::coroutine::CoroutineFn| {
         let mut chain = crate::coroutine::FrameStack::for_task();
@@ -378,7 +379,7 @@ unsafe fn run_alone(program: &Program) -> Result<Value, i64> {
             None => crate::global_skip(),
         }
     }
-    run(program.entry).map(typelisp_abi::decode)
+    run(program.entry).map(|v| typelisp_abi::decode(v as Word))
 }
 
 /// A classic-signature door onto a coroutine body: `args` is
@@ -398,11 +399,11 @@ unsafe fn run_alone(program: &Program) -> Result<Value, i64> {
 /// a valid argument array for it; a `Heap` must already
 /// be registered on this thread.
 #[no_mangle]
-pub unsafe extern "C-unwind" fn rt_drive_body(f: i64, callee_args: i64, callee_argc: i64) -> i64 {
+pub unsafe extern "C-unwind" fn rt_drive_body(f: Word, callee_args: Word, callee_argc: Word) -> Word {
     let f: crate::coroutine::CoroutineFn = core::mem::transmute(f as usize);
-    let words = collect_words(callee_args as usize as *const i64, callee_argc);
+    let words = collect_words(callee_args as usize as *const Word, callee_argc);
     match drive_to_completion(f, &words, &[], "rt_drive_body") {
-        Ok(v) => v,
+        Ok(v) => v as Word,
         Err(raised) => raised.into_word(),
     }
 }
@@ -418,7 +419,7 @@ pub unsafe extern "C-unwind" fn rt_drive_body(f: i64, callee_args: i64, callee_a
 ///
 /// A `Heap` must be registered on this thread (an uncaught throw's tag is
 /// read out of it).
-pub unsafe fn exit_code(code: i64) -> i64 {
+pub unsafe fn exit_code(code: Word) -> Word {
     let Some(payload) = typelisp_abi::take_raised() else { return code };
     if let Some(p) = payload.downcast_ref::<CompiledPanic>() {
         typelisp_mem::host::eprintln(format_args!("panic: {}", p.message));
@@ -435,7 +436,7 @@ pub unsafe fn exit_code(code: i64) -> i64 {
     fatal("the program entry was left by an unwind that is neither a panic nor a throw")
 }
 
-unsafe fn collect_words(p: *const i64, n: i64) -> Vec<i64> {
+unsafe fn collect_words(p: *const Word, n: Word) -> Vec<Word> {
     if n < 0 {
         fatal(&format!("{} is not a word count", n));
     }
@@ -484,7 +485,7 @@ unsafe fn pause_on_a_machine_frame(paused: crate::coroutine::Paused, what: &str)
 /// `closure` must be a tagged interpreted-closure box in the heap registered
 /// on this thread, and `args` its arguments in that closure's own declared
 /// representations.
-pub unsafe fn apply_on_this_frame(closure: i64, args: &[i64], what: &str) -> Result<i64, typelisp_abi::Raised> {
+pub unsafe fn apply_on_this_frame(closure: Word, args: &[Word], what: &str) -> Result<i64, typelisp_abi::Raised> {
     match APPLY_INTERPRETED.with(|cell| cell.get()) {
         Some(hook) => {
             let v = hook(closure, args.as_ptr(), args.len() as u32);
@@ -500,8 +501,8 @@ pub unsafe fn apply_on_this_frame(closure: i64, args: &[i64], what: &str) -> Res
 
 pub(crate) unsafe fn drive_to_completion(
     f: crate::coroutine::CoroutineFn,
-    args: &[i64],
-    env: &[i64],
+    args: &[Word],
+    env: &[Word],
     what: &str,
 ) -> Result<i64, typelisp_abi::Raised> {
     let mut stack = crate::coroutine::FrameStack::new();

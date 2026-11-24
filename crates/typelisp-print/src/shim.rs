@@ -33,6 +33,7 @@
 //! returns, and the compiled code that called it leaves for the `catch`/
 //! `unwind-protect` region that should see them.
 
+use typelisp_mem::Word;
 use typelisp_mem::prelude::*;
 use typelisp_abi::{active_heap, decode, encode, fatal, raise, Raised};
 use typelisp_mem::symbols::well_known_symbol;
@@ -85,10 +86,10 @@ fn check_argc(argc: u32, n: usize, who: &str) {
 /// The words must be valid; a
 /// `Heap` must be registered on this thread.
 #[no_mangle]
-pub unsafe extern "C-unwind" fn rt_pprint(which: i64, value: i64, colinc: i64) -> i64 {
+pub unsafe extern "C-unwind" fn rt_pprint(which: Word, value: Word, colinc: Word) -> Word {
     let which = decode(which);
     let value = decode(value);
-    let colinc = Value::Int(colinc);
+    let colinc = Value::Int(colinc as i64);
     if run(wk::F_PPRINT_RT, vec![which, value, colinc]).is_err() {
         return 0;
     }
@@ -104,10 +105,10 @@ pub unsafe extern "C-unwind" fn rt_pprint(which: i64, value: i64, colinc: i64) -
 /// The words must be valid; a
 /// `Heap` must be registered on this thread.
 #[no_mangle]
-pub unsafe extern "C-unwind" fn rt_pprint_block_start(obj: i64, prefix: i64, per_line: i64, suffix: i64) -> i64 {
+pub unsafe extern "C-unwind" fn rt_pprint_block_start(obj: Word, prefix: Word, per_line: bool, suffix: Word) -> Word {
     let obj = decode(obj);
     let prefix = decode(prefix);
-    let per_line = Value::Bool(per_line != 0);
+    let per_line = Value::Bool(per_line);
     let suffix = decode(suffix);
     if run(wk::F_PPRINT_BLOCK_START_RT, vec![obj, prefix, per_line, suffix]).is_err() {
         return 0;
@@ -121,7 +122,7 @@ pub unsafe extern "C-unwind" fn rt_pprint_block_start(obj: i64, prefix: i64, per
 ///
 /// A `Heap` must be registered on this thread.
 #[no_mangle]
-pub unsafe extern "C-unwind" fn rt_pprint_block_end() -> i64 {
+pub unsafe extern "C-unwind" fn rt_pprint_block_end() -> Word {
     if run(wk::F_PPRINT_BLOCK_END_RT, Vec::new()).is_err() {
         return 0;
     }
@@ -135,7 +136,7 @@ pub unsafe extern "C-unwind" fn rt_pprint_block_end() -> i64 {
 /// The words must be valid; a `Heap` must be
 /// registered on this thread.
 #[no_mangle]
-pub unsafe extern "C-unwind" fn rt_pprint_newline(x: i64) -> i64 {
+pub unsafe extern "C-unwind" fn rt_pprint_newline(x: Word) -> Word {
     if run(wk::F_PPRINT_NEWLINE, vec![decode(x)]).is_err() {
         return 0;
     }
@@ -149,9 +150,9 @@ pub unsafe extern "C-unwind" fn rt_pprint_newline(x: i64) -> i64 {
 /// The words must be valid; a
 /// `Heap` must be registered on this thread.
 #[no_mangle]
-pub unsafe extern "C-unwind" fn rt_pprint_indent(kind: i64, n: i64) -> i64 {
+pub unsafe extern "C-unwind" fn rt_pprint_indent(kind: Word, n: Word) -> Word {
     let kind = decode(kind);
-    let n = Value::Int(n);
+    let n = Value::Int(n as i64);
     if run(wk::F_PPRINT_INDENT, vec![kind, n]).is_err() {
         return 0;
     }
@@ -165,10 +166,10 @@ pub unsafe extern "C-unwind" fn rt_pprint_indent(kind: i64, n: i64) -> i64 {
 /// The words must be valid; a
 /// `Heap` must be registered on this thread.
 #[no_mangle]
-pub unsafe extern "C-unwind" fn rt_pprint_tab(kind: i64, colnum: i64, colinc: i64) -> i64 {
+pub unsafe extern "C-unwind" fn rt_pprint_tab(kind: Word, colnum: Word, colinc: Word) -> Word {
     let kind = decode(kind);
-    let colnum = Value::Int(colnum);
-    let colinc = Value::Int(colinc);
+    let colnum = Value::Int(colnum as i64);
+    let colinc = Value::Int(colinc as i64);
     if run(wk::F_PPRINT_TAB, vec![kind, colnum, colinc]).is_err() {
         return 0;
     }
@@ -182,7 +183,7 @@ pub unsafe extern "C-unwind" fn rt_pprint_tab(kind: i64, colnum: i64, colinc: i6
 ///
 /// A `Heap` must be registered on this thread.
 #[no_mangle]
-pub unsafe extern "C-unwind" fn rt_pprint_pop() -> i64 {
+pub unsafe extern "C-unwind" fn rt_pprint_pop() -> Word {
     match run(wk::F_PPRINT_POP, Vec::new()) {
         Ok(v) => encode(v),
         Err(_) => 0,
@@ -195,10 +196,10 @@ pub unsafe extern "C-unwind" fn rt_pprint_pop() -> i64 {
 ///
 /// A `Heap` must be registered on this thread.
 #[no_mangle]
-pub unsafe extern "C-unwind" fn rt_pprint_list_exhausted() -> i64 {
+pub unsafe extern "C-unwind" fn rt_pprint_list_exhausted() -> bool {
     match run(wk::F_PPRINT_LIST_EXHAUSTED, Vec::new()) {
-        Ok(Value::Bool(b)) => i64::from(b),
-        Err(_) => 0,
+        Ok(Value::Bool(b)) => b,
+        Err(_) => false,
         other => fatal(&format!("rt_pprint_list_exhausted: expected a bool, got {:?}", other)),
     }
 }
@@ -211,7 +212,7 @@ pub unsafe extern "C-unwind" fn rt_pprint_list_exhausted() -> i64 {
 // `Sexpr`s and lists tagged; `i32`s and flags as bare words.
 
 /// The arguments of one piece's call.
-struct Args(*const i64);
+struct Args(*const Word);
 
 impl Args {
     unsafe fn tagged(&self, i: usize) -> typelisp_mem::Value {
@@ -219,7 +220,7 @@ impl Args {
     }
 
     unsafe fn int(&self, i: usize) -> i64 {
-        *self.0.add(i)
+        *self.0.add(i) as i64
     }
 
     unsafe fn flag(&self, i: usize) -> bool {
@@ -261,22 +262,25 @@ impl Args {
 /// (the one a `print-object` method the piece called raised, when there is
 /// one: replacing it with the printing error would lose what the program
 /// raised).
-fn answer(r: Result<i64, String>) -> i64 {
+fn answer<T: Default>(r: Result<T, String>) -> T {
     match r {
         Ok(w) => w,
         Err(msg) => match typelisp_abi::raised() {
-            Err(raised) => raised.into_word(),
-            Ok(()) => raise(msg).into_word(),
+            Err(raised) => raised.into_zero(),
+            Ok(()) => raise(msg).into_zero(),
         },
     }
 }
 
-fn unit(r: Result<(), String>) -> i64 {
+fn unit(r: Result<(), String>) -> Word {
     answer(r.map(|()| 0))
 }
 
 macro_rules! piece {
     ($shim:ident, $argc:expr, |$a:ident| $body:expr) => {
+        piece!($shim, $argc, Word, |$a| $body);
+    };
+    ($shim:ident, $argc:expr, $ret:ty, |$a:ident| $body:expr) => {
         /// A piece of an expanded `format` (`crate::format::ops`).
         ///
         /// # Safety
@@ -284,7 +288,7 @@ macro_rules! piece {
         /// `args` must point to `argc` valid words in the representations
         /// the expansion passes; a `Heap` must be registered on this thread.
         #[no_mangle]
-        pub unsafe extern "C-unwind" fn $shim(args: *const i64, argc: u32) -> i64 {
+        pub unsafe extern "C-unwind" fn $shim(args: *const Word, argc: u32) -> $ret {
             check_argc(argc, $argc, stringify!($shim));
             let $a = Args(args);
             $body
@@ -338,10 +342,10 @@ piece!(rt_fmt_result, 2, |a| {
 piece!(rt_fmt_emit, 2, |a| unit(ops::emit_out(active_heap(), a.tagged(0), a.flag(1))));
 piece!(rt_fmt_first, 1, |a| answer(ops::first(active_heap(), a.tagged(0)).map(encode)));
 piece!(rt_fmt_rest, 1, |a| answer(ops::rest(active_heap(), a.tagged(0)).map(encode)));
-piece!(rt_fmt_empty, 1, |a| i64::from(ops::empty(a.tagged(0))));
-piece!(rt_fmt_length, 2, |a| answer(ops::length(active_heap(), a.tagged(0), &a.text(1))));
+piece!(rt_fmt_empty, 1, bool, |a| ops::empty(a.tagged(0)));
+piece!(rt_fmt_length, 2, i32, |a| answer(ops::length(active_heap(), a.tagged(0), &a.text(1)).map(|n| n as i32)));
 piece!(rt_fmt_goto, 3, |a| answer(ops::goto(active_heap(), a.tagged(0), a.int(1), a.flag(2)).map(encode)));
 piece!(rt_fmt_as_list, 2, |a| answer(ops::as_list(active_heap(), a.tagged(0), &a.text(1)).map(encode)));
-piece!(rt_fmt_param, 3, |a| answer(ops::param(active_heap(), a.tagged(0), a.int(1), a.int(2))));
-piece!(rt_fmt_select, 1, |a| answer(ops::select(active_heap(), a.tagged(0))));
-piece!(rt_fmt_bool, 1, |a| answer(ops::boolean(a.tagged(0)).map(i64::from)));
+piece!(rt_fmt_param, 3, i32, |a| answer(ops::param(active_heap(), a.tagged(0), a.int(1), a.int(2)).map(|n| n as i32)));
+piece!(rt_fmt_select, 1, i32, |a| answer(ops::select(active_heap(), a.tagged(0)).map(|n| n as i32)));
+piece!(rt_fmt_bool, 1, bool, |a| answer(ops::boolean(a.tagged(0))));

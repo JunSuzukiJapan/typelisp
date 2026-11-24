@@ -1,5 +1,6 @@
 //! Cons cells and the `Sexpr` leaf accessors (`sexpr-int`, `sexpr-str`, ...).
 
+use typelisp_mem::Word;
 use typelisp_mem::prelude::*;
 use typelisp_abi::{active_heap, decode, encode, fatal, raise};
 use typelisp_mem::{Heap, Value};
@@ -21,7 +22,7 @@ use typelisp_mem::{Heap, Value};
 /// The words must be valid;
 /// a `Heap` must already be registered on this thread.
 #[no_mangle]
-pub unsafe extern "C" fn rt_cons(car: i64, cdr: i64) -> i64 {
+pub unsafe extern "C" fn rt_cons(car: Word, cdr: Word) -> Word {
     let car = decode(car);
     let cdr = decode(cdr);
     match active_heap().cons(car, cdr) {
@@ -41,7 +42,7 @@ pub unsafe extern "C" fn rt_cons(car: i64, cdr: i64) -> i64 {
 /// The words must be valid; a
 /// `Heap` must already be registered on this thread.
 #[no_mangle]
-pub unsafe extern "C-unwind" fn rt_car(arg: i64) -> i64 {
+pub unsafe extern "C-unwind" fn rt_car(arg: Word) -> Word {
     cons_half(arg, "sexpr-car", Heap::car)
 }
 
@@ -51,7 +52,7 @@ pub unsafe extern "C-unwind" fn rt_car(arg: i64) -> i64 {
 ///
 /// Same as [`rt_car`].
 #[no_mangle]
-pub unsafe extern "C-unwind" fn rt_cdr(arg: i64) -> i64 {
+pub unsafe extern "C-unwind" fn rt_cdr(arg: Word) -> Word {
     cons_half(arg, "sexpr-cdr", Heap::cdr)
 }
 
@@ -62,9 +63,9 @@ pub unsafe extern "C-unwind" fn rt_cdr(arg: i64) -> i64 {
 /// are `Option<Sexpr>` now, so this is `None` in and `None` out — and it has
 /// to agree with the interpreter's `sexpr-car`/`sexpr-cdr`, or the same walk
 /// would end differently depending on whether its caller was compiled.
-unsafe fn cons_half(arg: i64, who: &str,
+unsafe fn cons_half(arg: Word, who: &str,
     half: fn(&Heap, Value) -> Result<Value, typelisp_mem::Error>,
-) -> i64 {
+) -> Word {
     let arg = decode(arg);
     if arg.is_empty() {
         return encode(arg);
@@ -85,7 +86,7 @@ unsafe fn cons_half(arg: i64, who: &str,
 /// The words must be valid;
 /// a `Heap` must already be registered on this thread.
 #[no_mangle]
-pub unsafe extern "C" fn rt_set_car(c: i64, val: i64) -> i64 {
+pub unsafe extern "C" fn rt_set_car(c: Word, val: Word) -> Word {
     set_cons_half(c, val, "rt_set_car", Heap::set_car)
 }
 
@@ -95,15 +96,15 @@ pub unsafe extern "C" fn rt_set_car(c: i64, val: i64) -> i64 {
 ///
 /// Same as [`rt_set_car`].
 #[no_mangle]
-pub unsafe extern "C" fn rt_set_cdr(c: i64, val: i64) -> i64 {
+pub unsafe extern "C" fn rt_set_cdr(c: Word, val: Word) -> Word {
     set_cons_half(c, val, "rt_set_cdr", Heap::set_cdr)
 }
 
 /// The body of [`rt_set_car`] and [`rt_set_cdr`], which differ only in the
 /// half they write.
-unsafe fn set_cons_half(c: i64, val: i64, who: &str,
+unsafe fn set_cons_half(c: Word, val: Word, who: &str,
     set: fn(&mut Heap, Value, Value) -> Result<(), typelisp_mem::Error>,
-) -> i64 {
+) -> Word {
     let c = decode(c);
     let val = decode(val);
     match set(active_heap(), c, val) {
@@ -133,8 +134,8 @@ unsafe fn set_cons_half(c: i64, val: i64, who: &str,
 ///
 /// Each word must be a value of the type the signature gives it.
 #[no_mangle]
-pub unsafe extern "C" fn rt_consp(x: i64) -> i64 {
-    i64::from(matches!(decode(x), Value::Cons(_)))
+pub unsafe extern "C" fn rt_consp(x: Word) -> bool {
+    matches!(decode(x), Value::Cons(_))
 }
 
 /// `(sexpr-null x)`: `1` if the tagged value is the empty list `()`.
@@ -143,8 +144,8 @@ pub unsafe extern "C" fn rt_consp(x: i64) -> i64 {
 ///
 /// Same as [`rt_consp`].
 #[no_mangle]
-pub unsafe extern "C" fn rt_null(x: i64) -> i64 {
-    i64::from(matches!(decode(x), Value::Empty))
+pub unsafe extern "C" fn rt_null(x: Word) -> bool {
+    matches!(decode(x), Value::Empty)
 }
 
 /// `(sexpr-atom x)`: `1` if the tagged value is *not* a cons cell — the
@@ -154,8 +155,8 @@ pub unsafe extern "C" fn rt_null(x: i64) -> i64 {
 ///
 /// Same as [`rt_consp`].
 #[no_mangle]
-pub unsafe extern "C" fn rt_atom(x: i64) -> i64 {
-    i64::from(!matches!(decode(x), Value::Cons(_)))
+pub unsafe extern "C" fn rt_atom(x: Word) -> bool {
+    !matches!(decode(x), Value::Cons(_))
 }
 
 /// `(sexpr-symp x)`: `1` if the tagged value is an interned symbol.
@@ -164,8 +165,8 @@ pub unsafe extern "C" fn rt_atom(x: i64) -> i64 {
 ///
 /// Same as [`rt_consp`].
 #[no_mangle]
-pub unsafe extern "C" fn rt_symp(x: i64) -> i64 {
-    i64::from(matches!(decode(x), Value::Symbol(_)))
+pub unsafe extern "C" fn rt_symp(x: Word) -> bool {
+    matches!(decode(x), Value::Symbol(_))
 }
 
 /// `(sexpr-int x)`: an `int` node's value — the tagged word itself, a
@@ -178,7 +179,7 @@ pub unsafe extern "C" fn rt_symp(x: i64) -> i64 {
 ///
 /// Same as [`rt_consp`].
 #[no_mangle]
-pub unsafe extern "C-unwind" fn rt_sexpr_int(w: i64) -> i64 {
+pub unsafe extern "C-unwind" fn rt_sexpr_int(w: Word) -> Word {
     let w = w;
     match decode(w) {
         Value::Int(_) => w,
@@ -198,10 +199,10 @@ pub unsafe extern "C-unwind" fn rt_sexpr_int(w: i64) -> i64 {
 ///
 /// Same as [`rt_consp`].
 #[no_mangle]
-pub unsafe extern "C-unwind" fn rt_sexpr_bool(x: i64) -> i64 {
+pub unsafe extern "C-unwind" fn rt_sexpr_bool(x: Word) -> bool {
     match decode(x) {
-        Value::Bool(b) => i64::from(b),
-        _ => raise("sexpr-bool: expected a Bool Sexpr node".to_string()).into_word(),
+        Value::Bool(b) => b,
+        _ => raise("sexpr-bool: expected a Bool Sexpr node".to_string()).into_zero(),
     }
 }
 
@@ -212,10 +213,10 @@ pub unsafe extern "C-unwind" fn rt_sexpr_bool(x: i64) -> i64 {
 ///
 /// Same as [`rt_consp`].
 #[no_mangle]
-pub unsafe extern "C-unwind" fn rt_sexpr_char(x: i64) -> i64 {
+pub unsafe extern "C-unwind" fn rt_sexpr_char(x: Word) -> u32 {
     match decode(x) {
-        Value::Char(c) => c as i64,
-        _ => raise("sexpr-char: expected a Char Sexpr node".to_string()).into_word(),
+        Value::Char(c) => c.into(),
+        _ => raise("sexpr-char: expected a Char Sexpr node".to_string()).into_zero(),
     }
 }
 
@@ -228,7 +229,7 @@ pub unsafe extern "C-unwind" fn rt_sexpr_char(x: i64) -> i64 {
 ///
 /// Same as [`rt_consp`].
 #[no_mangle]
-pub unsafe extern "C-unwind" fn rt_sexpr_str(x: i64) -> i64 {
+pub unsafe extern "C-unwind" fn rt_sexpr_str(x: Word) -> Word {
     match decode(x) {
         Value::Str(_) => x,
         _ => raise("sexpr-str: expected a Str Sexpr node".to_string()).into_word(),
@@ -244,7 +245,7 @@ pub unsafe extern "C-unwind" fn rt_sexpr_str(x: i64) -> i64 {
 ///
 /// Same as [`rt_consp`], plus a registered `Heap` (this allocates).
 #[no_mangle]
-pub unsafe extern "C-unwind" fn rt_sym_name(x: i64) -> i64 {
+pub unsafe extern "C-unwind" fn rt_sym_name(x: Word) -> Word {
     match decode(x) {
         Value::Symbol(id) => {
             let heap = active_heap();

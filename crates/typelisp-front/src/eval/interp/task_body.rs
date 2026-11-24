@@ -201,7 +201,7 @@ impl Interp {
 /// The worker threads, which WebAssembly has none of.
 #[cfg(not(target_family = "wasm"))]
 mod crew {
-    use typelisp_mem::Heap;
+    use typelisp_mem::{Heap, Word};
 
     use super::{Interp, TyplCx};
     use crate::eval::value::EvalError;
@@ -244,8 +244,8 @@ mod crew {
     /// # Safety
     ///
     /// Only ever called as `typelisp_rt`'s apply hook.
-    unsafe extern "C-unwind" fn refuse_apply_off_main(_closure: i64, _args: *const i64, _argc: u32) -> i64 {
-        typelisp_abi::raise(OFF_MAIN.to_string()).into_word()
+    unsafe extern "C-unwind" fn refuse_apply_off_main(_closure: Word, _args: *const Word, _argc: u32) -> i64 {
+        typelisp_abi::raise(OFF_MAIN.to_string()).into_zero()
     }
 
     /// [`refuse_apply_off_main`] for a `:dyn` call whose method nobody compiled.
@@ -253,7 +253,7 @@ mod crew {
     /// # Safety
     ///
     /// Only ever called as `typelisp_rt`'s `:dyn` hook.
-    unsafe extern "C-unwind" fn refuse_dyn_off_main(_vtable: u32, _slot: u32) -> i64 {
+    unsafe extern "C-unwind" fn refuse_dyn_off_main(_vtable: u32, _slot: u32) -> Word {
         typelisp_abi::raise(OFF_MAIN.to_string()).into_word()
     }
 

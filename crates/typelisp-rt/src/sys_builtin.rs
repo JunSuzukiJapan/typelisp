@@ -18,6 +18,7 @@
 //! `std::time` machinery in with it — see this crate's own module docs on how
 //! archive-member granularity decides what an AOT binary pays for.
 
+use typelisp_mem::Word;
 use typelisp_mem::prelude::*;
 use typelisp_mem::{spec, wk, Heap, StdModule, TypeId, TypeSpec, Value};
 
@@ -314,7 +315,7 @@ use crate::{active_heap, decode, encode, fatal};
 /// The word must encode a
 /// `Value::Str`; a `Heap` must be registered on this thread.
 #[no_mangle]
-pub unsafe extern "C" fn rt_parse_float(s: i64) -> i64 {
+pub unsafe extern "C" fn rt_parse_float(s: Word) -> Word {
     let s = match decode(s) {
         Value::Str(id) => active_heap().string(id).to_string(),
         other => fatal(&format!("parse-float: argument is not a string, got {:?}", other)),
@@ -331,7 +332,7 @@ pub unsafe extern "C" fn rt_parse_float(s: i64) -> i64 {
 /// A `Heap` must be
 /// registered on this thread.
 #[no_mangle]
-pub unsafe extern "C" fn rt_get_universal_time() -> i64 {
+pub unsafe extern "C" fn rt_get_universal_time() -> Word {
     let v = universal_time_value(active_heap(), get_universal_time());
     encode(v)
 }
@@ -344,7 +345,7 @@ pub unsafe extern "C" fn rt_get_universal_time() -> i64 {
 /// A `Heap` must be
 /// registered on this thread.
 #[no_mangle]
-pub unsafe extern "C" fn rt_get_internal_real_time() -> i64 {
+pub unsafe extern "C" fn rt_get_internal_real_time() -> Word {
     let v = internal_time_value(active_heap(), get_internal_real_time());
     encode(v)
 }
@@ -374,7 +375,7 @@ pub fn sleep(heap: &mut Heap, secs: f64) -> Result<(), String> {
 /// A `Heap` must be
 /// registered on this thread.
 #[no_mangle]
-pub unsafe extern "C" fn rt_lisp_implementation_version() -> i64 {
+pub unsafe extern "C" fn rt_lisp_implementation_version() -> Word {
     encode(lisp_implementation_version(active_heap()))
 }
 
@@ -385,7 +386,7 @@ pub unsafe extern "C" fn rt_lisp_implementation_version() -> i64 {
 /// A `Heap` must be
 /// registered on this thread.
 #[no_mangle]
-pub unsafe extern "C" fn rt_machine_type() -> i64 {
+pub unsafe extern "C" fn rt_machine_type() -> Word {
     encode(machine_type(active_heap()))
 }
 
@@ -396,7 +397,7 @@ pub unsafe extern "C" fn rt_machine_type() -> i64 {
 /// A `Heap` must be
 /// registered on this thread.
 #[no_mangle]
-pub unsafe extern "C" fn rt_software_type() -> i64 {
+pub unsafe extern "C" fn rt_software_type() -> Word {
     encode(software_type(active_heap()))
 }
 
@@ -409,7 +410,7 @@ pub unsafe extern "C" fn rt_software_type() -> i64 {
 /// A `Heap` must be
 /// registered on this thread.
 #[no_mangle]
-pub unsafe extern "C" fn rt_machine_version() -> i64 {
+pub unsafe extern "C" fn rt_machine_version() -> Word {
     encode(machine_version(active_heap()))
 }
 
@@ -422,8 +423,8 @@ pub unsafe extern "C" fn rt_machine_version() -> i64 {
 /// The words must be valid; a `Heap`
 /// must be registered on this thread.
 #[no_mangle]
-pub unsafe extern "C" fn rt_timezone_offset_seconds(day: i64, second: i64) -> i64 {
-    encode(timezone_offset_seconds(active_heap(), day, second))
+pub unsafe extern "C" fn rt_timezone_offset_seconds(day: Word, second: Word) -> Word {
+    encode(timezone_offset_seconds(active_heap(), day as i64, second as i64))
 }
 
 /// `(timezone-daylight-p day second)` for compiled code.
@@ -432,8 +433,8 @@ pub unsafe extern "C" fn rt_timezone_offset_seconds(day: i64, second: i64) -> i6
 ///
 /// Same as [`rt_timezone_offset_seconds`].
 #[no_mangle]
-pub unsafe extern "C" fn rt_timezone_daylight_p(day: i64, second: i64) -> i64 {
-    encode(timezone_daylight_p(active_heap(), day, second))
+pub unsafe extern "C" fn rt_timezone_daylight_p(day: Word, second: Word) -> Word {
+    encode(timezone_daylight_p(active_heap(), day as i64, second as i64))
 }
 
 /// `(heap-info)` for compiled code — a freshly allocated `heap-info` struct,
@@ -445,7 +446,7 @@ pub unsafe extern "C" fn rt_timezone_daylight_p(day: i64, second: i64) -> i64 {
 /// A `Heap` must be
 /// registered on this thread.
 #[no_mangle]
-pub unsafe extern "C" fn rt_heap_info() -> i64 {
+pub unsafe extern "C" fn rt_heap_info() -> Word {
     encode(heap_info(active_heap()))
 }
 
@@ -455,8 +456,8 @@ pub unsafe extern "C" fn rt_heap_info() -> i64 {
 ///
 /// None: the builtin is nullary.
 #[no_mangle]
-pub unsafe extern "C" fn rt_thread_current_id() -> i64 {
-    thread_current_id()
+pub unsafe extern "C" fn rt_thread_current_id() -> Word {
+    thread_current_id() as Word
 }
 
 /// `(Thread::available-parallelism)` for compiled code — a raw `int`, or a
@@ -466,9 +467,9 @@ pub unsafe extern "C" fn rt_thread_current_id() -> i64 {
 ///
 /// None: the builtin is nullary.
 #[no_mangle]
-pub unsafe extern "C-unwind" fn rt_thread_available_parallelism() -> i64 {
+pub unsafe extern "C-unwind" fn rt_thread_available_parallelism() -> Word {
     match thread_available_parallelism() {
-        Ok(n) => n,
+        Ok(n) => n as Word,
         Err(msg) => typelisp_abi::raise(msg).into_word(),
     }
 }
@@ -487,6 +488,6 @@ pub unsafe extern "C-unwind" fn rt_thread_available_parallelism() -> i64 {
 /// `x` is a raw `i64` exit code. Touches no
 /// heap.
 #[no_mangle]
-pub unsafe extern "C" fn rt_exit(x: i64) -> i64 {
+pub unsafe extern "C" fn rt_exit(x: Word) -> Word {
     typelisp_mem::host::exit(x as i32)
 }

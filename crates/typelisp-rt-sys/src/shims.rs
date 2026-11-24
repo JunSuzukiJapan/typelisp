@@ -3,6 +3,7 @@
 //! does not: a mode and a `bool` are bare machine words, a `string` and
 //! every `Result` are tagged heap values.
 
+use typelisp_mem::Word;
 use typelisp_mem::Value;
 use typelisp_rt::{active_heap, decode, encode, fatal};
 
@@ -23,7 +24,7 @@ typelisp_rt::stream_shim!(rt_file_create_directories, typelisp_mem::wk::F_FILE_C
 ///
 /// The word must encode a
 /// `Value::Str`; a `Heap` must be registered on this thread.
-unsafe fn str_arg(x: i64, who: &str) -> String {
+unsafe fn str_arg(x: Word, who: &str) -> String {
     match decode(x) {
         Value::Str(id) => active_heap().string(id).to_string(),
         other => fatal(&format!("{}: argument is not a string, got {:?}", who, other)),
@@ -38,7 +39,7 @@ unsafe fn str_arg(x: i64, who: &str) -> String {
 /// A `Heap` must be
 /// registered on this thread.
 #[no_mangle]
-pub unsafe extern "C" fn rt_command_line_args() -> i64 {
+pub unsafe extern "C" fn rt_command_line_args() -> Word {
     encode(crate::env::command_line_args(active_heap()))
 }
 
@@ -48,7 +49,7 @@ pub unsafe extern "C" fn rt_command_line_args() -> i64 {
 ///
 /// Same as [`str_arg`].
 #[no_mangle]
-pub unsafe extern "C" fn rt_getenv(x: i64) -> i64 {
+pub unsafe extern "C" fn rt_getenv(x: Word) -> Word {
     let name = str_arg(x, "rt_getenv");
     encode(crate::env::getenv(active_heap(), &name))
 }
@@ -60,7 +61,7 @@ pub unsafe extern "C" fn rt_getenv(x: i64) -> i64 {
 /// A `Heap` must be
 /// registered on this thread.
 #[no_mangle]
-pub unsafe extern "C" fn rt_home_directory() -> i64 {
+pub unsafe extern "C" fn rt_home_directory() -> Word {
     encode(crate::env::home_directory(active_heap()))
 }
 
@@ -70,7 +71,7 @@ pub unsafe extern "C" fn rt_home_directory() -> i64 {
 ///
 /// Same as [`str_arg`].
 #[no_mangle]
-pub unsafe extern "C" fn rt_dribble_start(x: i64) -> i64 {
+pub unsafe extern "C" fn rt_dribble_start(x: Word) -> Word {
     let path = str_arg(x, "rt_dribble_start");
     encode(crate::dribble::dribble_start(active_heap(), &path))
 }
@@ -82,6 +83,6 @@ pub unsafe extern "C" fn rt_dribble_start(x: i64) -> i64 {
 /// A `Heap` must be
 /// registered on this thread.
 #[no_mangle]
-pub unsafe extern "C" fn rt_dribble_stop() -> i64 {
+pub unsafe extern "C" fn rt_dribble_stop() -> Word {
     encode(crate::dribble::dribble_stop(active_heap()))
 }

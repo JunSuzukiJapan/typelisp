@@ -1,5 +1,6 @@
 //! Boxed structs (`defstruct`, `Vector<T>`): construction and field access.
 
+use typelisp_mem::Word;
 use typelisp_mem::prelude::*;
 use typelisp_abi::{active_heap, decode, encode, fatal, raise, Raised};
 use typelisp_mem::{BoxId, TypeId, Value};
@@ -17,7 +18,7 @@ use typelisp_mem::{BoxId, TypeId, Value};
 /// # Safety
 ///
 /// A `Heap` need not be registered; `raw` is only read as a word.
-pub(crate) unsafe fn type_arg(raw: i64, who: &str) -> TypeId {
+pub(crate) unsafe fn type_arg(raw: Word, who: &str) -> TypeId {
     TypeId::from_word(raw).unwrap_or_else(|| fatal(&format!("{}: type argument {} is not a type", who, raw)))
 }
 
@@ -35,7 +36,7 @@ pub(crate) unsafe fn type_arg(raw: i64, who: &str) -> TypeId {
 /// and `args[0]` must be a type's word; a `Heap` must already be
 /// registered on this thread.
 #[no_mangle]
-pub unsafe extern "C" fn rt_struct_new(args: *const i64, argc: u32) -> i64 {
+pub unsafe extern "C" fn rt_struct_new(args: *const Word, argc: u32) -> Word {
     if argc < 1 {
         fatal("rt_struct_new: expected at least 1 argument (the type)");
     }
@@ -66,7 +67,7 @@ pub unsafe extern "C" fn rt_struct_new(args: *const i64, argc: u32) -> i64 {
 ///
 /// A `Heap` must already be registered on this thread and `id` must name a
 /// live boxed struct in it.
-unsafe fn checked_field_index(id: BoxId, idx: i64) -> Result<usize, Raised> {
+unsafe fn checked_field_index(id: BoxId, idx: Word) -> Result<usize, Raised> {
     if idx < 0 || idx as usize >= active_heap().struct_field_count(id) {
         return Err(raise(format!("Vector: index {} out of bounds", idx)));
     }
@@ -86,7 +87,7 @@ unsafe fn checked_field_index(id: BoxId, idx: i64) -> Result<usize, Raised> {
 /// the first decoding to a `Value::Boxed` struct; a `Heap` must already be
 /// registered on this thread.
 #[no_mangle]
-pub unsafe extern "C-unwind" fn rt_struct_field_get(id: i64, index: i64) -> i64 {
+pub unsafe extern "C-unwind" fn rt_struct_field_get(id: Word, index: Word) -> Word {
     let id = match decode(id) {
         Value::Boxed(id) => id,
         _ => fatal("rt_struct_field_get: first argument is not a boxed Sexpr"),
@@ -110,7 +111,7 @@ pub unsafe extern "C-unwind" fn rt_struct_field_get(id: i64, index: i64) -> i64 
 /// the first decoding to a `Value::Boxed` struct; a `Heap` must already be
 /// registered on this thread.
 #[no_mangle]
-pub unsafe extern "C-unwind" fn rt_struct_field_set(id: i64, idx: i64, val: i64) -> i64 {
+pub unsafe extern "C-unwind" fn rt_struct_field_set(id: Word, idx: Word, val: Word) -> Word {
     let id = match decode(id) {
         Value::Boxed(id) => id,
         _ => fatal("rt_struct_field_set: first argument is not a boxed Sexpr"),
@@ -137,12 +138,12 @@ pub unsafe extern "C-unwind" fn rt_struct_field_set(id: i64, idx: i64, val: i64)
 /// decoding to a `Value::Boxed` struct; a `Heap` must already be registered
 /// on this thread.
 #[no_mangle]
-pub unsafe extern "C" fn rt_struct_field_count(id: i64) -> i64 {
+pub unsafe extern "C" fn rt_struct_field_count(id: Word) -> Word {
     let id = match decode(id) {
         Value::Boxed(id) => id,
         _ => fatal("rt_struct_field_count: first argument is not a boxed Sexpr"),
     };
-    active_heap().struct_field_count(id) as i64
+    active_heap().struct_field_count(id) as Word
 }
 
 /// `(rt-struct-push-field! s val)` for compiled code — appends `val` (a
@@ -160,7 +161,7 @@ pub unsafe extern "C" fn rt_struct_field_count(id: i64) -> i64 {
 /// first decoding to a `Value::Boxed` struct; a `Heap` must already be
 /// registered on this thread.
 #[no_mangle]
-pub unsafe extern "C" fn rt_struct_push_field(id: i64, val: i64) -> i64 {
+pub unsafe extern "C" fn rt_struct_push_field(id: Word, val: Word) -> Word {
     let id = match decode(id) {
         Value::Boxed(id) => id,
         _ => fatal("rt_struct_push_field: first argument is not a boxed Sexpr"),
@@ -196,7 +197,7 @@ pub unsafe extern "C" fn rt_struct_push_field(id: i64, val: i64) -> i64 {
 /// decoding to a `Value::Boxed` struct; a `Heap` must already be registered
 /// on this thread.
 #[no_mangle]
-pub unsafe extern "C" fn rt_struct_pop_field(id: i64) -> i64 {
+pub unsafe extern "C" fn rt_struct_pop_field(id: Word) -> Word {
     let id = match decode(id) {
         Value::Boxed(id) => id,
         _ => fatal("rt_struct_pop_field: first argument is not a boxed Sexpr"),

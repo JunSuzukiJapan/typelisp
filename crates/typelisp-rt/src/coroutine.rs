@@ -37,6 +37,7 @@
 //! indirect call — a closure, a `:dyn` method — would have to know which it
 //! was making.
 
+use typelisp_mem::Word;
 use typelisp_mem::prelude::*;
 use typelisp_abi::call_state;
 use typelisp_abi::call_state::Pending;
@@ -53,7 +54,7 @@ use typelisp_mem::{FrameRaw, Heap};
 /// A coroutine-ABI compiled function: takes the address of its frame's words
 /// (or `0` on first entry), returns a status word. A raise inside it comes
 /// back as `STATUS_UNWIND` with the unwind waiting (`typelisp_abi::raise`).
-pub type CoroutineFn = unsafe extern "C-unwind" fn(i64) -> i64;
+pub type CoroutineFn = unsafe extern "C-unwind" fn(Word) -> Word;
 
 /// Why a drive stopped short of an answer.
 #[derive(Debug, PartialEq, Eq)]
@@ -70,14 +71,14 @@ pub enum Paused {
     /// is a machine frame resolves it on that frame instead
     /// ([`FrameStack::run_to_end`]), which is the one thing it can do — and
     /// the reason such a call still cannot suspend.
-    Applying { closure: i64, args: Vec<i64> },
+    Applying { closure: Word, args: Vec<Word> },
     /// [`Paused::Applying`] through a `:dyn` call whose vtable slot is empty:
     /// the concrete type's method is ordinary interpreted code, and the
     /// closure it stands for has to be asked of the interpreter before it
     /// can be applied (`reify_dyn_slot`). Left to the driver's owner rather
     /// than asked here, because only the owner knows whether there is an
     /// interpreter on this thread at all.
-    ApplyingDyn { vtable: u32, slot: u32, args: Vec<i64> },
+    ApplyingDyn { vtable: u32, slot: u32, args: Vec<Word> },
     /// An unwind passed the outermost frame this driver owned without
     /// finding a handler. The chain is gone — every frame of it has been
     /// popped and its roots cut back — and what is unwinding is parked for
@@ -178,7 +179,7 @@ impl FrameStack {
     /// unwind: a function that raises inside its own `catch` published its
     /// frame first, and that frame is the one that catches. Only an entry
     /// that unwound *before* publishing leaves nothing to record.
-    fn begin(&mut self, heap: &mut Heap, f: CoroutineFn, args: Vec<i64>, env: Vec<i64>) -> i64 {
+    fn begin(&mut self, heap: &mut Heap, f: CoroutineFn, args: Vec<Word>, env: Vec<Word>) -> Word {
         // Counted before the entry runs: its code is in use from here, and a
         // nested evaluation inside it may compile.
         self.note_live(true);
@@ -189,7 +190,7 @@ impl FrameStack {
         let status = unsafe { activation(f, 0, self.interruptible) };
         match call_state::with(|s| s.entered(published)) {
             // SAFETY: the word is the address a prologue just published.
-            Some(data) => self.frames.push(Entry { body: f, raw: unsafe { FrameRaw::from_data(data as *mut i64) }, roots }),
+            Some(data) => self.frames.push(Entry { body: f, raw: unsafe { FrameRaw::from_data(data as *mut Word) }, roots }),
             None if status & 0b11 != STATUS_UNWIND => panic!("a coroutine function did not publish its frame on entry"),
             None => {}
         }
@@ -203,7 +204,7 @@ impl FrameStack {
     /// the frame below (or out, if there is none); a `CALL` pushes; a
     /// `SUSPEND` or `UNWIND` leaves the chain standing and gets out of the
     /// way, because who runs next is a scheduling question, not a calling one.
-    pub fn run(&mut self, heap: &mut Heap, f: CoroutineFn, args: &[i64]) -> Result<i64, Paused> {
+    pub fn run(&mut self, heap: &mut Heap, f: CoroutineFn, args: &[Word]) -> Result<i64, Paused> {
         self.run_with_env(heap, f, args, &[])
     }
 
@@ -213,26 +214,26 @@ impl FrameStack {
     /// What a suspension is waiting for arrives this way: the frame reads its
     /// value slot on resuming, and it cannot tell — and must not be able to
     /// tell — whether the word came from a callee or from a scheduler.
-    pub fn set_top_value(&self, _heap: &mut Heap, word: i64) {
+    pub fn set_top_value(&self, _heap: &mut Heap, value: i64) {
         let raw = match self.frames.last() {
             Some(top) => top.raw,
             None => panic!("set_top_value: there is no suspended chain to deliver to"),
         };
         // SAFETY: a frame on the chain is live.
-        unsafe { raw.set_word(typelisp_abi::FRAME_VALUE_SLOT, word) };
+        unsafe { raw.set_value(typelisp_abi::FRAME_VALUE_SLOT, value) };
     }
 
     /// Hands `value` to the frame waiting for it and runs it again — what a
     /// returning callee's answer does, for a callee that had no frame of its
     /// own to pop.
-    fn hand_back(&mut self, value: i64) -> i64 {
+    fn hand_back(&mut self, value: i64) -> Word {
         let (body, raw) = {
             let caller = self.frames.last().expect("a frame is waiting for the answer");
             (caller.body, caller.raw)
         };
         // SAFETY: a frame on the chain is live.
         unsafe {
-            raw.set_word(typelisp_abi::FRAME_VALUE_SLOT, value);
+            raw.set_value(typelisp_abi::FRAME_VALUE_SLOT, value);
             activation_on(body, raw, self.interruptible)
         }
     }
@@ -275,9 +276,9 @@ impl FrameStack {
         &mut self,
         heap: &mut Heap,
         f: CoroutineFn,
-        args: &[i64],
-        env: &[i64],
-        apply: impl Fn(i64, &[i64]) -> Result<i64, typelisp_abi::Raised>,
+        args: &[Word],
+        env: &[Word],
+        apply: impl Fn(Word, &[Word]) -> Result<i64, typelisp_abi::Raised>,
     ) -> Result<i64, Paused> {
         self.run_to_end_answering(heap, f, args, env, apply, |heap| match crate::sched::pending_wait(heap) {
             // Nothing to wait for and nobody to switch to: a loop's back edge
@@ -306,8 +307,8 @@ impl FrameStack {
     /// interpreter does not have. Each of those simply goes on, as
     /// [`Self::run_to_end`] goes on, and the scheduler's code is not part of
     /// the executable. Any other suspension is the compiler's mistake.
-    pub fn run_to_end_alone(&mut self, heap: &mut Heap, f: CoroutineFn, args: &[i64], env: &[i64]) -> Result<i64, Paused> {
-        let apply = |closure: i64, argv: &[i64]| unsafe { crate::program::apply_on_this_frame(closure, argv, "the program") };
+    pub fn run_to_end_alone(&mut self, heap: &mut Heap, f: CoroutineFn, args: &[Word], env: &[Word]) -> Result<i64, Paused> {
+        let apply = |closure: Word, argv: &[Word]| unsafe { crate::program::apply_on_this_frame(closure, argv, "the program") };
         self.run_to_end_answering(heap, f, args, env, apply, |_| {
             use typelisp_abi::call_state as cs;
             match cs::take_pending_suspend() {
@@ -328,9 +329,9 @@ impl FrameStack {
         &mut self,
         heap: &mut Heap,
         f: CoroutineFn,
-        args: &[i64],
-        env: &[i64],
-        apply: impl Fn(i64, &[i64]) -> Result<i64, typelisp_abi::Raised>,
+        args: &[Word],
+        env: &[Word],
+        apply: impl Fn(Word, &[Word]) -> Result<i64, typelisp_abi::Raised>,
         mut suspended: impl FnMut(&mut Heap) -> Result<i64, crate::sched::SchedError>,
     ) -> Result<i64, Paused> {
         let base = self.frames.len();
@@ -431,7 +432,7 @@ impl FrameStack {
     /// only ever routes an `apply` here after `compiled_closure_body_abi`
     /// said so. Anything else reaching here is the runtime disagreeing with
     /// itself, not a program error.
-    pub fn run_closure(&mut self, heap: &mut Heap, closure: i64, args: &[i64]) -> Result<i64, Paused> {
+    pub fn run_closure(&mut self, heap: &mut Heap, closure: Word, args: &[Word]) -> Result<i64, Paused> {
         // SAFETY: the word is a tagged coroutine-ABI closure box, in the
         // heap registered on this thread.
         match unsafe { crate::resolve_closure(closure) } {
@@ -451,8 +452,8 @@ impl FrameStack {
         &mut self,
         heap: &mut Heap,
         f: CoroutineFn,
-        args: &[i64],
-        env: &[i64],
+        args: &[Word],
+        env: &[Word],
     ) -> Result<i64, Paused> {
         let base = self.frames.len();
         let status = self.begin(heap, f, args.to_vec(), env.to_vec());
@@ -471,7 +472,7 @@ impl FrameStack {
     /// `base` is how many frames belonged to somebody else when this drive
     /// began — nonzero only for a nested drive, whose caller is waiting on a
     /// machine frame.
-    fn drive(&mut self, heap: &mut Heap, base: usize, status: i64) -> Result<i64, Paused> {
+    fn drive(&mut self, heap: &mut Heap, base: usize, status: Word) -> Result<i64, Paused> {
         // A resumed chain's code is in use from here, as an entered one's is
         // from `begin`.
         self.note_live(true);
@@ -493,13 +494,13 @@ impl FrameStack {
     }
 
     /// [`Self::drive`]'s loop.
-    fn drive_frames(&mut self, heap: &mut Heap, base: usize, mut status: i64) -> Result<i64, Paused> {
+    fn drive_frames(&mut self, heap: &mut Heap, base: usize, mut status: Word) -> Result<i64, Paused> {
         loop {
             match status & 0b11 {
                 STATUS_RETURN => {
                     let done = self.frames.pop().expect("a returning frame is on the stack");
                     // SAFETY: closed only below.
-                    let value = unsafe { done.raw.word(typelisp_abi::FRAME_VALUE_SLOT) };
+                    let value = unsafe { done.raw.value(typelisp_abi::FRAME_VALUE_SLOT) };
                     debug_assert_eq!(
                         heap.root_count(),
                         done.roots + 1,
@@ -514,7 +515,7 @@ impl FrameStack {
                     let (caller_body, caller_raw) = (caller.body, caller.raw);
                     // SAFETY: a frame on the chain is live.
                     status = unsafe {
-                        caller_raw.set_word(typelisp_abi::FRAME_VALUE_SLOT, value);
+                        caller_raw.set_value(typelisp_abi::FRAME_VALUE_SLOT, value);
                         activation_on(caller_body, caller_raw, self.interruptible)
                     };
                 }
@@ -543,7 +544,7 @@ impl FrameStack {
                             });
                             status = match typelisp_abi::is_raised() {
                                 true => taken_raise(true, STATUS_UNWIND, "a classic-ABI closure body"),
-                                false => self.hand_back(v),
+                                false => self.hand_back(v as i64),
                             };
                         }
                         crate::Callee::Interpreted => return Err(Paused::Applying { closure, args }),
@@ -571,7 +572,7 @@ impl FrameStack {
                             let v = crate::interrupt::outside(self.interruptible, || unsafe { f(args.as_ptr(), args.len() as u32) });
                             status = match typelisp_abi::is_raised() {
                                 true => taken_raise(true, STATUS_UNWIND, "a classic-ABI method body"),
-                                false => self.hand_back(v),
+                                false => self.hand_back(v as i64),
                             };
                         }
                     }
@@ -607,7 +608,7 @@ impl FrameStack {
     /// handler onwards is whatever encloses that region, and only the emitted
     /// code knows what that is — so the pad installs it (the island's
     /// `install-handler`), exactly as it does on the ordinary way out.
-    fn unwind(&mut self, heap: &mut Heap, base: usize) -> Option<i64> {
+    fn unwind(&mut self, heap: &mut Heap, base: usize) -> Option<Word> {
         loop {
             let (body, raw) = {
                 let top = self.frames.last().expect("an unwinding frame is on the stack");
@@ -631,7 +632,7 @@ impl FrameStack {
 }
 
 /// Where an unwind reaching this frame resumes, or `0` for nowhere.
-fn frame_handler(raw: FrameRaw) -> i64 {
+fn frame_handler(raw: FrameRaw) -> Word {
     if raw.len() <= typelisp_abi::FRAME_HANDLER_SLOT {
         panic!(
             "a compiled frame has {} slot(s) and so no handler slot: it was built before the slot \
@@ -646,8 +647,8 @@ fn frame_handler(raw: FrameRaw) -> i64 {
 
 /// [`activation`] resuming the frame `raw`: the body is handed the address of
 /// the frame's words, as the coroutine ABI says a resumed one is.
-unsafe fn activation_on(f: CoroutineFn, raw: FrameRaw, interruptible: bool) -> i64 {
-    activation(f, raw.data() as i64, interruptible)
+unsafe fn activation_on(f: CoroutineFn, raw: FrameRaw, interruptible: bool) -> Word {
+    activation(f, raw.data() as Word, interruptible)
 }
 
 /// Runs one compiled activation and takes what it raised.
@@ -666,7 +667,7 @@ unsafe fn activation_on(f: CoroutineFn, raw: FrameRaw, interruptible: bool) -> i
 /// fatal here rather than a wrong answer later.
 ///
 /// `interruptible` is the chain's [`FrameStack::interruptible`].
-unsafe fn activation(f: CoroutineFn, arg: i64, interruptible: bool) -> i64 {
+unsafe fn activation(f: CoroutineFn, arg: Word, interruptible: bool) -> Word {
     let status = crate::interrupt::outside(interruptible, || f(arg));
     taken_raise(status & 0b11 == STATUS_UNWIND, status, "a compiled activation")
 }
@@ -683,7 +684,7 @@ pub(crate) fn park_raised() {
 /// it raised is parked for the walk and the answer is `STATUS_UNWIND`;
 /// otherwise the answer is `status`. `left` is whether the code left because
 /// of it — compiled code that saw the raise always does.
-fn taken_raise(left: bool, status: i64, what: &str) -> i64 {
+fn taken_raise(left: bool, status: Word, what: &str) -> Word {
     match typelisp_abi::take_raised() {
         Some(payload) => {
             if !left {
@@ -736,8 +737,8 @@ fn take_pending_call() -> Pending {
 ///
 /// The words must be valid.
 #[no_mangle]
-pub unsafe extern "C" fn rt_suspend_task(closure: i64, name: i64) -> i64 {
-    call_state::set_pending_suspend_2(call_state::SUSPEND_TASK, closure, name);
+pub unsafe extern "C" fn rt_suspend_task(closure: Word, name: Word) -> Word {
+    call_state::set_pending_suspend_2(call_state::SUSPEND_TASK, closure as i64, name as i64);
     0
 }
 
@@ -751,7 +752,7 @@ pub unsafe extern "C" fn rt_suspend_task(closure: i64, name: i64) -> i64 {
 ///
 /// None: the suspension takes nothing.
 #[no_mangle]
-pub unsafe extern "C" fn rt_suspend_main() -> i64 {
+pub unsafe extern "C" fn rt_suspend_main() -> Word {
     call_state::set_pending_suspend(call_state::SUSPEND_MAIN, 0);
     0
 }
@@ -762,7 +763,7 @@ pub unsafe extern "C" fn rt_suspend_main() -> i64 {
 ///
 /// None: the builtin is nullary.
 #[no_mangle]
-pub unsafe extern "C" fn rt_suspend_yield() -> i64 {
+pub unsafe extern "C" fn rt_suspend_yield() -> Word {
     call_state::set_pending_suspend(call_state::SUSPEND_YIELD, 0);
     0
 }
@@ -810,7 +811,7 @@ const SAFEPOINT_PERIOD: u32 = 256;
 ///
 /// A `Heap` must be registered on this thread.
 #[no_mangle]
-pub unsafe extern "C" fn rt_loop_safepoint() -> i64 {
+pub unsafe extern "C" fn rt_loop_safepoint() -> Word {
     typelisp_abi::active_heap().safepoint();
     SAFEPOINT_COUNTDOWN.with(|c| {
         let left = c.get().saturating_sub(1);
@@ -837,8 +838,8 @@ pub unsafe extern "C" fn rt_loop_safepoint() -> i64 {
 ///
 /// Each word must be a value of the type the signature gives it.
 #[no_mangle]
-pub unsafe extern "C" fn rt_suspend_sleep(x: i64) -> i64 {
-    call_state::set_pending_suspend(call_state::SUSPEND_SLEEP, x);
+pub unsafe extern "C" fn rt_suspend_sleep(x: f64) -> Word {
+    call_state::set_pending_suspend(call_state::SUSPEND_SLEEP, x.to_bits() as i64);
     0
 }
 
@@ -853,8 +854,8 @@ pub unsafe extern "C" fn rt_suspend_sleep(x: i64) -> i64 {
 ///
 /// Each word must be a value of the type the signature gives it.
 #[no_mangle]
-pub unsafe extern "C" fn rt_suspend_wait(x: i64) -> i64 {
-    call_state::set_pending_suspend(call_state::SUSPEND_WAIT, x);
+pub unsafe extern "C" fn rt_suspend_wait(x: Word) -> Word {
+    call_state::set_pending_suspend(call_state::SUSPEND_WAIT, x as i64);
     0
 }
 
@@ -877,8 +878,8 @@ pub unsafe extern "C" fn rt_suspend_wait(x: i64) -> i64 {
 ///
 /// Each word must be a value of the type the signature gives it.
 #[no_mangle]
-pub unsafe extern "C" fn rt_suspend_chan_new(capacity: i64, ty: i64) -> i64 {
-    call_state::set_pending_suspend_2(call_state::SUSPEND_CHAN_NEW, capacity, ty);
+pub unsafe extern "C" fn rt_suspend_chan_new(capacity: Word, ty: Word) -> Word {
+    call_state::set_pending_suspend_2(call_state::SUSPEND_CHAN_NEW, capacity as i64, ty as i64);
     0
 }
 
@@ -888,8 +889,8 @@ pub unsafe extern "C" fn rt_suspend_chan_new(capacity: i64, ty: i64) -> i64 {
 ///
 /// Each word must be a value of the type the signature gives it.
 #[no_mangle]
-pub unsafe extern "C" fn rt_suspend_chan_len(x: i64) -> i64 {
-    call_state::set_pending_suspend(call_state::SUSPEND_CHAN_LEN, x);
+pub unsafe extern "C" fn rt_suspend_chan_len(x: Word) -> Word {
+    call_state::set_pending_suspend(call_state::SUSPEND_CHAN_LEN, x as i64);
     0
 }
 
@@ -899,8 +900,8 @@ pub unsafe extern "C" fn rt_suspend_chan_len(x: i64) -> i64 {
 ///
 /// Each word must be a value of the type the signature gives it.
 #[no_mangle]
-pub unsafe extern "C" fn rt_suspend_chan_cap(x: i64) -> i64 {
-    call_state::set_pending_suspend(call_state::SUSPEND_CHAN_CAP, x);
+pub unsafe extern "C" fn rt_suspend_chan_cap(x: Word) -> Word {
+    call_state::set_pending_suspend(call_state::SUSPEND_CHAN_CAP, x as i64);
     0
 }
 
@@ -910,8 +911,8 @@ pub unsafe extern "C" fn rt_suspend_chan_cap(x: i64) -> i64 {
 ///
 /// Each word must be a value of the type the signature gives it.
 #[no_mangle]
-pub unsafe extern "C" fn rt_suspend_chan_close(x: i64) -> i64 {
-    call_state::set_pending_suspend(call_state::SUSPEND_CHAN_CLOSE, x);
+pub unsafe extern "C" fn rt_suspend_chan_close(x: Word) -> Word {
+    call_state::set_pending_suspend(call_state::SUSPEND_CHAN_CLOSE, x as i64);
     0
 }
 
@@ -925,8 +926,8 @@ pub unsafe extern "C" fn rt_suspend_chan_close(x: i64) -> i64 {
 ///
 /// Each word must be a value of the type the signature gives it.
 #[no_mangle]
-pub unsafe extern "C" fn rt_suspend_chan_send(chan: i64, value: i64) -> i64 {
-    call_state::set_pending_suspend_2(call_state::SUSPEND_CHAN_SEND, chan, value);
+pub unsafe extern "C" fn rt_suspend_chan_send(chan: Word, value: Word) -> Word {
+    call_state::set_pending_suspend_2(call_state::SUSPEND_CHAN_SEND, chan as i64, value as i64);
     0
 }
 
@@ -943,7 +944,7 @@ pub unsafe extern "C" fn rt_suspend_chan_send(chan: i64, value: i64) -> i64 {
 ///
 /// `argc` must be `>= 2` and `args` must point to `argc` valid `i64`s.
 #[no_mangle]
-pub unsafe extern "C" fn rt_suspend_chan_select(args: *const i64, argc: u32) -> i64 {
+pub unsafe extern "C" fn rt_suspend_chan_select(args: *const Word, argc: u32) -> Word {
     if argc < 2 {
         crate::fatal("rt_suspend_chan_select: expected at least 2 words");
     }
@@ -964,7 +965,7 @@ pub unsafe extern "C" fn rt_suspend_chan_select(args: *const i64, argc: u32) -> 
 ///
 /// Each word must be a value of the type the signature gives it.
 #[no_mangle]
-pub unsafe extern "C" fn rt_suspend_chan_recv(chan: i64, ty: i64) -> i64 {
-    call_state::set_pending_suspend_2(call_state::SUSPEND_CHAN_RECV, chan, ty);
+pub unsafe extern "C" fn rt_suspend_chan_recv(chan: Word, ty: Word) -> Word {
+    call_state::set_pending_suspend_2(call_state::SUSPEND_CHAN_RECV, chan as i64, ty as i64);
     0
 }

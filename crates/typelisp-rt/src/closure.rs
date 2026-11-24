@@ -1,5 +1,6 @@
 //! Compiled closures and binding cells.
 
+use typelisp_mem::Word;
 use typelisp_mem::prelude::*;
 use core::cell::Cell;
 use typelisp_abi::{active_heap, decode, encode, fatal};
@@ -33,7 +34,7 @@ use typelisp_mem::Value;
 /// be a valid function pointer (opaque here — only stored); a `Heap` must
 /// already be registered on this thread.
 #[no_mangle]
-pub unsafe extern "C" fn rt_closure_new(args: *const i64, argc: u32) -> i64 {
+pub unsafe extern "C" fn rt_closure_new(args: *const Word, argc: u32) -> Word {
     closure_new(args, argc, typelisp_abi::BODY_ABI_CLASSIC, "rt_closure_new")
 }
 
@@ -49,11 +50,11 @@ pub unsafe extern "C" fn rt_closure_new(args: *const i64, argc: u32) -> i64 {
 ///
 /// As [`rt_closure_new`].
 #[no_mangle]
-pub unsafe extern "C" fn rt_coroutine_closure_new(args: *const i64, argc: u32) -> i64 {
+pub unsafe extern "C" fn rt_coroutine_closure_new(args: *const Word, argc: u32) -> Word {
     closure_new(args, argc, typelisp_abi::BODY_ABI_COROUTINE, "rt_coroutine_closure_new")
 }
 
-unsafe fn closure_new(args: *const i64, argc: u32, body_abi: u8, what: &str) -> i64 {
+unsafe fn closure_new(args: *const Word, argc: u32, body_abi: u8, what: &str) -> Word {
     if argc < 2 {
         fatal(&format!("{}: expected at least 2 arguments (fn ptr, sexpr mask)", what));
     }
@@ -69,7 +70,7 @@ unsafe fn closure_new(args: *const i64, argc: u32, body_abi: u8, what: &str) -> 
         if sexpr_mask & (1 << i) != 0 {
             env.push(decode(raw));
         } else {
-            env.push(Value::Int(raw));
+            env.push(Value::Int(raw as i64));
         }
     }
     encode(active_heap().alloc_compiled_closure(fn_ptr, env, sexpr_mask, body_abi))
@@ -88,12 +89,12 @@ unsafe fn closure_new(args: *const i64, argc: u32, body_abi: u8, what: &str) -> 
 /// decoding to a `Value::Boxed` compiled closure; a `Heap` must already be
 /// registered on this thread.
 #[no_mangle]
-pub unsafe extern "C" fn rt_closure_fnptr(id: i64) -> i64 {
+pub unsafe extern "C" fn rt_closure_fnptr(id: Word) -> Word {
     let id = match decode(id) {
         Value::Boxed(id) if active_heap().is_compiled_closure(id) => id,
         _ => fatal("rt_closure_fnptr: argument is not a boxed compiled closure"),
     };
-    active_heap().compiled_closure_fnptr(id) as i64
+    active_heap().compiled_closure_fnptr(id) as Word
 }
 
 /// `(rt-closure-env-len clo)` for compiled code — the number of captured
@@ -105,12 +106,12 @@ pub unsafe extern "C" fn rt_closure_fnptr(id: i64) -> i64 {
 ///
 /// Same contract as [`rt_closure_fnptr`].
 #[no_mangle]
-pub unsafe extern "C" fn rt_closure_env_len(id: i64) -> i64 {
+pub unsafe extern "C" fn rt_closure_env_len(id: Word) -> Word {
     let id = match decode(id) {
         Value::Boxed(id) if active_heap().is_compiled_closure(id) => id,
         _ => fatal("rt_closure_env_len: argument is not a boxed compiled closure"),
     };
-    active_heap().compiled_closure_env_len(id) as i64
+    active_heap().compiled_closure_env_len(id) as Word
 }
 
 /// `(rt-closure-env-get clo idx)` for compiled code — the `idx`-th captured
@@ -127,12 +128,11 @@ pub unsafe extern "C" fn rt_closure_env_len(id: i64) -> i64 {
 /// the first decoding to a `Value::Boxed` compiled closure; a `Heap` must
 /// already be registered on this thread.
 #[no_mangle]
-pub unsafe extern "C" fn rt_closure_env_get(id: i64, idx: i64) -> i64 {
+pub unsafe extern "C" fn rt_closure_env_get(id: Word, idx: Word) -> Word {
     let id = match decode(id) {
         Value::Boxed(id) if active_heap().is_compiled_closure(id) => id,
         _ => fatal("rt_closure_env_get: first argument is not a boxed compiled closure"),
     };
-    let idx = idx;
     if idx < 0 {
         fatal("rt_closure_env_get: negative slot index");
     }
@@ -142,7 +142,7 @@ pub unsafe extern "C" fn rt_closure_env_get(id: i64, idx: i64) -> i64 {
         encode(v)
     } else {
         match v {
-            Value::Int(raw) => raw,
+            Value::Int(raw) => raw as Word,
             other => fatal(&format!("rt_closure_env_get: unmasked slot holds a non-raw value {:?}", other)),
         }
     }
@@ -158,7 +158,7 @@ pub unsafe extern "C" fn rt_closure_env_get(id: i64, idx: i64) -> i64 {
 /// `typelisp::eval::Interp` installs it ([`set_apply_interpreted`]) at the
 /// same moment it registers the active heap; an AOT-compiled executable has
 /// no interpreter to install and leaves it unset.
-pub type ApplyInterpretedFn = unsafe extern "C-unwind" fn(closure: i64, args: *const i64, argc: u32) -> i64;
+pub type ApplyInterpretedFn = unsafe extern "C-unwind" fn(closure: Word, args: *const Word, argc: u32) -> i64;
 
 typelisp_mem::thread_local! {
     pub(crate) static APPLY_INTERPRETED: Cell<Option<ApplyInterpretedFn>> = const { Cell::new(None) };
@@ -187,7 +187,7 @@ pub fn set_apply_interpreted(f: Option<ApplyInterpretedFn>) {
 /// holding a valid tagged value; a `Heap` must already be registered on
 /// this thread.
 #[no_mangle]
-pub unsafe extern "C" fn rt_cell_new(v: i64) -> i64 {
+pub unsafe extern "C" fn rt_cell_new(v: Word) -> Word {
     let v = decode(v);
     encode(active_heap().alloc_cell_unregistered(v))
 }
@@ -204,7 +204,7 @@ pub unsafe extern "C" fn rt_cell_new(v: i64) -> i64 {
 /// decoding to a `Value::Boxed` cell; a `Heap` must already be registered
 /// on this thread.
 #[no_mangle]
-pub unsafe extern "C" fn rt_cell_get(x: i64) -> i64 {
+pub unsafe extern "C" fn rt_cell_get(x: Word) -> Word {
     match decode(x) {
         Value::Boxed(id) => match active_heap().try_cell_get(id) {
             Some(v) => encode(v),
@@ -228,7 +228,7 @@ pub unsafe extern "C" fn rt_cell_get(x: i64) -> i64 {
 /// the first decoding to a `Value::Boxed` cell, the second holding a valid
 /// tagged value; a `Heap` must already be registered on this thread.
 #[no_mangle]
-pub unsafe extern "C" fn rt_cell_set(id: i64, v: i64) -> i64 {
+pub unsafe extern "C" fn rt_cell_set(id: Word, v: Word) -> Word {
     let id = match decode(id) {
         Value::Boxed(id) if active_heap().is_cell(id) => id,
         _ => fatal("rt_cell_set: first argument is not a boxed cell"),

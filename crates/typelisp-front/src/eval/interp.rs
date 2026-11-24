@@ -202,7 +202,7 @@ pub trait CompiledBody {
     /// Provided, not required: the address is the only thing that varies per
     /// implementor. A `(panic ...)` in the body comes back as a raise waiting
     /// on the thread, which the caller's `catch_compiled_panic` takes.
-    fn call(&self, args: &[i64]) -> i64 {
+    fn call(&self, args: &[typelisp_mem::Word]) -> i64 {
         call_body(self.address(), self.body_abi(), args)
     }
 }
@@ -424,7 +424,7 @@ pub struct Interp {
     /// or `lambda` shares between evaluations; the body is rooted
     /// permanently when its definition is made, so its cells are never
     /// reused for another form and a key cannot come to name something else.
-    pub thread_entries: RefCell<HashMap<Vec<i64>, Path>>,
+    pub thread_entries: RefCell<HashMap<Vec<typelisp_mem::Word>, Path>>,
 }
 
 /// Why `compile::driver::precheck_compilable` says no.

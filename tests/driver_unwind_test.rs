@@ -24,47 +24,48 @@
 //!    down from where the throw was raised, and can claim the value.
 //! 4. A handler that declines keeps the throw travelling.
 
+use typelisp_mem::Word;
 use typelisp_abi::{call_state, encode, set_active_heap, FRAME_HANDLER_SLOT, FRAME_PC_SLOT, FRAME_RESERVED_SLOTS, FRAME_VALUE_SLOT};
 use typelisp_abi::{STATUS_CALL, STATUS_RETURN, STATUS_UNWIND};
 use typelisp_mem::{Heap, Value};
 use typelisp_rt::coroutine::{CoroutineFn, FrameStack, Paused};
 
 /// What [`plain`] answers with.
-const NO_THROW_RESULT: i64 = 999;
+const NO_THROW_RESULT: Word = 999;
 
 /// The value [`raiser`] throws.
 const THROWN: i64 = 7;
 
 /// [`guarded`]'s resume ids: `1` is its pad, `2` is after the call it makes.
-const PAD_PC: i64 = 1;
-const AFTER_CALL_PC: i64 = 2;
+const PAD_PC: Word = 1;
+const AFTER_CALL_PC: Word = 2;
 
 /// The prologue every compiled body emits: on first entry open a frame, which
 /// `rt_frame_open` also tells the driver about (it is made *inside* the
 /// callee, so there is no other moment); on a later entry the driver hands
 /// back the address of the same frame's words. Answers with that address and
 /// where to resume.
-unsafe fn prologue(param: i64, nslots: usize) -> (*mut i64, i64) {
+unsafe fn prologue(param: Word, nslots: usize) -> (*mut Word, Word) {
     if param != 0 {
-        let data = param as usize as *mut i64;
+        let data = param as usize as *mut Word;
         return (data, *data.add(FRAME_PC_SLOT));
     }
-    let open = [nslots as i64, 0];
-    let data = typelisp_rt::rt_frame_open(open[0], open[1]) as usize as *mut i64;
+    let open = [nslots as Word, 0];
+    let data = typelisp_rt::rt_frame_open(open[0], open[1]) as usize as *mut Word;
     (data, 0)
 }
 
 /// Writes one slot of a frame, the way `store-arg` on a slot pointer does.
-unsafe fn set_slot(data: *mut i64, idx: usize, word: i64) {
+unsafe fn set_slot(data: *mut Word, idx: usize, word: Word) {
     *data.add(idx) = word;
 }
 
-unsafe fn slot(data: *mut i64, idx: usize) -> i64 {
+unsafe fn slot(data: *mut Word, idx: usize) -> Word {
     *data.add(idx)
 }
 
 /// A body that just answers, with only the slots the protocol owns.
-unsafe extern "C-unwind" fn plain(param: i64) -> i64 {
+unsafe extern "C-unwind" fn plain(param: Word) -> Word {
     let (frame, _) = prologue(param, FRAME_RESERVED_SLOTS);
     set_slot(frame, FRAME_VALUE_SLOT, NO_THROW_RESULT);
     STATUS_RETURN
@@ -72,7 +73,7 @@ unsafe extern "C-unwind" fn plain(param: i64) -> i64 {
 
 /// A body that throws the tag it was passed. Declares no handler, so the
 /// driver has nothing to ask it.
-unsafe extern "C-unwind" fn raiser(param: i64) -> i64 {
+unsafe extern "C-unwind" fn raiser(param: Word) -> Word {
     let (_frame, _) = prologue(param, FRAME_RESERVED_SLOTS);
     let tag = call_state::with(|s| s.pending_arg(0)).expect("raiser was passed a tag");
     let args = [tag, encode(Value::Int(THROWN))];
@@ -88,7 +89,7 @@ unsafe extern "C-unwind" fn raiser(param: i64) -> i64 {
 /// The first slot past the protocol's holds the tag the pad claims. It has to
 /// be a frame slot rather than a local: the pad runs in a *later activation*
 /// than the code that read the argument.
-unsafe extern "C-unwind" fn guarded(param: i64) -> i64 {
+unsafe extern "C-unwind" fn guarded(param: Word) -> Word {
     let (frame, pc) = prologue(param, FRAME_RESERVED_SLOTS + 1);
     if pc == 0 {
         let caught = call_state::with(|s| s.pending_arg(0)).expect("guarded was passed a tag to claim");
@@ -96,7 +97,7 @@ unsafe extern "C-unwind" fn guarded(param: i64) -> i64 {
         set_slot(frame, FRAME_RESERVED_SLOTS, caught);
         // From here an unwind reaching this frame lands at `PAD_PC`.
         set_slot(frame, FRAME_HANDLER_SLOT, PAD_PC);
-        let call = [raiser as *const () as usize as i64, thrown];
+        let call = [raiser as *const () as usize as Word, thrown];
         typelisp_rt::rt_frame_call(call.as_ptr(), 2);
         set_slot(frame, FRAME_PC_SLOT, AFTER_CALL_PC);
         return STATUS_CALL;
@@ -125,7 +126,7 @@ fn heap() -> Box<Heap> {
 
 /// Runs `f` with `args`, with the panic hook silenced — a throw in flight
 /// prints nothing useful and every one of these tests raises at least one.
-fn drive(heap: &mut Heap, f: CoroutineFn, args: &[i64]) -> Result<i64, Paused> {
+fn drive(heap: &mut Heap, f: CoroutineFn, args: &[Word]) -> Result<i64, Paused> {
     let previous = std::panic::take_hook();
     std::panic::set_hook(Box::new(|_| {}));
     let mut stack = FrameStack::new();
@@ -139,7 +140,7 @@ fn drive(heap: &mut Heap, f: CoroutineFn, args: &[i64]) -> Result<i64, Paused> {
 fn a_body_that_returns_hands_its_value_out() {
     let mut heap = heap();
     let before = heap.root_count();
-    assert_eq!(drive(&mut heap, plain, &[]), Ok(NO_THROW_RESULT));
+    assert_eq!(drive(&mut heap, plain, &[]), Ok(NO_THROW_RESULT as i64));
     assert_eq!(heap.root_count(), before, "the body's own frame root outlived it");
 }
 
@@ -162,7 +163,7 @@ fn a_handler_two_frames_down_claims_the_throw() {
     let mut heap = heap();
     let before = heap.root_count();
     let tag = encode(heap.intern_symbol("boom"));
-    assert_eq!(drive(&mut heap, guarded, &[tag, tag]), Ok(encode(Value::Int(THROWN))));
+    assert_eq!(drive(&mut heap, guarded, &[tag, tag]), Ok(encode(Value::Int(THROWN)) as i64));
     assert_eq!(heap.root_count(), before);
 }
 
@@ -185,6 +186,6 @@ fn claiming_repeats() {
     let mut heap = heap();
     let tag = encode(heap.intern_symbol("boom"));
     for _ in 0..3 {
-        assert_eq!(drive(&mut heap, guarded, &[tag, tag]), Ok(encode(Value::Int(THROWN))));
+        assert_eq!(drive(&mut heap, guarded, &[tag, tag]), Ok(encode(Value::Int(THROWN)) as i64));
     }
 }
