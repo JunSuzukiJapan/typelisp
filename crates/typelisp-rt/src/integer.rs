@@ -18,6 +18,7 @@
 //! for the fixnum case in particular.
 
 use typelisp_mem::prelude::*;
+use core::ffi::{c_long, c_ulong};
 use num_bigint::{BigInt, Sign};
 use num_integer::Integer;
 use num_rational::BigRational;
@@ -367,11 +368,11 @@ integer_to_fixed! {
     i8: rt_integer_to_i8;
     i16: rt_integer_to_i16;
     i32: rt_integer_to_i32;
-    i64: rt_integer_to_c_long;
+    c_long: rt_integer_to_c_long;
     u8: rt_integer_to_u8;
     u16: rt_integer_to_u16;
     u32: rt_integer_to_u32;
-    u64: rt_integer_to_c_ulong;
+    c_ulong: rt_integer_to_c_ulong;
 }
 
 macro_rules! integer_fits_fixed {
@@ -416,7 +417,7 @@ pub unsafe extern "C" fn rt_integer_from_word(args: *const i64, argc: u32) -> i6
     wide_result(fixed::to_int(*args))
 }
 
-/// `int->int` on a `c-ulong`: the one receiver whose 64 bits are all value.
+/// `int->int` on a `c-ulong`: the one receiver whose top bit is not a sign.
 ///
 /// # Safety
 ///
@@ -426,7 +427,7 @@ pub unsafe extern "C" fn rt_integer_from_c_ulong(args: *const i64, argc: u32) ->
     if argc < 1 {
         fatal("rt_integer_from_c_ulong: expected 1 argument");
     }
-    wide_result(fixed::to_int(*args as u64))
+    wide_result(fixed::to_int(*args as c_ulong))
 }
 
 /// `(untag-int E)`'s refusal: an `int` in a machine-word position (an index,

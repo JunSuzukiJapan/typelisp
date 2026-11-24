@@ -264,6 +264,9 @@ enum LlvmRetK {
     Unit,
     /// Raw 0/1.
     Bool,
+    /// A small `int`, raw — the way an `int` argument arrives
+    /// ([`LlvmArgK::Int`]); the caller's side tags it.
+    Int,
     /// A freshly-allocated tagged heap `Value::Str`.
     Str,
     /// `Option<handle>` as a heap `BoxedObj::Enum` (`Some` payload =
@@ -309,6 +312,7 @@ fn llvm_ret_kind(ty: &Type) -> LlvmRetK {
         match ty {
             Type::Unit => LlvmRetK::Unit,
             Type::Bool => LlvmRetK::Bool,
+            Type::Int => LlvmRetK::Int,
             Type::Str => LlvmRetK::Str,
             other => panic!("llvm_op_table: return type {:?} has no rt_llvm_call marshaling", other),
         }
@@ -493,6 +497,10 @@ pub(crate) unsafe extern "C" fn rt_llvm_call(args: *const i64, argc: u32) -> i64
         LlvmRetK::Bool => match v {
             Value::Bool(b) => i64::from(b),
             other => rt_llvm_fatal(&format!("rt_llvm_call: {}::{}: expected a Bool result, got {:?}", op.type_key, op.method, other)),
+        },
+        LlvmRetK::Int => match v {
+            Value::Int(n) => n,
+            other => rt_llvm_fatal(&format!("rt_llvm_call: {}::{}: expected an int result, got {:?}", op.type_key, op.method, other)),
         },
         LlvmRetK::Str => match v {
             // Already a heap string; encoding is the tagged word, no copy.

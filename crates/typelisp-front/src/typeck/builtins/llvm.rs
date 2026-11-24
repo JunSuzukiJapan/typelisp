@@ -62,6 +62,10 @@ fn module(reg: &mut Registry) {
     // on, since every callee in those cases is something this same module
     // already added via `add-function` before the caller's body is compiled.
     def.instance("get-function", vec![module_ty(), Type::Str], function_ty());
+    // `c-long-bits`: how wide C's `long` is on the machine the module is for
+    // (`typelisp_mem::target::DataModel`) — the width of a `c-long`, which
+    // the width casts are told like any other integer's.
+    def.instance("c-long-bits", vec![module_ty()], Type::Int);
     // `add-function-with-env`: declares a function under the *extended*
     // ABI a `labels` block with outer-scope captures needs — `i64 name(i64*
     // args, i32 argc, i64* env, i32 env_len)` — used instead of

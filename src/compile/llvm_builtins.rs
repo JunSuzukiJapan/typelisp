@@ -72,6 +72,7 @@ pub(crate) fn eval_llvm_builtin_method(heap: &mut Heap, type_name: &Path, method
             wk::M_VERIFY => Some(llvm_module_verify(args)),
             wk::M_TO_STRING => Some(llvm_module_to_string(heap, args)),
             wk::M_GET_FUNCTION => Some(llvm_module_get_function(heap, args)),
+            wk::M_C_LONG_BITS => Some(Ok(Value::Int(i64::from(typelisp_mem::target::DataModel::current().c_long_bits())))),
             wk::M_ADD_FUNCTION_WITH_ENV => Some(llvm_module_add_function_with_env(heap, args)),
             wk::M_ADD_COROUTINE_FUNCTION => Some(llvm_module_add_coroutine_function(heap, args)),
             _ => None,
@@ -208,9 +209,8 @@ fn i64_word_ptr(
     name: &str,
     who: &str,
 ) -> Result<PointerValue<'static>, EvalError> {
-    let ctx = crate::compile::llvm_context();
-    let idx_val = ctx.i64_type().const_int(index, false);
-    unsafe { b.build_gep(ctx.i64_type(), array_ptr, &[idx_val], name) }
+    let idx_val = crate::compile::carriers::word().const_int(index, false);
+    unsafe { b.build_gep(crate::compile::carriers::word(), array_ptr, &[idx_val], name) }
         .map_err(|e| EvalError::Internal(format!("{}: {}", who, e)))
 }
 
@@ -223,8 +223,7 @@ fn load_i64_word(
     who: &str,
 ) -> Result<BasicValueEnum<'static>, EvalError> {
     let elem_ptr = i64_word_ptr(b, array_ptr, index, names.0, who)?;
-    let ctx = crate::compile::llvm_context();
-    b.build_load(ctx.i64_type(), elem_ptr, names.1).map_err(|e| EvalError::Internal(format!("{}: {}", who, e)))
+    b.build_load(crate::compile::carriers::word(), elem_ptr, names.1).map_err(|e| EvalError::Internal(format!("{}: {}", who, e)))
 }
 
 fn llvm_module_create(heap: &Heap, args: &[Value]) -> Result<Value, EvalError> {
@@ -245,7 +244,7 @@ fn llvm_module_create(heap: &Heap, args: &[Value]) -> Result<Value, EvalError> {
 pub(crate) fn compiled_fn_type() -> inkwell::types::FunctionType<'static> {
     let ctx = crate::compile::llvm_context();
     let ptr_ty = ctx.ptr_type(AddressSpace::default());
-    ctx.i64_type().fn_type(&[ptr_ty.into(), ctx.i32_type().into()], false)
+    crate::compile::carriers::word().fn_type(&[ptr_ty.into(), ctx.i32_type().into()], false)
 }
 
 /// Get-or-create: reuses an existing declaration under `name` (a bodyless
@@ -282,8 +281,7 @@ fn llvm_module_add_function(heap: &Heap, args: &[Value]) -> Result<Value, EvalEr
 /// What comes back is a **status word**, not the value. The value is in the
 /// frame, which is what makes stopping in the middle sayable at all.
 pub(crate) fn coroutine_fn_type() -> inkwell::types::FunctionType<'static> {
-    let ctx = crate::compile::llvm_context();
-    ctx.i64_type().fn_type(&[ctx.i64_type().into()], false)
+    crate::compile::carriers::word().fn_type(&[crate::compile::carriers::word().into()], false)
 }
 
 /// `(add-coroutine-function m name)` — get-or-create a function under
@@ -360,7 +358,7 @@ pub(crate) fn declare_external_compiled_function(module: &Rc<RefCell<Module<'sta
 fn compiled_fn_type_with_env() -> inkwell::types::FunctionType<'static> {
     let ctx = crate::compile::llvm_context();
     let ptr_ty = ctx.ptr_type(AddressSpace::default());
-    ctx.i64_type().fn_type(&[ptr_ty.into(), ctx.i32_type().into(), ptr_ty.into(), ctx.i32_type().into()], false)
+    crate::compile::carriers::word().fn_type(&[ptr_ty.into(), ctx.i32_type().into(), ptr_ty.into(), ctx.i32_type().into()], false)
 }
 
 /// `llvm-builder::load-env` reads a logical captured slot back out of `env`,
@@ -427,7 +425,7 @@ fn llvm_builder_position_at_end(args: &[Value]) -> Result<Value, EvalError> {
 fn llvm_builder_const_word(args: &[Value]) -> Result<Value, EvalError> {
     let _builder = expect_llvm_builder(&args[0])?;
     let n = expect_int(&args[1])?;
-    let value = crate::compile::llvm_context().i64_type().const_int(n as u64, false);
+    let value = crate::compile::carriers::word().const_int(n as u64, false);
     Ok(llvm_value_value(value.into()))
 }
 
@@ -503,8 +501,7 @@ fn llvm_builder_build_select(args: &[Value]) -> Result<Value, EvalError> {
     let else_v = expect_llvm_value(&args[3])?.into_int_value();
     let bld = builder.borrow();
     let err = |e: String| EvalError::Internal(format!("build-select: {}", e));
-    let ctx = crate::compile::llvm_context();
-    let zero = ctx.i64_type().const_zero();
+    let zero = crate::compile::carriers::word().const_zero();
     let is_nonzero = bld.build_int_compare(inkwell::IntPredicate::NE, cond, zero, "select_cond").map_err(|e| err(e.to_string()))?;
     let result = bld.build_select(is_nonzero, then_v, else_v, "select").map_err(|e| err(e.to_string()))?;
     Ok(llvm_value_value(result.into_int_value().into()))
@@ -533,12 +530,11 @@ fn llvm_builder_build_int_overflow(args: &[Value], name: &str, intrinsic_name: &
     let b = expect_llvm_value(&args[3])?.into_int_value();
     let flag_slot = expect_llvm_value(&args[4])?.into_pointer_value();
     let bld = builder.borrow();
-    let ctx = crate::compile::llvm_context();
-    let i64_ty = ctx.i64_type();
+    let word_ty = crate::compile::carriers::word();
     let err = |e: String| EvalError::Internal(format!("build-{}-overflow: {}", name, e));
     let intrinsic = inkwell::intrinsics::Intrinsic::find(intrinsic_name).ok_or_else(|| err(format!("no such LLVM intrinsic {}", intrinsic_name)))?;
     let decl = intrinsic
-        .get_declaration(&module.borrow(), &[i64_ty.into()])
+        .get_declaration(&module.borrow(), &[word_ty.into()])
         .ok_or_else(|| err(format!("failed to declare {}", intrinsic_name)))?;
     let call = bld.build_call(decl, &[a.into(), b.into()], name).map_err(|e| err(e.to_string()))?;
     let pair = match call.try_as_basic_value() {
@@ -547,26 +543,26 @@ fn llvm_builder_build_int_overflow(args: &[Value], name: &str, intrinsic_name: &
     };
     let result = bld.build_extract_value(pair, 0, "ov_result").map_err(|e| err(e.to_string()))?.into_int_value();
     let flag = bld.build_extract_value(pair, 1, "ov_flag").map_err(|e| err(e.to_string()))?.into_int_value();
-    let flag_wide = bld.build_int_z_extend(flag, i64_ty, "ov_flag_i64").map_err(|e| err(e.to_string()))?;
-    let zero = i64_ty.const_zero();
-    let slot0 = unsafe { bld.build_gep(i64_ty, flag_slot, &[zero], "ov_flag_ptr").map_err(|e| err(e.to_string()))? };
+    let flag_wide = bld.build_int_z_extend(flag, word_ty, "ov_flag_i64").map_err(|e| err(e.to_string()))?;
+    let zero = word_ty.const_zero();
+    let slot0 = unsafe { bld.build_gep(word_ty, flag_slot, &[zero], "ov_flag_ptr").map_err(|e| err(e.to_string()))? };
     bld.build_store(slot0, flag_wide).map_err(|e| err(e.to_string()))?;
     Ok(llvm_value_value(result.into()))
 }
 
-/// Stack-allocates a `[count x i64]` array and returns its base pointer, to
-/// be filled in by `store-arg` and passed to `build-call` — the compiled-IR
-/// equivalent of building the `i64* args` array every compiled function's
-/// fixed ABI expects (see `llvm_module_add_function`'s doc comment). Opaque
-/// pointers (the only kind LLVM 22 has) carry no element-type info of their own, so
-/// this pointer is usable as a flat `i64*` exactly the way `load_arg`'s own
-/// `args_ptr` parameter already is — every GEP against it supplies
-/// `ctx.i64_type()` itself, regardless of the alloca's nominal array type.
+/// Stack-allocates an array of `count` words and returns its base pointer,
+/// to be filled in by `store-arg` and passed to `build-call` — the
+/// compiled-IR equivalent of building the `args` array every compiled
+/// function's fixed ABI expects (see `llvm_module_add_function`'s doc
+/// comment). Opaque pointers (the only kind LLVM 22 has) carry no
+/// element-type info of their own, so this pointer is usable as a flat array
+/// of words exactly the way `load_arg`'s own `args_ptr` parameter already is
+/// — every GEP against it supplies the word type ([`crate::compile::carriers::word`])
+/// itself, regardless of the alloca's nominal array type.
 fn llvm_builder_alloca_args(args: &[Value]) -> Result<Value, EvalError> {
     let builder = expect_llvm_builder(&args[0])?;
     let count = expect_int(&args[1])? as u32;
-    let ctx = crate::compile::llvm_context();
-    let array_ty = ctx.i64_type().array_type(count);
+    let array_ty = crate::compile::carriers::word().array_type(count);
     let b = builder.borrow();
     let ptr = entry_alloca(&b, array_ty, "call_args").map_err(|e| EvalError::Internal(format!("alloca-args: {}", e)))?;
     Ok(llvm_value_value(ptr.into()))
@@ -643,7 +639,7 @@ fn llvm_builder_scratch_slot(args: &[Value]) -> Result<Value, EvalError> {
     if let Some(slot) = known {
         return Ok(llvm_value_value(slot.into()));
     }
-    let slot = entry_alloca(&builder.borrow(), crate::compile::llvm_context().i64_type().array_type(1), &format!("scratch{}", role))
+    let slot = entry_alloca(&builder.borrow(), crate::compile::carriers::word().array_type(1), &format!("scratch{}", role))
         .map_err(|e| EvalError::Internal(format!("scratch-slot: {}", e)))?;
     FRAME_CTXS.with(|c| {
         if let Some(f) = c.borrow_mut().get_mut(&key) {
@@ -714,8 +710,7 @@ fn llvm_builder_build_icmp(args: &[Value], name: &str, predicate: inkwell::IntPr
     let b = expect_llvm_value(&args[2])?.into_int_value();
     let bld = builder.borrow();
     let cmp = bld.build_int_compare(predicate, a, b, name).map_err(|e| EvalError::Internal(format!("{}: {}", name, e)))?;
-    let ctx = crate::compile::llvm_context();
-    let widened = bld.build_int_z_extend(cmp, ctx.i64_type(), name).map_err(|e| EvalError::Internal(format!("{}: {}", name, e)))?;
+    let widened = bld.build_int_z_extend(cmp, crate::compile::carriers::word(), name).map_err(|e| EvalError::Internal(format!("{}: {}", name, e)))?;
     Ok(llvm_value_value(widened.into()))
 }
 
@@ -728,8 +723,7 @@ fn llvm_builder_build_cond_br(args: &[Value]) -> Result<Value, EvalError> {
     let then_block = expect_llvm_basic_block(&args[2])?;
     let else_block = expect_llvm_basic_block(&args[3])?;
     let b = builder.borrow();
-    let ctx = crate::compile::llvm_context();
-    let zero = ctx.i64_type().const_zero();
+    let zero = crate::compile::carriers::word().const_zero();
     let is_nonzero =
         b.build_int_compare(inkwell::IntPredicate::NE, cond, zero, "if_cond_nz").map_err(|e| EvalError::Internal(format!("build-cond-br: {}", e)))?;
     b.build_conditional_branch(is_nonzero, then_block, else_block).map_err(|e| EvalError::Internal(format!("build-cond-br: {}", e)))?;
@@ -860,14 +854,14 @@ fn llvm_builder_build_make_closure(args: &[Value]) -> Result<Value, EvalError> {
         EvalError::Internal(format!("build-make-closure: {} not declared in this module", ctor_name))
     })?;
 
-    let i64_ty = ctx.i64_type();
+    let word_ty = crate::compile::carriers::word();
     let argc = 2 + env_len;
-    let ctor_args_ptr = entry_alloca(&b, i64_ty.array_type(argc as u32), "closure_ctor_args")
+    let ctor_args_ptr = entry_alloca(&b, word_ty.array_type(argc as u32), "closure_ctor_args")
         .map_err(|e| EvalError::Internal(format!("build-make-closure: {}", e)))?;
     let store_slot = |idx: u64, v: BasicValueEnum<'static>| -> Result<(), EvalError> {
-        let idx_val = i64_ty.const_int(idx, false);
+        let idx_val = word_ty.const_int(idx, false);
         let p = unsafe {
-            b.build_gep(i64_ty, ctor_args_ptr, &[idx_val], "closure_ctor_arg_ptr")
+            b.build_gep(word_ty, ctor_args_ptr, &[idx_val], "closure_ctor_arg_ptr")
                 .map_err(|e| EvalError::Internal(format!("build-make-closure: {}", e)))?
         };
         b.build_store(p, v).map_err(|e| EvalError::Internal(format!("build-make-closure: {}", e)))?;
@@ -875,18 +869,18 @@ fn llvm_builder_build_make_closure(args: &[Value]) -> Result<Value, EvalError> {
     };
 
     let fn_ptr_int = b
-        .build_ptr_to_int(target.as_global_value().as_pointer_value(), i64_ty, "closure_fn_ptr")
+        .build_ptr_to_int(target.as_global_value().as_pointer_value(), word_ty, "closure_fn_ptr")
         .map_err(|e| EvalError::Internal(format!("build-make-closure: {}", e)))?;
     store_slot(0, fn_ptr_int.into())?;
-    store_slot(1, i64_ty.const_int(sexpr_mask, false).into())?;
+    store_slot(1, word_ty.const_int(sexpr_mask, false).into())?;
     for i in 0..env_len {
-        let idx_val = i64_ty.const_int(i, false);
+        let idx_val = word_ty.const_int(i, false);
         let src_ptr = unsafe {
-            b.build_gep(i64_ty, env_ptr, &[idx_val], "closure_env_src")
+            b.build_gep(word_ty, env_ptr, &[idx_val], "closure_env_src")
                 .map_err(|e| EvalError::Internal(format!("build-make-closure: {}", e)))?
         };
         let v = b
-            .build_load(i64_ty, src_ptr, "closure_env_val")
+            .build_load(word_ty, src_ptr, "closure_env_val")
             .map_err(|e| EvalError::Internal(format!("build-make-closure: {}", e)))?;
         store_slot(2 + i, v)?;
     }
@@ -922,11 +916,10 @@ fn llvm_builder_build_make_closure(args: &[Value]) -> Result<Value, EvalError> {
 fn llvm_builder_build_malloc(args: &[Value]) -> Result<Value, EvalError> {
     let builder = expect_llvm_builder(&args[0])?;
     let count = expect_int(&args[1])? as u64;
-    let ctx = crate::compile::llvm_context();
-    let count_val = ctx.i64_type().const_int(count, false);
+    let count_val = crate::compile::carriers::word().const_int(count, false);
     let ptr = builder
         .borrow()
-        .build_array_malloc(ctx.i64_type(), count_val, "box")
+        .build_array_malloc(crate::compile::carriers::word(), count_val, "box")
         .map_err(|e| EvalError::Internal(format!("build-malloc: {}", e)))?;
     Ok(llvm_value_value(ptr.into()))
 }
@@ -967,10 +960,9 @@ fn llvm_builder_build_int_to_ptr(args: &[Value]) -> Result<Value, EvalError> {
 fn llvm_builder_build_ptr_to_int(args: &[Value]) -> Result<Value, EvalError> {
     let builder = expect_llvm_builder(&args[0])?;
     let ptr = expect_llvm_value(&args[1])?.into_pointer_value();
-    let ctx = crate::compile::llvm_context();
     let v = builder
         .borrow()
-        .build_ptr_to_int(ptr, ctx.i64_type(), "ptr_to_int")
+        .build_ptr_to_int(ptr, crate::compile::carriers::word(), "ptr_to_int")
         .map_err(|e| EvalError::Internal(format!("build-ptr-to-int: {}", e)))?;
     Ok(llvm_value_value(v.into()))
 }
@@ -989,10 +981,9 @@ fn llvm_builder_build_ptr_to_int(args: &[Value]) -> Result<Value, EvalError> {
 fn llvm_builder_build_fn_address(args: &[Value]) -> Result<Value, EvalError> {
     let builder = expect_llvm_builder(&args[0])?;
     let f = expect_llvm_function(&args[1])?;
-    let ctx = crate::compile::llvm_context();
     let v = builder
         .borrow()
-        .build_ptr_to_int(f.as_global_value().as_pointer_value(), ctx.i64_type(), "fn_address")
+        .build_ptr_to_int(f.as_global_value().as_pointer_value(), crate::compile::carriers::word(), "fn_address")
         .map_err(|e| EvalError::Internal(format!("build-fn-address: {}", e)))?;
     Ok(llvm_value_value(v.into()))
 }

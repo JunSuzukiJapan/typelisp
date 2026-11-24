@@ -408,6 +408,15 @@ impl Target {
         }
     }
 
+    /// The C data model of the machine the target is.
+    pub fn data_model(self) -> typelisp_mem::target::DataModel {
+        use typelisp_mem::target::DataModel;
+        match self {
+            Target::Host => DataModel::HOST,
+            Target::Wasip1 | Target::Wasm32Unknown | Target::Thumbv7em | Target::Thumbv8mMain => DataModel::ILP32,
+        }
+    }
+
     /// The target triple, as `--target` spells it.
     pub fn name(self) -> &'static str {
         match self {
@@ -426,9 +435,14 @@ pub fn compile_file_with(source_path: &str, output_path: &str, options: &BuildOp
         return Err("--no-cons and --heap-cells cannot be combined: without cons cells there is no arena to size".to_string());
     }
     crate::compile::driver::emitted_layout_is_runnable()?;
-    // A board's C functions are the board's: while its program compiles,
-    // `defffi` does not look for them here.
-    let _c_functions = crate::compile::ffi::CFunctionsOn::target(options.target.board().is_some());
+    // Code for another machine: C's `long` and a pointer are as wide as they
+    // are there, for the checker's layouts and casts as much as for the code
+    // generated.
+    let _data_model = typelisp_mem::target::DataModel::producing(options.target.data_model());
+    // Another machine's C functions are that machine's: while its program
+    // compiles, `defffi` does not look for them here. (Called here, they
+    // would be called with the other machine's widths.)
+    let _c_functions = crate::compile::ffi::CFunctionsOn::target(options.target != Target::Host);
     let source =
         fs::read_to_string(source_path).map_err(|e| format!("failed to read \"{}\": {}", source_path, e))?;
 
@@ -578,7 +592,7 @@ pub fn compile_file_with(source_path: &str, output_path: &str, options: &BuildOp
         // here: these resolve as ordinary linker symbols against
         // `typelisp-rt`'s `staticlib` once `write_executable` links it in.
         let ptr_ty = ctx.ptr_type(AddressSpace::default());
-        let fn_ty = ctx.i64_type().fn_type(&[ptr_ty.into(), ctx.i32_type().into()], false);
+        let fn_ty = crate::compile::carriers::word().fn_type(&[ptr_ty.into(), ctx.i32_type().into()], false);
         for (name, _) in crate::compile::externs::rt_extern_functions() {
             module.add_function(name, fn_ty, None);
         }
@@ -636,7 +650,7 @@ pub fn compile_file_with(source_path: &str, output_path: &str, options: &BuildOp
             crate::compile::llvm_builtins::coroutine_fn_type()
         } else {
             let ptr_ty = ctx.ptr_type(AddressSpace::default());
-            ctx.i64_type().fn_type(&[ptr_ty.into(), ctx.i32_type().into()], false)
+            crate::compile::carriers::word().fn_type(&[ptr_ty.into(), ctx.i32_type().into()], false)
         };
         for item in &items {
             let symbol = target_symbol_name(item);
@@ -899,6 +913,17 @@ pub fn compile_file_with(source_path: &str, output_path: &str, options: &BuildOp
                 }
                 Ok(())
             })
+            .and_then(|()| {
+                // The whole program's IR, for reading, whatever the target.
+                // An AOT module is the one the island's output is hardest to
+                // see: it is neither `disassemble`'s single function nor a
+                // committed dump, and by the time anything is wrong it is
+                // machine code. `TYPELISP_AOT_IR=<path>` writes it here.
+                if let Ok(path) = std::env::var("TYPELISP_AOT_IR") {
+                    fs::write(&path, m.print_to_string().to_string()).map_err(|e| format!("failed to write {}: {}", path, e))?;
+                }
+                Ok(())
+            })
             .and_then(|()| match options.target {
                 Target::Host => write_executable(&m, output_path, &link_libraries, &items),
                 Target::Wasip1 | Target::Wasm32Unknown | Target::Thumbv7em | Target::Thumbv8mMain => {
@@ -1008,7 +1033,7 @@ fn build_main_wrapper(
 
     let i32_type = ctx.i32_type();
     let ptr_ty = ctx.ptr_type(AddressSpace::default());
-    let fn_ty = ctx.i64_type().fn_type(&[ptr_ty.into(), ctx.i32_type().into()], false);
+    let fn_ty = crate::compile::carriers::word().fn_type(&[ptr_ty.into(), ctx.i32_type().into()], false);
     module.add_function("rt_heap_init", fn_ty, None);
     let main_fn = module.add_function(ENTRY_POINT_NAME, i32_type.fn_type(&[], false), None);
     let entry_block = ctx.append_basic_block(main_fn, "entry");
@@ -1033,15 +1058,15 @@ fn build_main_wrapper(
     // address under the function's definition and the function type C calls
     // it at, which is what a callback argument looks up.
     for (i, (sig, entry)) in callback_entries.iter().enumerate() {
-        let i64_ty = ctx.i64_type();
+        let word_ty = crate::compile::carriers::word();
         let definition = typelisp_mem::type_words::definition_words(sig.function.ns(), sig.function.name_symbol());
         let (definition, len) =
             crate::compile::type_table::constant_words(module, &format!("ffi_callback_function${}", i), &definition);
         let words = [
-            entry.as_global_value().as_pointer_value().const_to_int(i64_ty),
+            entry.as_global_value().as_pointer_value().const_to_int(word_ty),
             crate::compile::type_table::load(&builder, module, sig.ty)?,
-            definition.as_pointer_value().const_to_int(i64_ty),
-            i64_ty.const_int(len as u64, false),
+            definition.as_pointer_value().const_to_int(word_ty),
+            word_ty.const_int(len as u64, false),
         ];
         call_shim(ctx, module, &builder, "rt_ffi_callback_register", &words)?;
     }
@@ -1074,7 +1099,7 @@ fn build_main_wrapper(
     // module actually calls `rt_eval`: naming the shim is what pulls the
     // checker and the interpreter into the executable.
     if let Some((bytes, ns, release)) = eval_env {
-        let i64_ty = ctx.i64_type();
+        let word_ty = crate::compile::carriers::word();
         let blob = module.add_global(ctx.i8_type().array_type(bytes.len() as u32), None, "typelisp_eval_env");
         blob.set_initializer(&ctx.const_string(bytes, false));
         blob.set_constant(true);
@@ -1086,11 +1111,11 @@ fn build_main_wrapper(
             &builder,
             "rt_eval_state",
             &[
-                blob.as_pointer_value().const_to_int(i64_ty),
-                i64_ty.const_int(bytes.len() as u64, false),
-                ns_words.as_pointer_value().const_to_int(i64_ty),
-                i64_ty.const_int(ns_len as u64, false),
-                i64_ty.const_int(release as u64, false),
+                blob.as_pointer_value().const_to_int(word_ty),
+                word_ty.const_int(bytes.len() as u64, false),
+                ns_words.as_pointer_value().const_to_int(word_ty),
+                word_ty.const_int(ns_len as u64, false),
+                word_ty.const_int(release as u64, false),
             ],
         )?;
     }
@@ -1108,9 +1133,9 @@ fn build_main_wrapper(
         &builder,
         "rt_heap_init",
         &[
-            ctx.i64_type().const_int(heap.cells as u64, false),
-            ctx.i64_type().const_int(heap.max_memory.unwrap_or(0) as u64, false),
-            ctx.i64_type().const_int(heap.fixed as u64, false),
+            crate::compile::carriers::word().const_int(heap.cells as u64, false),
+            crate::compile::carriers::word().const_int(heap.max_memory.unwrap_or(0) as u64, false),
+            crate::compile::carriers::word().const_int(heap.fixed as u64, false),
         ],
     )?;
     // Between the heap and the vtables and global inits, and that position
@@ -1124,20 +1149,20 @@ fn build_main_wrapper(
     // A board's interrupt handlers (`typelisp_rt::interrupt`), each under its
     // vector-table entry: after the heap, which a handler runs on.
     for (vector, handler) in interrupt_handlers {
-        let i64_ty = ctx.i64_type();
-        let words = [i64_ty.const_int(u64::from(*vector), false), handler.as_global_value().as_pointer_value().const_to_int(i64_ty)];
+        let word_ty = crate::compile::carriers::word();
+        let words = [word_ty.const_int(u64::from(*vector), false), handler.as_global_value().as_pointer_value().const_to_int(word_ty)];
         call_shim(ctx, module, &builder, "rt_interrupt_register", &words)?;
     }
     // Trait-object vtables: after `rt_eval_init` (above), whose `Interp::new`
     // clears the table, and complete before `tl_main` can reach a `:dyn`
     // call site.
     if !vtables.is_empty() {
-        let i64_ty = ctx.i64_type();
+        let word_ty = crate::compile::carriers::word();
         let rt_vtable_set = module
             .get_function("rt_vtable_set")
             .ok_or_else(|| "internal error: rt_vtable_set not declared in module".to_string())?;
         let args_ptr = builder
-            .build_alloca(i64_ty.array_type(4), "vtable_set_args")
+            .build_alloca(word_ty.array_type(4), "vtable_set_args")
             .map_err(|e| format!("failed to alloca vtable-set args: {}", e))?;
         for (id, slots) in vtables {
             for (slot, (type_name, method)) in slots.iter().enumerate() {
@@ -1149,7 +1174,7 @@ fn build_main_wrapper(
                         method.name()
                     )
                 })?;
-                let fn_ptr = target.as_global_value().as_pointer_value().const_to_int(i64_ty);
+                let fn_ptr = target.as_global_value().as_pointer_value().const_to_int(word_ty);
                 // `IntValue` is `Copy`, so the deref below is free — spelled
                 // out because this crate is edition 2018, where an array's
                 // `into_iter()` still yields references.
@@ -1162,16 +1187,16 @@ fn build_main_wrapper(
                     typelisp_abi::BODY_ABI_CLASSIC
                 };
                 let set_args = [
-                    i64_ty.const_int(*id as u64, false),
-                    i64_ty.const_int(slot as u64, false),
+                    word_ty.const_int(*id as u64, false),
+                    word_ty.const_int(slot as u64, false),
                     fn_ptr,
-                    i64_ty.const_int(u64::from(body_abi), false),
+                    word_ty.const_int(u64::from(body_abi), false),
                 ];
                 for (i, v) in set_args.iter().enumerate() {
                     let v = *v;
                     let p = unsafe {
                         builder
-                            .build_gep(i64_ty, args_ptr, &[i64_ty.const_int(i as u64, false)], "vtable_set_arg_ptr")
+                            .build_gep(word_ty, args_ptr, &[word_ty.const_int(i as u64, false)], "vtable_set_arg_ptr")
                             .map_err(|e| format!("failed to build vtable-set gep: {}", e))?
                     };
                     builder.build_store(p, v).map_err(|e| format!("failed to store vtable-set arg: {}", e))?;
@@ -1185,24 +1210,24 @@ fn build_main_wrapper(
     // The supertrait upcast table, for the same reason and at the same
     // point: a `:dyn` upcast in `tl_main` reads it, and it is all constants.
     if !upcasts.is_empty() {
-        let i64_ty = ctx.i64_type();
+        let word_ty = crate::compile::carriers::word();
         let rt_upcast_set = module
             .get_function("rt_upcast_set")
             .ok_or_else(|| "internal error: rt_upcast_set not declared in module".to_string())?;
         let args_ptr = builder
-            .build_alloca(i64_ty.array_type(3), "upcast_set_args")
+            .build_alloca(word_ty.array_type(3), "upcast_set_args")
             .map_err(|e| format!("failed to alloca upcast-set args: {}", e))?;
         for (from, trait_id, to) in upcasts {
             let set_args = [
-                i64_ty.const_int(*from as u64, false),
-                i64_ty.const_int(*trait_id as u64, false),
-                i64_ty.const_int(*to as u64, false),
+                word_ty.const_int(*from as u64, false),
+                word_ty.const_int(*trait_id as u64, false),
+                word_ty.const_int(*to as u64, false),
             ];
             for (i, v) in set_args.iter().enumerate() {
                 let v = *v;
                 let p = unsafe {
                     builder
-                        .build_gep(i64_ty, args_ptr, &[i64_ty.const_int(i as u64, false)], "upcast_set_arg_ptr")
+                        .build_gep(word_ty, args_ptr, &[word_ty.const_int(i as u64, false)], "upcast_set_arg_ptr")
                         .map_err(|e| format!("failed to build upcast-set gep: {}", e))?
                 };
                 builder.build_store(p, v).map_err(|e| format!("failed to store upcast-set arg: {}", e))?;
@@ -1252,7 +1277,7 @@ fn build_main_wrapper(
     // `(task ...)` admits -- which is the AOT-scheduler work's remaining
     // limit this closes.
     let coroutine_fn_ty = crate::compile::llvm_builtins::coroutine_fn_type();
-    let i64_ty = ctx.i64_type();
+    let word_ty = crate::compile::carriers::word();
     let mut init_addrs: Vec<inkwell::values::IntValue<'static>> = Vec::with_capacity(global_init_names.len());
     for name in global_init_names {
         let f = module
@@ -1264,9 +1289,9 @@ fn build_main_wrapper(
                 name
             ));
         }
-        init_addrs.push(f.as_global_value().as_pointer_value().const_to_int(i64_ty));
+        init_addrs.push(f.as_global_value().as_pointer_value().const_to_int(word_ty));
     }
-    let entry_addr = tl_main.as_global_value().as_pointer_value().const_to_int(i64_ty);
+    let entry_addr = tl_main.as_global_value().as_pointer_value().const_to_int(word_ty);
     // The entry shim, and the one without a scheduler that takes its place
     // when the program turns out to need none (below).
     let mut entry: Option<(inkwell::values::FunctionValue<'static>, &str)> = None;
@@ -1286,18 +1311,18 @@ fn build_main_wrapper(
         if eval_env.is_none() {
             entry = Some((rt_run_program, if main_returns_int { "rt_run_program_alone_int" } else { "rt_run_program_alone" }));
         }
-        let inits = module.add_global(i64_ty.array_type(init_addrs.len() as u32), None, "tl_global_inits");
-        inits.set_initializer(&i64_ty.const_array(&init_addrs));
+        let inits = module.add_global(word_ty.array_type(init_addrs.len() as u32), None, "tl_global_inits");
+        inits.set_initializer(&word_ty.const_array(&init_addrs));
         inits.set_constant(true);
-        let inits_addr = inits.as_pointer_value().const_to_int(i64_ty);
-        let words = [inits_addr, i64_ty.const_int(init_addrs.len() as u64, false), entry_addr];
+        let inits_addr = inits.as_pointer_value().const_to_int(word_ty);
+        let words = [inits_addr, word_ty.const_int(init_addrs.len() as u64, false), entry_addr];
         let args_ptr = builder
-            .build_alloca(i64_ty.array_type(words.len() as u32), "program_args")
+            .build_alloca(word_ty.array_type(words.len() as u32), "program_args")
             .map_err(|e| format!("failed to alloca the program arguments: {}", e))?;
         for (i, w) in words.iter().enumerate() {
             let slot = unsafe {
                 builder
-                    .build_gep(i64_ty, args_ptr, &[i64_ty.const_int(i as u64, false)], "program_arg_ptr")
+                    .build_gep(word_ty, args_ptr, &[word_ty.const_int(i as u64, false)], "program_arg_ptr")
                     .map_err(|e| format!("failed to build the program argument gep: {}", e))?
             };
             builder.build_store(slot, *w).map_err(|e| format!("failed to store a program argument: {}", e))?;
@@ -1312,7 +1337,7 @@ fn build_main_wrapper(
         if !init_addrs.is_empty() {
             return Err("internal error: a classic-ABI entry point cannot run global initialisers (no scheduler)".to_string());
         }
-        let rt_run_entry = module.add_function("rt_run_entry", i64_ty.fn_type(&[i64_ty.into()], false), None);
+        let rt_run_entry = module.add_function("rt_run_entry", word_ty.fn_type(&[word_ty.into()], false), None);
         builder
             .build_call(rt_run_entry, &[entry_addr.into()], "tl_main_result")
             .map_err(|e| format!("failed to build entry-point call: {}", e))?
@@ -1460,20 +1485,20 @@ fn leave_out_unread_globals(
         }
         read = now;
     }
-    let i64_ty = module.get_context().i64_type();
+    let word_ty = crate::compile::carriers::word();
     let words: Vec<inkwell::values::IntValue<'static>> = globals
         .inits
         .iter()
         .zip(&init_fns)
         .map(|(init, f)| {
             if init.always || read.contains(&init.id) {
-                f.as_global_value().as_pointer_value().const_to_int(i64_ty)
+                f.as_global_value().as_pointer_value().const_to_int(word_ty)
             } else {
-                i64_ty.const_zero()
+                word_ty.const_zero()
             }
         })
         .collect();
-    array.set_initializer(&i64_ty.const_array(&words));
+    array.set_initializer(&word_ty.const_array(&words));
     Ok(())
 }
 
@@ -1624,7 +1649,7 @@ fn emit_print_registration(
 ) -> Result<(), String> {
     let builder = ctx.create_builder();
     builder.position_at_end(ctx.append_basic_block(register, "entry"));
-    let i64_ty = ctx.i64_type();
+    let word_ty = crate::compile::carriers::word();
     // A `(pointer, length)` pair per string, from a module-level constant
     // — no heap involved, so this can run before `rt_heap_init`.
     let literal = |builder: &inkwell::builder::Builder<'static>, text: &str| -> Result<(inkwell::values::IntValue<'static>, inkwell::values::IntValue<'static>), String> {
@@ -1632,8 +1657,8 @@ fn emit_print_registration(
             .build_global_string_ptr(text, "print_reg_str")
             .map_err(|e| format!("failed to build a printer-registration string: {}", e))?;
         Ok((
-            g.as_pointer_value().const_to_int(i64_ty),
-            i64_ty.const_int(text.len() as u64, false),
+            g.as_pointer_value().const_to_int(word_ty),
+            word_ty.const_int(text.len() as u64, false),
         ))
     };
     let call = |builder: &inkwell::builder::Builder<'static>, name: &str, words: &[inkwell::values::IntValue<'static>]| -> Result<(), String> {
@@ -1641,12 +1666,12 @@ fn emit_print_registration(
             .get_function(name)
             .ok_or_else(|| format!("internal error: {} not declared in module", name))?;
         let args_ptr = builder
-            .build_alloca(i64_ty.array_type(words.len() as u32), "print_reg_args")
+            .build_alloca(word_ty.array_type(words.len() as u32), "print_reg_args")
             .map_err(|e| format!("failed to alloca printer-registration args: {}", e))?;
         for (i, w) in words.iter().enumerate() {
             let p = unsafe {
                 builder
-                    .build_gep(i64_ty, args_ptr, &[i64_ty.const_int(i as u64, false)], "print_reg_arg_ptr")
+                    .build_gep(word_ty, args_ptr, &[word_ty.const_int(i as u64, false)], "print_reg_arg_ptr")
                     .map_err(|e| format!("failed to build printer-registration gep: {}", e))?
             };
             builder.build_store(p, *w).map_err(|e| format!("failed to store printer-registration arg: {}", e))?;
@@ -1664,18 +1689,18 @@ fn emit_print_registration(
     if let Some(live) = live {
         for (path, variant, name) in enum_variants.iter().filter(|(path, ..)| live.has_definition(path)) {
             let (name_ptr, name_len) = literal(&builder, name)?;
-            call(&builder, "rt_print_enum_variant", &[definition(path)?, i64_ty.const_int(*variant as u64, false), name_ptr, name_len])?;
+            call(&builder, "rt_print_enum_variant", &[definition(path)?, word_ty.const_int(*variant as u64, false), name_ptr, name_len])?;
         }
         for (path, variant, index, template) in field_templates.iter().filter(|(path, ..)| live.has_definition(path)) {
             call(
                 &builder,
                 "rt_print_field_template",
-                &[definition(path)?, i64_ty.const_int(*variant as u64, true), i64_ty.const_int(*index as u64, true), ty(*template)?],
+                &[definition(path)?, word_ty.const_int(*variant as u64, true), word_ty.const_int(*index as u64, true), ty(*template)?],
             )?;
         }
         for (path, index, name) in field_names.iter().filter(|(path, ..)| live.has_definition(path)) {
             let (name_ptr, name_len) = literal(&builder, name)?;
-            call(&builder, "rt_print_field_name", &[definition(path)?, i64_ty.const_int(*index as u64, true), name_ptr, name_len])?;
+            call(&builder, "rt_print_field_name", &[definition(path)?, word_ty.const_int(*index as u64, true), name_ptr, name_len])?;
         }
         for ((receiver, symbol), live) in print_objects.iter().zip(&live.print_objects) {
             // A type no value of can exist is registered with no method, so
@@ -1687,7 +1712,7 @@ fn emit_print_registration(
                 })?;
                 classic_door(ctx, module, target)?
             } else {
-                i64_ty.const_zero()
+                word_ty.const_zero()
             };
             call(&builder, "rt_print_object_method", &[ty(*receiver)?, fn_ptr])?;
         }
@@ -1695,7 +1720,7 @@ fn emit_print_registration(
     if writes {
         for (name, id) in printer_globals {
             let (name_ptr, name_len) = literal(&builder, name)?;
-            call(&builder, "rt_print_global", &[name_ptr, name_len, i64_ty.const_int(*id as u64, false)])?;
+            call(&builder, "rt_print_global", &[name_ptr, name_len, word_ty.const_int(*id as u64, false)])?;
         }
     }
     // Type names are written for the entry file's module, as the interpreter
@@ -1703,7 +1728,7 @@ fn emit_print_registration(
     let view = typelisp_print::shared::name_view();
     let words = |name: &str, words: &[typelisp_mem::type_words::Word]| {
         let (global, len) = crate::compile::type_table::constant_words(module, name, words);
-        (global.as_pointer_value().const_to_int(i64_ty), i64_ty.const_int(len as u64, false))
+        (global.as_pointer_value().const_to_int(word_ty), word_ty.const_int(len as u64, false))
     };
     let (module_ptr, module_len) = words("print_name_module", &typelisp_mem::type_words::ns_words(view.module()));
     // In the order of the names, so the executable is the same each time.
@@ -1711,18 +1736,18 @@ fn emit_print_registration(
     imports.sort_by_key(|(_, name)| **name);
     // One table, which the runtime decodes only when a name is written
     // (`typelisp_print::aot::rt_print_names`).
-    let mut table = vec![module_ptr, module_len, i64_ty.const_int(imports.len() as u64, false)];
+    let mut table = vec![module_ptr, module_len, word_ty.const_int(imports.len() as u64, false)];
     for (i, ((ns, sym), name)) in imports.into_iter().enumerate() {
         let (def_ptr, def_len) =
             words(&format!("print_name_import${}", i), &typelisp_mem::type_words::definition_words(*ns, *sym));
         let (name_ptr, name_len) = literal(&builder, name)?;
         table.extend([def_ptr, def_len, name_ptr, name_len]);
     }
-    let names = module.add_global(i64_ty.array_type(table.len() as u32), None, "print_names");
-    names.set_initializer(&i64_ty.const_array(&table));
+    let names = module.add_global(word_ty.array_type(table.len() as u32), None, "print_names");
+    names.set_initializer(&word_ty.const_array(&table));
     names.set_constant(true);
     names.set_linkage(inkwell::module::Linkage::Private);
-    call(&builder, "rt_print_names", &[names.as_pointer_value().const_to_int(i64_ty)])?;
+    call(&builder, "rt_print_names", &[names.as_pointer_value().const_to_int(word_ty)])?;
     builder.build_return(None).map_err(|e| format!("failed to build the printer registration's return: {}", e))?;
     Ok(())
 }
@@ -1767,7 +1792,7 @@ fn call_shim(
     name: &str,
     words: &[inkwell::values::IntValue<'static>],
 ) -> Result<(), String> {
-    let i64_ty = ctx.i64_type();
+    let word_ty = crate::compile::carriers::word();
     let f = module
         .get_function(name)
         .ok_or_else(|| format!("internal error: {} not declared in module", name))?;
@@ -1775,12 +1800,12 @@ fn call_shim(
         ctx.ptr_type(AddressSpace::default()).const_null()
     } else {
         let p = builder
-            .build_alloca(i64_ty.array_type(words.len() as u32), "shim_args")
+            .build_alloca(word_ty.array_type(words.len() as u32), "shim_args")
             .map_err(|e| format!("failed to alloca {} args: {}", name, e))?;
         for (i, w) in words.iter().enumerate() {
             let slot = unsafe {
                 builder
-                    .build_gep(i64_ty, p, &[i64_ty.const_int(i as u64, false)], "shim_arg_ptr")
+                    .build_gep(word_ty, p, &[word_ty.const_int(i as u64, false)], "shim_arg_ptr")
                     .map_err(|e| format!("failed to build {} gep: {}", name, e))?
             };
             builder.build_store(slot, *w).map_err(|e| format!("failed to store {} arg: {}", name, e))?;
@@ -1869,16 +1894,16 @@ fn classic_door(
     module: &Module<'static>,
     target: inkwell::values::FunctionValue<'static>,
 ) -> Result<inkwell::values::IntValue<'static>, String> {
-    let i64_ty = ctx.i64_type();
+    let word_ty = crate::compile::carriers::word();
     if target.get_type() != crate::compile::llvm_builtins::coroutine_fn_type() {
-        return Ok(target.as_global_value().as_pointer_value().const_to_int(i64_ty));
+        return Ok(target.as_global_value().as_pointer_value().const_to_int(word_ty));
     }
     let name = format!("{}$classic", target.get_name().to_string_lossy());
     if let Some(existing) = module.get_function(&name) {
-        return Ok(existing.as_global_value().as_pointer_value().const_to_int(i64_ty));
+        return Ok(existing.as_global_value().as_pointer_value().const_to_int(word_ty));
     }
     let ptr_ty = ctx.ptr_type(AddressSpace::default());
-    let classic_ty = i64_ty.fn_type(&[ptr_ty.into(), ctx.i32_type().into()], false);
+    let classic_ty = word_ty.fn_type(&[ptr_ty.into(), ctx.i32_type().into()], false);
     let door = module.add_function(&name, classic_ty, None);
     let drive = match module.get_function("rt_drive_body") {
         Some(f) => f,
@@ -1887,21 +1912,21 @@ fn classic_door(
     let builder = ctx.create_builder();
     builder.position_at_end(ctx.append_basic_block(door, "entry"));
     let args = builder
-        .build_alloca(i64_ty.array_type(3), "drive_args")
+        .build_alloca(word_ty.array_type(3), "drive_args")
         .map_err(|e| format!("failed to alloca the driver arguments: {}", e))?;
     let words = [
-        target.as_global_value().as_pointer_value().const_to_int(i64_ty),
+        target.as_global_value().as_pointer_value().const_to_int(word_ty),
         builder
             .build_ptr_to_int(
                 door.get_nth_param(0).expect("the classic signature has two parameters").into_pointer_value(),
-                i64_ty,
+                word_ty,
                 "callee_args",
             )
             .map_err(|e| format!("failed to take the argument array's address: {}", e))?,
         builder
             .build_int_z_extend(
                 door.get_nth_param(1).expect("the classic signature has two parameters").into_int_value(),
-                i64_ty,
+                word_ty,
                 "callee_argc",
             )
             .map_err(|e| format!("failed to widen the argument count: {}", e))?,
@@ -1909,7 +1934,7 @@ fn classic_door(
     for (i, w) in words.iter().enumerate() {
         let p = unsafe {
             builder
-                .build_gep(i64_ty, args, &[i64_ty.const_int(i as u64, false)], "drive_arg_ptr")
+                .build_gep(word_ty, args, &[word_ty.const_int(i as u64, false)], "drive_arg_ptr")
                 .map_err(|e| format!("failed to index the driver arguments: {}", e))?
         };
         builder.build_store(p, *w).map_err(|e| format!("failed to store a driver argument: {}", e))?;
@@ -1924,7 +1949,7 @@ fn classic_door(
         }
     };
     builder.build_return(Some(&out)).map_err(|e| format!("failed to build the door's return: {}", e))?;
-    Ok(door.as_global_value().as_pointer_value().const_to_int(i64_ty))
+    Ok(door.as_global_value().as_pointer_value().const_to_int(word_ty))
 }
 
 
@@ -2020,15 +2045,15 @@ mod tests {
         let module = ctx.create_module("rt_ping_test");
 
         let ptr_ty = ctx.ptr_type(AddressSpace::default());
-        let fn_ty = ctx.i64_type().fn_type(&[ptr_ty.into(), ctx.i32_type().into()], false);
+        let fn_ty = crate::compile::carriers::word().fn_type(&[ptr_ty.into(), ctx.i32_type().into()], false);
         let rt_ping = module.add_function("rt_ping", fn_ty, None);
         let tl_main = module.add_function("tl_main", fn_ty, None);
 
         let builder = ctx.create_builder();
         let entry = ctx.append_basic_block(tl_main, "entry");
         builder.position_at_end(entry);
-        let one_slot = builder.build_alloca(ctx.i64_type(), "one_slot").unwrap();
-        builder.build_store(one_slot, ctx.i64_type().const_int(41, false)).unwrap();
+        let one_slot = builder.build_alloca(crate::compile::carriers::word(), "one_slot").unwrap();
+        builder.build_store(one_slot, crate::compile::carriers::word().const_int(41, false)).unwrap();
         let argc_one = ctx.i32_type().const_int(1, false);
         let call = builder.build_call(rt_ping, &[one_slot.into(), argc_one.into()], "rt_ping_result").unwrap();
         let result = match call.try_as_basic_value() {
@@ -2066,7 +2091,7 @@ mod tests {
         let module = ctx.create_module("rt_heap_init_test");
 
         let ptr_ty = ctx.ptr_type(AddressSpace::default());
-        let fn_ty = ctx.i64_type().fn_type(&[ptr_ty.into(), ctx.i32_type().into()], false);
+        let fn_ty = crate::compile::carriers::word().fn_type(&[ptr_ty.into(), ctx.i32_type().into()], false);
         let rt_heap_live_count = module.add_function("rt_heap_live_count", fn_ty, None);
         let tl_main = module.add_function("tl_main", fn_ty, None);
 

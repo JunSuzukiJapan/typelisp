@@ -44,13 +44,7 @@ impl Fixed {
     }
 
     fn ty(self) -> IntType<'static> {
-        let ctx = crate::compile::llvm_context();
-        match self.bits {
-            8 => ctx.i8_type(),
-            16 => ctx.i16_type(),
-            32 => ctx.i32_type(),
-            _ => ctx.i64_type(),
-        }
+        crate::compile::carriers::int(self.bits)
     }
 
     /// The type of the target a `int->W`/`try-int->W` method converts to,
@@ -61,11 +55,11 @@ impl Fixed {
             "i8" => Fixed { bits: 8, signed: true },
             "i16" => Fixed { bits: 16, signed: true },
             "i32" => Fixed { bits: 32, signed: true },
-            "c-long" => Fixed { bits: 64, signed: true },
+            "c-long" => Fixed { bits: typelisp_mem::target::DataModel::current().c_long_bits(), signed: true },
             "u8" => Fixed { bits: 8, signed: false },
             "u16" => Fixed { bits: 16, signed: false },
             "u32" => Fixed { bits: 32, signed: false },
-            "c-ulong" => Fixed { bits: 64, signed: false },
+            "c-ulong" => Fixed { bits: typelisp_mem::target::DataModel::current().c_long_bits(), signed: false },
             _ => return None,
         })
     }
@@ -83,7 +77,7 @@ impl Emit<'_> {
     }
 
     fn word_ty(&self) -> IntType<'static> {
-        crate::compile::llvm_context().i64_type()
+        crate::compile::carriers::word()
     }
 
     /// The word cut to `t`: its low bits are the value.
@@ -298,7 +292,7 @@ pub(super) fn build_fixed_unary(heap: &Heap, args: &[Value]) -> Result<Value, Ev
             let ctx = crate::compile::llvm_context();
             let f = if t.signed { bld.build_signed_int_to_float(a, ctx.f64_type(), "float") } else { bld.build_unsigned_int_to_float(a, ctx.f64_type(), "float") }
                 .map_err(|x| e.err(x))?;
-            let bits = bld.build_bit_cast(f, e.word_ty(), "bits").map_err(|x| e.err(x))?;
+            let bits = bld.build_bit_cast(f, ctx.i64_type(), "bits").map_err(|x| e.err(x))?;
             return Ok(llvm_value_value(bits));
         }
         _ => return Err(e.err(format!("not a fixed-width unary method: {}", method))),

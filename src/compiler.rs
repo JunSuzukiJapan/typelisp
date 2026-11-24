@@ -1294,10 +1294,10 @@ const SOURCE_TEMPLATE: &str = r#"
 (defun int-receiver-type? ((name Option<Sexpr>)) bool
   (case name
     ((i8 i16 i32 u8 u16 u32) true)
-    ;; The C-boundary words are 64-bit integers as far as *lowering* is
-    ;; concerned. What sets them apart is written down elsewhere: the checker
-    ;; gives them no arithmetic and refuses to store them, so only the
-    ;; conversions ever arrive here.
+    ;; The C-boundary words are integers of C's `long` width as far as
+    ;; *lowering* is concerned. What sets them apart is written down
+    ;; elsewhere: the checker gives them no arithmetic and refuses to store
+    ;; them, so only the conversions ever arrive here.
     ((c-long c-ulong) true)
     (:else false)))
 
@@ -1310,13 +1310,14 @@ const SOURCE_TEMPLATE: &str = r#"
 ;; `width * 2 + (signed ? 1 : 0)` — `types::int_width_signed` on the Rust
 ;; side, and what the fixed-width builders are told. A type name says how
 ;; many bits and whether the top one is a sign, and nothing else; this is
-;; where the island reads both off.
-(defun int-wsig ((name Option<Sexpr>)) int
+;; where the island reads both off. A C word is as wide as C's `long` on
+;; the machine the module is for, which only `m` knows.
+(defun int-wsig ((m llvm-module) (name Option<Sexpr>)) int
   (case name
     (i8 17) (i16 33) (i32 65)
     (u8 16) (u16 32) (u32 64)
-    ;; 64 bits under LP64.
-    (c-long 129) (c-ulong 128)
+    (c-long (+ (* (c-long-bits m) 2) 1))
+    (c-ulong (* (c-long-bits m) 2))
     (:else (panic (append "int-wsig: not an integer type: " (sexpr-sym-name name))))))
 
 ;; The type a width cast converts to, read off its method name (`int->u8`,
@@ -2678,13 +2679,13 @@ const SOURCE_TEMPLATE: &str = r#"
                    (:else (panic (append "compile-assoc: unsupported str method " method)))))))))
         ((if (int-receiver-type? type-name) (int-native-method? method) false)
          (let ((a (load-raw builder ops 0))
-               (wsig (int-wsig type-name)))
+               (wsig (int-wsig m type-name)))
            ;; The unary methods are read before `b2`: there is no second
            ;; argument form to compile for them.
            (case method
              ;; `int->int`: the exact widening into the arbitrary-precision
-             ;; type, `(as int x)`. `c-ulong` is the one receiver whose 64
-             ;; bits are all value.
+             ;; type, `(as int x)`. `c-ulong` is the one receiver whose top
+             ;; bit is not a sign.
              ("int->int"
               (integer-unary-call builder m (if (equal type-name (quote c-ulong)) "rt_integer_from_c_ulong" "rt_integer_from_word") a))
              ("int->ratio"

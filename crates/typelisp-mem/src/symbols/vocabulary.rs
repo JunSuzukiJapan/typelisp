@@ -152,6 +152,7 @@ pub const MEMBER_VOCABULARY: &[u32] = &[
     wk::M_COUNT,
     wk::M_CREATE,
     wk::M_CURRENT_ID,
+    wk::M_C_LONG_BITS,
     wk::M_DENOMINATOR,
     wk::M_DIGITP,
     wk::M_DOWNCASE,

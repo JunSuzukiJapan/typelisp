@@ -224,14 +224,14 @@ pub(crate) fn fresh_module_with_declarations(name: &str, items: &[CompileTarget]
     let _guard = crate::compile::COMPILE_LOCK.lock().unwrap();
     let module = ctx.create_module(name);
     let ptr_ty = ctx.ptr_type(AddressSpace::default());
-    let fn_ty = ctx.i64_type().fn_type(&[ptr_ty.into(), ctx.i32_type().into()], false);
+    let fn_ty = crate::compile::carriers::word().fn_type(&[ptr_ty.into(), ctx.i32_type().into()], false);
     for (name, _) in rt_extern_functions() {
         module.add_function(name, fn_ty, None);
     }
     // Under the coroutine ABI (Phase C2) a compiled Lisp function is
     // `i64 f(i64 frame)`, not `i64 f(i64*, i32)`.
     let lisp_fn_ty = if crate::compile::EMITTED_BODY_ABI == typelisp_abi::BODY_ABI_COROUTINE {
-        ctx.i64_type().fn_type(&[ctx.i64_type().into()], false)
+        crate::compile::carriers::word().fn_type(&[crate::compile::carriers::word().into()], false)
     } else {
         fn_ty
     };

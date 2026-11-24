@@ -62,7 +62,7 @@ pub fn rt_symbol(name: SymRef) -> Option<&'static str> {
 /// interpreter converts through around `c_mem::load`/`store`.
 pub fn kind_repr(kind: i64) -> Repr {
     match kind {
-        c_mem::KIND_C_LONG | c_mem::KIND_C_ULONG | c_mem::KIND_PTR => Repr::RawWord,
+        c_mem::KIND_RAW_I32 | c_mem::KIND_RAW_U32 | c_mem::KIND_RAW_64 => Repr::RawWord,
         c_mem::KIND_F32 => Repr::F32,
         c_mem::KIND_F64 => Repr::F64,
         c_mem::KIND_BOOL => Repr::Bool,

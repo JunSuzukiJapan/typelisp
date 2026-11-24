@@ -362,7 +362,7 @@ fn emit_bitcode(interp: &Interp, heap: &mut Heap, items: &[CompileTarget]) -> Re
     let module = {
         let module = ctx.create_module("session");
         let ptr_ty = ctx.ptr_type(AddressSpace::default());
-        let fn_ty = ctx.i64_type().fn_type(&[ptr_ty.into(), ctx.i32_type().into()], false);
+        let fn_ty = crate::compile::carriers::word().fn_type(&[ptr_ty.into(), ctx.i32_type().into()], false);
         for (name, _) in crate::compile::externs::rt_extern_functions() {
             module.add_function(name, fn_ty, None);
         }

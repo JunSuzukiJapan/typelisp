@@ -61,6 +61,7 @@ pub fn jit_engine(module: &Module<'static>, externals: &[(String, usize)]) -> Re
 pub mod abi_signature;
 pub mod aot;
 pub mod bootstrap;
+pub(crate) mod carriers;
 pub mod codegen_prep;
 pub mod core_bridge;
 pub mod driver;
@@ -524,15 +525,15 @@ mod tests {
         let module = ctx.create_module("jit_ping_test");
 
         let ptr_ty = ctx.ptr_type(AddressSpace::default());
-        let fn_ty = ctx.i64_type().fn_type(&[ptr_ty.into(), ctx.i32_type().into()], false);
+        let fn_ty = crate::compile::carriers::word().fn_type(&[ptr_ty.into(), ctx.i32_type().into()], false);
         let rt_ping_decl = module.add_function("rt_ping", fn_ty, None);
         let caller = module.add_function("jit_ping_test", fn_ty, None);
 
         let builder = ctx.create_builder();
         let entry = ctx.append_basic_block(caller, "entry");
         builder.position_at_end(entry);
-        let one_slot = builder.build_alloca(ctx.i64_type(), "one_slot").unwrap();
-        builder.build_store(one_slot, ctx.i64_type().const_int(41, false)).unwrap();
+        let one_slot = builder.build_alloca(crate::compile::carriers::word(), "one_slot").unwrap();
+        builder.build_store(one_slot, crate::compile::carriers::word().const_int(41, false)).unwrap();
         let argc_one = ctx.i32_type().const_int(1, false);
         let call = builder.build_call(rt_ping_decl, &[one_slot.into(), argc_one.into()], "rt_ping_result").unwrap();
         let result = match call.try_as_basic_value() {
@@ -564,7 +565,7 @@ mod tests {
         let module = ctx.create_module("jit_heap_test");
 
         let ptr_ty = ctx.ptr_type(AddressSpace::default());
-        let fn_ty = ctx.i64_type().fn_type(&[ptr_ty.into(), ctx.i32_type().into()], false);
+        let fn_ty = crate::compile::carriers::word().fn_type(&[ptr_ty.into(), ctx.i32_type().into()], false);
         let rt_heap_live_count_decl = module.add_function("rt_heap_live_count", fn_ty, None);
         let caller = module.add_function("jit_heap_test", fn_ty, None);
 
@@ -614,8 +615,8 @@ mod tests {
         let module = ctx.create_module("jit_cons_test");
 
         let ptr_ty = ctx.ptr_type(AddressSpace::default());
-        let i64_ty = ctx.i64_type();
-        let fn_ty = i64_ty.fn_type(&[ptr_ty.into(), ctx.i32_type().into()], false);
+        let word_ty = crate::compile::carriers::word();
+        let fn_ty = word_ty.fn_type(&[ptr_ty.into(), ctx.i32_type().into()], false);
         let rt_cons_decl = module.add_function("rt_cons", fn_ty, None);
         let rt_car_decl = module.add_function("rt_car", fn_ty, None);
         let rt_cdr_decl = module.add_function("rt_cdr", fn_ty, None);
@@ -625,13 +626,13 @@ mod tests {
         let entry = ctx.append_basic_block(caller, "entry");
         builder.position_at_end(entry);
 
-        let tagged_one = i64_ty.const_int(1 << 3, false);
-        let tagged_two = i64_ty.const_int(2 << 3, false);
-        let cons_args = builder.build_alloca(i64_ty.array_type(2), "cons_args").unwrap();
+        let tagged_one = word_ty.const_int(1 << 3, false);
+        let tagged_two = word_ty.const_int(2 << 3, false);
+        let cons_args = builder.build_alloca(word_ty.array_type(2), "cons_args").unwrap();
         let argc_zero32 = ctx.i32_type().const_int(0, false);
-        let slot0 = unsafe { builder.build_gep(i64_ty, cons_args, &[argc_zero32], "slot0").unwrap() };
+        let slot0 = unsafe { builder.build_gep(word_ty, cons_args, &[argc_zero32], "slot0").unwrap() };
         builder.build_store(slot0, tagged_one).unwrap();
-        let slot1 = unsafe { builder.build_gep(i64_ty, cons_args, &[ctx.i32_type().const_int(1, false)], "slot1").unwrap() };
+        let slot1 = unsafe { builder.build_gep(word_ty, cons_args, &[ctx.i32_type().const_int(1, false)], "slot1").unwrap() };
         builder.build_store(slot1, tagged_two).unwrap();
         let argc_two = ctx.i32_type().const_int(2, false);
         let pair = builder.build_call(rt_cons_decl, &[cons_args.into(), argc_two.into()], "pair").unwrap();
@@ -640,7 +641,7 @@ mod tests {
             inkwell::values::ValueKind::Instruction(_) => panic!("rt_cons call produced no value"),
         };
 
-        let one_slot = builder.build_alloca(i64_ty, "one_slot").unwrap();
+        let one_slot = builder.build_alloca(word_ty, "one_slot").unwrap();
         builder.build_store(one_slot, pair).unwrap();
         let argc_one = ctx.i32_type().const_int(1, false);
         let car_call = builder.build_call(rt_car_decl, &[one_slot.into(), argc_one.into()], "car_result").unwrap();
@@ -654,10 +655,10 @@ mod tests {
             inkwell::values::ValueKind::Instruction(_) => panic!("rt_cdr call produced no value"),
         };
 
-        let three = i64_ty.const_int(3, false);
+        let three = word_ty.const_int(3, false);
         let car_untagged = builder.build_right_shift(car_result, three, true, "car_untagged").unwrap();
         let cdr_untagged = builder.build_right_shift(cdr_result, three, true, "cdr_untagged").unwrap();
-        let thousand = i64_ty.const_int(1000, false);
+        let thousand = word_ty.const_int(1000, false);
         let combined =
             builder.build_int_add(builder.build_int_mul(car_untagged, thousand, "car_scaled").unwrap(), cdr_untagged, "combined").unwrap();
         builder.build_return(Some(&combined)).unwrap();

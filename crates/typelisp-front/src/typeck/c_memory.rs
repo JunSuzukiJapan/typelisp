@@ -32,8 +32,10 @@ use super::type_syntax::{parse_raw, TypeCx};
 const C_TYPES: &str = "i8, i16, i32, u8, u16, u32, c-long, c-ulong, f32, f64, bool, ptr, \
                        a typed pointer (ptr T), or a def-c-struct";
 
-/// The load/store kind of a C scalar type, `ptr` or a typed pointer.
+/// The load/store kind of a C scalar type, `ptr` or a typed pointer. A raw
+/// word's kind is its width on the target ([`raw_word_kind`]).
 fn c_kind(ty: &Type) -> Option<i64> {
+    let model = typelisp_mem::target::DataModel::current();
     Some(match ty {
         Type::I8 => c_mem::KIND_I8,
         Type::I16 => c_mem::KIND_I16,
@@ -41,14 +43,25 @@ fn c_kind(ty: &Type) -> Option<i64> {
         Type::U8 => c_mem::KIND_U8,
         Type::U16 => c_mem::KIND_U16,
         Type::U32 => c_mem::KIND_U32,
-        Type::CLong => c_mem::KIND_C_LONG,
-        Type::CULong => c_mem::KIND_C_ULONG,
+        Type::CLong => raw_word_kind(model.c_long_bits(), true),
+        Type::CULong => raw_word_kind(model.c_long_bits(), false),
         Type::F32 => c_mem::KIND_F32,
         Type::F64 => c_mem::KIND_F64,
         Type::Bool => c_mem::KIND_BOOL,
-        Type::Ptr | Type::PtrTo(_) => c_mem::KIND_PTR,
+        Type::Ptr | Type::PtrTo(_) => raw_word_kind(model.pointer_bits(), false),
         _ => return None,
     })
+}
+
+/// The kind of a raw word `bits` wide: the load extends a 32-bit one by its
+/// sign or not, and a 64-bit one is all of the compiled code's word.
+fn raw_word_kind(bits: u32, signed: bool) -> i64 {
+    match (bits, signed) {
+        (32, true) => c_mem::KIND_RAW_I32,
+        (32, false) => c_mem::KIND_RAW_U32,
+        (64, _) => c_mem::KIND_RAW_64,
+        _ => unimplemented!("a {}-bit raw word in C memory", bits),
+    }
 }
 
 /// Whether `ty` is, or holds, a typed pointer.
@@ -93,13 +106,16 @@ fn c_struct_def<'r>(reg: &'r Registry, path: &Path) -> Result<&'r CStructDef, Er
     }
 }
 
-/// `(sizeof, _Alignof)` of a C type on LP64.
+/// `(sizeof, _Alignof)` of a C type, by the target's data model.
 fn c_layout(reg: &Registry, ty: &Type) -> Result<(u64, u64), Error> {
+    let model = typelisp_mem::target::DataModel::current();
     Ok(match ty {
         Type::I8 | Type::U8 | Type::Bool => (1, 1),
         Type::I16 | Type::U16 => (2, 2),
         Type::I32 | Type::U32 | Type::F32 => (4, 4),
-        Type::CLong | Type::CULong | Type::F64 | Type::Ptr | Type::PtrTo(_) => (8, 8),
+        Type::CLong | Type::CULong => (u64::from(model.c_long_bytes), u64::from(model.c_long_bytes)),
+        Type::Ptr | Type::PtrTo(_) => (u64::from(model.pointer_bytes), u64::from(model.pointer_bytes)),
+        Type::F64 => (8, u64::from(model.f64_align)),
         Type::CStruct(p) => {
             let d = c_struct_def(reg, p)?;
             (d.size, d.align)

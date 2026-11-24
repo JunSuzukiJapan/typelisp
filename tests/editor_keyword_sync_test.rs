@@ -129,7 +129,7 @@ fn is_excluded(name: &str) -> bool {
     // the builder of the function being built.
     const ISLAND_PREFIXES: [&str; 8] =
         ["build-", "llvm-", "const-", "load-", "store-", "position-", "frame-", "coroutine-"];
-    const ISLAND_EXACT: [&str; 17] = [
+    const ISLAND_EXACT: [&str; 18] = [
         "add-function",
         "add-function-with-env",
         // The coroutine ABI's declarer and its raw parameter reader (Phase C2)
@@ -143,6 +143,8 @@ fn is_excluded(name: &str) -> bool {
         "clone-frames",
         "create",
         "get-function",
+        // The width of a `c-long` on the machine the module is for.
+        "c-long-bits",
         "pop-frame",
         "push-frame",
         "scope",

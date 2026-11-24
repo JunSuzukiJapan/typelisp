@@ -675,10 +675,16 @@ define void @typelisp_host_sleep_us(i64 %us) {
 /// The object [`BOARD_FUNCTIONS_IR`] compiles to, by the `llc` of the LLVM
 /// typl is built with.
 fn board_functions_object(dir: &Path) -> PathBuf {
+    board_object(dir, BOARD_FUNCTIONS_IR)
+}
+
+/// The Cortex-M4 object the LLVM IR `ir` compiles to, by the `llc` of the
+/// LLVM typl is built with.
+fn board_object(dir: &Path, ir_text: &str) -> PathBuf {
     let prefix = std::env::var("LLVM_SYS_221_PREFIX").expect("LLVM_SYS_221_PREFIX names the LLVM typl is built with");
     let ir = dir.join("board.ll");
     let object = dir.join("board.o");
-    std::fs::write(&ir, BOARD_FUNCTIONS_IR).unwrap();
+    std::fs::write(&ir, ir_text).unwrap();
     let out = Command::new(Path::new(&prefix).join("bin").join("llc"))
         .args(["-mcpu=cortex-m4", "-filetype=obj", "-o"])
         .arg(&object)
@@ -705,6 +711,61 @@ fn the_board_gives_its_functions_as_c_functions() {
     let out = run_board(&elf);
     assert_eq!(text(&out.stdout), "through the UART 7\n", "stderr: {}", text(&out.stderr));
     assert_eq!(out.status.code(), Some(4));
+}
+
+/// C functions as the board's C compiler sees them: a `long` is 32 bits,
+/// and `struct rec { long n; void *p; int x; }` has `x` at offset 8.
+const ILP32_C_FUNCTIONS_IR: &str = r#"
+target triple = "thumbv7em-unknown-none-eabihf"
+
+define i32 @negate_long(i32 %n) {
+  %r = sub i32 0, %n
+  ret i32 %r
+}
+
+define i32 @rec_x(ptr %r) {
+  %at = getelementptr i8, ptr %r, i32 8
+  %x = load i32, ptr %at
+  ret i32 %x
+}
+"#;
+
+/// A `c-long` is as wide as the board's C `long`, and a `def-c-struct` is
+/// laid out as the board's C lays it out: a C function written for the
+/// board reads what the program passes it and what it stored.
+#[test]
+fn c_long_and_c_structs_follow_the_board_s_c() {
+    let dir = scratch("board_ilp32");
+    let object = board_object(&dir, ILP32_C_FUNCTIONS_IR);
+    let elf = built(
+        "board_ilp32",
+        r#"
+(defffi (negate-long "negate_long") (c-long) c-long)
+(unsafe (def-c-struct rec (n c-long) (p ptr) (x i32)))
+(defffi (rec-x "rec_x") ((ptr rec)) i32)
+(defun main () int
+  (unsafe
+    (let ((r (c-alloc rec)))
+      (setf r::x (as i32 30))
+      (+ (as int (rec-x r)) (as int (negate-long (as c-long -12)))))))
+"#,
+        "prog.elf",
+        &board_flags(&["--link", object.to_str().unwrap()]),
+    );
+    let out = run_board(&elf);
+    assert_eq!(out.status.code(), Some(42), "stdout: {} stderr: {}", text(&out.stdout), text(&out.stderr));
+}
+
+/// `(as c-long n)` keeps the bits a board's `long` has, compiled and folded
+/// alike.
+#[test]
+fn a_c_long_cast_keeps_the_board_s_width() {
+    let source = r#"
+(defun wrap ((n int)) int (unsafe (as int (as c-long n))))
+(defun main () int (+ (wrap 4294967301) (unsafe (as int (as c-long 4294967306)))))
+"#;
+    let elf = built("board_c_long_wrap", source, "prog.elf", &board_flags(&[]));
+    assert_eq!(run_board(&elf).status.code(), Some(15), "2^32 + 5 is 5 and 2^32 + 10 is 10 in a 32-bit long");
 }
 
 /// Without them, the link says which are missing.

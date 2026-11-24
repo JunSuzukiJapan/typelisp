@@ -82,7 +82,7 @@ enum CType {
     /// string for one call and copied back out of one — see
     /// `typelisp_rt::rt_ffi_cstring_new` and its two siblings.
     Str,
-    /// An opaque pointer. Crosses as a raw 64-bit word in both directions —
+    /// An opaque pointer. Crosses as a raw word in both directions —
     /// see [`typelisp_front::check::repr::Repr::RawWord`] for why it may not
     /// be stored anywhere that tags what it holds.
     Ptr,
@@ -108,7 +108,7 @@ impl CType {
             _ => return None,
         };
         // Covers the six widths *and* `c-long`/`c-ulong`, which that function
-        // answers 64 for — the one place the LP64 assumption is written down.
+        // answers the target's C `long` width for.
         if let Some((bits, signed)) = typelisp_front::types::int_width_signed(&scalar) {
             return Some(CType::Int { bits, signed });
         }
@@ -122,24 +122,12 @@ impl CType {
         }
     }
 
-    /// This width as an LLVM integer type. Only the four the declarable
-    /// widths use, so there is no custom-width case to get wrong.
-    fn int_type(bits: u32) -> inkwell::types::IntType<'static> {
-        let ctx = llvm_context();
-        match bits {
-            8 => ctx.i8_type(),
-            16 => ctx.i16_type(),
-            32 => ctx.i32_type(),
-            _ => ctx.i64_type(),
-        }
-    }
-
     /// What a value of this type is, as an LLVM type — `None` for `Void`,
     /// which is not a value.
     fn llvm(self) -> Option<BasicTypeEnum<'static>> {
         let ctx = llvm_context();
         Some(match self {
-            CType::Int { bits, .. } => CType::int_type(bits).into(),
+            CType::Int { bits, .. } => crate::compile::carriers::int(bits).into(),
             CType::F32 => ctx.f32_type().into(),
             CType::F64 => ctx.f64_type().into(),
             CType::Bool => ctx.bool_type().into(),
@@ -232,14 +220,14 @@ pub(crate) fn emit_thunk(module: &Module<'static>, decl: &FfiDecl) -> Result<Fun
     let entry = ctx.append_basic_block(thunk, "entry");
     builder.position_at_end(entry);
 
-    let i64_ty = ctx.i64_type();
+    let word_ty = crate::compile::carriers::word();
     let args_ptr = thunk.get_nth_param(0).expect("the shared signature has two parameters").into_pointer_value();
 
     // One scratch slot, reused: every shim call below takes exactly one word
     // and consumes it before the next is stored. In the entry block because
     // that is where LLVM wants an `alloca`.
     let scratch = builder
-        .build_alloca(i64_ty, "ffi_scratch")
+        .build_alloca(word_ty, "ffi_scratch")
         .map_err(|e| format!("ffi: failed to reserve the shim argument slot: {}", e))?;
     let one = ctx.i32_type().const_int(1, false);
     let shim = |name: &str| match module.get_function(name) {
@@ -256,11 +244,11 @@ pub(crate) fn emit_thunk(module: &Module<'static>, decl: &FfiDecl) -> Result<Fun
         // signature this thunk was built from.
         let slot = unsafe {
             builder
-                .build_gep(i64_ty, args_ptr, &[i64_ty.const_int(i as u64, false)], "arg_slot")
+                .build_gep(word_ty, args_ptr, &[word_ty.const_int(i as u64, false)], "arg_slot")
                 .map_err(|e| format!("ffi: failed to index the argument array: {}", e))?
         };
         let word = builder
-            .build_load(i64_ty, slot, "arg_word")
+            .build_load(word_ty, slot, "arg_word")
             .map_err(|e| format!("ffi: failed to load an argument: {}", e))?
             .into_int_value();
         if *c == CType::Str {
@@ -278,7 +266,7 @@ pub(crate) fn emit_thunk(module: &Module<'static>, decl: &FfiDecl) -> Result<Fun
     // Native for exactly the C call: everything it is given is a C value
     // by now, and nothing it answers is a Lisp one yet — see
     // `typelisp_rt::rt_ffi_enter_native`.
-    let zero = i64_ty.const_zero();
+    let zero = word_ty.const_zero();
     call_shim(&builder, shim("rt_ffi_enter_native"), scratch, one, zero, "native")?;
     let call = builder
         .build_call(c_fn, &call_args, "ffi_call")
@@ -293,7 +281,7 @@ pub(crate) fn emit_thunk(module: &Module<'static>, decl: &FfiDecl) -> Result<Fun
             // bytes that are not UTF-8 — leaks the argument strings, on a
             // path that is ending the call anyway.
             let raw = builder
-                .build_ptr_to_int(v.into_pointer_value(), i64_ty, "ret_cstr")
+                .build_ptr_to_int(v.into_pointer_value(), word_ty, "ret_cstr")
                 .map_err(|e| format!("ffi: failed to take the address of a string result: {}", e))?;
             call_shim(&builder, shim("rt_ffi_string_from_cstr"), scratch, one, raw, "ret_str")?
         }
@@ -301,7 +289,7 @@ pub(crate) fn emit_thunk(module: &Module<'static>, decl: &FfiDecl) -> Result<Fun
         // A `void` C function still has to answer with a word, because the
         // shared signature says so. `Repr::Unit` crosses as 0, so this is the
         // same placeholder every other unit-valued call produces.
-        inkwell::values::ValueKind::Instruction(_) => i64_ty.const_zero(),
+        inkwell::values::ValueKind::Instruction(_) => word_ty.const_zero(),
     };
     for made in owned_cstrings {
         call_shim(&builder, shim("rt_ffi_cstring_free"), scratch, one, made, "freed")?;
@@ -328,7 +316,7 @@ fn emit_coroutine_entry(
     argc: usize,
 ) -> Result<FunctionValue<'static>, String> {
     let ctx = llvm_context();
-    let i64_ty = ctx.i64_type();
+    let word_ty = crate::compile::carriers::word();
     let entry_fn = module.add_function(name, crate::compile::llvm_builtins::coroutine_fn_type(), None);
     let builder = ctx.create_builder();
     builder.position_at_end(ctx.append_basic_block(entry_fn, "entry"));
@@ -338,7 +326,7 @@ fn emit_coroutine_entry(
         None => module.add_function(n, compiled_fn_type(), None),
     };
     let scratch = builder
-        .build_alloca(i64_ty, "ffi_entry_scratch")
+        .build_alloca(word_ty, "ffi_entry_scratch")
         .map_err(|e| format!("ffi: failed to reserve the entry scratch slot: {}", e))?;
     let one = ctx.i32_type().const_int(1, false);
 
@@ -346,16 +334,16 @@ fn emit_coroutine_entry(
     // locals, but a frame the driver cannot read the handler slot of is a
     // frame it cannot ask about an unwind. No slot is rooted, so no mask.
     let open_args = builder
-        .build_alloca(i64_ty.array_type(2), "ffi_frame_open_args")
+        .build_alloca(word_ty.array_type(2), "ffi_frame_open_args")
         .map_err(|e| format!("ffi: failed to reserve the frame's arguments: {}", e))?;
     for (i, word) in [typelisp_abi::FRAME_RESERVED_SLOTS as u64, 0].into_iter().enumerate() {
         let slot = unsafe {
             builder
-                .build_gep(i64_ty, open_args, &[i64_ty.const_int(i as u64, false)], "ffi_frame_open_arg")
+                .build_gep(word_ty, open_args, &[word_ty.const_int(i as u64, false)], "ffi_frame_open_arg")
                 .map_err(|e| format!("ffi: failed to index the frame's arguments: {}", e))?
         };
         builder
-            .build_store(slot, i64_ty.const_int(word, false))
+            .build_store(slot, word_ty.const_int(word, false))
             .map_err(|e| format!("ffi: failed to store a frame argument: {}", e))?;
     }
     let data = builder
@@ -367,7 +355,7 @@ fn emit_coroutine_entry(
     };
 
     let args = builder
-        .build_alloca(i64_ty.array_type(argc.max(1) as u32), "ffi_entry_args")
+        .build_alloca(word_ty.array_type(argc.max(1) as u32), "ffi_entry_args")
         .map_err(|e| format!("ffi: failed to reserve the entry argument array: {}", e))?;
     for i in 0..argc {
         let word = call_shim(
@@ -375,12 +363,12 @@ fn emit_coroutine_entry(
             shim("rt_pending_arg"),
             scratch,
             one,
-            i64_ty.const_int(i as u64, false),
+            word_ty.const_int(i as u64, false),
             "ffi_pending",
         )?;
         let slot = unsafe {
             builder
-                .build_gep(i64_ty, args, &[i64_ty.const_int(i as u64, false)], "ffi_entry_arg_ptr")
+                .build_gep(word_ty, args, &[word_ty.const_int(i as u64, false)], "ffi_entry_arg_ptr")
                 .map_err(|e| format!("ffi: failed to index the entry argument array: {}", e))?
         };
         builder.build_store(slot, word).map_err(|e| format!("ffi: failed to store an entry argument: {}", e))?;
@@ -402,12 +390,12 @@ fn emit_coroutine_entry(
         .map_err(|e| format!("ffi: failed to take the frame's data pointer: {}", e))?;
     let value_slot = unsafe {
         builder
-            .build_gep(i64_ty, data, &[i64_ty.const_zero()], "ffi_value_slot")
+            .build_gep(word_ty, data, &[word_ty.const_zero()], "ffi_value_slot")
             .map_err(|e| format!("ffi: failed to index the frame's value slot: {}", e))?
     };
     builder.build_store(value_slot, out).map_err(|e| format!("ffi: failed to store the result: {}", e))?;
     builder
-        .build_return(Some(&i64_ty.const_zero()))
+        .build_return(Some(&word_ty.const_zero()))
         .map_err(|e| format!("ffi: failed to build the entry return: {}", e))?;
     Ok(entry_fn)
 }
@@ -467,7 +455,7 @@ fn unspellable(ty: TypeId, where_: &str, decl: &FfiDecl) -> String {
     )
 }
 
-/// The i64 the shared signature carries, as the C type the declaration named.
+/// The word the shared signature carries, as the C type the declaration named.
 fn word_to_c(
     builder: &inkwell::builder::Builder<'static>,
     word: IntValue<'static>,
@@ -480,9 +468,9 @@ fn word_to_c(
             .build_int_to_ptr(word, ctx.ptr_type(inkwell::AddressSpace::default()), "arg_ptr")
             .map_err(|e| format!("ffi: failed to make a pointer argument: {}", e))?
             .into(),
-        CType::Int { bits: 64, .. } => word.into(),
+        CType::Int { bits, .. } if bits == word.get_type().get_bit_width() => word.into(),
         CType::Int { bits, .. } => builder
-            .build_int_truncate(word, CType::int_type(bits), "arg_narrow")
+            .build_int_truncate(word, crate::compile::carriers::int(bits), "arg_narrow")
             .map_err(|e| format!("ffi: failed to narrow an integer argument: {}", e))?
             .into(),
         CType::Bool => builder
@@ -512,38 +500,40 @@ fn word_to_c(
     })
 }
 
-/// What the C function answered with, as the i64 the shared signature returns.
+/// What the C function answered with, as the word the shared signature returns.
 fn c_to_word(
     builder: &inkwell::builder::Builder<'static>,
     v: BasicValueEnum<'static>,
     c: CType,
 ) -> Result<IntValue<'static>, String> {
     let ctx = llvm_context();
-    let i64_ty = ctx.i64_type();
+    let word_ty = crate::compile::carriers::word();
+    // A double's bits, which is what the word holds a float as.
+    let bits_ty = ctx.i64_type();
     Ok(match c {
         CType::Ptr => builder
-            .build_ptr_to_int(v.into_pointer_value(), i64_ty, "ret_ptr")
+            .build_ptr_to_int(v.into_pointer_value(), word_ty, "ret_ptr")
             .map_err(|e| format!("ffi: failed to take the address of a pointer result: {}", e))?,
         CType::Int { bits, signed } => {
             let n = v.into_int_value();
-            if bits == 64 {
+            if bits == word_ty.get_bit_width() {
                 n
             } else if signed {
                 builder
-                    .build_int_s_extend(n, i64_ty, "ret_sext")
+                    .build_int_s_extend(n, word_ty, "ret_sext")
                     .map_err(|e| format!("ffi: failed to widen a signed result: {}", e))?
             } else {
                 builder
-                    .build_int_z_extend(n, i64_ty, "ret_zext")
+                    .build_int_z_extend(n, word_ty, "ret_zext")
                     .map_err(|e| format!("ffi: failed to widen an unsigned result: {}", e))?
             }
         }
         // `false`/`true` cross as 0/1, so the one bit is zero-extended.
         CType::Bool => builder
-            .build_int_z_extend(v.into_int_value(), i64_ty, "ret_bool")
+            .build_int_z_extend(v.into_int_value(), word_ty, "ret_bool")
             .map_err(|e| format!("ffi: failed to widen a bool result: {}", e))?,
         CType::F64 => builder
-            .build_bit_cast(v.into_float_value(), i64_ty, "ret_f64")
+            .build_bit_cast(v.into_float_value(), bits_ty, "ret_f64")
             .map_err(|e| format!("ffi: failed to reinterpret an f64 result: {}", e))?
             .into_int_value(),
         // Widened to `f64` before its bits are taken, because that is the
@@ -553,7 +543,7 @@ fn c_to_word(
                 .build_float_ext(v.into_float_value(), ctx.f64_type(), "ret_f32_wide")
                 .map_err(|e| format!("ffi: failed to widen an f32 result: {}", e))?;
             builder
-                .build_bit_cast(wide, i64_ty, "ret_f32")
+                .build_bit_cast(wide, bits_ty, "ret_f32")
                 .map_err(|e| format!("ffi: failed to reinterpret an f32 result: {}", e))?
                 .into_int_value()
         }
@@ -578,14 +568,14 @@ static OPEN_LIBS: Mutex<Option<HashMap<String, usize>>> = Mutex::new(None);
 
 thread_local! {
     /// Whether the C functions `defffi` names are the compiled program's
-    /// target's and not this process's: set while a program for a board
-    /// compiles on this thread ([`CFunctionsOn::target`]).
+    /// target's and not this process's: set while a program for another
+    /// machine compiles on this thread ([`CFunctionsOn::target`]).
     static C_FUNCTIONS_ON_TARGET: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }
 
 /// While it lives, `defffi` on this thread does not look its C function up
-/// in this process: the function is the board's, which only the executable's
-/// link finds. The interpreter's thunk then calls [`not_here`] instead.
+/// in this process: the function is the target's, which only the
+/// executable's link finds. The interpreter's thunk then calls [`not_here`] instead.
 pub(crate) struct CFunctionsOn {
     before: bool,
 }
@@ -607,16 +597,16 @@ impl Drop for CFunctionsOn {
 /// it is one function for all of them, so it cannot tell which was called.
 static NOT_HERE_NAMES: Mutex<Vec<String>> = Mutex::new(Vec::new());
 
-/// What the interpreter's thunk calls in place of a board's C function while
-/// the board's program compiles: running it here, at compile time (from a
-/// macro, say), cannot be done, and nothing it could answer would be the
-/// board's. Ends `typl` with the reason; called with whatever the C
+/// What the interpreter's thunk calls in place of the target's C function
+/// while the target's program compiles: running it here, at compile time
+/// (from a macro, say), cannot be done, and nothing it could answer would be
+/// the target's. Ends `typl` with the reason; called with whatever the C
 /// signature passes, which it reads none of.
 extern "C" fn not_here() {
     let names = NOT_HERE_NAMES.lock().unwrap_or_else(|e| e.into_inner()).join("`, `");
     eprintln!(
-        "error: one of the board's C functions (`{}`) was called while typl compiled the program for the \
-         board; they run only on the board",
+        "error: one of the target's C functions (`{}`) was called while typl compiled the program for the \
+         target; they run only on the target",
         names
     );
     std::process::exit(1)
@@ -809,7 +799,7 @@ fn emit_callback_entry(
     ret: CType,
 ) -> Result<FunctionValue<'static>, String> {
     let ctx = llvm_context();
-    let i64_ty = ctx.i64_type();
+    let word_ty = crate::compile::carriers::word();
     let builder = ctx.create_builder();
     let arg_tys: Vec<BasicMetadataTypeEnum<'static>> =
         params.iter().map(|c| c.llvm().expect("a callback parameter is never void").into()).collect();
@@ -835,29 +825,29 @@ fn emit_callback_entry(
         None => module.add_function(n, compiled_fn_type(), None),
     };
     let scratch = builder
-        .build_alloca(i64_ty, "cb_scratch")
+        .build_alloca(word_ty, "cb_scratch")
         .map_err(|e| format!("ffi: failed to reserve the callback scratch slot: {}", e))?;
     let one = ctx.i32_type().const_int(1, false);
-    let zero = i64_ty.const_zero();
+    let zero = word_ty.const_zero();
 
     call_shim(&builder, shim("rt_ffi_callback_enter"), scratch, one, zero, "cb_enter")?;
 
     // `[target, n, kind0, word0, aux0, ...]` — see `rt_ffi_callback_invoke`.
     let len = 2 + 3 * params.len();
     let words = builder
-        .build_alloca(i64_ty.array_type(len as u32), "cb_args")
+        .build_alloca(word_ty.array_type(len as u32), "cb_args")
         .map_err(|e| format!("ffi: failed to reserve the callback argument array: {}", e))?;
     let store = |i: usize, w: IntValue<'static>| -> Result<(), String> {
         let slot = unsafe {
             builder
-                .build_gep(i64_ty, words, &[i64_ty.const_int(i as u64, false)], "cb_arg_slot")
+                .build_gep(word_ty, words, &[word_ty.const_int(i as u64, false)], "cb_arg_slot")
                 .map_err(|e| format!("ffi: failed to index the callback argument array: {}", e))?
         };
         builder.build_store(slot, w).map_err(|e| format!("ffi: failed to store a callback argument: {}", e))?;
         Ok(())
     };
     store(0, target)?;
-    store(1, i64_ty.const_int(params.len() as u64, false))?;
+    store(1, word_ty.const_int(params.len() as u64, false))?;
     for (i, c) in params.iter().enumerate() {
         let v = entry.get_nth_param(i as u32).expect("the entry has one parameter per declared type");
         let (kind, word, aux) = match (c, pointees.get(i).copied().flatten()) {
@@ -866,7 +856,7 @@ fn emit_callback_entry(
             (CType::Str, _) => (
                 1,
                 builder
-                    .build_ptr_to_int(v.into_pointer_value(), i64_ty, "cb_cstr")
+                    .build_ptr_to_int(v.into_pointer_value(), word_ty, "cb_cstr")
                     .map_err(|e| format!("ffi: failed to take a string argument's address: {}", e))?,
                 zero,
             ),
@@ -879,7 +869,7 @@ fn emit_callback_entry(
             }
             _ => (0, c_to_word(&builder, v, *c)?, zero),
         };
-        store(2 + 3 * i, i64_ty.const_int(kind, false))?;
+        store(2 + 3 * i, word_ty.const_int(kind, false))?;
         store(3 + 3 * i, word)?;
         store(4 + 3 * i, aux)?;
     }
@@ -924,7 +914,7 @@ pub(crate) fn emit_callback_entry_in_module(
     let body = module
         .get_function(&symbol)
         .ok_or_else(|| format!("compile-file: `{}` is passed to C as a callback but was not compiled", sig.function))?;
-    let target = body.as_global_value().as_pointer_value().const_to_int(llvm_context().i64_type());
+    let target = body.as_global_value().as_pointer_value().const_to_int(crate::compile::carriers::word());
     emit_callback_entry(module, name, target, &ctypes, &pointees(&params), cret)
 }
 
@@ -969,7 +959,7 @@ pub fn callback_entry(
 
     let _guard = COMPILE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let module = llvm_context().create_module("ffi_callback");
-    let target = llvm_context().i64_type().const_int(body.address() as u64, false);
+    let target = crate::compile::carriers::word().const_int(body.address() as u64, false);
     let entry = emit_callback_entry(&module, "ffi_callback_entry", target, &ctypes, &pointees(&params), cret)?;
     let name = entry.get_name().to_str().map_err(|e| format!("ffi: entry name: {}", e))?.to_string();
     module

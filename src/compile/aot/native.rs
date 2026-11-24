@@ -125,14 +125,6 @@ pub(crate) fn assembly_of(module: &Module<'static>) -> Result<String, String> {
 /// at `output_path` via the system `cc`. Must be called with
 /// [`crate::compile::COMPILE_LOCK`] held.
 pub(super) fn write_executable(module: &Module<'static>, output_path: &str, libraries: &[String], items: &[CompileTarget]) -> Result<(), String> {
-    // The whole program's IR, for reading. An AOT module is the one the
-    // island's output is hardest to see: it is neither `disassemble`'s
-    // single function nor a committed dump, and by the time anything is
-    // wrong it is machine code. `TYPELISP_AOT_IR=<path>` writes it here.
-    if let Ok(path) = std::env::var("TYPELISP_AOT_IR") {
-        std::fs::write(&path, module.print_to_string().to_string())
-            .map_err(|e| format!("failed to write {}: {}", path, e))?;
-    }
     crate::compile::codegen_prep::prepare(module)?;
     let target_machine = host_target_machine()?;
     crate::compile::optimize::run_llvm_passes(module, &target_machine)?;

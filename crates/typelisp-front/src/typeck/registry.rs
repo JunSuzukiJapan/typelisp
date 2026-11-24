@@ -132,7 +132,7 @@ pub(crate) struct MacroDef {
 /// A `def-c-struct`: a struct laid out the way C lays it out, which exists
 /// only behind a typed pointer (`Type::PtrTo`) into memory an `(unsafe ...)`
 /// allocated. The layout is computed once, when the definition is checked,
-/// by C's rules on an LP64 target.
+/// by C's rules for the target's data model (`typelisp_mem::target::DataModel`).
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub(crate) struct CStructDef {
     /// The struct's fully-qualified name, its identity (`Type::CStruct`).

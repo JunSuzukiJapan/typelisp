@@ -697,6 +697,7 @@ well_known_symbols! {
     M_COUNT => "count"
     M_CREATE => "create"
     M_CURRENT_ID => "current-id"
+    M_C_LONG_BITS => "c-long-bits"
     M_DENOMINATOR => "denominator"
     M_DIGITP => "digitp"
     M_DOWNCASE => "downcase"

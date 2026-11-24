@@ -228,8 +228,8 @@ pub enum Type {
     /// The collector does not trace it, which is right — it points outside the
     /// heap entirely — and is the other half of why it is confined.
     Ptr,
-    /// C's `long` / `int64_t` / `intptr_t`, and [`Self::CULong`] its unsigned
-    /// twin (`unsigned long`, `size_t`, `uint64_t`).
+    /// C's `long` (and `intptr_t`, which is as wide), and [`Self::CULong`]
+    /// its unsigned twin (`unsigned long`, `size_t`).
     ///
     /// Named for C rather than spelled `i64`/`u64` on purpose. This language
     /// deliberately has no 64-bit integer type — a tagged immediate has 61
@@ -238,8 +238,9 @@ pub enum Type {
     /// language. It is deliberately *not* in `INT_TYPE_NAMES`, so it carries
     /// no arithmetic: to compute with one, convert (`as i32`, `as bignum`).
     ///
-    /// LP64 is assumed, which every Unix this workspace supports uses (the
-    /// `#[cfg(unix)]` split in `typelisp_rt_posix::os` is the same assumption).
+    /// As wide as C's `long` on the machine the code being produced runs on
+    /// (`typelisp_mem::target::DataModel`): 64 bits under LP64, 32 on wasm32
+    /// and the Cortex-M boards.
     CLong,
     CULong,
     /// A typed C pointer, `(ptr T)`: the address of a `T` laid out as C lays
@@ -485,8 +486,9 @@ impl Type {
 /// native-method table, and the island's own dispatch predicate.
 pub const INT_TYPES: [Type; 6] = [Type::I8, Type::I16, Type::I32, Type::U8, Type::U16, Type::U32];
 
-/// The two C-boundary word types, which are 64 bits wide and deliberately
-/// *not* in [`INT_TYPES`]: they have no arithmetic, only conversions.
+/// The two C-boundary word types, as wide as the target's C `long`
+/// (`typelisp_mem::target::DataModel`) and deliberately *not* in
+/// [`INT_TYPES`]: they have no arithmetic, only conversions.
 /// Kept as their own list so the places that mean "an integer of this
 /// language" and the places that mean "a machine word of a known width" stay
 /// distinguishable.
@@ -503,13 +505,13 @@ pub const C_WORD_TYPES: [Type; 2] = [Type::CLong, Type::CULong];
 /// (`typelisp_mem::fixed::FixedType::of` turns this pair into the type).
 pub fn int_width_signed(ty: &Type) -> Option<(u32, bool)> {
     Some(match ty {
-        // The C words: 64 bits under LP64, which is every platform this
-        // workspace builds for. They are not in `INT_TYPES`, so the callers
-        // that ask "is this an integer of this language" still say no — but
-        // the ones that ask "how wide is this word" need an answer, because
-        // the width casts and the FFI thunk are both driven by it.
-        Type::CLong => (64, true),
-        Type::CULong => (64, false),
+        // The C words: as wide as C's `long` on the machine the code being
+        // produced runs on. They are not in `INT_TYPES`, so the callers that
+        // ask "is this an integer of this language" still say no — but the
+        // ones that ask "how wide is this word" need an answer, because the
+        // width casts and the FFI thunk are both driven by it.
+        Type::CLong => (typelisp_mem::target::DataModel::current().c_long_bits(), true),
+        Type::CULong => (typelisp_mem::target::DataModel::current().c_long_bits(), false),
         Type::I8 => (8, true),
         Type::I16 => (16, true),
         Type::I32 => (32, true),

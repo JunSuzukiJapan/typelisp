@@ -42,19 +42,26 @@ use typelisp_abi::{fatal, raise};
 use typelisp_mem::TypeId;
 
 /// What a load or store reads or writes, as the checker encodes it. One code
-/// per C scalar type; a typed pointer is loaded and stored as [`KIND_PTR`].
+/// per C scalar type of a fixed width, and three for the raw words — `c-long`,
+/// `c-ulong` and pointers — by the width the checker's data model gives them
+/// (`typelisp_mem::target::DataModel`): a raw word is as wide as the target
+/// says, which is not a question the code reading it can answer, since it may
+/// be the compiler reading memory laid out for another machine.
 pub const KIND_I8: i64 = 1;
 pub const KIND_I16: i64 = 2;
 pub const KIND_I32: i64 = 3;
 pub const KIND_U8: i64 = 4;
 pub const KIND_U16: i64 = 5;
 pub const KIND_U32: i64 = 6;
-pub const KIND_C_LONG: i64 = 7;
-pub const KIND_C_ULONG: i64 = 8;
+/// A 32-bit raw word that is signed (a 32-bit `c-long`).
+pub const KIND_RAW_I32: i64 = 7;
+/// A 32-bit raw word that is not (a 32-bit `c-ulong` or pointer).
+pub const KIND_RAW_U32: i64 = 8;
 pub const KIND_F32: i64 = 9;
 pub const KIND_F64: i64 = 10;
 pub const KIND_BOOL: i64 = 11;
-pub const KIND_PTR: i64 = 12;
+/// A 64-bit raw word, all of whose bits the compiled code's word holds.
+pub const KIND_RAW_64: i64 = 12;
 
 struct Block {
     len: usize,
@@ -199,8 +206,9 @@ pub unsafe fn load(addr: usize, kind: i64) -> i64 {
         KIND_I32 => p.cast::<i32>().read_unaligned() as i64,
         KIND_U8 => p.read_unaligned() as i64,
         KIND_U16 => p.cast::<u16>().read_unaligned() as i64,
-        KIND_U32 => p.cast::<u32>().read_unaligned() as i64,
-        KIND_C_LONG | KIND_C_ULONG | KIND_PTR => p.cast::<i64>().read_unaligned(),
+        KIND_U32 | KIND_RAW_U32 => p.cast::<u32>().read_unaligned() as i64,
+        KIND_RAW_I32 => p.cast::<i32>().read_unaligned() as i64,
+        KIND_RAW_64 => p.cast::<i64>().read_unaligned(),
         KIND_F32 => f64::from(p.cast::<f32>().read_unaligned()).to_bits() as i64,
         KIND_F64 => p.cast::<f64>().read_unaligned().to_bits() as i64,
         KIND_BOOL => i64::from(p.read_unaligned() != 0),
@@ -218,8 +226,8 @@ pub unsafe fn store(addr: usize, kind: i64, word: i64) {
     match kind {
         KIND_I8 | KIND_U8 => p.write_unaligned(word as u8),
         KIND_I16 | KIND_U16 => p.cast::<u16>().write_unaligned(word as u16),
-        KIND_I32 | KIND_U32 => p.cast::<u32>().write_unaligned(word as u32),
-        KIND_C_LONG | KIND_C_ULONG | KIND_PTR => p.cast::<i64>().write_unaligned(word),
+        KIND_I32 | KIND_U32 | KIND_RAW_I32 | KIND_RAW_U32 => p.cast::<u32>().write_unaligned(word as u32),
+        KIND_RAW_64 => p.cast::<i64>().write_unaligned(word),
         KIND_F32 => p.cast::<f32>().write_unaligned(f64::from_bits(word as u64) as f32),
         KIND_F64 => p.cast::<f64>().write_unaligned(f64::from_bits(word as u64)),
         KIND_BOOL => p.write_unaligned(u8::from(word != 0)),

@@ -40,11 +40,11 @@ const INIT: &str = "typelisp_types_init.";
 
 /// Reads `ty`, as its [`TypeId::word`], out of `module`'s table.
 pub fn load(builder: &Builder<'static>, module: &Module<'static>, ty: TypeId) -> Result<IntValue<'static>, String> {
-    let i64_ty = super::llvm_context().i64_type();
+    let word_ty = crate::compile::carriers::word();
     let name = format!("{}{}", UNSETTLED, ty.index());
-    let slot = module.get_global(&name).unwrap_or_else(|| module.add_global(i64_ty, None, &name));
+    let slot = module.get_global(&name).unwrap_or_else(|| module.add_global(word_ty, None, &name));
     Ok(builder
-        .build_load(i64_ty, slot.as_pointer_value(), "type")
+        .build_load(word_ty, slot.as_pointer_value(), "type")
         .map_err(|e| format!("failed to load a type from the type table: {}", e))?
         .into_int_value())
 }
@@ -67,12 +67,12 @@ fn unsettled(module: &Module<'static>) -> Result<Vec<(GlobalValue<'static>, Type
 
 /// Points every global in `slots` at its word of `table`, and removes it.
 fn redirect(table: GlobalValue<'static>, len: u32, slots: Vec<(GlobalValue<'static>, usize)>) {
-    let i64_ty = super::llvm_context().i64_type();
-    let array_ty = i64_ty.array_type(len);
+    let word_ty = crate::compile::carriers::word();
+    let array_ty = word_ty.array_type(len);
     for (slot, pos) in slots {
         // SAFETY: `pos` is below `len`, the table's length.
         let word = unsafe {
-            table.as_pointer_value().const_gep(array_ty, &[i64_ty.const_zero(), i64_ty.const_int(pos as u64, false)])
+            table.as_pointer_value().const_gep(array_ty, &[word_ty.const_zero(), word_ty.const_int(pos as u64, false)])
         };
         slot.as_pointer_value().replace_all_uses_with(word);
         // SAFETY: every use was just replaced.
@@ -86,11 +86,11 @@ pub fn settle_in_process(module: &Module<'static>) -> Result<(), String> {
     if slots.is_empty() {
         return Ok(());
     }
-    let i64_ty = super::llvm_context().i64_type();
+    let word_ty = crate::compile::carriers::word();
     let len = slots.len() as u32;
-    let words: Vec<IntValue<'static>> = slots.iter().map(|(_, ty)| i64_ty.const_int(ty.word() as u64, true)).collect();
-    let table = module.add_global(i64_ty.array_type(len), None, "typelisp.types");
-    table.set_initializer(&i64_ty.const_array(&words));
+    let words: Vec<IntValue<'static>> = slots.iter().map(|(_, ty)| word_ty.const_int(ty.word() as u64, true)).collect();
+    let table = module.add_global(word_ty.array_type(len), None, "typelisp.types");
+    table.set_initializer(&word_ty.const_array(&words));
     table.set_constant(true);
     table.set_linkage(Linkage::Private);
     redirect(table, len, slots.into_iter().enumerate().map(|(pos, (g, _))| (g, pos)).collect());
@@ -105,14 +105,14 @@ pub fn settle_for_export(module: &Module<'static>) -> Result<(), String> {
         return Ok(());
     }
     let ctx = super::llvm_context();
-    let i64_ty = ctx.i64_type();
+    let word_ty = crate::compile::carriers::word();
     let mut types = TypeWords::default();
     let slots: Vec<(GlobalValue<'static>, usize)> = slots.into_iter().map(|(g, ty)| (g, types.add(ty))).collect();
 
     let (shapes, nwords) = constant_words(module, "typelisp.types.shapes", types.words());
     let len = types.len() as u32;
-    let table = module.add_global(i64_ty.array_type(len), None, "typelisp.types");
-    table.set_initializer(&i64_ty.array_type(len).const_zero());
+    let table = module.add_global(word_ty.array_type(len), None, "typelisp.types");
+    table.set_initializer(&word_ty.array_type(len).const_zero());
     table.set_linkage(Linkage::Private);
     redirect(table, len, slots);
 
@@ -123,17 +123,17 @@ pub fn settle_for_export(module: &Module<'static>) -> Result<(), String> {
     let ptr_ty = ctx.ptr_type(AddressSpace::default());
     let define = match module.get_function("rt_types_define") {
         Some(f) => f,
-        None => module.add_function("rt_types_define", i64_ty.fn_type(&[ptr_ty.into(), ctx.i32_type().into()], false), None),
+        None => module.add_function("rt_types_define", word_ty.fn_type(&[ptr_ty.into(), ctx.i32_type().into()], false), None),
     };
-    let args = builder.build_alloca(i64_ty.array_type(3), "args").map_err(|e| e.to_string())?;
+    let args = builder.build_alloca(word_ty.array_type(3), "args").map_err(|e| e.to_string())?;
     let arg_words = [
-        shapes.as_pointer_value().const_to_int(i64_ty),
-        i64_ty.const_int(nwords as u64, false),
-        table.as_pointer_value().const_to_int(i64_ty),
+        shapes.as_pointer_value().const_to_int(word_ty),
+        word_ty.const_int(nwords as u64, false),
+        table.as_pointer_value().const_to_int(word_ty),
     ];
     for (i, w) in arg_words.into_iter().enumerate() {
         // SAFETY: `i` is below the array's length, 3.
-        let slot = unsafe { builder.build_gep(i64_ty, args, &[i64_ty.const_int(i as u64, false)], "arg") }.map_err(|e| e.to_string())?;
+        let slot = unsafe { builder.build_gep(word_ty, args, &[word_ty.const_int(i as u64, false)], "arg") }.map_err(|e| e.to_string())?;
         builder.build_store(slot, w).map_err(|e| e.to_string())?;
     }
     builder
@@ -148,27 +148,27 @@ pub fn settle_for_export(module: &Module<'static>) -> Result<(), String> {
 /// length in words.
 pub fn constant_words(module: &Module<'static>, name: &str, words: &[Word]) -> (GlobalValue<'static>, usize) {
     let ctx = super::llvm_context();
-    let i64_ty = ctx.i64_type();
+    let word_ty = crate::compile::carriers::word();
     let mut strings = std::collections::HashMap::new();
     let mut placed = Vec::new();
     for w in words {
         match w {
-            Word::Int(n) => placed.push(i64_ty.const_int(*n as u64, true)),
+            Word::Int(n) => placed.push(word_ty.const_int(*n as u64, true)),
             Word::Str(text) => {
                 let address = *strings.entry(*text).or_insert_with(|| {
                     let g = module.add_global(ctx.i8_type().array_type(text.len() as u32), None, &format!("{}.string", name));
                     g.set_initializer(&ctx.const_string(text.as_bytes(), false));
                     g.set_constant(true);
                     g.set_linkage(Linkage::Private);
-                    g.as_pointer_value().const_to_int(i64_ty)
+                    g.as_pointer_value().const_to_int(word_ty)
                 });
                 placed.push(address);
-                placed.push(i64_ty.const_int(text.len() as u64, false));
+                placed.push(word_ty.const_int(text.len() as u64, false));
             }
         }
     }
-    let array = module.add_global(i64_ty.array_type(placed.len() as u32), None, name);
-    array.set_initializer(&i64_ty.const_array(&placed));
+    let array = module.add_global(word_ty.array_type(placed.len() as u32), None, name);
+    array.set_initializer(&word_ty.const_array(&placed));
     array.set_constant(true);
     array.set_linkage(Linkage::Private);
     (array, placed.len())

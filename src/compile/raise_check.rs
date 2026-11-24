@@ -33,7 +33,7 @@ pub(crate) fn after_call(builder: &Builder<'static>, callee: FunctionValue<'stat
         return Ok(());
     }
     let ctx = crate::compile::llvm_context();
-    let i64t = ctx.i64_type();
+    let word_ty = crate::compile::carriers::word();
     let block = builder.get_insert_block().ok_or("a call was made with the builder outside any block")?;
     let current = block.get_parent().ok_or("a call was made in a block outside any function")?;
     let unwinding = rt_unwinding_in(current)?;
@@ -46,7 +46,7 @@ pub(crate) fn after_call(builder: &Builder<'static>, callee: FunctionValue<'stat
         inkwell::values::ValueKind::Instruction(_) => return Err("raise check: rt_unwinding produced no value".to_string()),
     };
     let raised = builder
-        .build_int_compare(inkwell::IntPredicate::NE, asked, i64t.const_zero(), "raised")
+        .build_int_compare(inkwell::IntPredicate::NE, asked, word_ty.const_zero(), "raised")
         .map_err(|e| format!("raise check: compare: {}", e))?;
     let leave = ctx.append_basic_block(current, "raised");
     let go_on = ctx.append_basic_block(current, "not_raised");
@@ -63,13 +63,12 @@ pub(crate) fn after_call(builder: &Builder<'static>, callee: FunctionValue<'stat
 /// coroutine-ABI body (`i64 f(i64 frame)`), a zero of the return type for
 /// anything else.
 fn leave_with_the_raise(builder: &Builder<'static>, f: FunctionValue<'static>) -> Result<(), String> {
-    let ctx = crate::compile::llvm_context();
     let ty = f.get_type();
     let coroutine = ty.get_param_types().len() == 1
-        && ty.get_param_types()[0] == BasicTypeEnum::IntType(ctx.i64_type()).into()
-        && ty.get_return_type() == Some(BasicTypeEnum::IntType(ctx.i64_type()));
+        && ty.get_param_types()[0] == BasicTypeEnum::IntType(crate::compile::carriers::word()).into()
+        && ty.get_return_type() == Some(BasicTypeEnum::IntType(crate::compile::carriers::word()));
     let r = if coroutine {
-        builder.build_return(Some(&ctx.i64_type().const_int(typelisp_abi::STATUS_UNWIND as u64, false)))
+        builder.build_return(Some(&crate::compile::carriers::word().const_int(typelisp_abi::STATUS_UNWIND as u64, false)))
     } else {
         match ty.get_return_type() {
             Some(t) => builder.build_return(Some(&zero_of(t))),
@@ -107,6 +106,6 @@ fn rt_unwinding_in(f: FunctionValue<'static>) -> Result<FunctionValue<'static>, 
     // SAFETY: borrowed for the one declaration and not dropped — the module is
     // owned elsewhere.
     let module: std::mem::ManuallyDrop<Module<'static>> = std::mem::ManuallyDrop::new(unsafe { Module::new(module_ref) });
-    let fn_ty = ctx.i64_type().fn_type(&[ctx.ptr_type(AddressSpace::default()).into(), ctx.i32_type().into()], false);
+    let fn_ty = crate::compile::carriers::word().fn_type(&[ctx.ptr_type(AddressSpace::default()).into(), ctx.i32_type().into()], false);
     Ok(module.add_function(RT_UNWINDING, fn_ty, None))
 }
