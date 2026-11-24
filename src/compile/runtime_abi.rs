@@ -32,7 +32,7 @@ pub(crate) enum RtTy {
 const LENGTH: RtTy = RtTy::Value(Carrier::Int { bits: 32, signed: false });
 
 impl RtTy {
-    fn llvm(self) -> BasicTypeEnum<'static> {
+    pub(crate) fn llvm(self) -> BasicTypeEnum<'static> {
         match self {
             RtTy::Value(c) => c.llvm().unwrap_or_else(|| unreachable!("a runtime function takes and answers no unit")),
             RtTy::Ptr => crate::compile::llvm_context().ptr_type(AddressSpace::default()).into(),
@@ -189,19 +189,62 @@ pub(crate) fn declare(module: &Module<'static>, name: &str, sig: &Sig) -> Functi
     }
 }
 
-/// Calls the runtime function `name` with `args`, the words compiled code
-/// holds, converting each to its parameter's type, and answers its result
-/// as a word. Raises nothing itself: whoever calls this asks
-/// [`crate::compile::raise_check::after_call`] when the callee can raise.
+/// Calls the runtime function `name` with `args`, converting each to its
+/// parameter's type, and answers its result. Raises nothing itself: whoever
+/// calls this asks [`crate::compile::raise_check::after_call`] when the
+/// callee can raise.
 pub(crate) fn call(
     builder: &inkwell::builder::Builder<'static>,
     module: &Module<'static>,
     name: &str,
-    args: &[inkwell::values::BasicValueEnum<'static>],
-) -> Result<(FunctionValue<'static>, inkwell::values::IntValue<'static>), String> {
+    args: &[BasicValueEnum<'static>],
+) -> Result<(FunctionValue<'static>, BasicValueEnum<'static>), String> {
     let sig = crate::compile::externs::runtime_sig(name).ok_or_else(|| format!("`{}` is not a runtime function", name))?;
     let f = declare(module, name, sig);
     call_declared(builder, f, sig, args)
+}
+
+/// [`call`] of a function whose result is a word.
+pub(crate) fn call_word(
+    builder: &inkwell::builder::Builder<'static>,
+    module: &Module<'static>,
+    name: &str,
+    args: &[BasicValueEnum<'static>],
+) -> Result<(FunctionValue<'static>, inkwell::values::IntValue<'static>), String> {
+    let (f, v) = call(builder, module, name, args)?;
+    Ok((f, v.into_int_value()))
+}
+
+/// `v` as the parameter type `ty`, which it has unless one of the two is
+/// wider: a word for a narrower integer, an integer for a wider one (the
+/// callee reads the low bits its value has), an `f32` for a `double`, or a
+/// float where the callee takes any value's bits.
+fn argument(
+    b: &inkwell::builder::Builder<'static>,
+    v: BasicValueEnum<'static>,
+    ty: RtTy,
+) -> Result<BasicValueEnum<'static>, String> {
+    let ctx = crate::compile::llvm_context();
+    let e = |e: inkwell::builder::BuilderError| e.to_string();
+    let to = ty.llvm();
+    if v.get_type() == to {
+        return Ok(v);
+    }
+    Ok(match (v, to) {
+        (BasicValueEnum::IntValue(w), BasicTypeEnum::PointerType(p)) => b.build_int_to_ptr(w, p, "arg").map_err(e)?.into(),
+        (BasicValueEnum::PointerValue(p), BasicTypeEnum::IntType(t)) => b.build_ptr_to_int(p, t, "arg").map_err(e)?.into(),
+        (BasicValueEnum::IntValue(w), BasicTypeEnum::IntType(t)) if w.get_type().get_bit_width() > t.get_bit_width() => {
+            b.build_int_truncate(w, t, "arg").map_err(e)?.into()
+        }
+        (BasicValueEnum::IntValue(w), BasicTypeEnum::IntType(t)) => b.build_int_z_extend(w, t, "arg").map_err(e)?.into(),
+        (BasicValueEnum::IntValue(_), BasicTypeEnum::FloatType(t)) => {
+            let c = if t == ctx.f32_type() { Carrier::F32 } else { Carrier::F64 };
+            c.coerce(b, v)?
+        }
+        (BasicValueEnum::FloatValue(f), BasicTypeEnum::FloatType(t)) if t == ctx.f64_type() => b.build_float_ext(f, t, "arg").map_err(e)?.into(),
+        (BasicValueEnum::FloatValue(_), BasicTypeEnum::IntType(_)) => crate::compile::carriers::to_word(b, v)?.into(),
+        _ => return Err(format!("a {:?} parameter given a {}", ty, v.get_type().print_to_string())),
+    })
 }
 
 /// [`call`] with the callee and its signature in hand.
@@ -209,37 +252,23 @@ pub(crate) fn call_declared(
     builder: &inkwell::builder::Builder<'static>,
     f: FunctionValue<'static>,
     sig: &Sig,
-    args: &[inkwell::values::BasicValueEnum<'static>],
-) -> Result<(FunctionValue<'static>, inkwell::values::IntValue<'static>), String> {
+    args: &[BasicValueEnum<'static>],
+) -> Result<(FunctionValue<'static>, BasicValueEnum<'static>), String> {
     let name = f.get_name().to_string_lossy().into_owned();
     if args.len() != sig.params.len() {
         return Err(format!("`{}` takes {} arguments, given {}", name, sig.params.len(), args.len()));
     }
-    let ctx = crate::compile::llvm_context();
     let err = |e: String| format!("{}: {}", name, e);
     let mut passed: Vec<inkwell::values::BasicMetadataValueEnum<'static>> = Vec::with_capacity(args.len());
     for (a, ty) in args.iter().zip(&sig.params) {
-        let v: BasicValueEnum<'static> = match (ty, a) {
-            (ty, v) if v.get_type() == ty.llvm() => *v,
-            (RtTy::Ptr, BasicValueEnum::IntValue(w)) => {
-                builder.build_int_to_ptr(*w, ctx.ptr_type(AddressSpace::default()), "arg_ptr").map_err(|e| err(e.to_string()))?.into()
-            }
-            (RtTy::Value(Carrier::Word), BasicValueEnum::PointerValue(p)) => {
-                builder.build_ptr_to_int(*p, crate::compile::carriers::word(), "arg_word").map_err(|e| err(e.to_string()))?.into()
-            }
-            (RtTy::Value(c), BasicValueEnum::IntValue(w)) if w.get_type() == crate::compile::carriers::word() => {
-                c.from_word(builder, *w).map_err(err)?.ok_or_else(|| err("a unit parameter".to_string()))?
-            }
-            (ty, other) => return Err(err(format!("a {:?} parameter given {:?}", ty, other.get_type()))),
-        };
-        passed.push(v.into());
+        passed.push(argument(builder, *a, *ty).map_err(err)?.into());
     }
     let call = builder.build_call(f, &passed, "rt_result").map_err(|e| err(e.to_string()))?;
     for (at, attr) in sig.extensions() {
         call.add_attribute(at, attr);
     }
-    match (call.try_as_basic_value(), sig.ret) {
-        (inkwell::values::ValueKind::Basic(v), RtTy::Value(c)) => Ok((f, c.to_word(builder, v).map_err(err)?)),
-        _ => Err(err("answers no value".to_string())),
+    match call.try_as_basic_value() {
+        inkwell::values::ValueKind::Basic(v) => Ok((f, v)),
+        inkwell::values::ValueKind::Instruction(_) => Err(err("answers no value".to_string())),
     }
 }

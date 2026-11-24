@@ -1,14 +1,8 @@
 //! The island's numeric builders: one operation on a fixed-width integer or
 //! a float, computed at the type's own width.
 //!
-//! A value travels through compiled code in a 64-bit word: a fixed-width
-//! integer sign-extended from its width when signed and zero-extended when
-//! unsigned, a float as the bits of a `double` (an `f32` is exactly a
-//! `double`). That is the *word*. An operation is computed in the type's own
-//! LLVM type — `i8` for `u8`, `float` for `f32` — so every builder here does
-//! three things: cut the word down to that type, compute, and extend the
-//! result back. Between two operations of one expression LLVM folds the
-//! extension and the cut away, so the expression stays in the narrow type.
+//! Every operand and every result is in the type's own LLVM type — `i8` for
+//! `u8`, `float` for `f32` — and a comparison answers an `i1`.
 //!
 //! The island passes the type (a fixed-width integer as its `wsig`,
 //! `width * 2 + signed`; a float as its width in bits) and the method's name,
@@ -24,7 +18,8 @@ use inkwell::{FloatPredicate, IntPredicate};
 
 use typelisp_mem::{Heap, Value};
 
-use super::{expect_int, expect_llvm_builder, expect_llvm_module, expect_llvm_value, llvm_value_value};
+use super::values::value_or_return;
+use super::{expect_int, expect_llvm_builder, expect_llvm_module, llvm_value_value};
 use crate::eval::interp::{expect_str, EvalError};
 
 /// A fixed-width integer type as the island names it.
@@ -76,30 +71,9 @@ impl Emit<'_> {
         EvalError::Internal(format!("{}: {}", self.who, e))
     }
 
-    fn word_ty(&self) -> IntType<'static> {
-        crate::compile::carriers::word()
-    }
-
-    /// The word cut to `t`: its low bits are the value.
-    fn narrow(&self, t: Fixed, word: IntValue<'static>) -> Result<IntValue<'static>, EvalError> {
-        if t.bits == 64 {
-            return Ok(word);
-        }
-        self.b.build_int_truncate(word, t.ty(), "narrow").map_err(|e| self.err(e))
-    }
-
-    /// A value of `t` back in its word.
-    fn widen(&self, t: Fixed, v: IntValue<'static>) -> Result<IntValue<'static>, EvalError> {
-        if t.bits == 64 {
-            return Ok(v);
-        }
-        let r = if t.signed { self.b.build_int_s_extend(v, self.word_ty(), "widen") } else { self.b.build_int_z_extend(v, self.word_ty(), "widen") };
-        r.map_err(|e| self.err(e))
-    }
-
-    /// An `i1` as the `0`/`1` word a `bool` is.
-    fn flag(&self, v: IntValue<'static>) -> Result<IntValue<'static>, EvalError> {
-        self.b.build_int_z_extend(v, self.word_ty(), "flag").map_err(|e| self.err(e))
+    /// `v`, which is of `from`, at the type `to`.
+    fn cast(&self, from: Fixed, to: Fixed, v: IntValue<'static>) -> Result<IntValue<'static>, EvalError> {
+        self.b.build_int_cast_sign_flag(v, to.ty(), from.signed, "cast").map_err(|e| self.err(e))
     }
 
     fn cmp(&self, p: IntPredicate, a: IntValue<'static>, b: IntValue<'static>) -> Result<IntValue<'static>, EvalError> {
@@ -138,26 +112,24 @@ fn int_predicate(method: &str, t: Fixed) -> Option<IntPredicate> {
 
 /// `(build-fixed-binop builder wsig method a b)`: a two-operand method of a
 /// fixed-width integer — arithmetic, comparison, bitwise, `max`/`min`, the
-/// divisions, `ash` and `logbitp`. A comparison answers a `0`/`1` word.
+/// divisions, `ash` and `logbitp`. A comparison answers an `i1`.
 ///
 /// `/`, `mod` and `rem` assume their operands passed
 /// `build-fixed-div-check`: the island branches to the runtime's fault on
-/// the other side. `ash`'s and `logbitp`'s `b` is a bit count, a raw word
+/// the other side. `ash`'s and `logbitp`'s `b` is a bit count, an untagged word
 /// whatever the receiver's type.
 pub(super) fn build_fixed_binop(heap: &Heap, args: &[Value]) -> Result<Value, EvalError> {
     let builder = expect_llvm_builder(&args[0])?;
     let t = Fixed::of(expect_int(&args[1])?)?;
     let method = expect_str(heap, &args[2])?.to_string();
-    let (aw, bw) = (expect_llvm_value(&args[3])?.into_int_value(), expect_llvm_value(&args[4])?.into_int_value());
+    let (a, b) = (value_or_return!(&args[3]).into_int_value(), value_or_return!(&args[4]).into_int_value());
     let bld = builder.borrow();
     let e = Emit { b: &bld, who: "build-fixed-binop" };
-    let a = e.narrow(t, aw)?;
     if method == "ash" || method == "logbitp" {
-        return Ok(llvm_value_value(shift(&e, t, &method, a, bw)?.into()));
+        return Ok(llvm_value_value(shift(&e, t, &method, a, b)?.into()));
     }
-    let b = e.narrow(t, bw)?;
     if let Some(p) = int_predicate(&method, t) {
-        return Ok(llvm_value_value(e.flag(e.cmp(p, a, b)?)?.into()));
+        return Ok(llvm_value_value(e.cmp(p, a, b)?.into()));
     }
     let zero = t.ty().const_zero();
     let r = match method.as_str() {
@@ -169,7 +141,7 @@ pub(super) fn build_fixed_binop(heap: &Heap, args: &[Value]) -> Result<Value, Ev
         "logxor" => bld.build_xor(a, b, "xor"),
         "logtest" => {
             let both = bld.build_and(a, b, "and").map_err(|x| e.err(x))?;
-            return Ok(llvm_value_value(e.flag(e.cmp(IntPredicate::NE, both, zero)?)?.into()));
+            return Ok(llvm_value_value(e.cmp(IntPredicate::NE, both, zero)?.into()));
         }
         // The first operand unless the second is strictly greater (smaller):
         // `typelisp_mem::fixed::max`/`min`.
@@ -204,7 +176,7 @@ pub(super) fn build_fixed_binop(heap: &Heap, args: &[Value]) -> Result<Value, Ev
         _ => return Err(e.err(format!("not a fixed-width binary method: {}", method))),
     }
     .map_err(|x| e.err(x))?;
-    Ok(llvm_value_value(e.widen(t, r)?.into()))
+    Ok(llvm_value_value(r.into()))
 }
 
 /// `ash` and `logbitp` (`typelisp_mem::fixed::ash`/`logbitp`): a distance
@@ -212,68 +184,65 @@ pub(super) fn build_fixed_binop(heap: &Heap, args: &[Value]) -> Result<Value, Ev
 /// say (they are undefined there), so the in-range shift is computed on a
 /// safe distance and the saturated value chosen by `select`.
 fn shift(e: &Emit, t: Fixed, method: &str, a: IntValue<'static>, count: IntValue<'static>) -> Result<IntValue<'static>, EvalError> {
-    let wt = e.word_ty();
+    let wt = count.get_type();
     let zero_w = wt.const_zero();
     let width = wt.const_int(u64::from(t.bits), false);
+    // A distance below the type's width fits the type.
+    let in_t = |n: IntValue<'static>| e.b.build_int_cast_sign_flag(n, t.ty(), false, "distance").map_err(|x| e.err(x));
     let zero = t.ty().const_zero();
     let sign = if t.signed { e.cmp(IntPredicate::SLT, a, zero)? } else { crate::compile::llvm_context().bool_type().const_zero() };
     if method == "logbitp" {
         // A negative index, read unsigned, is past the width too.
         let past = e.cmp(IntPredicate::UGE, count, width)?;
-        let at = e.narrow(t, e.select(past, zero_w, count)?)?;
+        let at = in_t(e.select(past, zero_w, count)?)?;
         let shifted = e.b.build_right_shift(a, at, false, "bit").map_err(|x| e.err(x))?;
         let bit = e.b.build_and(shifted, t.ty().const_int(1, false), "bit").map_err(|x| e.err(x))?;
         let set = e.cmp(IntPredicate::NE, bit, zero)?;
-        let r = e.b.build_select(past, sign, set, "logbitp").map_err(|x| e.err(x))?.into_int_value();
-        return e.flag(r);
+        return e.select(past, sign, set);
     }
     let left = e.cmp(IntPredicate::SGE, count, zero_w)?;
     let negated = e.b.build_int_sub(zero_w, count, "neg").map_err(|x| e.err(x))?;
     let distance = e.select(left, count, negated)?;
     // `-i64::MIN` wraps to itself, which read unsigned is past every width.
     let past = e.cmp(IntPredicate::UGE, distance, width)?;
-    let by = e.narrow(t, e.select(past, zero_w, distance)?)?;
+    let by = in_t(e.select(past, zero_w, distance)?)?;
     let shl = e.b.build_left_shift(a, by, "shl").map_err(|x| e.err(x))?;
     let shr = e.b.build_right_shift(a, by, t.signed, "shr").map_err(|x| e.err(x))?;
     let all = t.ty().const_all_ones();
     let filled = e.select(sign, all, zero)?;
     let l = e.select(past, zero, shl)?;
     let r = e.select(past, filled, shr)?;
-    e.widen(t, e.select(left, l, r)?)
+    e.select(left, l, r)
 }
 
 /// `(build-fixed-unary builder module wsig method a)`: a one-operand method
 /// of a fixed-width integer — `lognot`, `logcount`, `integer-length`,
 /// `int->float`, and the width casts. `int->W` answers the cast value;
-/// `try-int->W` answers whether `a` fits `W`, a `0`/`1` word (a value that
-/// fits is the same word in both types, so the island's `Some` holds `a`).
+/// `try-int->W` answers whether `a` fits `W`, an `i1`.
 pub(super) fn build_fixed_unary(heap: &Heap, args: &[Value]) -> Result<Value, EvalError> {
     let builder = expect_llvm_builder(&args[0])?;
     let module = expect_llvm_module(&args[1])?;
     let t = Fixed::of(expect_int(&args[2])?)?;
     let method = expect_str(heap, &args[3])?.to_string();
-    let word = expect_llvm_value(&args[4])?.into_int_value();
+    let a = value_or_return!(&args[4]).into_int_value();
     let bld = builder.borrow();
     let e = Emit { b: &bld, who: "build-fixed-unary" };
+    let zero = t.ty().const_zero();
     if let Some(to) = Fixed::target_of(&method) {
-        let cast = e.widen(to, e.narrow(to, word)?)?;
+        let cast = e.cast(t, to, a)?;
         if method.starts_with("try-") {
-            let kept = e.cmp(IntPredicate::EQ, cast, word)?;
-            // A word below zero is a negative value of a signed type and,
-            // of `c-ulong`, one past `c-long`'s maximum: either way it is out
-            // of range for a type of the other signedness.
-            let fits = if t.signed != to.signed {
-                let non_negative = e.cmp(IntPredicate::SGE, word, e.word_ty().const_zero())?;
-                bld.build_and(kept, non_negative, "fits").map_err(|x| e.err(x))?
-            } else {
-                kept
+            // It fits when it comes back the same and keeps its sign.
+            let kept = e.cmp(IntPredicate::EQ, e.cast(to, t, cast)?, a)?;
+            let negative = |t: Fixed, v: IntValue<'static>| match t.signed {
+                true => e.cmp(IntPredicate::SLT, v, t.ty().const_zero()),
+                false => Ok(crate::compile::llvm_context().bool_type().const_zero()),
             };
-            return Ok(llvm_value_value(e.flag(fits)?.into()));
+            let same_sign = e.cmp(IntPredicate::EQ, negative(t, a)?, negative(to, cast)?)?;
+            let fits = bld.build_and(kept, same_sign, "fits").map_err(|x| e.err(x))?;
+            return Ok(llvm_value_value(fits.into()));
         }
         return Ok(llvm_value_value(cast.into()));
     }
-    let a = e.narrow(t, word)?;
-    let zero = t.ty().const_zero();
     // `logcount`/`integer-length` read a negative value through its
     // complement (`typelisp_mem::fixed`).
     let magnitude = || -> Result<IntValue<'static>, EvalError> {
@@ -292,16 +261,15 @@ pub(super) fn build_fixed_unary(heap: &Heap, args: &[Value]) -> Result<Value, Ev
             let ctx = crate::compile::llvm_context();
             let f = if t.signed { bld.build_signed_int_to_float(a, ctx.f64_type(), "float") } else { bld.build_unsigned_int_to_float(a, ctx.f64_type(), "float") }
                 .map_err(|x| e.err(x))?;
-            let bits = bld.build_bit_cast(f, ctx.i64_type(), "bits").map_err(|x| e.err(x))?;
-            return Ok(llvm_value_value(bits));
+            return Ok(llvm_value_value(f.into()));
         }
         _ => return Err(e.err(format!("not a fixed-width unary method: {}", method))),
     };
-    Ok(llvm_value_value(e.widen(t, r)?.into()))
+    Ok(llvm_value_value(r.into()))
 }
 
 /// `(build-fixed-div-check builder wsig method a b)`: whether `/`, `mod` or
-/// `rem` fails on these operands, as a `0`/`1` word — a zero divisor, and
+/// `rem` fails on these operands, an `i1` — a zero divisor, and
 /// for `/` also the most negative value over `-1`
 /// (`typelisp_mem::fixed::Fault`). The island takes the failing side to
 /// the runtime's `rt_int_div_fault`/`rt_int_mod_fault`.
@@ -309,10 +277,9 @@ pub(super) fn build_fixed_div_check(heap: &Heap, args: &[Value]) -> Result<Value
     let builder = expect_llvm_builder(&args[0])?;
     let t = Fixed::of(expect_int(&args[1])?)?;
     let method = expect_str(heap, &args[2])?.to_string();
+    let (a, b) = (value_or_return!(&args[3]).into_int_value(), value_or_return!(&args[4]).into_int_value());
     let bld = builder.borrow();
     let e = Emit { b: &bld, who: "build-fixed-div-check" };
-    let a = e.narrow(t, expect_llvm_value(&args[3])?.into_int_value())?;
-    let b = e.narrow(t, expect_llvm_value(&args[4])?.into_int_value())?;
     let zero = e.cmp(IntPredicate::EQ, b, t.ty().const_zero())?;
     let fails = if method == "/" && t.signed {
         let min = t.ty().const_int(1u64 << (t.bits - 1), false);
@@ -323,7 +290,7 @@ pub(super) fn build_fixed_div_check(heap: &Heap, args: &[Value]) -> Result<Value
     } else {
         zero
     };
-    Ok(llvm_value_value(e.flag(fails)?.into()))
+    Ok(llvm_value_value(fails.into()))
 }
 
 /// A float width as the island names it, in bits.
@@ -336,27 +303,9 @@ fn float_ty(bits: i64) -> Result<FloatType<'static>, EvalError> {
     }
 }
 
-/// A float's word as a value of `ty`: the `double` it holds, rounded to
-/// `float` for an `f32` (exactly, since the word holds an `f32`'s value).
-fn float_word(e: &Emit, word: IntValue<'static>, ty: FloatType<'static>) -> Result<FloatValue<'static>, EvalError> {
-    let ctx = crate::compile::llvm_context();
-    let d = e.b.build_bit_cast(word, ctx.f64_type(), "double").map_err(|x| e.err(x))?.into_float_value();
-    if ty == ctx.f64_type() {
-        return Ok(d);
-    }
-    e.b.build_float_trunc(d, ty, "narrow").map_err(|x| e.err(x))
-}
-
-/// A float back in its word: as a `double`'s bits.
-fn float_back(e: &Emit, v: FloatValue<'static>) -> Result<IntValue<'static>, EvalError> {
-    let ctx = crate::compile::llvm_context();
-    let d = if v.get_type() == ctx.f64_type() { v } else { e.b.build_float_ext(v, ctx.f64_type(), "widen").map_err(|x| e.err(x))? };
-    Ok(e.b.build_bit_cast(d, ctx.i64_type(), "bits").map_err(|x| e.err(x))?.into_int_value())
-}
-
 /// `(build-float-binop builder module bits method a b)`: a two-operand
 /// method of `f32` (`bits` 32) or `f64` (64) — arithmetic, `expt`,
-/// `max`/`min`, comparisons. A comparison answers a `0`/`1` word: the
+/// `max`/`min`, comparisons. A comparison answers an `i1`: the
 /// ordered predicates, so a `NaN` operand makes `<` and `=` false, and `/=`
 /// unordered, so it makes `/=` true (Rust's `!=`).
 pub(super) fn build_float_binop(heap: &Heap, args: &[Value]) -> Result<Value, EvalError> {
@@ -364,10 +313,9 @@ pub(super) fn build_float_binop(heap: &Heap, args: &[Value]) -> Result<Value, Ev
     let module = expect_llvm_module(&args[1])?;
     let ty = float_ty(expect_int(&args[2])?)?;
     let method = expect_str(heap, &args[3])?.to_string();
+    let (a, b) = (value_or_return!(&args[4]).into_float_value(), value_or_return!(&args[5]).into_float_value());
     let bld = builder.borrow();
     let e = Emit { b: &bld, who: "build-float-binop" };
-    let a = float_word(&e, expect_llvm_value(&args[4])?.into_int_value(), ty)?;
-    let b = float_word(&e, expect_llvm_value(&args[5])?.into_int_value(), ty)?;
     let fcmp = |p: FloatPredicate, x: FloatValue<'static>, y: FloatValue<'static>| bld.build_float_compare(p, x, y, "fcmp").map_err(|z| e.err(z));
     let predicate = match method.as_str() {
         "<" => Some(FloatPredicate::OLT),
@@ -379,7 +327,7 @@ pub(super) fn build_float_binop(heap: &Heap, args: &[Value]) -> Result<Value, Ev
         _ => None,
     };
     if let Some(p) = predicate {
-        return Ok(llvm_value_value(e.flag(fcmp(p, a, b)?)?.into()));
+        return Ok(llvm_value_value(fcmp(p, a, b)?.into()));
     }
     let r = match method.as_str() {
         "+" => bld.build_float_add(a, b, "fadd").map_err(|x| e.err(x))?,
@@ -395,14 +343,13 @@ pub(super) fn build_float_binop(heap: &Heap, args: &[Value]) -> Result<Value, Ev
         }
         _ => return Err(e.err(format!("not a float binary method: {}", method))),
     };
-    Ok(llvm_value_value(float_back(&e, r)?.into()))
+    Ok(llvm_value_value(r.into()))
 }
 
 /// `(build-float-unary builder module bits method a)`: a one-operand method
 /// of `f32` or `f64` with an LLVM intrinsic, and the width casts.
 /// `float->f32` rounds to binary32; `float->f64` is exact; `try-float->f32`
-/// answers whether rounding to binary32 keeps the value's bits, a `0`/`1`
-/// word.
+/// answers whether rounding to binary32 keeps the value's bits, an `i1`.
 ///
 /// `round` is `llvm.rint` in the default rounding mode (nearest, ties to
 /// even, CL's `round`) rather than `llvm.roundeven`, which some targets
@@ -412,20 +359,20 @@ pub(super) fn build_float_unary(heap: &Heap, args: &[Value]) -> Result<Value, Ev
     let module = expect_llvm_module(&args[1])?;
     let ty = float_ty(expect_int(&args[2])?)?;
     let method = expect_str(heap, &args[3])?.to_string();
-    let word = expect_llvm_value(&args[4])?.into_int_value();
+    let a = value_or_return!(&args[4]).into_float_value();
     let bld = builder.borrow();
     let e = Emit { b: &bld, who: "build-float-unary" };
     let ctx = crate::compile::llvm_context();
+    let to = |ty: FloatType<'static>, v: FloatValue<'static>| bld.build_float_cast(v, ty, "cast").map_err(|x| e.err(x));
     match method.as_str() {
-        "float->f32" => {
-            let single = float_word(&e, word, ctx.f32_type())?;
-            return Ok(llvm_value_value(float_back(&e, single)?.into()));
-        }
-        "float->f64" => return Ok(llvm_value_value(word.into())),
+        "float->f32" => return Ok(llvm_value_value(to(ctx.f32_type(), a)?.into())),
+        "float->f64" => return Ok(llvm_value_value(to(ctx.f64_type(), a)?.into())),
         "try-float->f32" => {
-            let single = float_word(&e, word, ctx.f32_type())?;
-            let back = float_back(&e, single)?;
-            return Ok(llvm_value_value(e.flag(e.cmp(IntPredicate::EQ, back, word)?)?.into()));
+            let wide = to(ctx.f64_type(), a)?;
+            let back = to(ctx.f64_type(), to(ctx.f32_type(), wide)?)?;
+            let bits = |v: FloatValue<'static>| bld.build_bit_cast(v, ctx.i64_type(), "bits").map_err(|x| e.err(x));
+            let kept = e.cmp(IntPredicate::EQ, bits(back)?.into_int_value(), bits(wide)?.into_int_value())?;
+            return Ok(llvm_value_value(kept.into()));
         }
         _ => {}
     }
@@ -441,7 +388,6 @@ pub(super) fn build_float_unary(heap: &Heap, args: &[Value]) -> Result<Value, Ev
         "log" => "llvm.log",
         _ => return Err(e.err(format!("not a float unary method: {}", method))),
     };
-    let a = float_word(&e, word, ty)?;
     let r = e.intrinsic(&module.borrow(), intrinsic, &[ty.into()], &[a.into()])?.into_float_value();
-    Ok(llvm_value_value(float_back(&e, r)?.into()))
+    Ok(llvm_value_value(r.into()))
 }

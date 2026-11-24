@@ -219,8 +219,9 @@ impl Args {
         decode(*self.0.add(i))
     }
 
+    /// The `i32` in word `i`: its low 32 bits, whatever fills the rest.
     unsafe fn int(&self, i: usize) -> i64 {
-        *self.0.add(i) as i64
+        i64::from(*self.0.add(i) as i32)
     }
 
     unsafe fn flag(&self, i: usize) -> bool {

@@ -605,12 +605,12 @@ impl Repr {
     ///
     /// The narrow integers are the clearest case of the two producers meaning
     /// different things by the same *kind of* value. A `u8` **field of a
-    /// struct** is `1`, a raw word, because the `defstruct` already wrote the
-    /// width down and nothing has to be carried alongside the value. A `u8`
+    /// struct** is a fixnum, because the `defstruct` already wrote the width
+    /// down and nothing has to be carried alongside the value. A `u8`
     /// **inside a `Sexpr`** is the `u8` variant, a `BoxedObj::Narrow`, because
-    /// there the width is written down nowhere else. Same type, same machine
-    /// word, two encodings — decided by where the value is going, which is
-    /// what this number says.
+    /// there the width is written down nowhere else. Same type, two encodings
+    /// — decided by where the value is going, which is what this number
+    /// says.
     ///
     /// Read off the `Repr`, not off [`Repr::class`]: the two float widths
     /// share a class (they compute alike) but not a kind (they box
@@ -619,6 +619,11 @@ impl Repr {
         use crate::sexpr_variant::field_kind as k;
         if matches!(self, Repr::F32) {
             return k::F32 as i64;
+        }
+        // A fixed-width integer is a fixnum in the slot whatever its width;
+        // the width is what it is read back at.
+        if let Repr::Narrow(t) = self {
+            return (k::FIXED as i64) + i64::from(t.bits()) * 2 + i64::from(t.signed());
         }
         // A niche is a tagged word both ways, like `TAGGED` — but the island has
         // to tell the two apart where it *builds* an `Option` around a

@@ -71,7 +71,7 @@ fn collect_into_here(heap: &Heap, form: Value, t: &mut Targets) -> Result<(), Er
         // this is the only place a cons can be something other than a node —
         // and a quoted `(call ...)` datum is data, not a dependency.
         wk::QUOTE => return Ok(()),
-        // `(call PATH (REPR...) ARG...)`, and `fnref`'s first field is the
+        // `(call PATH REPR (REPR...) ARG...)`, and `fnref`'s first field is the
         // same path — the bridge turns a `fnref` into a forwarding call, so
         // its target needs the same treatment.
         wk::CALL | wk::FNREF => {
@@ -114,7 +114,7 @@ fn collect_into_here(heap: &Heap, form: Value, t: &mut Targets) -> Result<(), Er
                 push_unique(&mut t.dyn_upcasts, p);
             }
         }
-        // `(dyn-call TRAIT SYM SLOT ((TYPE SYM)...) (REPR...) ARG...)` — no
+        // `(dyn-call TRAIT SYM SLOT ((TYPE SYM)...) REPR (REPR...) ARG...)` — no
         // static target, but every implementation it could dispatch to must
         // exist natively before this body can run natively.
         wk::DYN_CALL => {

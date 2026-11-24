@@ -60,6 +60,12 @@ pub(crate) fn lower_rooted(heap: &mut Heap, lw: &mut Lowering, t: &Typed) -> Res
 fn lower_node(heap: &mut Heap, lw: &mut Lowering, t: &Typed) -> Result<Value, Error> {
     match &t.node {
         Node::Literal { tag, value } => match value {
+            // A fixed-width integer's literal says which type it is of: the
+            // number alone does not.
+            Some(v) if *tag == wk::INT_ANY_WIDTH => {
+                let repr = lw.reg.repr(&lw.settle(&t.ty)).write(heap)?;
+                core::tagged(heap, *tag, &[*v, repr])
+            }
             Some(v) => core::tagged(heap, *tag, &[*v]),
             None => core::tagged(heap, *tag, &[]),
         },
@@ -78,7 +84,7 @@ fn lower_node(heap: &mut Heap, lw: &mut Lowering, t: &Typed) -> Result<Value, Er
                 lowered.push((lw.settle(&a.ty), lower_rooted(heap, lw, a)?));
             }
             let lowered: Vec<Arg> = lowered.iter().map(|(ty, form)| Arg { ty, form: *form }).collect();
-            lw.reg.call_form(heap, &path, &lowered)
+            lw.reg.call_form(heap, &path, &lw.settle(&t.ty), &lowered)
         }
         Node::Call { path, targs, args } => {
             let path = if targs.is_empty() {
@@ -93,7 +99,7 @@ fn lower_node(heap: &mut Heap, lw: &mut Lowering, t: &Typed) -> Result<Value, Er
             }
             let lowered: Vec<Arg> = lowered.iter().map(|(ty, form)| Arg { ty, form: *form }).collect();
             request_print_object(lw, &lw.settle(&t.ty));
-            lw.reg.call_form(heap, &path, &lowered)
+            lw.reg.call_form(heap, &path, &lw.settle(&t.ty), &lowered)
         }
         Node::MethodCall { owner, method, instance, targs, args } => {
             // Every type's method is the receiver's own when its type has one.
@@ -105,7 +111,7 @@ fn lower_node(heap: &mut Heap, lw: &mut Lowering, t: &Typed) -> Result<Value, Er
                         let targs = if def.sig.builtin { Vec::new() } else { targs };
                         return lower_method_call(heap, lw, &owner, code, true, &targs, args, &t.ty);
                     }
-                    Some(Chosen::Dyn { trait_path, slot }) => return lower_dyn_call(heap, lw, &trait_path, *method, slot, args),
+                    Some(Chosen::Dyn { trait_path, slot }) => return lower_dyn_call(heap, lw, &trait_path, *method, slot, args, &t.ty),
                     None => {}
                 }
             }
@@ -126,7 +132,7 @@ fn lower_node(heap: &mut Heap, lw: &mut Lowering, t: &Typed) -> Result<Value, Er
                 }
                 let lowered: Vec<Arg> = lowered.iter().map(|(ty, form)| Arg { ty, form: *form }).collect();
                 let targets = super::dyn_trait::targets(lw.reg, dyn_trait, *method);
-                return lw.reg.dyn_call_form(heap, dyn_trait, *method, slot, &targets, &lowered);
+                return lw.reg.dyn_call_form(heap, dyn_trait, *method, slot, &targets, &lw.settle(&t.ty), &lowered);
             }
             let (owner, type_args) = match &recv {
                 Type::Named(path, type_args) => (*path, type_args.clone()),
@@ -183,7 +189,7 @@ fn lower_node(heap: &mut Heap, lw: &mut Lowering, t: &Typed) -> Result<Value, Er
             let form = lower_rooted(heap, lw, value)?;
             lw.reg.dyn_new_form(heap, trait_path, &slots, &supers, &concrete, form)
         }
-        Node::DynCall { trait_path, method, slot, args } => lower_dyn_call(heap, lw, trait_path, *method, *slot, args),
+        Node::DynCall { trait_path, method, slot, args } => lower_dyn_call(heap, lw, trait_path, *method, *slot, args, &t.ty),
         Node::Select { arms } => {
             let mut lowered = Vec::with_capacity(arms.len());
             for arm in arms {
@@ -410,7 +416,8 @@ fn lower_node(heap: &mut Heap, lw: &mut Lowering, t: &Typed) -> Result<Value, Er
             };
             let path = &path;
             let params: Vec<Type> = params.iter().map(|ty| lw.settle(ty)).collect();
-            lw.reg.fnref_form(heap, path, &params)
+            let Type::Fn(_, _, ret) = lw.settle(&t.ty) else { unreachable!("a function taken as a value is of a function type") };
+            lw.reg.fnref_form(heap, path, &params, &ret)
         }
         Node::Apply { callee, args } => {
             let ret = lw.settle(&t.ty);
@@ -694,13 +701,14 @@ fn lower_method_call(heap: &mut Heap, lw: &mut Lowering, owner: &Path, method: S
 }
 
 /// A call through a trait object's table: the method `method`, the slot
-/// `slot` of `trait_path`'s table, on `args` (the trait object first).
-fn lower_dyn_call(heap: &mut Heap, lw: &mut Lowering, trait_path: &Path, method: SymRef, slot: usize, args: &[Typed]) -> Result<Value, Error> {
+/// `slot` of `trait_path`'s table, on `args` (the trait object first), whose
+/// result is of type `ty`.
+fn lower_dyn_call(heap: &mut Heap, lw: &mut Lowering, trait_path: &Path, method: SymRef, slot: usize, args: &[Typed], ty: &Type) -> Result<Value, Error> {
     let mut lowered = Vec::with_capacity(args.len());
     for a in args {
         lowered.push((lw.settle(&a.ty), lower_rooted(heap, lw, a)?));
     }
     let lowered: Vec<Arg> = lowered.iter().map(|(ty, form)| Arg { ty, form: *form }).collect();
     let targets = super::dyn_trait::targets(lw.reg, trait_path, method);
-    lw.reg.dyn_call_form(heap, trait_path, method, slot, &targets, &lowered)
+    lw.reg.dyn_call_form(heap, trait_path, method, slot, &targets, &lw.settle(ty), &lowered)
 }

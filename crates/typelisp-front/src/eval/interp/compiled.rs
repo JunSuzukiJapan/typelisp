@@ -29,8 +29,12 @@ pub(crate) fn decode_crossing_return(heap: &mut Heap, raw: i64, ret: &Repr) -> R
                 )))
             }
         },
-        // Raw machine words on the way out, mirroring the argument encode.
-        Repr::Narrow(_) => Value::Int(raw),
+        // The word's low bits, at the type's width: what fills the rest of
+        // the word is no part of the value.
+        Repr::Narrow(t) => Value::Int(typelisp_mem::with_fixed!(*t, T => {
+            use typelisp_mem::fixed::Fixed;
+            T::from_word(raw).to_word()
+        })),
         // Also raw, and — unlike `Handle` above — with no registry to
         // check it against. Whatever C answered is the answer; the FFI
         // declaration is what claimed it would be a pointer.

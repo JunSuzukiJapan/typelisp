@@ -1246,7 +1246,7 @@ fn rt_shims() -> [(&'static str, Shim); 353] {
         ("rt_str_append", shim(rt_str_append as unsafe extern "C" fn(Word, Word) -> Word)),
         ("rt_str_substring", shim(rt_str_substring as unsafe extern "C-unwind" fn(Word, Word, Word) -> Word)),
         ("rt_str_upcase", shim(rt_str_upcase as unsafe extern "C" fn(Word) -> Word)),
-        ("rt_int_fits_char", shim(rt_int_fits_char as unsafe extern "C" fn(Word) -> bool)),
+        ("rt_int_fits_char", shim(rt_int_fits_char as unsafe extern "C" fn(i64) -> bool)),
         ("rt_f64_fits_f32", shim(rt_f64_fits_f32 as unsafe extern "C" fn(f64) -> bool)),
         ("rt_str_downcase", shim(rt_str_downcase as unsafe extern "C" fn(Word) -> Word)),
         ("rt_f64_new", shim(rt_f64_new as unsafe extern "C" fn(f64) -> Word)),
@@ -1489,11 +1489,12 @@ mod scc_tests {
         // `(defun a () i64 (b))` / `(defun b () i64 (a))` — never checked,
         // built directly as core forms, so the checker's forward-reference
         // restriction never comes into play. Each body is a single
-        // `(call NAME ())`: no arguments, hence no argument reprs.
+        // `(call NAME int ())`: no arguments, hence no argument reprs.
         for (name, callee) in [("a", "b"), ("b", "a")] {
             let path = crate::check::core::definition_form(&Path::root(callee));
             heap.push_root(path);
-            let call = core::tagged(&mut heap, typelisp_mem::wk::CALL, &[path, Value::Empty])
+            let ret = Repr::Int.write(&mut heap).expect("a symbol");
+            let call = core::tagged(&mut heap, typelisp_mem::wk::CALL, &[path, ret, Value::Empty])
                 .expect("building a 2-field node cannot exhaust a 1<<16 heap");
             // Registered `FnDef` bodies are reachable only through
             // `Interp::fns`, which the collector does not scan — the same

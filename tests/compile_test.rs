@@ -433,14 +433,14 @@ fn a_freshly_built_module_verifies_successfully() {
 
 /// The self-hosted compiler body (`src/compiler.rs`'s `compile-value`/
 /// `compile-function`) compiling the exact shape `ast_bridge::ast_to_sexpr`
-/// produces for `Expr::Int` — `'(int-any-width 0 42)` here stands in for what the bridge
+/// produces for `Expr::Int` — `'(int-any-width 0 0 42)` here stands in for what the bridge
 /// would build from the real typed AST (the Rust-side `ast_bridge` unit
 /// tests already cover that translation in isolation; this covers the
 /// compiler body consuming it). No parameters, hence the empty `'()`.
 #[test]
 fn the_compiler_body_compiles_an_int_literal_node() {
     let ir = eval_string_in_island(
-        r#"(to-string (compile-function (llvm-module::create "mod") "answer" '() '(int-any-width 0 42)))"#,
+        r#"(to-string (compile-function (llvm-module::create "mod") "answer" '() '(int-any-width 0 0 42)))"#,
     );
     assert!(ir.contains("define i64 @answer(i64"), "IR was:\n{}", ir);
     // The value goes into the frame's slot 0 and the function returns a
@@ -470,7 +470,7 @@ fn the_compiler_body_compiles_an_int_literal_node() {
 #[test]
 fn the_compiler_body_compiles_a_two_parameter_addition() {
     let module = expect_llvm_module(eval_ok_in_island(
-        r#"(compile-function (llvm-module::create "mod") "add2" '((a . 0) (b . 0)) '(assoc i32 "+" true "tl_std::primitive::i32''+" (0 var "a" false) (0 var "b" false)))"#,
+        r#"(compile-function (llvm-module::create "mod") "add2" '((a . -65) (b . -65)) '(assoc i32 "+" true "tl_std::primitive::i32''+" 65 (0 var "a" false) (0 var "b" false)))"#,
     ));
     // See `compile::COMPILE_LOCK`'s doc comment — every LLVM-Context-touching
     // call, even from a test driving the raw builtins directly rather than
@@ -496,7 +496,7 @@ fn the_compiler_body_compiles_a_two_parameter_addition() {
 #[test]
 fn the_compiler_body_compiles_a_labels_form_with_a_sibling_call() {
     let module = expect_llvm_module(eval_ok_in_island(
-        r#"(compile-function (llvm-module::create "mod") "outer" '() '(labels () (("f" ((x . 0)) (apply "g" (0 var "x" false))) ("g" ((n . 0)) (var "n" false))) (apply "f" (0 int-any-width 0 5))))"#,
+        r#"(compile-function (llvm-module::create "mod") "outer" '() '(labels () (("f" ((x . 0)) (apply "g" 0 (0 var "x" false))) ("g" ((n . 0)) (var "n" false))) (apply "f" 0 (0 int-any-width 0 0 5))))"#,
     ));
     let _guard = COMPILE_LOCK.lock().unwrap();
     // Every compiled function allocates its activation record on the GC heap
@@ -513,7 +513,7 @@ fn the_compiler_body_compiles_a_labels_form_with_a_sibling_call() {
 /// captured list (`"offset"`, `outer`'s own first parameter) — through
 /// `declare-labels-siblings`'s `add-function-with-env` branch,
 /// `compile-labels-bodies`'s `bind-captures`, and `compile-apply`'s
-/// `build-call-with-env` branch, none of which the Stage 1 sibling-call
+/// `coroutine-call-env` branch, none of which the Stage 1 sibling-call
 /// test above exercises (its captured list is always empty).
 #[test]
 fn the_compiler_body_compiles_a_labels_form_that_captures_an_outer_scope_value() {
@@ -531,7 +531,7 @@ fn the_compiler_body_compiles_a_labels_form_that_captures_an_outer_scope_value()
     let module = expect_llvm_module(eval_ok_in_island(
         r#"(let ((m (llvm-module::create "mod")))
              (let ((ignored (add-function m "rt_push_sexpr_root"))) ())
-             (compile-function m "outer" '((offset . 0) (n . 0)) '(labels ((offset . 0)) (("rec" ((k . 0)) (assoc i32 "+" true "tl_std::primitive::i32''+" (0 var "k" false) (0 var "offset" false)))) (apply "rec" (0 var "n" false)))))"#,
+             (compile-function m "outer" '((offset . -65) (n . -65)) '(labels ((offset . -65)) (("rec" ((k . -65)) (assoc i32 "+" true "tl_std::primitive::i32''+" 65 (0 var "k" false) (0 var "offset" false)))) (apply "rec" 65 (0 var "n" false)))))"#,
     ));
     let _guard = COMPILE_LOCK.lock().unwrap();
     // Every compiled function allocates its activation record on the GC heap
@@ -598,7 +598,7 @@ fn a_function_using_load_arg_and_build_add_computes_correctly() {
     assert_eq!(unsafe { add2(argv.as_ptr(), argv.len() as u32) }, 7);
 }
 
-/// `get-function`/`alloca-args`/`store-arg`/`build-call`: a direct call from
+/// `get-function`/`arg-list`/`slot-set`/`build-call`: a direct call from
 /// one compiled function to another *already declared in the same module*
 /// — the primitive every statically-resolvable call (self-recursion,
 /// `labels` siblings, top-level `defun`-to-`defun`) is built on (labels
@@ -623,12 +623,12 @@ fn a_function_can_directly_call_another_function_in_the_same_module() {
                   (let ((builder2 (%core::llvm-builder::create)))
                     (position-at-end builder2 b2)
                     (let ((n (load-arg builder2 quad-fn 0)))
-                      (let ((args1 (alloca-args builder2 1)))
-                        (store-arg builder2 args1 0 n)
-                        (let ((doubled (build-call builder2 (get-function m "double") args1 1)))
-                          (let ((args2 (alloca-args builder2 1)))
-                            (store-arg builder2 args2 0 doubled)
-                            (build-ret builder2 (build-call builder2 (get-function m "double") args2 1))))))))
+                      (let ((args1 (arg-list builder2 1)))
+                        (slot-set builder2 args1 0 n)
+                        (let ((doubled (build-call builder2 (get-function m "double") args1)))
+                          (let ((args2 (arg-list builder2 1)))
+                            (slot-set builder2 args2 0 doubled)
+                            (build-ret builder2 (build-call builder2 (get-function m "double") args2))))))))
                 m))))
         (build-quadruple-module)
     "#;
@@ -643,8 +643,7 @@ fn a_function_can_directly_call_another_function_in_the_same_module() {
 /// `build-make-closure`/`coroutine-apply`: a `BoxedObj::CompiledClosure`
 /// wrapping a capturing function (`add_offset`, declared via
 /// `add-function-with-env`, adding its one logical argument to a captured
-/// value), called *indirectly* through the closure value rather than
-/// `build-call-with-env`'s direct, statically-known-target path
+/// value), called *indirectly* through the closure value
 /// (labels/closures Stage 4) — no `ast_bridge`/`compiler.rs` involvement,
 /// raw builtins only, the same way Phase 0/1's and Stage 1's own raw-builtin
 /// tests preceded their self-hosted-compiler-body counterparts.
@@ -696,16 +695,16 @@ fn a_closure_made_from_a_capturing_function_can_be_called_indirectly() {
               (position-at-end builder2 b2)
               (coroutine-begin builder2 m caller-fn)
               (let* ((closure-slot (frame-slot builder2))
-                     (env-arr (alloca-args builder2 1))
-                     (args-arr (alloca-args builder2 1)))
-                (store-arg builder2 env-arr 0 (const-word builder2 100))
-                (store-arg builder2 closure-slot 0
-                           (build-make-closure builder2 m add-offset-fn env-arr 1 0 0))
-                (store-arg builder2 args-arr 0 (const-word builder2 5))
+                     (env-arr (arg-list builder2 1))
+                     (args-arr (arg-list builder2 1)))
+                (slot-set builder2 env-arr 0 (const-word builder2 100))
+                (slot-set builder2 closure-slot 0
+                           (build-make-closure builder2 m add-offset-fn env-arr 0 0))
+                (slot-set builder2 args-arr 0 (const-word builder2 5))
                 (coroutine-end builder2 m
                                (coroutine-apply builder2 m
-                                                (load-raw builder2 closure-slot 0)
-                                                args-arr 1))))
+                                                (slot-get builder2 closure-slot 0)
+                                                args-arr 0))))
             m))
         (build-and-run-closure-module)
     "#;
@@ -961,8 +960,8 @@ fn the_compiler_body_compiles_a_call_to_another_compiled_function() {
     let module = expect_llvm_module(eval_ok_in_island(
         r#"
         (let ((m (llvm-module::create "mod")))
-          (compile-function m "double" '((x . 0)) '(assoc i32 "+" true "tl_std::primitive::i32''+" (0 var "x" false) (0 var "x" false)))
-          (compile-function m "quadruple" '((n . 0)) '(call "double" (0 call "double" (0 var "n" false)))))
+          (compile-function m "double" '((x . -65)) '(assoc i32 "+" true "tl_std::primitive::i32''+" 65 (0 var "x" false) (0 var "x" false)))
+          (compile-function m "quadruple" '((n . -65)) '(call "double" 65 (0 call "double" 65 (0 var "n" false)))))
         "#,
     ));
     let _guard = COMPILE_LOCK.lock().unwrap();
@@ -986,7 +985,7 @@ fn the_compiler_body_compiles_a_call_to_another_compiled_function() {
 #[test]
 fn the_compiler_body_compiles_a_self_referencing_call() {
     let ir = eval_string_in_island(
-        r#"(to-string (compile-function (llvm-module::create "mod") "f" '((n . 0)) '(call "f" (0 var "n" false))))"#,
+        r#"(to-string (compile-function (llvm-module::create "mod") "f" '((n . -65)) '(call "f" 65 (0 var "n" false))))"#,
     );
     assert!(ir.contains("define i64 @f(i64"), "IR was:\n{}", ir);
     // The self-call is no longer an LLVM `call` at all: it names `f` to the
@@ -1590,7 +1589,7 @@ fn the_compiler_body_boxes_a_bare_labels_sibling_reference() {
     let module = expect_llvm_module(eval_ok_in_island(
         r#"(let ((m (llvm-module::create "mod")))
              (let ((ignored-new (add-function m "rt_coroutine_closure_new"))) ())
-             (compile-function m "outer" '() '(labels () (("f" ((n . 0)) (var "n" false))) (apply-indirect (var "f" true) (0 int-any-width 0 5)))))"#,
+             (compile-function m "outer" '() '(labels () (("f" ((n . 0)) (var "n" false))) (apply-indirect (var "f" true) 0 (0 int-any-width 0 0 5)))))"#,
     ));
     let _guard = COMPILE_LOCK.lock().unwrap();
     let engine = jit(&module);
@@ -1617,7 +1616,7 @@ fn the_compiler_body_boxes_a_bare_labels_sibling_reference_that_captures_an_oute
     let module = expect_llvm_module(eval_ok_in_island(
         r#"(let ((m (llvm-module::create "mod")))
              (let ((ignored-new (add-function m "rt_coroutine_closure_new"))) ())
-             (compile-function m "outer" '((offset . 0) (n . 0)) '(labels ((offset . 0)) (("rec" ((k . 0)) (assoc i32 "+" true "tl_std::primitive::i32''+" (0 var "k" false) (0 var "offset" false)))) (apply-indirect (var "rec" true) (0 int-any-width 0 5)))))"#,
+             (compile-function m "outer" '((offset . -65) (n . -65)) '(labels ((offset . -65)) (("rec" ((k . -65)) (assoc i32 "+" true "tl_std::primitive::i32''+" 65 (0 var "k" false) (0 var "offset" false)))) (apply-indirect (var "rec" true) 65 (0 int-any-width 65 0 5)))))"#,
     ));
     let _guard = COMPILE_LOCK.lock().unwrap();
     let engine = jit(&module);
@@ -1645,7 +1644,7 @@ fn the_compiler_body_boxes_a_labels_sibling_that_bare_references_itself() {
     let ir = eval_string_in_island(
         r#"(let ((m (llvm-module::create "mod")))
              (let ((ignored (add-function m "rt_coroutine_closure_new"))) ())
-             (to-string (compile-function m "outer" '() '(labels () (("f" () (var "f" true))) (apply "f")))))"#,
+             (to-string (compile-function m "outer" '() '(labels () (("f" () (var "f" true))) (apply "f" 0)))))"#,
     );
     assert!(ir.contains("call i64 @rt_coroutine_closure_new"), "IR was:\n{}", ir);
 }
@@ -1920,8 +1919,8 @@ fn the_compiler_body_compiles_a_bool_literal_node() {
 #[test]
 fn the_compiler_body_compiles_an_integer_comparison() {
     let module = expect_llvm_module(eval_ok_in_island(
-        r#"(compile-function (llvm-module::create "mod") "lt" '((a . 0) (b . 0))
-              '(assoc i32 "<" true "tl_i32''<" (0 var "a" false) (0 var "b" false)))"#,
+        r#"(compile-function (llvm-module::create "mod") "lt" '((a . -65) (b . -65))
+              '(assoc i32 "<" true "tl_i32''<" 65 (0 var "a" false) (0 var "b" false)))"#,
     ));
     let _guard = COMPILE_LOCK.lock().unwrap();
     // Every compiled function allocates its activation record on the GC heap
@@ -1959,9 +1958,9 @@ fn the_compiler_body_compiles_an_integer_comparison() {
 #[test]
 fn the_compiler_body_compiles_an_if_expression() {
     let module = expect_llvm_module(eval_ok_in_island(
-        r#"(compile-function (llvm-module::create "mod") "maxab" '((a . 0) (b . 0))
+        r#"(compile-function (llvm-module::create "mod") "maxab" '((a . -65) (b . -65))
               '(if false
-                   (assoc i32 ">" true "tl_i32''>" (0 var "a" false) (0 var "b" false))
+                   (assoc i32 ">" true "tl_i32''>" 65 (0 var "a" false) (0 var "b" false))
                    (var "a" false)
                    (var "b" false)))"#,
     ));
@@ -1984,9 +1983,9 @@ fn the_compiler_body_compiles_an_if_expression() {
 #[test]
 fn let_shadowing_is_correctly_restored_after_the_let_ends() {
     let module = expect_llvm_module(eval_ok_in_island(
-        r#"(compile-function (llvm-module::create "mod") "shadow_test" '((x . 0))
-              '(assoc i32 "+" true "tl_i32''+"
-                 (0 let (((x . 0) . (int-any-width 0 99))) (var "x" false))
+        r#"(compile-function (llvm-module::create "mod") "shadow_test" '((x . -65))
+              '(assoc i32 "+" true "tl_i32''+" 65
+                 (0 let (((x . 0) . (int-any-width 65 0 99))) (var "x" false))
                  (0 var "x" false)))"#,
     ));
     let _guard = COMPILE_LOCK.lock().unwrap();
@@ -6324,10 +6323,10 @@ fn the_island_compiles_a_body_the_new_bridge_produced() {
     // The bridge reproduces exactly the text the hand-written test above
     // feeds `compile-function` — the two are checked against each other here
     // rather than only against the island, so a change to either is visible.
-    assert_eq!(body, r#"(assoc i32 "+" true "tl_std::primitive::i32''+" (0 var "a" false) (0 var "b" false))"#);
+    assert_eq!(body, r#"(assoc i32 "+" true "tl_std::primitive::i32''+" 65 (0 var "a" false) (0 var "b" false))"#);
 
     let module = expect_llvm_module(eval_ok_in_island(&format!(
-        r#"(compile-function (llvm-module::create "mod") "add2" '((a . 0) (b . 0)) '{})"#,
+        r#"(compile-function (llvm-module::create "mod") "add2" '((a . -65) (b . -65)) '{})"#,
         body
     )));
     let _guard = COMPILE_LOCK.lock().unwrap();
@@ -6347,12 +6346,12 @@ fn the_island_compiles_a_body_the_new_bridge_produced() {
 fn the_island_compiles_a_bridged_let_and_if() {
     let body = bridge_to_island_text(
         "(let ((d i32 (assoc ::std::primitive::i32 - true i32 (i32 i32) (type-named ::std::primitive::i32) (var a) (var b))))
-           (if (assoc ::std::primitive::i32 < true bool (i32 i32) (type-named ::std::primitive::bool) (var d) (int-any-width 0))
-               (assoc ::std::primitive::i32 - true i32 (i32 i32) (type-named ::std::primitive::i32) (int-any-width 0) (var d))
+           (if (assoc ::std::primitive::i32 < true bool (i32 i32) (type-named ::std::primitive::bool) (var d) (int-any-width 0 i32))
+               (assoc ::std::primitive::i32 - true i32 (i32 i32) (type-named ::std::primitive::i32) (int-any-width 0 i32) (var d))
                (var d)))",
     );
     let module = expect_llvm_module(eval_ok_in_island(&format!(
-        r#"(compile-function (llvm-module::create "mod") "absdiff" '((a . 0) (b . 0)) '{})"#,
+        r#"(compile-function (llvm-module::create "mod") "absdiff" '((a . -65) (b . -65)) '{})"#,
         body
     )));
     let _guard = COMPILE_LOCK.lock().unwrap();
@@ -6400,10 +6399,10 @@ fn the_island_accepts_a_bridged_construct_field_and_match() {
         &defs,
         "(let ((p struct (construct ::point (type-named ::point) 0 true (i32 i32) (var a) (var b))))
            (match (construct ::maybe-int (type-named ::maybe-int) 1 false (i32) (field-get (var p) 1 i32)) enum
-             ((pat-ctor ::maybe-int (type-named ::maybe-int) 0 false ()) (int-any-width -1))
+             ((pat-ctor ::maybe-int (type-named ::maybe-int) 0 false ()) (int-any-width -1 i32))
              ((pat-ctor ::maybe-int (type-named ::maybe-int) 1 false (i32) (pat-bind x)) (var x))))",
     );
-    let src = compile_function_source("second", "((a . 0) (b . 0))", &body);
+    let src = compile_function_source("second", "((a . -65) (b . -65))", &body);
     let ir = eval_string_in_island(&format!("(to-string {})", src));
     // The struct is built and read, and the enum box is built and tested —
     // i.e. the island really took each of the three tags, rather than
@@ -6429,18 +6428,18 @@ fn the_island_accepts_a_bridged_construct_field_and_match() {
 #[test]
 fn the_island_runs_a_bridged_loop() {
     let body = bridge_to_island_text(
-        "(let ((acc i32 (int-any-width 0)) (i i32 (int-any-width 0)))
+        "(let ((acc i32 (int-any-width 0 i32)) (i i32 (int-any-width 0 i32)))
            (loop unit
              (if (assoc ::std::primitive::i32 < true bool (i32 i32) (type-named ::std::primitive::bool) (var i) (var b))
                  (unit)
                  (break))
              (set acc (assoc ::std::primitive::i32 + true i32 (i32 i32) (type-named ::std::primitive::i32) (var acc) (var a)))
-             (set i (assoc ::std::primitive::i32 + true i32 (i32 i32) (type-named ::std::primitive::i32) (var i) (int-any-width 1))))
+             (set i (assoc ::std::primitive::i32 + true i32 (i32 i32) (type-named ::std::primitive::i32) (var i) (int-any-width 1 i32))))
            (var acc))",
     );
     let module = expect_llvm_module(eval_ok_in_island(&compile_function_source(
         "mul",
-        "((a . 0) (b . 0))",
+        "((a . -65) (b . -65))",
         &body,
     )));
     let _guard = COMPILE_LOCK.lock().unwrap();
@@ -6454,7 +6453,7 @@ fn the_island_runs_a_bridged_loop() {
     let mut heap = Heap::with_capacity(1 << 12);
     typelisp::compile::runtime::set_active_heap(&mut heap as *mut Heap);
     for (a, b) in [(6i64, 7i64), (0, 5), (3, 0), (-4, 3)] {
-        assert_eq!(run_coroutine_entry(&engine, &mut heap, "mul", &[a, b]), a * b.max(0), "a={} b={}", a, b);
+        assert_eq!(i64::from(run_coroutine_entry(&engine, &mut heap, "mul", &[a, b]) as i32), a * b.max(0), "a={} b={}", a, b);
     }
 }
 
@@ -6468,16 +6467,16 @@ fn the_island_runs_a_bridged_loop() {
 fn the_island_runs_a_bridged_labels_block() {
     let body = bridge_to_island_text(
         "(labels ((rec ((n i32) (acc i32)) i32
-                    (if (assoc ::std::primitive::i32 < true bool (i32 i32) (type-named ::std::primitive::bool) (var n) (int-any-width 1))
+                    (if (assoc ::std::primitive::i32 < true bool (i32 i32) (type-named ::std::primitive::bool) (var n) (int-any-width 1 i32))
                         (var acc)
                         (apply (var rec) i32 (i32 i32)
-                          (assoc ::std::primitive::i32 - true i32 (i32 i32) (type-named ::std::primitive::i32) (var n) (int-any-width 1))
+                          (assoc ::std::primitive::i32 - true i32 (i32 i32) (type-named ::std::primitive::i32) (var n) (int-any-width 1 i32))
                           (assoc ::std::primitive::i32 * true i32 (i32 i32) (type-named ::std::primitive::i32) (var acc) (var n))))))
-           (apply (var rec) i32 (i32 i32) (var a) (int-any-width 1)))",
+           (apply (var rec) i32 (i32 i32) (var a) (int-any-width 1 i32)))",
     );
     let module = expect_llvm_module(eval_ok_in_island(&compile_function_source(
         "fact",
-        "((a . 0))",
+        "((a . -65))",
         &body,
     )));
     let _guard = COMPILE_LOCK.lock().unwrap();
@@ -6505,16 +6504,16 @@ fn the_island_accepts_a_bridged_escaping_closure() {
     let body = bridge_to_island_text(
         "(let ((n i32 (var a)))
            (let ((f fn (lambda ((x i32)) i32 (assoc ::std::primitive::i32 + true i32 (i32 i32) (type-named ::std::primitive::i32) (var x) (var n)))))
-             (apply (var f) i32 (i32) (int-any-width 1))))",
+             (apply (var f) i32 (i32) (int-any-width 1 i32))))",
     );
     // The capture really is a cell on both sides of the boundary.
-    assert!(body.contains("(n . 11)"), "the captured binding should be a cell: {}", body);
+    assert!(body.contains("(n . 275)"), "the captured binding should be a cell: {}", body);
     // No leading paren in the pattern: this reference sits in an argument
-    // position, so it is spelled `(0 cellvar "n" 1)` — the kind, then the node.
-    assert!(body.contains(r#"cellvar "n" 1"#), "the closure should read through it: {}", body);
+    // position, so it is spelled `(0 cellvar "n" 265)` — the kind, then the node.
+    assert!(body.contains(r#"cellvar "n" 265"#), "the closure should read through it: {}", body);
     assert!(body.contains("apply-indirect"), "the closure should be applied through its value: {}", body);
 
-    let src = compile_function_source("addn", "((a . 0))", &body);
+    let src = compile_function_source("addn", "((a . -65))", &body);
     let ir = eval_string_in_island(&format!("(to-string {})", src));
     for expected in ["rt_cell_new", "rt_cell_get", "define i64 @addn"] {
         assert!(ir.contains(expected), "expected {} in the IR:\n{}", expected, ir);
@@ -7002,9 +7001,9 @@ fn a_compiled_function_suspends_and_resumes_with_its_local_intact() {
             (position-at-end builder entry)
             (coroutine-begin builder m f)
             (let ((slot (frame-slot builder)))
-              (store-arg builder slot 0 (const-word builder 40))
+              (slot-set builder slot 0 (const-word builder 40))
               (let ((woken (coroutine-suspend builder m)))
-                (coroutine-end builder m (build-add builder (load-raw builder slot 0) woken))))
+                (coroutine-end builder m (build-add builder (slot-get builder slot 0) woken))))
             m))
         (build-suspending-module)
     "#;
@@ -7069,30 +7068,30 @@ fn a_compiled_recursion_runs_two_hundred_thousand_frames_deep() {
             ;; storage that outlives a suspension.
             (let* ((n-slot (frame-slot builder))
                    (r-slot (frame-slot builder))
-                   (arg0 (alloca-args builder 1)))
-              (store-arg builder arg0 0 (const-word builder 0))
-              (store-arg builder n-slot 0 (build-call builder (get-function m "rt_pending_arg") arg0 1))
+                   (arg0 (arg-list builder 1)))
+              (slot-set builder arg0 0 (const-word builder 0))
+              (slot-set builder n-slot 0 (build-call builder (get-function m "rt_pending_arg") arg0))
               (build-cond-br builder
-                             (build-icmp-eq builder (load-raw builder n-slot 0) (const-word builder 0))
+                             (build-icmp-eq builder (slot-get builder n-slot 0) (const-word builder 0))
                              base rec)
 
               (position-at-end builder base)
-              (store-arg builder r-slot 0 (const-word builder 0))
+              (slot-set builder r-slot 0 (const-word builder 0))
               (build-br builder merge)
 
               ;; The recursive step. `coroutine-call` splits the block: what
               ;; follows it is emitted into a resume block the driver branches
               ;; to once the callee has an answer.
               (position-at-end builder rec)
-              (let ((call-args (alloca-args builder 1)))
-                (store-arg builder call-args 0
-                           (build-sub builder (load-raw builder n-slot 0) (const-word builder 1)))
-                (let ((below (coroutine-call builder m (build-fn-address builder f) call-args 1)))
-                  (store-arg builder r-slot 0 (build-add builder (load-raw builder n-slot 0) below))
+              (let ((call-args (arg-list builder 1)))
+                (slot-set builder call-args 0
+                           (build-sub builder (slot-get builder n-slot 0) (const-word builder 1)))
+                (let ((below (coroutine-call builder m (build-fn-address builder f) call-args 0)))
+                  (slot-set builder r-slot 0 (build-add builder (slot-get builder n-slot 0) below))
                   (build-br builder merge)))
 
               (position-at-end builder merge)
-              (coroutine-end builder m (load-raw builder r-slot 0)))
+              (coroutine-end builder m (slot-get builder r-slot 0)))
             m))
         (build-deep-module)
     "#;

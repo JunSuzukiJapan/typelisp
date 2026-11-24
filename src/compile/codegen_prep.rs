@@ -2,8 +2,8 @@
 //! it into machine code — the one step every path to machine code takes (the
 //! JIT, `compile-file`, and `disassemble`'s assembly).
 //!
-//! The island asks for a fresh stack array (`alloca-args`) for every scratch
-//! word and every argument array it needs, and never hands one back. Emitted as
+//! A temporary and an argument array are each given storage of their own, and nothing
+//! hands one back. Emitted as
 //! is, each of those is a slot of its own in the machine frame, so a function's
 //! frame grew with the size of its body: `(+ 1 (+ 1 ... a))` a hundred
 //! thousand deep needed 8.3MB, and overflowed the stack it was called on. What
@@ -225,7 +225,7 @@ fn instruction_value_as_pointer(i: InstructionValue<'static>) -> inkwell::values
 /// block, by one call that takes its address. Its contents matter from the
 /// first store to the end of that call and never after: the coroutine ABI
 /// already rules out a later read, since the machine frame does not survive a
-/// call that suspends (see `llvm_builder_alloca_args`). Spans in different
+/// call that suspends (see `llvm_builtins::slots`). Spans in different
 /// blocks never overlap — each lies within one run of its block — so only
 /// the spans of one block are compared, and the same few shared arrays serve
 /// the whole function. An `alloca` used any other way keeps its own slot.

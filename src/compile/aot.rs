@@ -235,10 +235,10 @@ fn is_entry_call(heap: &Heap, tl: Value, entry_path: &Path) -> bool {
     if !core::op_is(heap, form, wk::CALL) {
         return false;
     }
-    // `(call PATH (R...) ARG...)`: the resolved path, and no arguments past
-    // the representation list.
+    // `(call PATH RET-R (R...) ARG...)`: the resolved path, and no arguments
+    // past the representation list.
     let is_main = core::definition_field(heap, form, 0).is_some_and(|p| &p == entry_path);
-    is_main && core::fields(heap, form).map(|f| f.len() == 2).unwrap_or(false)
+    is_main && core::fields(heap, form).map(|f| f.len() == 3).unwrap_or(false)
 }
 
 /// [`compile_file`] for a caller that is itself a running program — the
@@ -1390,7 +1390,7 @@ fn build_main_wrapper(
         let inits_addr = inits.as_pointer_value().const_to_int(word_ty);
         let words = [inits_addr.into(), word_ty.const_int(init_addrs.len() as u64, false).into(), entry_addr.into()];
         let sig = crate::compile::externs::runtime_sig(entry_shim).expect("an entry shim is in the entry table");
-        crate::compile::runtime_abi::call_declared(&builder, rt_run_program, sig, &words)?.1
+        crate::compile::runtime_abi::call_declared(&builder, rt_run_program, sig, &words)?.1.into_int_value()
     } else {
         if main_returns_int {
             return Err("an `int`-returning main under the classic ABI is not supported".to_string());
@@ -1398,7 +1398,7 @@ fn build_main_wrapper(
         if !init_addrs.is_empty() {
             return Err("internal error: a classic-ABI entry point cannot run global initialisers (no scheduler)".to_string());
         }
-        crate::compile::runtime_abi::call(&builder, module, "rt_run_entry", &[entry_addr.into()])?.1
+        crate::compile::runtime_abi::call_word(&builder, module, "rt_run_entry", &[entry_addr.into()])?.1
     };
     let exit_code = builder
         .build_int_truncate(result, i32_type, "exit_code")
@@ -1541,7 +1541,7 @@ fn call_entry(
     let f = declare_entry(module, name)?;
     let sig = crate::compile::externs::runtime_sig(name).expect("an entry shim is in the entry table");
     let words: Vec<_> = words.iter().map(|w| (*w).into()).collect();
-    Ok(crate::compile::runtime_abi::call_declared(builder, f, sig, &words)?.1)
+    Ok(crate::compile::runtime_abi::call_declared(builder, f, sig, &words)?.1.into_int_value())
 }
 
 /// What each global's initialiser and each compiled body read, by global
@@ -2129,7 +2129,7 @@ mod tests {
         // (`rt_run_entry`), so the answer leaves through `exit` instead.
         let exit_ty = ctx.void_type().fn_type(&[ctx.i32_type().into()], false);
         let exit = module.add_function("exit", exit_ty, None);
-        let code = builder.build_int_truncate(result, ctx.i32_type(), "code").unwrap();
+        let code = builder.build_int_truncate(result.into_int_value(), ctx.i32_type(), "code").unwrap();
         builder.build_call(exit, &[code.into()], "").unwrap();
         builder.build_unreachable().unwrap();
 

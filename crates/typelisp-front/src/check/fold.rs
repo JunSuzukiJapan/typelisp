@@ -129,7 +129,7 @@ pub(crate) fn fold_builtin_method(
 /// The literal node `value` is, as a `ret`-typed result — the inverse of
 /// [`literal_value`], and the same spelling `typeck::expr` gives a
 /// literal read from source: an `int` is `(int N)` when it fits a fixnum and
-/// `(bignum B)` otherwise, a fixed width is `(int-any-width N)`, a float is
+/// `(bignum B)` otherwise, a fixed width is `(int-any-width N REPR)`, a float is
 /// its box under `float-any-width`.
 ///
 /// A value whose shape does not match `ret` is the evaluator disagreeing with
@@ -151,5 +151,10 @@ fn literal_node(heap: &mut Heap, value: Value, ret: &Type) -> Result<Value, Erro
         (Type::Bool, Value::Bool(_)) => wk::BOOL,
         (t, v) => unreachable!("constant folding produced {:?} for a `{:?}`-typed builtin", v, t),
     };
+    if tag == wk::INT_ANY_WIDTH {
+        // A scalar type's representation asks nothing about any definition.
+        let repr = crate::check::repr::Repr::of_by(ret, &|_| None).write(heap)?;
+        return core::tagged(heap, tag, &[value, repr]);
+    }
     core::tagged(heap, tag, &[value])
 }

@@ -55,7 +55,7 @@ unsafe fn prologue(param: Word, nslots: usize) -> (*mut Word, Word) {
     (data, 0)
 }
 
-/// Writes one slot of a frame, the way `store-arg` on a slot pointer does.
+/// Writes one slot of a frame, the way `slot-set` does.
 unsafe fn set_slot(data: *mut Word, idx: usize, word: Word) {
     *data.add(idx) = word;
 }

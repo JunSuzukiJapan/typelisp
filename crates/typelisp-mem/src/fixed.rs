@@ -118,6 +118,14 @@ impl FixedType {
             _ => return None,
         })
     }
+
+    pub fn bits(self) -> u32 {
+        crate::with_fixed!(self, T => <T as Fixed>::BITS)
+    }
+
+    pub fn signed(self) -> bool {
+        crate::with_fixed!(self, T => <T as Fixed>::SIGNED)
+    }
 }
 
 /// `$body` with `$t` naming the Rust type of the [`FixedType`] `$ty`.

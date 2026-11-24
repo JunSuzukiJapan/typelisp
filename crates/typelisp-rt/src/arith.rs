@@ -44,7 +44,7 @@ pub unsafe extern "C-unwind" fn rt_int_mod_fault(_dividend: i64, _divisor: i64) 
 ///
 /// The words must be valid.
 #[no_mangle]
-pub unsafe extern "C" fn rt_int_fits_char(n: Word) -> bool {
+pub unsafe extern "C" fn rt_int_fits_char(n: i64) -> bool {
     u32::try_from(n).is_ok_and(|n| char::from_u32(n).is_some())
 }
 

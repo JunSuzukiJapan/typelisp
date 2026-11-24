@@ -63,6 +63,10 @@ pub(crate) enum NativeHandle {
     Function(FunctionValue<'static>),
     BasicBlock(BasicBlock<'static>),
     Value(BasicValueEnum<'static>),
+    /// The value of code that does not come back (`super::slots`).
+    Never,
+    /// Where the code being built keeps values.
+    Slots(Rc<RefCell<super::slots::Slots>>),
 }
 
 /// The registry itself, wrapped only so its teardown can be given the same
@@ -124,7 +128,7 @@ pub(crate) fn llvm_handle_get(h: i64) -> Option<NativeHandle> {
 }
 
 /// Register `h` as the interpreter-level value standing for it.
-fn handle_value(h: NativeHandle) -> Value {
+pub(super) fn handle_value(h: NativeHandle) -> Value {
     Value::Int(llvm_handle_register(h))
 }
 

@@ -616,7 +616,7 @@ mod tests {
         let tagged_one = word_ty.const_int(1 << 3, false);
         let tagged_two = word_ty.const_int(2 << 3, false);
         let call = |name: &str, args: &[inkwell::values::BasicValueEnum<'static>]| {
-            crate::compile::runtime_abi::call(&builder, &module, name, args).unwrap().1
+            crate::compile::runtime_abi::call_word(&builder, &module, name, args).unwrap().1
         };
         let pair = call("rt_cons", &[tagged_one.into(), tagged_two.into()]);
         let car_result = call("rt_car", &[pair.into()]);

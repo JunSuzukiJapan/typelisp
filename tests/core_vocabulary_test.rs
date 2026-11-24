@@ -17,7 +17,7 @@
 //! On its own this property is weak, and it is worth saying why rather than
 //! letting it look stronger than it is: *any* well-formed s-expression round
 //! trips. It says nothing about whether these are the right tags. Changing an
-//! example from `(int-any-width 42)` to `(int-any-width 43)` — or to a tag that
+//! example from `(int-any-width 42 i32)` to `(int-any-width 43 i32)` — or to a tag that
 //! does not exist —
 //! still passes.
 //!
@@ -49,8 +49,8 @@
 //! The old bridge read all of these off the `Type` hanging on each AST node.
 //! Nothing downstream of the checker has a `Type` any more, so each one is
 //! written into the form instead — as a repr list beside the argument list
-//! (`(call f (i32 i32) (int-any-width 1)
-//! (int-any-width 2))`), the same parallel-list idiom
+//! (`(call f i32 (i32 i32) (int-any-width 1 i32)
+//! (int-any-width 2 i32))`), the same parallel-list idiom
 //! `defstruct`/`defenum` already use, rather than as a wrapper around every
 //! argument.
 //!
@@ -121,14 +121,14 @@ fn record_tags(src: &str) {
 #[test]
 fn literals() {
     all_round_trip(&[
-        "(int-any-width 42)",
-        "(int-any-width -7)",
+        "(int-any-width 42 i32)",
+        "(int-any-width -7 i32)",
         // An `int` literal: the same number under the tag that says "tagged
         // word", which the island cannot read off the number.
         "(int 42)",
         "(int -4611686018427387904)",
         "(float-any-width 1.5)",
-        // Keeps its point, so it is not the same form as `(int-any-width 1)`.
+        // Keeps its point, so it is not the same form as `(int-any-width 1 i32)`.
         "(float-any-width 1.0)",
         "(bignum 123456789012345678901234567890)",
         "(ratio 1/3)",
@@ -158,12 +158,12 @@ fn literals() {
 fn variables_and_globals() {
     all_round_trip(&[
         "(var x)",
-        "(set x (int-any-width 1))",
+        "(set x (int-any-width 1 i32))",
         // Resolved to `m::counter`, an int.
         "(global m::counter i32)",
         // A root-module global.
         "(global n sexpr)",
-        "(set-global m::counter i32 (int-any-width 5))",
+        "(set-global m::counter i32 (int-any-width 5 i32))",
     ]);
 }
 
@@ -175,11 +175,11 @@ fn variables_and_globals() {
 #[test]
 fn binding_and_control() {
     all_round_trip(&[
-        "(let ((x i32 (int-any-width 1))) (var x))",
-        "(let ((x i32 (int-any-width 1)) (y sexpr (quote a))) (var y))",
+        "(let ((x i32 (int-any-width 1 i32))) (var x))",
+        "(let ((x i32 (int-any-width 1 i32)) (y sexpr (quote a))) (var y))",
         // progn
-        "(let () (int-any-width 1) (int-any-width 2))",
-        "(if (bool true) (int-any-width 1) (int-any-width 2))",
+        "(let () (int-any-width 1 i32) (int-any-width 2 i32))",
+        "(if (bool true) (int-any-width 1 i32) (int-any-width 2 i32))",
         // `loop` leads with its own `Repr` — the type a `break`/`return`
         // carries out — where every other node in this vocabulary trails one.
         // The body is variadic, so a trailing field could not be told from one
@@ -187,14 +187,14 @@ fn binding_and_control() {
         "(loop unit (break))",
         "(break)",
         "(return)",
-        "(return (int-any-width 3))",
+        "(return (int-any-width 3 i32))",
         // The named escape. The name is a `(str ...)` node and the body is a
         // single form — the checker wraps its sequence in a binding-less
         // `let` first, so nothing downstream re-implements sequencing. The
         // trailing `Repr` is the block's own value, for `loop`'s reason.
-        r#"(block (str "b") (let () (int-any-width 1)) i32)"#,
+        r#"(block (str "b") (let () (int-any-width 1 i32)) i32)"#,
         r#"(return-from (str "b"))"#,
-        r#"(return-from (str "b") (int-any-width 3))"#,
+        r#"(return-from (str "b") (int-any-width 3 i32))"#,
         r#"(panic (str "boom"))"#,
     ]);
 }
@@ -221,13 +221,13 @@ fn binding_and_control() {
 #[test]
 fn calls() {
     all_round_trip(&[
-        "(call f (i32 i32) (int-any-width 1) (int-any-width 2))",
-        "(call m::helper ())",
+        "(call f i32 (i32 i32) (int-any-width 1 i32) (int-any-width 2 i32))",
+        "(call m::helper i32 ())",
         // An instance method on `int`, `true` meaning it takes a receiver,
         // returning an int, over two int arguments.
         "(assoc int + true i32 (i32 i32) (var a) (var b))",
         // A static associated function: no receiver.
-        "(assoc point new false struct (i32 i32) (int-any-width 1) (int-any-width 2))",
+        "(assoc point new false struct (i32 i32) (int-any-width 1 i32) (int-any-width 2 i32))",
         // A builtin whose result is what identifies it: an empty vector of
         // ints, which the bridge lowers to a `vector-op` rather than a method
         // call, because there is no compiled body to call.
@@ -237,27 +237,27 @@ fn calls() {
         // The callee is a value, so the *return* representation rides on the
         // node — a compiled closure's result has no name to look a signature
         // up by. Then the argument representations, then the arguments.
-        "(apply (var g) i32 (i32) (int-any-width 1))",
+        "(apply (var g) i32 (i32) (int-any-width 1 i32))",
         "(compile-fn (fn f))",
         "(compile-fn (method point new))",
         // `(task CALL)` — the call is made in a task rather than here. It wraps
         // a whole call node, so its own shape is the thinnest in the
         // vocabulary; the bridge is what takes the wrapped node apart.
-        "(task (call f (i32) (int-any-width 1)))",
+        "(task (call f i32 (i32) (int-any-width 1 i32)))",
         // The callee can be a value, in which case the wrapped node is an
         // `apply` and its callee is a form like any argument.
-        "(task (apply (var g) i32 (i32) (int-any-width 1)))",
+        "(task (apply (var g) i32 (i32) (int-any-width 1 i32)))",
         // `(thread CALL)` — `task`'s shape, for a task on an OS thread of its
         // own.
-        "(thread (call f (i32) (int-any-width 1)))",
+        "(thread (call f i32 (i32) (int-any-width 1 i32)))",
         // `(select ARM...)`. Each arm is a plain list rather than a node —
         // `("recv" VAR KEY CHAN BODY)`, `("send" KIND CHAN VALUE BODY)`,
         // `("else" BODY)` — because the fields are metadata (a tag, a bound
         // name, a type key, a field kind) with one form each. The channel
         // expressions are `var`s: the checker bound every operand in a `let`
         // around this node, so nothing here evaluates anything that can stop.
-        "(select (\"recv\" v \"Option<int>\" (var c) (var v)) (\"else\" (int-any-width 0)))",
-        "(select (\"send\" 1 (var c) (var x) (int-any-width 0)))",
+        "(select (\"recv\" v \"Option<int>\" (var c) (var v)) (\"else\" (int-any-width 0 i32)))",
+        "(select (\"send\" 1 (var c) (var x) (int-any-width 0 i32)))",
     ]);
     // `compile-fn`'s two payload shapes, standalone for the same reason the
     // pattern tags are.
@@ -286,7 +286,7 @@ fn repl_tools() {
         "(untrace)",
         // `step` is the odd one: it names no definition, it wraps a *form*.
         // The form keeps its own type, so the node carries nothing else.
-        "(step (call f ()))",
+        "(step (call f i32 ()))",
         // `disassemble-fn` carries the same payload plus one flag: `true`
         // asks for LLVM IR rather than host assembly. A literal, because the
         // answer decides what to emit.
@@ -317,10 +317,10 @@ fn repl_tools() {
 #[test]
 fn data() {
     all_round_trip(&[
-        "(construct point 0 false (i32 i32) (int-any-width 1) (int-any-width 2))",
-        "(construct option 1 false (i32) (int-any-width 9))",
+        "(construct point 0 false (i32 i32) (int-any-width 1 i32) (int-any-width 2 i32))",
+        "(construct option 1 false (i32) (int-any-width 9 i32))",
         "(field-get (var p) 0 i32)",
-        "(field-set (var p) 1 i32 (int-any-width 5))",
+        "(field-set (var p) 1 i32 (int-any-width 5 i32))",
     ]);
 }
 
@@ -352,20 +352,20 @@ fn data() {
 #[test]
 fn patterns() {
     all_round_trip(&[
-        "(match (var v) sexpr ((pat-wild) (int-any-width 0)))",
+        "(match (var v) sexpr ((pat-wild) (int-any-width 0 i32)))",
         // The empty list. Its own node rather than `Sexpr`'s variant 0:
         // the empty list outlives `nil` (docs/dev/null-elimination-plan.md).
-        "(match (var v) sexpr ((pat-empty) (int-any-width 0)) ((pat-wild) (int-any-width 1)))",
+        "(match (var v) sexpr ((pat-empty) (int-any-width 0 i32)) ((pat-wild) (int-any-width 1 i32)))",
         // `Option<Sexpr>`'s `(Some P)`: reject the empty list, then match
         // `P` against the same word (the niche makes them one value).
-        "(match (var v) sexpr ((pat-nonempty (pat-bind x)) (var x)) ((pat-empty) (int-any-width 0)))",
+        "(match (var v) sexpr ((pat-nonempty (pat-bind x)) (var x)) ((pat-empty) (int-any-width 0 i32)))",
         "(match (var v) i32 ((pat-bind x) (var x)))",
-        "(match (var v) sexpr ((pat-lit (int-any-width 1)) (int-any-width 10)) ((pat-wild) (int-any-width 0)))",
+        "(match (var v) sexpr ((pat-lit (int-any-width 1 i32)) (int-any-width 10 i32)) ((pat-wild) (int-any-width 0 i32)))",
         // A value pattern: the test is an ordinary expression — here the
         // `equals` call a `"a"` literal pattern lowers to — and the symbol is
         // the name that expression reads the value under test through.
-        r#"(match (var s) str ((pat-guard $match-scrut (assoc string equals true bool (str str) (var $match-scrut) (str "a"))) (int-any-width 1)) ((pat-wild) (int-any-width 0)))"#,
-        "(match (var v) enum ((pat-ctor option 0 false ()) (int-any-width 0)) ((pat-ctor option 1 false (i32) (pat-bind x)) (var x)))",
+        r#"(match (var s) str ((pat-guard $match-scrut (assoc string equals true bool (str str) (var $match-scrut) (str "a"))) (int-any-width 1 i32)) ((pat-wild) (int-any-width 0 i32)))"#,
+        "(match (var v) enum ((pat-ctor option 0 false ()) (int-any-width 0 i32)) ((pat-ctor option 1 false (i32) (pat-bind x)) (var x)))",
         // A downcast arm, for matching a trait object against a concrete type.
         "(match (var d) sexpr ((pat-ctor point 0 true (i32 i32) (pat-bind p)) (var p)))",
         "(match (var d) sexpr ((pat-typetest point (pat-bind p)) (var p)))",
@@ -377,7 +377,7 @@ fn patterns() {
         "(pat-empty)",
         "(pat-nonempty (pat-bind x))",
         "(pat-bind x)",
-        "(pat-lit (int-any-width 1))",
+        "(pat-lit (int-any-width 1 i32))",
         "(pat-guard $match-scrut (bool true))",
         "(pat-ctor option 1 false (i32) (pat-bind x))",
         "(pat-typetest point (pat-bind p))",
@@ -394,7 +394,7 @@ fn functions() {
     all_round_trip(&[
         "(lambda ((x i32)) i32 (var x))",
         "(lambda () unit (unit))",
-        "(labels ((rec ((i i32)) i32 (var i))) (call rec (i32) (int-any-width 1)))",
+        "(labels ((rec ((i i32)) i32 (var i))) (call rec i32 (i32) (int-any-width 1 i32)))",
     ]);
 }
 
@@ -439,13 +439,13 @@ fn top_level() {
         // params, then whether it takes `&rest`, then the `&optional`/`&key`
         // structure, then the body.
         "(defmacro m::when (c body) true (1 () ()) (quote ()))",
-        "(defvar m::counter i32 true (int-any-width 0))",
+        "(defvar m::counter i32 true (int-any-width 0 i32))",
         // A struct publishes its fields' representations, which is where the
         // bridge reads a pattern's field kinds from.
         "(defstruct point (i32 i32))",
         "(defenum m::color (red green blue) (() () ()))",
         "(defenum option (None Some) (() (sexpr)))",
-        "(module m (defvar m::x i32 false (int-any-width 1)))",
+        "(module m (defvar m::x i32 false (int-any-width 1 i32)))",
         // A C function, declared. Fields 3-4 are `defun`'s own; field 2 is the
         // library to look the symbol up in (`()` for "the running process"),
         // and the last two spell the C types, which the `REPR`s beside them
@@ -454,7 +454,7 @@ fn top_level() {
         r#"(defffi c-sqrt "sqrt" "m" ((a0 f64)) f64 (f64) f64)"#,
         "(use m::helper other::helper)",
         r#"(load "lib.typl")"#,
-        "(expr (int-any-width 42))",
+        "(expr (int-any-width 42 i32))",
     ]);
 }
 

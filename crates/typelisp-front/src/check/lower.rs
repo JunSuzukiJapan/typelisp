@@ -127,26 +127,29 @@ pub(crate) trait CoreForms {
     }
 
 
-    /// `(call PATH (REPR...) ARG...)` — a call to a free function, `PATH` the
-    /// one the checker resolved the name to.
+    /// `(call PATH RET-REPR (REPR...) ARG...)` — a call to a free function,
+    /// `PATH` the one the checker resolved the name to.
     ///
-    /// The representations are the *arguments'* own, one per argument in the
-    /// same order: the island reads them to decide the GC-root bookkeeping
-    /// around each argument as it crosses into a compiled frame.
-    fn call_form(&self, heap: &mut Heap, r: &Path, args: &[Arg]) -> Result<Value, Error> {
+    /// The answer of a compiled call comes back in a word, and `RET-REPR` is
+    /// what says how to read it. The list is the *arguments'* own
+    /// representations, one per argument in the same order: the island reads
+    /// them to decide whether the collector follows each one while it waits.
+    fn call_form(&self, heap: &mut Heap, r: &Path, ret: &Type, args: &[Arg]) -> Result<Value, Error> {
         // A Rust-implemented builtin's `int`-typed parameters cross the
         // compiled boundary as raw machine words — see `int_boundary_raw`.
         let boundary = self.builtin_fn_sig(r).filter(|_| !int_boundary_native_fn(r.name_symbol()));
         let mut f = Items::new(heap);
         let path = core::definition_form(r);
         f.push(path);
+        let ret_repr = self.repr_form(f.heap(), ret)?;
+        f.push(ret_repr);
         // An untagged argument is a raw word from here on, and its
         // representation has to say so: a rooted slot holding a raw word
         // would be read by the collector as a reference.
         let declared_int = |i: usize| boundary.as_ref().and_then(|(ps, _)| ps.get(i)).is_some_and(|t| *t == Type::Int);
         let reprs = self.repr_forms(
             f.heap(),
-            args.iter().enumerate().map(|(i, a)| if declared_int(i) { Type::I32 } else { a.ty.clone() }),
+            args.iter().enumerate().map(|(i, a)| if declared_int(i) { Type::CLong } else { a.ty.clone() }),
         )?;
         f.push(reprs);
         for (i, a) in args.iter().enumerate() {
@@ -194,7 +197,7 @@ pub(crate) trait CoreForms {
         // representation has to say so (`call_form` makes the same point).
         let reprs = self.repr_forms(
             f.heap(),
-            args.iter().enumerate().map(|(i, a)| if declared_int(i) { Type::I32 } else { a.ty.clone() }),
+            args.iter().enumerate().map(|(i, a)| if declared_int(i) { Type::CLong } else { a.ty.clone() }),
         )?;
         f.push(reprs);
         // The *result's* runtime identity. A built-in container method builds
@@ -216,24 +219,26 @@ pub(crate) trait CoreForms {
         }
     }
 
-    /// `(fnref PATH (PARAM-REPR...))` — a named free function reified as a
+    /// `(fnref PATH (PARAM-REPR...) RET-REPR)` — a named free function reified as a
     /// value.
     ///
     /// The parameter representations are carried because the bridge turns this
     /// into a closure construction, and there is no call site here to read them
     /// from. A `&rest` parameter is simply the last entry (always `sexpr`), so
     /// it needs no flag of its own.
-    fn fnref_form(&self, heap: &mut Heap, r: &Path, params: &[Type]) -> Result<Value, Error> {
+    fn fnref_form(&self, heap: &mut Heap, r: &Path, params: &[Type], ret: &Type) -> Result<Value, Error> {
         let mut f = Items::new(heap);
         let path = core::definition_form(r);
         f.push(path);
         let reprs = self.repr_forms(f.heap(), params.to_vec())?;
         f.push(reprs);
+        let ret = self.repr_form(f.heap(), ret)?;
+        f.push(ret);
         f.finish(wk::FNREF)
     }
 
-    /// `(methodref PATH SYM (PARAM-REPR...) RET-KEY)` — see
-    /// [`Self::fnref_form`] for the representation list.
+    /// `(methodref PATH SYM (PARAM-REPR...) RET-KEY RET-REPR)` — see
+    /// [`Self::fnref_form`] for the representations.
     ///
     /// `RET-KEY` is the runtime identity of what the method returns, for the
     /// same reason [`Self::assoc_form`] carries one: a built-in container
@@ -256,6 +261,8 @@ pub(crate) trait CoreForms {
         f.push(reprs);
         let key = core::type_form(f.heap(), ret)?;
         f.push(key);
+        let ret = self.repr_form(f.heap(), ret)?;
+        f.push(ret);
         f.finish(wk::METHODREF)
     }
 
@@ -523,7 +530,8 @@ pub(crate) trait CoreForms {
         f.finish(wk::DYN_NEW)
     }
 
-    /// `(dyn-call TRAIT SYM SLOT ((TYPE SYM)...) (REPR...) ARG...)` — a call
+    /// `(dyn-call TRAIT SYM SLOT ((TYPE SYM)...) RET-REPR (REPR...)
+    /// ARG...)` — a call
     /// through a trait object's vtable, `args[0]` the receiver.
     ///
     /// The implementation list is not what dispatches — that is the vtable's
@@ -537,6 +545,7 @@ pub(crate) trait CoreForms {
         method: SymRef,
         slot: usize,
         impl_targets: &[(Path, SymRef)],
+        ret: &Type,
         args: &[Arg],
     ) -> Result<Value, Error> {
         let mut f = Items::new(heap);
@@ -546,6 +555,8 @@ pub(crate) trait CoreForms {
         f.push(Value::Int(slot as i64));
         let targets = vtable_form(f.heap(), impl_targets)?;
         f.push(targets);
+        let ret = self.repr_form(f.heap(), ret)?;
+        f.push(ret);
         let reprs = self.repr_forms(f.heap(), args.iter().map(|a| a.ty.clone()))?;
         f.push(reprs);
         f.extend(args.iter().map(|a| a.form));

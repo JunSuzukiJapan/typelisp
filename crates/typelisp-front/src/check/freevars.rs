@@ -303,8 +303,8 @@ fn plain_sub_forms(heap: &Heap, form: Value, tag: SymRef) -> Result<Vec<Value>, 
     let parts = core::fields(heap, form)?;
     let from = |n: usize| -> Vec<Value> { parts.iter().skip(n).copied().collect() };
     Ok(match tag.well_known() {
-        // path, representations, then the arguments.
-        wk::CALL => from(2),
+        // path, result, representations, then the arguments.
+        wk::CALL => from(3),
         // type, method, instance, result, representations, result key, then
         // the arguments.
         wk::ASSOC => from(6),
@@ -382,8 +382,9 @@ fn plain_sub_forms(heap: &Heap, form: Value, tag: SymRef) -> Result<Vec<Value>, 
         // The boxed value, past the vtable tables and the value's own
         // representation.
         wk::DYN_NEW => from(5),
-        // type, method, slot, table, representations, then the arguments.
-        wk::DYN_CALL => from(5),
+        // type, method, slot, table, result, representations, then the
+        // arguments.
+        wk::DYN_CALL => from(6),
         _ => {
             return Err(Error::TypeError(format!(
                 "compile: the free-variable walk does not know the tag `{}`",

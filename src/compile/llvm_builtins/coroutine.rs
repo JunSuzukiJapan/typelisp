@@ -10,7 +10,9 @@ use inkwell::module::Module;
 use inkwell::values::{BasicValueEnum, FunctionValue, InstructionValue, IntValue, PointerValue};
 use typelisp_mem::Value;
 use crate::eval::interp::EvalError;
-use super::{entry_alloca, expect_llvm_basic_block, expect_llvm_builder, expect_llvm_function, expect_llvm_module, expect_llvm_value, llvm_value_value};
+use super::slots::{all_of, expect_slots, operand, Operand, Slots};
+use super::{entry_alloca, expect_int, expect_llvm_basic_block, expect_llvm_builder, expect_llvm_function, expect_llvm_module, llvm_value_value};
+use crate::compile::carriers::{self, Carrier};
 
 // ---- the frame under construction ---------------------------------------
 //
@@ -26,8 +28,8 @@ use super::{entry_alloca, expect_llvm_basic_block, expect_llvm_builder, expect_l
 // signatures grows an argument — `compile-value` already carries 16, and this
 // phase is supposed to shorten that list, not lengthen it.
 //
-// This is the same division `alloca-args` already draws: the island decides
-// *which* binding needs storage and when, Rust knows *where* the storage is.
+// The island decides *which* binding needs storage and when, Rust knows
+// *where* the storage is and how wide (`super::slots`).
 
 /// The frame being built for one function, keyed by its builder.
 pub(super) struct FrameCtx {
@@ -49,7 +51,7 @@ pub(super) struct FrameCtx {
     /// to be in, which no resume block is dominated by.
     prologue_end: InstructionValue<'static>,
     /// The `scratch-slot` handed out for each role, made on first request.
-    pub(super) scratch: HashMap<i64, PointerValue<'static>>,
+    pub(super) scratch: HashMap<i64, Rc<RefCell<Slots>>>,
     /// What the function is.
     shape: Shape,
 }
@@ -183,38 +185,21 @@ fn ensure_declared(module: &Rc<RefCell<Module<'static>>>, name: &str) -> Functio
     crate::compile::runtime_abi::declare(&module.borrow(), name, sig)
 }
 
-/// `(frame-slot builder)` — the address of a fresh, **unmasked** frame slot.
+/// The address of a fresh slot of the frame on `builder`, followed by the
+/// collector when `rooted`: a bit in the function's mask table
+/// (`rooted_table`), not code, so the slot is a root for as long as the frame
+/// lives and no early exit can leave anything out of step.
 ///
-/// Unmasked means the collector never reads it as a reference, which is what a
-/// raw `i32`/`f64` local needs (`Repr::class`'s non-collectable case).
-pub(super) fn llvm_builder_frame_slot(args: &[Value]) -> Result<Value, EvalError> {
-    frame_slot_impl(args, false)
-}
-
-/// `(frame-slot-rooted builder m)` — the address of a fresh frame slot, marked
-/// so the collector traces it.
-///
-/// The mark is a bit in the function's mask table (`set_rooted_table`), not
-/// code: the slot is a root for as long as the frame lives, so no early exit
-/// can leave anything out of step.
-pub(super) fn llvm_builder_frame_slot_rooted(args: &[Value]) -> Result<Value, EvalError> {
-    frame_slot_impl(args, true)
-}
-
-/// A slot's address moves out of the block that asked for it, to
-/// `coro.prologue` — the one block every entry falls into — because the resume
-/// blocks use it and nothing in the body dominates them. A rooted slot is only
-/// recorded here (`CoroCtx::rooted`); `coroutine-end` puts them all in the
-/// mask table.
-fn frame_slot_impl(args: &[Value], rooted: bool) -> Result<Value, EvalError> {
-    let builder = expect_llvm_builder(&args[0])?;
-    let word_ty = crate::compile::carriers::word();
-    let key = builder_key(&builder);
-
+/// The address moves out of the block that asked for it, to the prologue —
+/// the one block every entry falls into — because the resume blocks use it
+/// and nothing in the body dominates them. A rooted slot is only recorded
+/// here; `coroutine-end` puts them all in the mask table.
+pub(super) fn new_frame_slot(builder: &Rc<RefCell<Builder<'static>>>, rooted: bool) -> Result<PointerValue<'static>, EvalError> {
+    let word_ty = carriers::word();
     let (data, idx, prologue_end) = FRAME_CTXS.with(|c| {
         let mut map = c.borrow_mut();
         let f = map
-            .get_mut(&key)
+            .get_mut(&builder_key(builder))
             .ok_or_else(|| EvalError::Internal("frame-slot: no frame is open on this builder".to_string()))?;
         let idx = f.next;
         f.next += 1;
@@ -223,18 +208,12 @@ fn frame_slot_impl(args: &[Value], rooted: bool) -> Result<Value, EvalError> {
         }
         Ok::<_, EvalError>((f.data, idx, f.prologue_end))
     })?;
-
-    let b = builder.borrow();
-    let here = b.get_insert_block();
+    // A builder of its own: `builder` stands in the middle of the body.
+    let b = crate::compile::llvm_context().create_builder();
     b.position_before(&prologue_end);
-    let elem_ptr = unsafe {
-        b.build_gep(word_ty, data, &[word_ty.const_int(idx, false)], "frame_slot")
-            .map_err(|e| EvalError::Internal(format!("frame-slot: gep: {}", e)))?
-    };
-    if let Some(block) = here {
-        b.position_at_end(block);
-    }
-    Ok(llvm_value_value(elem_ptr.into()))
+    // SAFETY: the frame has as many words as `coroutine-end` finds slots.
+    unsafe { b.build_gep(word_ty, data, &[word_ty.const_int(idx, false)], "frame_slot") }
+        .map_err(|e| EvalError::Internal(format!("frame-slot: gep: {}", e)))
 }
 
 // ---------------------------------------------------------------------------
@@ -266,9 +245,9 @@ fn store_resume_point(b: &Builder<'static>, data: PointerValue<'static>, id: u64
 }
 
 /// Emits a call to `f`, a runtime function that takes its arguments as an
-/// array and its length (`rt_frame_call` and its siblings, whose list is a
-/// callee and any number of arguments), with `vals` as the array.
-fn emit_rt_call(
+/// array of words and its length (`rt_frame_call` and its siblings, whose
+/// list is a callee and any number of arguments), with `vals` as the array.
+pub(super) fn emit_rt_call(
     b: &Builder<'static>,
     f: FunctionValue<'static>,
     vals: &[BasicValueEnum<'static>],
@@ -276,17 +255,8 @@ fn emit_rt_call(
     what: &str,
 ) -> Result<Option<BasicValueEnum<'static>>, EvalError> {
     let ctx = crate::compile::llvm_context();
-    let word_ty = crate::compile::carriers::word();
     let err = |step: &str, e: String| EvalError::Internal(format!("{}: {}: {}", what, step, e));
-    let arr = entry_alloca(b, word_ty.array_type(vals.len().max(1) as u32), &format!("{}_args", name))
-        .map_err(|e| err("alloca", e))?;
-    for (i, v) in vals.iter().enumerate() {
-        let slot = unsafe {
-            b.build_gep(word_ty, arr, &[word_ty.const_int(i as u64, false)], &format!("{}_a{}", name, i))
-                .map_err(|e| err("gep", e.to_string()))?
-        };
-        b.build_store(slot, *v).map_err(|e| err("store", e.to_string()))?;
-    }
+    let arr = word_array(b, vals, &format!("{}_args", name)).map_err(|e| err("the arguments", e))?;
     let call = b
         .build_call(f, &[arr.into(), ctx.i32_type().const_int(vals.len() as u64, false).into()], name)
         .map_err(|e| err("call", e.to_string()))?;
@@ -370,7 +340,7 @@ pub(super) fn llvm_builder_coroutine_begin(args: &[Value]) -> Result<Value, Eval
     // size and the mask table are placeholders; `coroutine-end` writes them
     // in.
     b.position_at_end(fresh);
-    let (_, fresh_data) = crate::compile::runtime_abi::call(
+    let (_, fresh_data) = crate::compile::runtime_abi::call_word(
         &b,
         &module.borrow(),
         "rt_frame_open",
@@ -477,7 +447,7 @@ fn direct_begin(
     Ok(Value::Empty)
 }
 
-/// `(coroutine-call builder m target args-ptr argc)` — hand a call to the
+/// `(coroutine-call builder m target args carrier)` — hand a call to the
 /// driver and come back with its answer.
 ///
 /// This is where a compiled call stops being an LLVM `call`. The function
@@ -486,6 +456,10 @@ fn direct_begin(
 /// ready. Two frames exist at once, on the heap, and the machine stack is the
 /// same depth as it was — which is the whole point: the recursion limit
 /// becomes the heap.
+///
+/// `args` is the slots the arguments are in, and `carrier` the number of how
+/// the answer is carried ([`Carrier::code`]): the answer comes back in a word
+/// and only the callee's declaration says what is in it.
 ///
 /// The block is split here. Everything after the call in the source is
 /// emitted into a fresh resume block, so the island's `compile-value` goes on
@@ -501,7 +475,7 @@ pub(super) fn llvm_builder_coroutine_call(args: &[Value]) -> Result<Value, EvalE
     coroutine_call_impl(args, "rt_frame_call", "coroutine-call", 1, None)
 }
 
-/// `(coroutine-apply builder m closure args-ptr argc)` — hand an `apply` to
+/// `(coroutine-apply builder m closure args carrier)` — hand an `apply` to
 /// the driver and come back with its answer.
 ///
 /// [`llvm_builder_coroutine_call`] with a function *value* in place of an
@@ -655,7 +629,7 @@ fn frame_handler(args: &[Value], pad: Option<BasicBlock<'static>>, what: &str) -
     Ok(Value::Empty)
 }
 
-/// `(coroutine-dyn-call builder m vtable slot args-ptr argc)` — hand a `:dyn`
+/// `(coroutine-dyn-call builder m vtable slot args carrier)` — hand a `:dyn`
 /// method call to the driver and come back with its answer.
 ///
 /// [`llvm_builder_coroutine_apply`] for a callee named by a vtable slot
@@ -670,7 +644,7 @@ pub(super) fn llvm_builder_coroutine_dyn_call(args: &[Value]) -> Result<Value, E
     coroutine_call_impl(args, "rt_frame_dyn_call", "coroutine-dyn-call", 2, None)
 }
 
-/// `(coroutine-call-env builder m target args-ptr argc env-ptr env-len)` —
+/// `(coroutine-call-env builder m target args carrier env)` —
 /// [`llvm_builder_coroutine_call`] for a callee that also has captures.
 ///
 /// The captures are read out of the caller's array by `rt_frame_call_env`
@@ -679,44 +653,37 @@ pub(super) fn llvm_builder_coroutine_dyn_call(args: &[Value]) -> Result<Value, E
 /// and read by the callee, which is the difference a call that *returns*
 /// makes.
 pub(super) fn llvm_builder_coroutine_call_env(args: &[Value]) -> Result<Value, EvalError> {
-    let env_ptr = expect_llvm_value(&args[5])?.into_pointer_value();
-    let env_len = match &args[6] {
-        Value::Int(n) if *n >= 0 => *n as u64,
-        other => {
-            return Err(EvalError::Internal(format!("coroutine-call-env: {:?} is not a capture count", other)))
-        }
-    };
-    coroutine_call_impl(args, "rt_frame_call_env", "coroutine-call-env", 1, Some((env_ptr, env_len)))
+    let env = expect_slots(&args[5])?;
+    coroutine_call_impl(args, "rt_frame_call_env", "coroutine-call-env", 1, Some(env))
 }
 
 /// `head_len` is how many of `args[2..]` are the shim's own leading words —
 /// one for a callee (an address or a function value), two for a `:dyn` call's
-/// vtable and slot. The argument array and its count follow.
+/// vtable and slot. The arguments' slots and the answer's carrier follow.
 fn coroutine_call_impl(
     args: &[Value],
     shim: &str,
     what: &str,
     head_len: usize,
-    env: Option<(PointerValue<'static>, u64)>,
+    env: Option<Rc<RefCell<Slots>>>,
 ) -> Result<Value, EvalError> {
     let builder = expect_llvm_builder(&args[0])?;
     let module = expect_llvm_module(&args[1])?;
+    let ctx = crate::compile::llvm_context();
+    let word_ty = carriers::word();
+    let err = |step: &str, e: String| EvalError::Internal(format!("{}: {}: {}", what, step, e));
+    let or_zero = |v: Operand| v.unwrap_or_else(|| word_ty.const_zero().into());
     let mut head: Vec<BasicValueEnum<'static>> = Vec::with_capacity(head_len + 2);
     for a in &args[2..2 + head_len] {
-        head.push(expect_llvm_value(a)?);
+        head.push(or_zero(operand(a)?));
     }
-    let args_ptr = expect_llvm_value(&args[2 + head_len])?.into_pointer_value();
-    let argc = match &args[3 + head_len] {
-        Value::Int(n) if *n >= 0 => *n as u64,
-        other => return Err(EvalError::Internal(format!("{}: {:?} is not an argument count", what, other))),
-    };
-    let ctx = crate::compile::llvm_context();
-    let word_ty = crate::compile::carriers::word();
-    let err = |step: &str, e: String| EvalError::Internal(format!("{}: {}: {}", what, step, e));
+    let slots = expect_slots(&args[2 + head_len])?;
+    let carrier = Carrier::of_code(expect_int(&args[3 + head_len])?).map_err(|e| err("the answer", e))?;
+    let passed = all_of(&builder.borrow(), &slots)?;
     if env.is_none() && shim == "rt_frame_call" {
         if let Some((callee, sig)) = direct_callee(&module, &head[0]) {
             let b = builder.borrow();
-            return direct_call(&b, callee, &sig, args_ptr, argc).map(|v| llvm_value_value(v.into())).map_err(|e| err("direct call", e));
+            return direct_call(&b, callee, &sig, &passed).map(llvm_value_value).map_err(|e| err("direct call", e));
         }
     }
     let (data, function, id) = open_coroutine_frame(&builder, what)?;
@@ -727,21 +694,15 @@ fn coroutine_call_impl(
     let b = builder.borrow();
     // rt_frame_call(callee, arg...) — one array, the callee first; the
     // captures-carrying form puts the env between them.
-    let mut call_args: Vec<BasicValueEnum<'static>> = Vec::with_capacity(argc as usize + head_len + 2);
+    let mut call_args: Vec<BasicValueEnum<'static>> = Vec::with_capacity(passed.len() + head_len + 2);
     call_args.extend(head);
-    if let Some((env_ptr, env_len)) = env {
-        call_args.push(
-            b.build_ptr_to_int(env_ptr, word_ty, "coro_env_word").map_err(|e| err("ptrtoint", e.to_string()))?.into(),
-        );
-        call_args.push(word_ty.const_int(env_len, false).into());
+    if let Some(env) = env {
+        let captured: Vec<_> = all_of(&b, &env)?.into_iter().map(or_zero).collect();
+        let array = word_array(&b, &captured, "coro_env").map_err(|e| err("captures", e))?;
+        call_args.push(array.into());
+        call_args.push(word_ty.const_int(captured.len() as u64, false).into());
     }
-    for i in 0..argc {
-        let slot = unsafe {
-            b.build_gep(word_ty, args_ptr, &[word_ty.const_int(i, false)], "coro_arg")
-                .map_err(|e| err("gep", e.to_string()))?
-        };
-        call_args.push(b.build_load(word_ty, slot, "coro_arg_val").map_err(|e| err("load", e.to_string()))?);
-    }
+    call_args.extend(passed.into_iter().map(or_zero));
     emit_rt_call(&b, frame_call, &call_args, "frame_call", what)?;
     store_resume_point(&b, data, id, what)?;
     b.build_return(Some(&word_ty.const_int(typelisp_abi::STATUS_CALL as u64, false)))
@@ -753,10 +714,23 @@ fn coroutine_call_impl(
         b.build_gep(word_ty, data, &[word_ty.const_int(typelisp_abi::FRAME_VALUE_SLOT as u64, false)], "coro_result_slot")
             .map_err(|e| err("gep", e.to_string()))?
     };
-    let result = b.build_load(word_ty, value_slot, "coro_result").map_err(|e| err("load", e.to_string()))?;
+    let word = b.build_load(word_ty, value_slot, "coro_result").map_err(|e| err("load", e.to_string()))?.into_int_value();
+    let result = carrier.from_word(&b, word).map_err(|e| err("the answer", e))?;
     drop(b);
     push_resume(&builder, id, resume);
     Ok(llvm_value_value(result))
+}
+
+/// `vals` as an array of words on the machine stack.
+pub(super) fn word_array(b: &Builder<'static>, vals: &[BasicValueEnum<'static>], name: &str) -> Result<PointerValue<'static>, String> {
+    let word_ty = carriers::word();
+    let array = entry_alloca(b, word_ty.array_type(vals.len().max(1) as u32).into(), name)?;
+    for (i, v) in vals.iter().enumerate() {
+        // SAFETY: within the array just made.
+        let slot = unsafe { b.build_gep(word_ty, array, &[word_ty.const_int(i as u64, false)], "element") }.map_err(|e| e.to_string())?;
+        b.build_store(slot, carriers::to_word(b, *v)?).map_err(|e| e.to_string())?;
+    }
+    Ok(array)
 }
 
 /// The direct function a call's callee word names, with its signature: the
@@ -782,40 +756,29 @@ fn direct_callee(module: &Rc<RefCell<Module<'static>>>, callee: &BasicValueEnum<
     }
 }
 
-/// A call to the direct function `callee`, its arguments the words in the
-/// `argc` slots at `args_ptr`, each converted to the parameter's carrier; and
-/// its result converted back to the word.
-///
-/// The arguments sit in the caller's slots, not in registers, because the
-/// island evaluates a call's arguments one at a time into a slot each; LLVM
-/// forwards the stores to the loads once the slots are on the stack.
+/// A call to the direct function `callee`, each argument and the result at
+/// its own carrier.
 fn direct_call(
     b: &Builder<'static>,
     callee: FunctionValue<'static>,
     sig: &crate::compile::direct::DirectSig,
-    args_ptr: PointerValue<'static>,
-    argc: u64,
-) -> Result<IntValue<'static>, String> {
-    let word_ty = crate::compile::carriers::word();
-    if argc as usize != sig.params.len() {
-        return Err(format!("`{}` takes {} arguments, given {}", callee.get_name().to_string_lossy(), sig.params.len(), argc));
+    args: &[Operand],
+) -> Result<BasicValueEnum<'static>, String> {
+    if args.len() != sig.params.len() {
+        return Err(format!("`{}` takes {} arguments, given {}", callee.get_name().to_string_lossy(), sig.params.len(), args.len()));
     }
     let mut passed: Vec<inkwell::values::BasicMetadataValueEnum<'static>> = Vec::with_capacity(sig.params.len());
-    for (i, carrier) in sig.params.iter().enumerate() {
-        if *carrier == crate::compile::carriers::Carrier::Unit {
-            continue;
+    for (carrier, v) in sig.params.iter().zip(args) {
+        if *carrier != Carrier::Unit {
+            passed.push(v.map_or(Ok(carrier.zero()), |v| carrier.coerce(b, v))?.into());
         }
-        let slot = unsafe { b.build_gep(word_ty, args_ptr, &[word_ty.const_int(i as u64, false)], "arg_slot").map_err(|e| e.to_string())? };
-        let w = b.build_load(word_ty, slot, "arg_word").map_err(|e| e.to_string())?.into_int_value();
-        let v = carrier.from_word(b, w)?.expect("a carried parameter");
-        passed.push(v.into());
     }
     let call = b.build_call(callee, &passed, "direct").map_err(|e| e.to_string())?;
     crate::compile::raise_check::after_call(b, callee)?;
-    match call.try_as_basic_value() {
-        inkwell::values::ValueKind::Basic(v) => sig.ret.to_word(b, v),
-        inkwell::values::ValueKind::Instruction(_) => Ok(word_ty.const_zero()),
-    }
+    Ok(match call.try_as_basic_value() {
+        inkwell::values::ValueKind::Basic(v) => v,
+        inkwell::values::ValueKind::Instruction(_) => Carrier::Unit.zero(),
+    })
 }
 
 /// `(coroutine-end builder m v)` — return `v` through the protocol, then
@@ -835,7 +798,7 @@ fn direct_call(
 pub(super) fn llvm_builder_coroutine_end(args: &[Value]) -> Result<Value, EvalError> {
     let builder = expect_llvm_builder(&args[0])?;
     let module = expect_llvm_module(&args[1])?;
-    let value = expect_llvm_value(&args[2])?;
+    let value = operand(&args[2])?;
     let ctx = crate::compile::llvm_context();
     let word_ty = crate::compile::carriers::word();
     let what = "coroutine-end";
@@ -851,7 +814,7 @@ pub(super) fn llvm_builder_coroutine_end(args: &[Value]) -> Result<Value, EvalEr
         Shape::Coroutine(coro) => coro,
         Shape::Direct(direct) => {
             let b = builder.borrow();
-            return direct_end(&b, &module, f.function, f.data, f.next, &f.rooted, f.prologue_end, direct, value.into_int_value())
+            return direct_end(&b, &module, f.function, f.data, f.next, &f.rooted, f.prologue_end, direct, value)
                 .map(|()| Value::Empty)
                 .map_err(|e| err("direct", e));
         }
@@ -862,7 +825,8 @@ pub(super) fn llvm_builder_coroutine_end(args: &[Value]) -> Result<Value, EvalEr
         b.build_gep(word_ty, f.data, &[word_ty.const_int(typelisp_abi::FRAME_VALUE_SLOT as u64, false)], "coro_ret_slot")
             .map_err(|e| err("gep", e.to_string()))?
     };
-    b.build_store(value_slot, value).map_err(|e| err("store", e.to_string()))?;
+    let word = value.map_or(Ok(word_ty.const_zero()), |v| carriers::to_word(&b, v)).map_err(|e| err("the answer", e))?;
+    b.build_store(value_slot, word).map_err(|e| err("store", e.to_string()))?;
     b.build_return(Some(&word_ty.const_int(typelisp_abi::STATUS_RETURN as u64, false)))
         .map_err(|e| err("ret", e.to_string()))?;
 
@@ -916,7 +880,7 @@ fn direct_end(
     rooted: &[u64],
     prologue_end: InstructionValue<'static>,
     direct: DirectCtx,
-    value: IntValue<'static>,
+    value: Operand,
 ) -> Result<(), String> {
     let word_ty = crate::compile::carriers::word();
     let e = |e: inkwell::builder::BuilderError| e.to_string();
@@ -940,7 +904,7 @@ fn direct_end(
             // Right after the array, ahead of every slot address cut from it.
             let here = b.get_insert_block();
             b.position_before(&direct.slots.get_next_instruction().unwrap_or(prologue_end));
-            let (_, opened) = crate::compile::runtime_abi::call(
+            let (_, opened) = crate::compile::runtime_abi::call_word(
                 b,
                 &module.borrow(),
                 "rt_local_frame_open",
@@ -965,11 +929,11 @@ fn direct_end(
     };
 
     if b.get_insert_block().is_some_and(|block| block.get_terminator().is_none()) {
-        let answer = direct.sig.ret.from_word(b, value)?;
+        let answer = value.map_or(Ok(direct.sig.ret.zero()), |v| direct.sig.ret.coerce(b, v))?;
         close(b)?;
-        match answer {
-            Some(v) => b.build_return(Some(&v)).map_err(e)?,
-            None => b.build_return(None).map_err(e)?,
+        match direct.sig.ret {
+            Carrier::Unit => b.build_return(None).map_err(e)?,
+            _ => b.build_return(Some(&answer)).map_err(e)?,
         };
     }
 
@@ -1028,44 +992,43 @@ fn rooted_table(
     Some(table.as_pointer_value().const_to_int(word_ty))
 }
 
-/// `(entry-word builder m entry idx)` — the word of the function's argument
-/// `idx` (`entry` `"rt_pending_arg"`) or capture `idx` (`"rt_pending_env"`).
+/// `(entry-value builder m entry idx kind)` — the function's argument `idx`
+/// (`entry` `"rt_pending_arg"`) or capture `idx` (`"rt_pending_env"`),
+/// carried as `kind` says ([`Carrier::of_param_kind`]).
 ///
 /// A coroutine's arguments and captures cannot arrive as parameters — it
-/// has one, the frame — so they wait in `typelisp_abi::call_state` for the
-/// prologue to copy in, and this asks the runtime function `entry` for one.
-/// A direct function's arguments are its parameters, each at its carrier,
-/// and this is the parameter as a word; a `()` one has no parameter and is
-/// the word `0`. A direct function captures nothing.
-pub(super) fn llvm_builder_entry_word(heap: &typelisp_mem::Heap, args: &[Value]) -> Result<Value, EvalError> {
+/// has one, the frame — so they wait in `typelisp_abi::call_state`, each in a
+/// word, for the prologue to copy in, and this asks the runtime function
+/// `entry` for one. A direct function's arguments are its parameters, each at
+/// its carrier; a `()` one has no parameter. A direct function captures
+/// nothing.
+pub(super) fn llvm_builder_entry_value(heap: &typelisp_mem::Heap, args: &[Value]) -> Result<Value, EvalError> {
     let builder = expect_llvm_builder(&args[0])?;
     let module = expect_llvm_module(&args[1])?;
     let entry = crate::eval::interp::expect_str(heap, &args[2])?.to_string();
     let idx = match &args[3] {
         Value::Int(n) if *n >= 0 => *n as usize,
-        other => return Err(EvalError::Internal(format!("entry-word: {:?} is not an index", other))),
+        other => return Err(EvalError::Internal(format!("entry-value: {:?} is not an index", other))),
     };
-    let err = |e: String| EvalError::Internal(format!("entry-word: {}", e));
+    let err = |e: String| EvalError::Internal(format!("entry-value: {}", e));
     let b = builder.borrow();
     if let Some(sig) = direct_sig(&builder) {
         if entry != "rt_pending_arg" {
             return Err(err(format!("a direct function has no `{}`", entry)));
         }
-        let carrier = *sig.params.get(idx).ok_or_else(|| err(format!("no parameter {}", idx)))?;
-        let word = match sig.llvm_index(idx) {
-            None => crate::compile::carriers::word().const_zero(),
+        let v = match sig.llvm_index(idx) {
+            None => Carrier::Unit.zero(),
             Some(i) => {
                 let f = b.get_insert_block().and_then(|block| block.get_parent()).ok_or_else(|| err("outside any function".to_string()))?;
-                let p = f.get_nth_param(i).ok_or_else(|| err(format!("no LLVM parameter {}", i)))?;
-                carrier.to_word(&b, p).map_err(err)?
+                f.get_nth_param(i).ok_or_else(|| err(format!("no LLVM parameter {}", i)))?
             }
         };
-        return Ok(llvm_value_value(word.into()));
+        return Ok(llvm_value_value(v));
     }
-    let word = crate::compile::carriers::word();
-    let (f, v) = crate::compile::runtime_abi::call(&b, &module.borrow(), &entry, &[word.const_int(idx as u64, false).into()]).map_err(err)?;
+    let carrier = Carrier::of_param_kind(expect_int(&args[4])?).map_err(err)?;
+    let (f, word) = crate::compile::runtime_abi::call_word(&b, &module.borrow(), &entry, &[carriers::word().const_int(idx as u64, false).into()]).map_err(err)?;
     crate::compile::raise_check::after_call(&b, f).map_err(err)?;
-    Ok(llvm_value_value(v.into()))
+    Ok(llvm_value_value(carrier.from_word(&b, word).map_err(err)?))
 }
 
 /// `(loop-safepoint builder m loop-block)` — the back edge of a loop, to
@@ -1091,7 +1054,7 @@ pub(super) fn llvm_builder_loop_safepoint(args: &[Value]) -> Result<Value, EvalE
     let resume = ctx.append_basic_block(function, &format!("coro.resume{}", id));
     {
         let b = builder.borrow();
-        let (f, offered) = crate::compile::runtime_abi::call(&b, &module.borrow(), "rt_loop_safepoint", &[]).map_err(|e| err("call", e))?;
+        let (f, offered) = crate::compile::runtime_abi::call_word(&b, &module.borrow(), "rt_loop_safepoint", &[]).map_err(|e| err("call", e))?;
         crate::compile::raise_check::after_call(&b, f).map_err(|e| err("raise check", e))?;
         let stay = b
             .build_int_compare(inkwell::IntPredicate::EQ, offered, crate::compile::carriers::word().const_zero(), "no_turn")

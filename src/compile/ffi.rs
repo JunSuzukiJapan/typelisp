@@ -366,7 +366,7 @@ fn call_shim(
     args: &[IntValue<'static>],
 ) -> Result<IntValue<'static>, String> {
     let args: Vec<BasicValueEnum<'static>> = args.iter().map(|a| (*a).into()).collect();
-    let (f, v) = crate::compile::runtime_abi::call(builder, module, name, &args).map_err(|e| format!("ffi: {}", e))?;
+    let (f, v) = crate::compile::runtime_abi::call_word(builder, module, name, &args).map_err(|e| format!("ffi: {}", e))?;
     crate::compile::raise_check::after_call(builder, f).map_err(|e| format!("ffi: {}", e))?;
     Ok(v)
 }
@@ -813,7 +813,7 @@ fn emit_callback_entry(
         store(3 + 3 * i, word)?;
         store(4 + 3 * i, aux)?;
     }
-    let (_, value) = crate::compile::runtime_abi::call(
+    let (_, value) = crate::compile::runtime_abi::call_word(
         &builder,
         module,
         "rt_ffi_callback_invoke",
