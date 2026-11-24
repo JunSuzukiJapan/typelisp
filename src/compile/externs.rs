@@ -889,14 +889,16 @@ pub(crate) fn rt_extern_functions() -> &'static [(&'static str, Shim)] {
 /// [`rt_extern_functions`], which every module declares; `main` declares
 /// the ones it calls.
 fn entry_shims() -> &'static [(&'static str, Shim)] {
-    static ENTRIES: std::sync::OnceLock<[(&'static str, Shim); 11]> = std::sync::OnceLock::new();
+    static ENTRIES: std::sync::OnceLock<[(&'static str, Shim); 13]> = std::sync::OnceLock::new();
     ENTRIES.get_or_init(|| {
         use typelisp_rt::{
-            rt_drive_body, rt_heap_init, rt_run_entry, rt_run_program, rt_run_program_alone, rt_run_program_alone_int,
+            rt_drive_body, rt_heap_init, rt_main_answered, rt_main_returned, rt_run_entry, rt_run_program, rt_run_program_alone, rt_run_program_alone_int,
             rt_run_program_int,
         };
         [
             ("rt_heap_init", shim(rt_heap_init as unsafe extern "C" fn(i64, i64, i64) -> i64)),
+            ("rt_main_answered", shim(rt_main_answered as unsafe extern "C" fn(i64) -> i64)),
+            ("rt_main_returned", shim(rt_main_returned as unsafe extern "C" fn() -> i64)),
             ("rt_run_entry", shim(rt_run_entry as unsafe extern "C" fn(i64) -> i64)),
             ("rt_drive_body", shim(rt_drive_body as unsafe extern "C-unwind" fn(i64, i64, i64) -> i64)),
             ("rt_run_program", shim(rt_run_program as unsafe extern "C" fn(i64, i64, i64) -> i64)),

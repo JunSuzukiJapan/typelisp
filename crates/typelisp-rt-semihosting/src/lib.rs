@@ -46,7 +46,10 @@ mod semihosting {
             0 => (0, nr::open::R),
             1 => (1, nr::open::W_TRUNC),
             2 => (2, nr::open::W_APPEND),
-            other => panic!("descriptor {} is not one of the board's", other),
+            // Not one of the board's: the runtime names no other. Ended, not
+            // a panic, whose message every program would carry `core::fmt`
+            // for.
+            _ => typelisp_host_exit(134),
         };
         let open = HANDLES[slot].load(Ordering::Relaxed);
         if open != UNOPENED {

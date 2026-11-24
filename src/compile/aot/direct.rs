@@ -48,6 +48,7 @@ use crate::check::repr::Repr;
 use crate::compile::direct::DirectSig;
 
 /// One function of the executable, translated for the island.
+#[derive(Clone)]
 pub(crate) struct Body {
     pub symbol: String,
     pub params: Vec<Repr>,
@@ -132,6 +133,8 @@ pub(crate) struct Direct {
     pub sigs: HashMap<String, DirectSig>,
     pub copies: HashMap<String, String>,
     pub emit: Vec<Body>,
+    /// The entry point's direct copy, when it has one.
+    pub entry: Option<String>,
 }
 
 /// The direct functions of the program whose own functions are `bodies` and
@@ -144,6 +147,7 @@ pub(crate) fn direct_functions(
     bodies: &[Body],
     inits: &[Value],
     pinned: &HashSet<String>,
+    entry: &str,
     mut prelude: impl FnMut(&mut Heap, &str) -> Result<Option<Body>, String>,
 ) -> Result<Direct, String> {
     let mut known: HashMap<String, Facts> = bodies.iter().map(|b| (b.symbol.clone(), facts(heap, b.body))).collect();
@@ -209,6 +213,16 @@ pub(crate) fn direct_functions(
     }
 
     let mut answer = Direct::default();
+    // The entry is a coroutine for the runtime to drive, and a direct
+    // function for a `main` that needs none of it.
+    let e = &known[entry];
+    if !e.stops && !(e.loops && waits) && e.callees.iter().all(|c| direct.contains(c.as_str()) || (!known.contains_key(c) && module.get_function(c).is_none())) {
+        let body = bodies.iter().find(|b| b.symbol == entry).expect("the entry is one of the program's functions");
+        let copy = format!("{}{}", entry, COPY_SUFFIX);
+        answer.sigs.insert(copy.clone(), DirectSig::of(&body.params, &body.ret));
+        answer.emit.push(Body { symbol: copy.clone(), ..body.clone() });
+        answer.entry = Some(copy);
+    }
     for b in bodies.iter().filter(|b| direct.contains(b.symbol.as_str())) {
         answer.sigs.insert(b.symbol.clone(), DirectSig::of(&b.params, &b.ret));
     }

@@ -96,9 +96,10 @@ struct CoroCtx {
 struct DirectCtx {
     /// How its parameters and result are carried.
     sig: crate::compile::direct::DirectSig,
-    /// The stack array the slots are cut from. Its length is a placeholder
-    /// until `coroutine-end` knows it; when any slot is rooted, the array is
-    /// replaced by a frame the collector sees (`rt_local_frame_open`).
+    /// Where the slots are cut from until `coroutine-end` knows how many
+    /// there are: it puts a stack array of that many in its place, or, when
+    /// any slot is rooted, a frame the collector sees
+    /// (`rt_local_frame_open`).
     slots: InstructionValue<'static>,
     /// Where an unwind leaves the function from: a raise after a call, or a
     /// throw with no region left in the function to catch it.
@@ -436,13 +437,13 @@ pub(super) fn llvm_builder_coroutine_begin(args: &[Value]) -> Result<Value, Eval
 /// straight line, since the function is entered once.
 ///
 /// ``text
-/// entry:      %slots = alloca i64, N;  br body
+/// entry:      %slots = alloca [N x i64];  br body
 /// body:       ...
 /// unwind:     (written by `coroutine-end`, when anything leaves through it)
 /// ``
 ///
-/// `N` is written in by `coroutine-end`, which also replaces the array with a
-/// frame the collector sees when any slot turned out to be rooted.
+/// The array is put in by `coroutine-end`, which knows `N` — or a frame the
+/// collector sees in its place, when any slot turned out to be rooted.
 fn direct_begin(
     builder: &Rc<RefCell<Builder<'static>>>,
     function: FunctionValue<'static>,
@@ -923,9 +924,16 @@ fn direct_end(
 
     let frame = match rooted_table(module, function, rooted, nslots) {
         None => {
-            if !direct.slots.set_operand(0, word_ty.const_int(nslots, false)) {
-                return Err("could not write the slot count into the prologue".to_string());
+            // One array type rather than a count, which is what LLVM takes
+            // apart into values (`sroa`).
+            let here = b.get_insert_block();
+            b.position_before(&direct.slots);
+            let slots = b.build_alloca(word_ty.array_type(nslots as u32), "slots").map_err(e)?;
+            if let Some(block) = here {
+                b.position_at_end(block);
             }
+            data.replace_all_uses_with(slots);
+            direct.slots.erase_from_basic_block();
             None
         }
         Some(table) => {

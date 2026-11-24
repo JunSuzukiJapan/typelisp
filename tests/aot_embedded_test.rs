@@ -274,6 +274,14 @@ fn what_a_program_does_not_use_is_left_out() {
             assert!(found.is_empty(), "{}: {} is linked in: {:?}", name, part, &found[..found.len().min(5)]);
         }
     }
+    // With no runtime at all: no heap to make, nothing to drive a coroutine
+    // with, no interrupt handlers and no text to write.
+    let elf = built("board_bare", blink, "prog.elf", &board_flags(&[]));
+    let names = symbols(&elf);
+    for part in ["rt_", "typelisp_rt::", "typelisp_mem::heap", "embedded_alloc", "linked_list_allocator", "typelisp_board_start"] {
+        let found: Vec<&String> = names.iter().filter(|n| n.starts_with(part) || of_module(n, part)).collect();
+        assert!(found.is_empty(), "{} is linked in: {:?}", part, &found[..found.len().min(5)]);
+    }
     let elf = built(
         "board_left_in",
         r#"

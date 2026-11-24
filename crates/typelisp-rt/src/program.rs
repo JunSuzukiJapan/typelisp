@@ -213,15 +213,47 @@ pub unsafe fn run_entry(
             Err(code) => code,
         });
     }
-    let code = match result {
-        Ok(Value::Int(n)) => n,
-        Ok(Value::Boxed(id)) if active_heap().is_bignum(id) => {
+    exit_code(match result {
+        Ok(answer) => int_answer(answer),
+        Err(code) => code,
+    })
+}
+
+/// The exit code an `int`-returning `main`'s answer is.
+unsafe fn int_answer(answer: Value) -> i64 {
+    match answer {
+        Value::Int(n) => n,
+        Value::Boxed(id) if active_heap().is_bignum(id) => {
             fatal(&format!("main returned {}, which is not a process exit code", active_heap().bignum_text(id)))
         }
-        Ok(other) => fatal(&format!("main declared to return int answered {:?}", other)),
-        Err(code) => code,
-    };
-    exit_code(code)
+        other => fatal(&format!("main declared to return int answered {:?}", other)),
+    }
+}
+
+/// The exit code of a program whose `main` the generated `main` called
+/// itself (a direct function: `compile::aot`), having answered the `int`
+/// `word` — or having raised, when `word` means nothing.
+///
+/// # Safety
+///
+/// `word` must be a tagged `int` unless a raise is waiting; a `Heap` must be
+/// registered on this thread.
+#[no_mangle]
+pub unsafe extern "C" fn rt_main_answered(word: i64) -> i64 {
+    if typelisp_abi::raised().is_err() {
+        return exit_code(EXIT_CODE_PANIC);
+    }
+    int_answer(typelisp_abi::decode(word))
+}
+
+/// [`rt_main_answered`] for a `main` that answers `()`.
+///
+/// # Safety
+///
+/// A `Heap` must be registered on this thread.
+#[no_mangle]
+pub unsafe extern "C" fn rt_main_returned() -> i64 {
+    exit_code(EXIT_CODE_SUCCESS)
 }
 
 /// What a generated `main` hands the program entry: the initialisers and

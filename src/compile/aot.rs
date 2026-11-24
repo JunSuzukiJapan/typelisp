@@ -71,6 +71,7 @@ use crate::{Checker, Heap, Interp, Path, Reader, TopLevelForm, Value};
 use typelisp_mem::{wk, ConcreteNames};
 mod archive;
 mod direct;
+mod settle;
 mod made;
 mod native;
 mod reach;
@@ -665,7 +666,8 @@ pub fn compile_file_with(source_path: &str, output_path: &str, options: &BuildOp
     for (_, slots) in interp.vtable_descriptors() {
         pinned.extend(slots.iter().map(|(type_name, method)| ConcreteNames::method_symbol(type_name, method.name())));
     }
-    let direct::Direct { sigs, copies, emit } = direct::direct_functions(&mut heap, &module.borrow(), &bodies, &init_bodies, &pinned, |heap, symbol| {
+    let entry_symbol = target_symbol_name(&CompileTarget::Fn(entry_path));
+    let direct::Direct { sigs, copies, emit, entry: direct_entry } = direct::direct_functions(&mut heap, &module.borrow(), &bodies, &init_bodies, &pinned, &entry_symbol, |heap, symbol| {
         prelude_items.get(symbol).map(|item| translated(heap, item)).transpose()
     })?;
     bodies.extend(emit);
@@ -747,6 +749,7 @@ pub fn compile_file_with(source_path: &str, output_path: &str, options: &BuildOp
     // Every body is emitted. What compiles from here on compiles for this
     // process (the `eval` environment's checking), and nothing there is direct.
     drop(producing_direct);
+    settle::settle(&module.borrow(), &direct_names)?;
 
     // Which types have a compiled `print-object`, for the printer's AOT
     // startup registration to choose from (`live_types` keeps those
@@ -813,6 +816,9 @@ pub fn compile_file_with(source_path: &str, output_path: &str, options: &BuildOp
         let symbol = target_symbol_name(item);
         let read = globals_read(&heap, &body)?;
         // A direct copy is the same body.
+        if let Some(copy) = direct_entry.as_ref().filter(|_| symbol == entry_symbol) {
+            body_globals.insert(copy.clone(), read.clone());
+        }
         if let Some(copy) = copies.get(&symbol) {
             body_globals.insert(copy.clone(), read.clone());
         }
@@ -913,7 +919,8 @@ pub fn compile_file_with(source_path: &str, output_path: &str, options: &BuildOp
         build_main_wrapper(
             ctx,
             &m,
-            &target_symbol_name(&CompileTarget::Fn(entry_path)),
+            &entry_symbol,
+            direct_entry.as_deref(),
             &global_init_names,
             &globals,
             &interp.vtable_descriptors(),
@@ -1083,6 +1090,7 @@ fn build_main_wrapper(
     ctx: &'static Context,
     module: &Module<'static>,
     entry_symbol: &str,
+    direct_entry: Option<&str>,
     global_init_names: &[String],
     globals: &Globals,
     vtables: &[(u32, Vec<(Path, typelisp_mem::SymRef)>)],
@@ -1122,6 +1130,38 @@ fn build_main_wrapper(
         .set_volatile(true)
         .map_err(|e| format!("failed to mark the ABI marker load volatile: {:?}", e))?;
 
+
+    // A program nothing of which calls the runtime: no heap, and nothing to
+    // start. What it runs is all there is.
+    let outside = !callback_entries.is_empty() || !interrupt_handlers.is_empty() || eval_env.is_some();
+    let direct_entry = match direct_entry.filter(|_| !outside) {
+        Some(name) => Some(module.get_function(name).ok_or_else(|| format!("internal error: `{}` was not compiled", name))?),
+        None => None,
+    };
+    if let Some(entry) = direct_entry {
+        if globals.inits.iter().all(|i| !i.always) && !reach::reached(module, &[entry], None).functions.iter().any(|f| is_runtime(module, f)) {
+            let call = builder.build_call(entry, &[], "answer").map_err(|e| format!("failed to call the entry point: {}", e))?;
+            let code = match call.try_as_basic_value() {
+                // With no runtime there is no bignum, so an `int` is a fixnum.
+                inkwell::values::ValueKind::Basic(word) if main_returns_int => {
+                    let n = builder
+                        .build_right_shift(word.into_int_value(), word.get_type().into_int_type().const_int(1, false), true, "code")
+                        .map_err(|e| format!("failed to read the exit code: {}", e))?;
+                    builder.build_int_truncate(n, i32_type, "exit_code").map_err(|e| format!("failed to truncate exit code: {}", e))?
+                }
+                _ => i32_type.const_zero(),
+            };
+            builder.build_return(Some(&code)).map_err(|e| format!("failed to build entry-point return: {}", e))?;
+            return crate::compile::type_table::settle_for_export(module).map(|_| ());
+        }
+    }
+
+    // A board's memory and interrupt controller, readied for the runtime
+    // before anything allocates.
+    if target.board().is_some() {
+        let start = module.add_function("typelisp_board_start", ctx.void_type().fn_type(&[], false), None);
+        builder.build_call(start, &[], "").map_err(|e| format!("failed to build the board's start: {}", e))?;
+    }
 
     // The C callback entries (`typelisp_rt::ffi_callback`): the entry's
     // address under the function's definition and the function type C calls
@@ -1409,6 +1449,17 @@ fn build_main_wrapper(
             scheduled.as_global_value().as_pointer_value().replace_all_uses_with(alone.as_global_value().as_pointer_value());
             // SAFETY: a declaration with no uses left.
             unsafe { scheduled.delete() };
+            // With no global to initialise either, an entry that is direct
+            // runs on this frame, and what drives a coroutine is not linked
+            // in.
+            let nothing_to_initialise = module
+                .get_global("tl_global_inits")
+                .and_then(|g| g.get_initializer())
+                // SAFETY: a live constant of `module`.
+                .is_some_and(|i| unsafe { inkwell::llvm_sys::core::LLVMIsNull(inkwell::values::AsValueRef::as_value_ref(&i)) } != 0);
+            if let Some(direct) = direct_entry.filter(|_| nothing_to_initialise) {
+                run_direct_entry(module, &builder, main_fn, alone, direct, main_returns_int)?;
+            }
         }
     }
 
@@ -1421,6 +1472,11 @@ fn build_main_wrapper(
     crate::compile::type_table::settle_for_export(module)?;
     let read = reach::reached(module, &[main_fn], None).globals;
     let first = entry_block.get_first_instruction().expect("`main` was just given a body");
+    // After the board's start, which is what they allocate from.
+    let first = match entry_block.get_instructions().find(|i| calls(i, "typelisp_board_start")) {
+        Some(start) => start.get_next_instruction().expect("`main` goes on after the board's start"),
+        None => first,
+    };
     builder.position_before(&first);
     for init in crate::compile::type_table::init_functions(module) {
         let f = module.get_function(&init).expect("an init function the module defines");
@@ -1430,6 +1486,62 @@ fn build_main_wrapper(
         }
     }
     Ok(())
+}
+
+/// Whether the function `name` is the runtime's: one the module only
+/// declares, that is not LLVM's own and not a C function the program calls.
+fn is_runtime(module: &Module<'static>, name: &str) -> bool {
+    name.starts_with("rt_") && module.get_function(name).is_some_and(|f| f.count_basic_blocks() == 0)
+}
+
+/// Whether `i` is a call of the function `name`.
+fn calls(i: &inkwell::values::InstructionValue<'static>, name: &str) -> bool {
+    i.get_opcode() == InstructionOpcode::Call
+        && matches!(i.get_operand(i.get_num_operands() - 1), Some(Operand::Value(v)) if v.is_pointer_value() && v.into_pointer_value().get_name().to_bytes() == name.as_bytes())
+}
+
+/// Puts, in `main`, a call of the direct entry point and of what reads its
+/// answer in place of the call that would drive the program (`driven`).
+fn run_direct_entry(
+    module: &Module<'static>,
+    builder: &inkwell::builder::Builder<'static>,
+    main_fn: inkwell::values::FunctionValue<'static>,
+    driven: inkwell::values::FunctionValue<'static>,
+    entry: inkwell::values::FunctionValue<'static>,
+    main_returns_int: bool,
+) -> Result<(), String> {
+    let name = driven.get_name().to_string_lossy().into_owned();
+    let call = main_fn
+        .get_basic_blocks()
+        .into_iter()
+        .flat_map(|b| b.get_instructions().collect::<Vec<_>>())
+        .find(|i| calls(i, &name))
+        .ok_or_else(|| format!("internal error: `main` does not call `{}`", name))?;
+    builder.position_before(&call);
+    let word_ty = crate::compile::carriers::word();
+    let answer = builder.build_call(entry, &[], "answer").map_err(|e| format!("failed to call the entry point: {}", e))?;
+    let code = match answer.try_as_basic_value() {
+        inkwell::values::ValueKind::Basic(word) if main_returns_int => call_entry(builder, module, "rt_main_answered", &[word.into_int_value()])?,
+        _ => call_entry(builder, module, "rt_main_returned", &[])?,
+    };
+    let call: inkwell::values::IntValue<'static> = call.try_into().map_err(|()| "internal error: the program's answer is not a word".to_string())?;
+    debug_assert_eq!(call.get_type(), word_ty);
+    call.replace_all_uses_with(code);
+    call.as_instruction().expect("a call").erase_from_basic_block();
+    Ok(())
+}
+
+/// Calls the entry shim `name`, whose answer is a word.
+fn call_entry(
+    builder: &inkwell::builder::Builder<'static>,
+    module: &Module<'static>,
+    name: &str,
+    words: &[inkwell::values::IntValue<'static>],
+) -> Result<inkwell::values::IntValue<'static>, String> {
+    let f = declare_entry(module, name)?;
+    let sig = crate::compile::externs::runtime_sig(name).expect("an entry shim is in the entry table");
+    let words: Vec<_> = words.iter().map(|w| (*w).into()).collect();
+    Ok(crate::compile::runtime_abi::call_declared(builder, f, sig, &words)?.1)
 }
 
 /// What each global's initialiser and each compiled body read, by global
@@ -2021,7 +2133,7 @@ mod tests {
         builder.build_call(exit, &[code.into()], "").unwrap();
         builder.build_unreachable().unwrap();
 
-        build_main_wrapper(ctx, &module, "tl_main", &[], &super::Globals::default(), &[], &[], &[], &[], &[], &[], &[], &[], &[], None, false, super::Target::Host, super::HeapInit { cells: typelisp_rt::DEFAULT_AOT_HEAP_CAPACITY, fixed: false, max_memory: None }).expect("build_main_wrapper failed");
+        build_main_wrapper(ctx, &module, "tl_main", None, &[], &super::Globals::default(), &[], &[], &[], &[], &[], &[], &[], &[], &[], None, false, super::Target::Host, super::HeapInit { cells: typelisp_rt::DEFAULT_AOT_HEAP_CAPACITY, fixed: false, max_memory: None }).expect("build_main_wrapper failed");
         module.verify().expect("module failed verification");
 
         let out_path = tmp_path("rt_ping_test");
@@ -2055,7 +2167,7 @@ mod tests {
         let (_, result) = crate::compile::runtime_abi::call_declared(&builder, rt_heap_live_count, &sig, &[]).unwrap();
         builder.build_return(Some(&result)).unwrap();
 
-        build_main_wrapper(ctx, &module, "tl_main", &[], &super::Globals::default(), &[], &[], &[], &[], &[], &[], &[], &[], &[], None, false, super::Target::Host, super::HeapInit { cells: typelisp_rt::DEFAULT_AOT_HEAP_CAPACITY, fixed: false, max_memory: None }).expect("build_main_wrapper failed");
+        build_main_wrapper(ctx, &module, "tl_main", None, &[], &super::Globals::default(), &[], &[], &[], &[], &[], &[], &[], &[], &[], None, false, super::Target::Host, super::HeapInit { cells: typelisp_rt::DEFAULT_AOT_HEAP_CAPACITY, fixed: false, max_memory: None }).expect("build_main_wrapper failed");
         module.verify().expect("module failed verification");
 
         let out_path = tmp_path("rt_heap_init_test");

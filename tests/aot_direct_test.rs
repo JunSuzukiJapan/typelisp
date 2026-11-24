@@ -132,6 +132,61 @@ fn a_direct_functions_locals_are_roots() {
     }
 }
 
+/// A program that calls nothing of the runtime's has a `main` that calls
+/// nothing of it; one that does, and waits for nothing, calls its own `main`
+/// with nothing to drive it. Both answer as `typl` would, an `int` and `()`
+/// alike, and a raise out of `main` ends the program as one.
+#[test]
+fn a_main_that_stops_nowhere_is_called_directly() {
+    let bare = r#"
+(defun add ((a i32) (b i32)) i32 (+ a b))
+(defun main () int (if (eq (add (the i32 1) (the i32 2)) (the i32 3)) 42 -1))
+"#;
+    let heap = r#"
+(defun len ((s string)) int (length (append s "abc")))
+(defun main () int (+ 20 (len "0123456789012345678")))
+"#;
+    let unit = "(defun f ((s string)) int (length (append s s)))\n(defun main () () (f \"ab\") ())";
+    let fails = "(defun f ((a i32)) i32 (/ a (the i32 0)))\n(defun main () int (f (the i32 1)) 7)";
+    for (name, source, code, runtime) in
+        [("bare", bare, 42, None), ("heap", heap, 42, Some("@rt_main_answered")), ("unit", unit, 0, Some("@rt_main_returned")), ("fails", fails, 1, Some("@rt_main_answered"))]
+    {
+        let (ran, ir) = built(&format!("main_{}", name), source, &[]);
+        assert_eq!(ran.status.code(), Some(code), "{}: {}", name, String::from_utf8_lossy(&ran.stderr));
+        let at = ir.find("define i32 @main()").expect("a `main`");
+        let main = &ir[at..at + ir[at..].find("\n}\n").unwrap()];
+        assert!(main.contains("::main$direct\""), "{}:\n{}", name, main);
+        assert!(!main.contains("@rt_run_program"), "{}:\n{}", name, main);
+        match runtime {
+            Some(shim) => assert!(main.contains(shim), "{}:\n{}", name, main),
+            None => assert!(!main.contains("@rt_"), "{}:\n{}", name, main),
+        }
+    }
+}
+
+/// A volatile access of a constant address is an instruction, and after a
+/// call that cannot raise there is no check for a raise — at `-O0` too.
+#[test]
+fn what_is_settled_needs_no_runtime() {
+    let (_, ir) = built(
+        "settled",
+        r#"
+(defun poke () () (unsafe (volatile-write-u32 #x40004000 #x2A)))
+(defun peek () u8 (unsafe (volatile-read-u8 #x40004001)))
+(defun bad () () (unsafe (volatile-write-u32 #x40004002 1)))
+(defun three () i32 (the i32 3))
+(defun main () int (if (eq (three) (the i32 4)) (progn (poke) (peek) (bad) 1) 42))
+"#,
+        &[],
+    );
+    let (_, poke) = function(&ir, "::poke");
+    assert!(poke.contains("store volatile i32 42, ptr inttoptr (i64 1073758208 to ptr)") && !poke.contains("call"), "{}", poke);
+    let (_, peek) = function(&ir, "::peek");
+    assert!(peek.contains("load volatile i8") && !peek.contains("call"), "{}", peek);
+    // A misaligned register raises, as it does everywhere.
+    assert!(function(&ir, "::bad").1.contains("@rt_c_volatile_store"));
+}
+
 /// A raise leaves direct functions one by one, closing each one's frame, to
 /// the coroutine that catches it, which goes on; and one nobody catches ends
 /// the program with its message.
@@ -162,4 +217,26 @@ fn a_raise_leaves_direct_functions() {
         assert!(!is_coroutine(&ir, name), "{}", name);
     }
     assert!(is_coroutine(&ir, "::once"));
+}
+
+/// A program that calls no `eval` has nothing of the checker or the
+/// interpreter in its executable.
+#[test]
+fn without_eval_there_is_no_interpreter() {
+    let symbols = |name: &str, source: &str| {
+        let (ran, _) = built(name, source, &[]);
+        assert!(ran.status.success(), "{}", String::from_utf8_lossy(&ran.stderr));
+        let exe = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("target/aot-test-tmp").join(format!("direct_{}", name)).join("prog");
+        let prefix = std::env::var("LLVM_SYS_221_PREFIX").expect("LLVM_SYS_221_PREFIX names the LLVM typl is built with");
+        let out = Command::new(PathBuf::from(prefix).join("bin").join("llvm-nm"))
+            .args(["--defined-only", "--demangle", "--format=just-symbols"])
+            .arg(exe)
+            .output()
+            .expect("failed to start llvm-nm");
+        assert!(out.status.success(), "llvm-nm failed: {}", String::from_utf8_lossy(&out.stderr));
+        String::from_utf8_lossy(&out.stdout).lines().map(str::to_string).collect::<Vec<_>>()
+    };
+    let interpreter = |names: &[String]| names.iter().filter(|n| n.contains("typelisp_front::typeck::") || n.contains("typelisp_front::eval::")).count();
+    assert_eq!(interpreter(&symbols("no_eval", r#"(defun main () () (println "~a" (list 1 2)))"#)), 0);
+    assert_ne!(interpreter(&symbols("eval", "(use std::eval::eval) (defun main () () (eval '(+ 1 2)) ())")), 0);
 }

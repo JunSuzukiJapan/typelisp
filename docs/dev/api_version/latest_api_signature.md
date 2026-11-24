@@ -1,11 +1,11 @@
-# ABI バージョン 0.3.77
+# ABI バージョン 0.3.78
 
 `scripts/regen-abi-version.sh` が生成した文書。手で編集しない。
 
-コンパイラが生成するコードが、ABI バージョン 0.3.77 のランタイムライブラリについて仮定していることの一覧。
+コンパイラが生成するコードが、ABI バージョン 0.3.78 のランタイムライブラリについて仮定していることの一覧。
 ここに書かれていない前提(シムが引数をどう扱うか、生成コードがヒープを直接読む箇所など)は含まない。
 
-内容ハッシュ (FNV-1a 64): `e80d72bec7633594`
+内容ハッシュ (FNV-1a 64): `b09c9106e95fbff7`
 
 ## 呼び出し規約 (typelisp_abi)
 
@@ -1245,6 +1245,8 @@
 | `rt_machine_version` | `i64 ()` |
 | `rt_macroexpand` | `i64 (i64, i64)` |
 | `rt_macroexpand_1` | `i64 (i64, i64)` |
+| `rt_main_answered` | `i64 (i64)` |
+| `rt_main_returned` | `i64 ()` |
 | `rt_make_random_state_fresh` | `i64 ()` |
 | `rt_match_fail` | `i64 ()` |
 | `rt_net_accept` | `i64 (i64)` |
