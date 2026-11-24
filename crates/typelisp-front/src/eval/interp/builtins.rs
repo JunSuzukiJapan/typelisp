@@ -3,7 +3,7 @@
 
 use crate::{wk, Heap, Path, SymRef, TypeId, Value};
 use crate::eval::value::EvalError;
-use super::{backend, bool_eq, char_compare, char_eq, char_eqp, char_lt, char_to_int, eval_float_builtin, eval_get_internal_real_time, eval_get_universal_time, eval_int_builtin, eval_integer_builtin, eval_llvm_builtin_method, eval_make_random_state_fresh, eval_parse_float, eval_random_state_copy, eval_random_state_next, eval_ratio_builtin, eval_rational_builtin, eval_seed_random_state, expect_char, expect_int, expect_str, expect_struct_box, float_expt, float_to_int, float_to_ratio, float_to_width, float_unary, hashtable_bucket_count, hashtable_bucket_delete, hashtable_bucket_key, hashtable_bucket_put, hashtable_bucket_value, hashtable_clear, hashtable_count, hashtable_entries, hashtable_keys, hashtable_values, int_integer_length, int_logcount, int_lognot, int_pair, int_to_char, int_to_float, int_to_ratio, int_to_width, integer_conversion, integer_to_width, integer_unary, ratio_denominator, ratio_numerator, ratio_to_float, ratio_to_int, rational_unary, rt_f64, rt_i64, rt_str, scope_clone_frames_heap, scope_get_heap, scope_pop_frame_heap, scope_push_frame_heap, scope_set_heap, sexpr_eq, sexpr_eql, sexpr_equal, sexpr_equalp, str_rt, string_append, string_compare, string_content_eq, string_content_eqp, string_identity_eq, string_length, string_lt, string_ref, string_substring, try_float_to_f32, try_int_to_char, try_int_to_width, vector_get, vector_len, vector_pop, vector_push, vector_set, width_cast_target, width_to_int, Interp};
+use super::{backend, bool_eq, char_compare, char_eq, char_eqp, char_lt, char_to_int, eval_float_builtin, eval_get_internal_real_time, eval_get_universal_time, eval_fixed_builtin, eval_integer_builtin, eval_llvm_builtin_method, eval_make_random_state_fresh, eval_parse_float, eval_random_state_copy, eval_random_state_next, eval_ratio_builtin, eval_rational_builtin, eval_seed_random_state, expect_char, expect_int, expect_str, expect_struct_box, float_to_int, float_to_ratio, float_to_width, hashtable_bucket_count, hashtable_bucket_delete, hashtable_bucket_key, hashtable_bucket_put, hashtable_bucket_value, hashtable_clear, hashtable_count, hashtable_entries, hashtable_keys, hashtable_values, int_pair, integer_conversion, integer_to_width, integer_unary, ratio_denominator, ratio_numerator, ratio_to_float, ratio_to_int, rational_unary, rt_f64, rt_i64, rt_str, scope_clone_frames_heap, scope_get_heap, scope_pop_frame_heap, scope_push_frame_heap, scope_set_heap, sexpr_eq, sexpr_eql, sexpr_equal, sexpr_equalp, str_rt, string_append, string_compare, string_content_eq, string_content_eqp, string_identity_eq, string_length, string_lt, string_ref, string_substring, try_float_to_f32, vector_get, vector_len, vector_pop, vector_push, vector_set, width_cast_target, Interp};
 
 impl Interp {
     /// Evaluate a built-in operator. Returns `None` if `name` is not a
@@ -334,17 +334,18 @@ impl Interp {
             // normalized word, because that is what a statically typed `u8`
             // is everywhere outside a `Sexpr`.
             wk::F_SEXPR_I8 | wk::F_SEXPR_I16 | wk::F_SEXPR_U8 | wk::F_SEXPR_U16 | wk::F_SEXPR_U32 | wk::F_SEXPR_I32 => {
-                let (width, signed) = match name.well_known() {
-                    wk::F_SEXPR_I8 => (8u8, true),
-                    wk::F_SEXPR_I16 => (16, true),
-                    wk::F_SEXPR_U8 => (8, false),
-                    wk::F_SEXPR_U16 => (16, false),
-                    wk::F_SEXPR_U32 => (32, false),
-                    _ => (32, true),
+                use typelisp_mem::fixed::FixedType;
+                let ty = match name.well_known() {
+                    wk::F_SEXPR_I8 => FixedType::I8,
+                    wk::F_SEXPR_I16 => FixedType::I16,
+                    wk::F_SEXPR_U8 => FixedType::U8,
+                    wk::F_SEXPR_U16 => FixedType::U16,
+                    wk::F_SEXPR_U32 => FixedType::U32,
+                    _ => FixedType::I32,
                 };
                 match args.first() {
-                    Some(Value::Boxed(id)) if heap.is_narrow(*id, width, signed) => {
-                        Some(Ok(Value::Int(heap.narrow_box(*id).expect("just tested").value)))
+                    Some(Value::Boxed(id)) if heap.is_narrow(*id, ty) => {
+                        Some(Ok(Value::Int(heap.narrow_box(*id).expect("just tested").word())))
                     }
                     Some(_) => Some(Err(EvalError::Panic(format!("{name}: expected a {} Sexpr node", &name.name()[6..])))),
                     _ => Some(Err(EvalError::Internal(format!("{name}: expected a Sexpr argument")))),
@@ -416,13 +417,12 @@ impl Interp {
     }
 }
 
-/// The width and signedness of `type_name`, when it is one of the integer
-/// types — every one of which shares the same catalog and the same runtime
-/// carrier (`Value::Int`, an `i64`) but *not* the same arithmetic: the pair
-/// this returns is what `eval_int_builtin` cuts every result back to. `None`
-/// for anything that is not an integer type.
-fn int_receiver_width(type_name: &Path) -> Option<(u32, bool)> {
-    crate::types::scalar_type(type_name).and_then(|t| crate::types::int_width_signed(&t))
+/// The fixed-width integer type `type_name` names — every one of which
+/// shares the same catalog and the same runtime carrier (`Value::Int`, an
+/// `i64`) but *not* the same arithmetic, which is the type's own
+/// (`eval_fixed_builtin`). `None` for anything that is not one.
+fn int_receiver_width(type_name: &Path) -> Option<typelisp_mem::fixed::FixedType> {
+    crate::types::scalar_type(type_name).and_then(|t| crate::types::int_width_signed(&t)).and_then(|(w, s)| typelisp_mem::fixed::FixedType::of(w, s))
 }
 
 /// [`int_receiver_width`]'s float counterpart: `f32` and `f64` are one
@@ -554,42 +554,14 @@ pub(crate) fn eval_builtin_method(
             _ => None,
         };
     }
-    if let Some((width, signed)) = int_receiver_width(type_name) {
-        return match method.well_known() {
-            wk::M_OP_ADD | wk::M_OP_SUB | wk::M_OP_MUL | wk::M_OP_DIV | wk::M_MOD | wk::M_OP_LT | wk::M_OP_LE | wk::M_OP_GT | wk::M_OP_GE | wk::RETIRED_EQUALS | wk::M_OP_NE | wk::M_MAX | wk::M_MIN | wk::M_LOGAND | wk::M_LOGIOR | wk::M_LOGXOR | wk::M_ASH | wk::M_LOGBITP | wk::M_LOGTEST => eval_int_builtin(method, args, width, signed),
-            wk::M_LOGNOT => Some(int_lognot(args, width, signed)),
-            wk::M_LOGCOUNT => Some(int_logcount(args, width)),
-            wk::M_INTEGER_LENGTH => Some(int_integer_length(args, width)),
-            // `eq`/`eql`/`equal`/`equalp` are all registered as aliases for
-            // `=` (see `registry::int_assoc`'s doc comment for why every one
-            // of these four is meaningful to register even though none can
-            // diverge from `=` here).
-            wk::M_EQ | wk::M_EQL | wk::M_EQUAL | wk::M_EQUALP => eval_int_builtin(typelisp_mem::symbols::well_known_symbol(wk::RETIRED_EQUALS), args, width, signed),
-            wk::M_INT_TO_FLOAT => Some(int_to_float(heap, args)),
-            wk::M_INT_TO_CHAR => Some(int_to_char(args)),
-            wk::M_TRY_INT_TO_CHAR => Some(try_int_to_char(heap, args, ret_type)),
-            wk::M_INT_TO_INT => Some(width_to_int(heap, args, width, signed)),
-            wk::M_INT_TO_RATIO => Some(int_to_ratio(heap, args)),
-            _ if width_cast_target(method).is_some_and(|(try_variant, _, _)| !try_variant) => {
-                let (_, w, sg) = width_cast_target(method).expect("just matched");
-                Some(int_to_width(args, w, sg))
-            }
-            _ if width_cast_target(method).is_some_and(|(try_variant, _, _)| try_variant) => {
-                let (_, w, sg) = width_cast_target(method).expect("just matched");
-                Some(try_int_to_width(heap, args, w, sg, ret_type))
-            }
-            _ => None,
-        };
+    if let Some(ty) = int_receiver_width(type_name) {
+        return eval_fixed_builtin(heap, method, args, ty, ret_type);
     }
     if is_float_receiver(type_name) {
-        // `f32` is binary32 and `f64` binary64: the receiver's own width says
-        // what each result is rounded to (`float_at`).
+        // `f32` is binary32 and `f64` binary64, each computed at its own
+        // width.
         let single = crate::types::path_is_builtin(type_name, typelisp_mem::wk::F32);
         return match method.well_known() {
-            wk::M_OP_ADD | wk::M_OP_SUB | wk::M_OP_MUL | wk::M_OP_DIV | wk::M_OP_LT | wk::M_OP_LE | wk::M_OP_GT | wk::M_OP_GE | wk::RETIRED_EQUALS | wk::M_OP_NE | wk::M_MAX | wk::M_MIN => {
-                eval_float_builtin(heap, method, args, single)
-            }
-            wk::M_EQ | wk::M_EQL | wk::M_EQUAL | wk::M_EQUALP => eval_float_builtin(heap, typelisp_mem::symbols::well_known_symbol(wk::RETIRED_EQUALS), args, single),
             wk::M_FLOAT_TO_F32 => Some(float_to_width(heap, args, true)),
             wk::M_FLOAT_TO_F64 => Some(float_to_width(heap, args, false)),
             wk::M_TRY_FLOAT_TO_F32 => Some(try_float_to_f32(heap, args, ret_type)),
@@ -598,29 +570,9 @@ pub(crate) fn eval_builtin_method(
                 let some = Some(v);
                 heap.alloc_option(ret_type, some)
             })),
-            wk::M_EXPT => Some(float_expt(heap, args, single)),
-            wk::M_SQRT => Some(float_unary(heap, args, f64::sqrt, single)),
-            wk::M_FLOOR => Some(float_unary(heap, args, f64::floor, single)),
-            wk::M_CEILING => Some(float_unary(heap, args, f64::ceil, single)),
-            wk::M_ROUND => Some(float_unary(heap, args, f64::round_ties_even, single)),
-            wk::M_TRUNCATE => Some(float_unary(heap, args, f64::trunc, single)),
-            wk::M_SIN => Some(float_unary(heap, args, f64::sin, single)),
-            wk::M_COS => Some(float_unary(heap, args, f64::cos, single)),
-            wk::M_TAN => Some(float_unary(heap, args, f64::tan, single)),
-            wk::M_ASIN => Some(float_unary(heap, args, f64::asin, single)),
-            wk::M_ACOS => Some(float_unary(heap, args, f64::acos, single)),
-            wk::M_ATAN => Some(float_unary(heap, args, f64::atan, single)),
-            wk::M_SINH => Some(float_unary(heap, args, f64::sinh, single)),
-            wk::M_COSH => Some(float_unary(heap, args, f64::cosh, single)),
-            wk::M_TANH => Some(float_unary(heap, args, f64::tanh, single)),
-            wk::M_ASINH => Some(float_unary(heap, args, f64::asinh, single)),
-            wk::M_ACOSH => Some(float_unary(heap, args, f64::acosh, single)),
-            wk::M_ATANH => Some(float_unary(heap, args, f64::atanh, single)),
-            wk::M_EXP => Some(float_unary(heap, args, f64::exp, single)),
-            wk::M_LOG => Some(float_unary(heap, args, f64::ln, single)),
             wk::M_FLOAT_TO_INT => Some(float_to_int(heap, args)),
             wk::M_FLOAT_TO_RATIO => Some(float_to_ratio(heap, args)),
-            _ => None,
+            _ => eval_float_builtin(heap, method, args, single),
         };
     }
     if crate::types::path_is_builtin(type_name, typelisp_mem::wk::INT) {
@@ -634,8 +586,8 @@ pub(crate) fn eval_builtin_method(
                 Some(integer_conversion(heap, method, args, ret_type))
             }
             _ if width_cast_target(method).is_some() => {
-                let (try_variant, w, sg) = width_cast_target(method).expect("just matched");
-                Some(integer_to_width(heap, args, w, sg, try_variant, ret_type))
+                let (try_variant, to) = width_cast_target(method).expect("just matched");
+                Some(integer_to_width(heap, args, to, try_variant, ret_type))
             }
             _ => None,
         };

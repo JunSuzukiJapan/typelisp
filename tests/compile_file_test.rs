@@ -1186,12 +1186,11 @@ fn an_uncaught_throw_reaching_the_entry_point_exits_rather_than_aborting() {
     assert!(stderr.contains("no enclosing (catch 'nobody)"), "stderr was: {}", stderr);
 }
 
-/// A runtime failure the *runtime* raises — here a zero divisor inside
-/// `rt_int_div` — ends an AOT executable the same way an explicit
+/// A runtime failure the *runtime* raises — here a zero divisor, raised by
+/// `rt_int_div_fault` — ends an AOT executable the same way an explicit
 /// `(panic ...)` does: message on stderr, exit code 1.
 ///
-/// It used to abort with 134 instead, because `rt_int_div` reached
-/// `typelisp_rt::fatal()`. That it now unwinds all the way to `rt_run_entry`
+/// That it unwinds all the way to `rt_run_entry`
 /// is what makes an AOT program's arithmetic failures reportable rather than
 /// fatal; `tests/runtime_error_parity_test.rs` covers the same failures on the
 /// interpreted and JIT paths.

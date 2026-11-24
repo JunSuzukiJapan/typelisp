@@ -1314,11 +1314,11 @@ fn match_sexpr_core(
     // A narrow integer node matches its own variant and no other: the five
     // widths are five types, and `(u8 x)` binding a `u16` node would be the
     // fold this representation exists to undo.
-    if let (Some((width, signed)), Value::Boxed(id)) = (narrow_variant(variant), v) {
-        return if heap.is_narrow(id, width, signed) {
+    if let (Some(ty), Value::Boxed(id)) = (narrow_variant(variant), v) {
+        return if heap.is_narrow(id, ty) {
             // The binding is the plain normalized word — what a statically
             // typed `u8` is everywhere but inside a `Sexpr`.
-            let n = heap.narrow_box(id).expect("just tested").value;
+            let n = heap.narrow_box(id).expect("just tested").word();
             one(heap, Value::Int(n))
         } else {
             Ok(None)
@@ -1418,9 +1418,9 @@ pub(super) fn construct_sexpr_core(heap: &mut Heap, variant: usize, argv: &[Valu
     // The narrow widths box on the way in, from the *variant*'s width rather
     // than from the value: the word is the same bit pattern for a `u8` `200`
     // and an `i32` `200`, which is why the box has to be told.
-    if let Some((width, signed)) = narrow_variant(variant) {
+    if let Some(ty) = narrow_variant(variant) {
         let n = super::rt_i64(&arg(0)?)?;
-        return Ok(heap.alloc_narrow(width, signed, n));
+        return Ok(heap.alloc_narrow(typelisp_mem::NarrowInt::new(ty, n).expect("a Sexpr variant's width")));
     }
 
     match variant {

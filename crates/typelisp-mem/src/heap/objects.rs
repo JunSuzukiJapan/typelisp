@@ -172,23 +172,11 @@ impl Heap {
 
     /// Store an `i8`/`i16`/`i32`/`u8`/`u16`/`u32`, returning its
     /// `Value::Boxed` — the runtime representation of those six `Sexpr`
-    /// variants.
-    ///
-    /// `value` is normalized on the way in rather than trusted, so the box's
-    /// contents satisfy [`NarrowInt`]'s invariant no matter what the caller
-    /// had in its register. `i32` boxes like the rest since `int` took the
-    /// bare fixnum word: inside a `Sexpr` the word alone no longer says
-    /// which of the two it is.
-    ///
-    /// Panics on a width not in `{8, 16, 32}` — an internal-invariant trap
-    /// like [`f64_value`](Self::f64_value)'s, since the caller reaches here
-    /// from a declared type.
-    pub fn alloc_narrow(&mut self, width: u8, signed: bool, value: i64) -> Value {
-        if !matches!(width, 8 | 16 | 32) {
-            panic!("alloc_narrow: {}{} is not a boxed integer type", if signed { "i" } else { "u" }, width);
-        }
-        let value = crate::normalize_int(value, u32::from(width), signed);
-        self.alloc_boxed(BoxedObj::Narrow(NarrowInt { width, signed, value }))
+    /// variants. `i32` boxes like the rest since `int` took the bare fixnum
+    /// word: inside a `Sexpr` the word alone no longer says which of the two
+    /// it is.
+    pub fn alloc_narrow(&mut self, n: NarrowInt) -> Value {
+        self.alloc_boxed(BoxedObj::Narrow(n))
     }
 
     /// A boxed narrow integer, as the type it actually is — `None` when `id`
@@ -210,9 +198,9 @@ impl Heap {
     /// [`is_f32`](Self::is_f32)/[`is_f64`](Self::is_f64). There is no
     /// width-agnostic `is_narrow` for the same reason there is no
     /// `is_float`.
-    pub fn is_narrow(&self, id: BoxId, width: u8, signed: bool) -> bool {
+    pub fn is_narrow(&self, id: BoxId, ty: crate::fixed::FixedType) -> bool {
         match &self.shared.boxes.read_recursive().slots[id.0 as usize] {
-            Some(BoxedObj::Narrow(n)) => n.width == width && n.signed == signed,
+            Some(BoxedObj::Narrow(n)) => n.ty() == ty,
             _ => false,
         }
     }
@@ -231,14 +219,13 @@ impl Heap {
         match &self.shared.boxes.read_recursive().slots[id.0 as usize] {
             Some(BoxedObj::Float32(_)) => Some("f32"),
             Some(BoxedObj::Float64(_)) => Some("f64"),
-            Some(BoxedObj::Narrow(n)) => Some(match (n.width, n.signed) {
-                (8, true) => "i8",
-                (16, true) => "i16",
-                (8, false) => "u8",
-                (16, false) => "u16",
-                (32, false) => "u32",
-                (32, true) => "i32",
-                (w, s) => panic!("primitive_box_type_name: a narrow box of an unknown width {}{}", if s { "i" } else { "u" }, w),
+            Some(BoxedObj::Narrow(n)) => Some(match n {
+                NarrowInt::I8(_) => "i8",
+                NarrowInt::I16(_) => "i16",
+                NarrowInt::I32(_) => "i32",
+                NarrowInt::U8(_) => "u8",
+                NarrowInt::U16(_) => "u16",
+                NarrowInt::U32(_) => "u32",
             }),
             // A bignum box is an `int`: the `bignum` type was folded into it.
             Some(BoxedObj::Bignum(_)) => Some("int"),

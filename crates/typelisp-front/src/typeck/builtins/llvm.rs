@@ -144,53 +144,14 @@ fn builder(reg: &mut Registry) {
     // integers would come back corrupted.
     def.instance("build-lshr", vec![builder_ty(), value_ty(), value_ty()], value_ty());
     def.instance("build-ashr", vec![builder_ty(), value_ty(), value_ty()], value_ty());
-    // `f64` arithmetic/comparison (`eval_llvm_builtin_method`'s
-    // `llvm_builder_build_float_op`/`_fcmp`): both operands and the arithmetic
-    // result are the *same* `i64`-carried representation every other
-    // `llvm-value` uses (a compiled `f64`'s raw `f64::to_bits` pattern) — the
-    // `i64`<->`double` `bitcast`ing is entirely internal to each op, so these
-    // are ordinary `i64`-in/`i64`-out builtins like `build-add`, and
-    // `compile-assoc`'s f64 branch composes them exactly like the int one
-    // composes `build-add`/`build-icmp-*`. A comparison yields a `0`/`1`
-    // `i64` (the `bool` representation), matching `build-icmp-*`.
-    for name in ["build-fadd", "build-fsub", "build-fmul", "build-fdiv", "build-frem"] {
-        def.instance(name, vec![builder_ty(), value_ty(), value_ty()], value_ty());
-    }
-    for name in ["build-fcmp-lt", "build-fcmp-le", "build-fcmp-gt", "build-fcmp-ge", "build-fcmp-eq", "build-fcmp-ne"] {
-        def.instance(name, vec![builder_ty(), value_ty(), value_ty()], value_ty());
-    }
-    // `f64` transcendentals (`float-native-method?`'s `sqrt`/`floor`/`ceiling`/
-    // `round`/`truncate`): each lowers to the matching LLVM intrinsic
-    // (`llvm.sqrt.f64`/...) declared on demand in `module` — unlike
-    // `build-fadd`/..., these need the module to look the intrinsic
-    // declaration up in (`eval_llvm_builtin_method`'s
-    // `llvm_builder_build_float_unary_intrinsic`), so they take `llvm-module`
-    // as a second argument the same way `build-make-closure` does.
-    for name in ["build-fsqrt", "build-ffloor", "build-fceil", "build-fround", "build-ftrunc", "build-fsin", "build-fcos", "build-fexp", "build-flog"] {
-        def.instance(name, vec![builder_ty(), module_ty(), value_ty()], value_ty());
-    }
-    // `expt` (`f64,f64->f64`): the binary counterpart of the unary
-    // transcendentals above, `llvm.pow.f64`. `max`/`min` are the same shape
-    // (`llvm.maxnum.f64`/`llvm.minnum.f64`).
-    for name in ["build-fpow", "build-fmaxnum", "build-fminnum"] {
-        def.instance(name, vec![builder_ty(), module_ty(), value_ty(), value_ty()], value_ty());
-    }
-    // `float->int` (`f64->i32`, narrowing, truncating toward zero): a single
-    // `fptosi` instruction, no heap allocation and no module lookup needed —
-    // unlike `float->bignum`/`float->ratio`, which stay non-native (see
-    // `float-native-method?`'s doc comment).
-    def.instance("build-fptosi", vec![builder_ty(), module_ty(), value_ty()], value_ty());
-    // `int->float` (widening, always exact for the widths this language has):
-    // `sitofp` to `double`, then `bitcast` back to the raw word a compiled
-    // `f64` is carried in. No module parameter — unlike `fptosi`'s saturating
-    // form, `sitofp` is a plain instruction with no intrinsic to overload and
-    // no input it is undefined on.
-    def.instance("build-sitofp", vec![builder_ty(), value_ty()], value_ty());
-    // `float->f32` (and every `f32` arithmetic result): round the operand to
-    // binary32 and widen it straight back. Two instructions, no intrinsic and
-    // no module lookup — `fptrunc` then `fpext`, which is exactly "the
-    // nearest binary32 value" written in IR.
-    def.instance("build-fround32", vec![builder_ty(), value_ty()], value_ty());
+    // The numeric builders (`compile::llvm_builtins::numeric`): one method
+    // of a fixed-width integer (its `wsig`) or a float (its width in bits),
+    // computed at the type's own width. The method is named by its spelling.
+    def.instance("build-fixed-binop", vec![builder_ty(), Type::Int, Type::Str, value_ty(), value_ty()], value_ty());
+    def.instance("build-fixed-div-check", vec![builder_ty(), Type::Int, Type::Str, value_ty(), value_ty()], value_ty());
+    def.instance("build-fixed-unary", vec![builder_ty(), module_ty(), Type::Int, Type::Str, value_ty()], value_ty());
+    def.instance("build-float-binop", vec![builder_ty(), module_ty(), Type::Int, Type::Str, value_ty(), value_ty()], value_ty());
+    def.instance("build-float-unary", vec![builder_ty(), module_ty(), Type::Int, Type::Str, value_ty()], value_ty());
     // `int`'s overflow-checked `+`/`-`/`*` on two fixnum words: the result,
     // with the overflow flag stored into an `alloca-args` slot — see
     // `llvm_builder_build_int_overflow`.

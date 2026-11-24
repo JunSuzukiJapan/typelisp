@@ -25,6 +25,7 @@ use crate::collections::HashMap;
 use core::fmt;
 
 use crate::symbols::{StdModule, SymRef};
+use crate::fixed::{Fixed, FixedType};
 use num_bigint::BigInt;
 use num_rational::BigRational;
 
@@ -352,21 +353,59 @@ pub enum FloatBox {
     F64(f64),
 }
 
-/// A boxed narrow integer, read back as the type it actually is.
+/// A boxed fixed-width integer, read back as the type it actually is.
 ///
-/// The integer counterpart of [`FloatBox`], and for the same reason: `i8`,
-/// `i16`, `u8`, `u16` and `u32` all ride in an `i64` carrier, so the carrier
-/// alone cannot say which of the five it is. Reading one out means being told.
-///
-/// `width` is in bits and `signed` says which end the value was extended
-/// from; `value` is normalized (`crate::normalize_int`'s invariant: the word
-/// *is* the number the type names, sign-extended or zero-extended into 64
-/// bits), so `value` may be compared and printed directly.
+/// The integer counterpart of [`FloatBox`], and for the same reason: the six
+/// widths all ride in an `i64` carrier, so the carrier alone cannot say which
+/// of them it is. Each variant holds the value as its own Rust type, so
+/// reading one out means being told the type.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct NarrowInt {
-    pub width: u8,
-    pub signed: bool,
-    pub value: i64,
+pub enum NarrowInt {
+    I8(i8),
+    I16(i16),
+    I32(i32),
+    U8(u8),
+    U16(u16),
+    U32(u32),
+}
+
+impl NarrowInt {
+    /// The box for `word` read as `ty` — `None` for a C word, which has no
+    /// `Sexpr` variant.
+    pub fn new(ty: FixedType, word: i64) -> Option<NarrowInt> {
+        Some(match ty {
+            FixedType::I8 => NarrowInt::I8(word as i8),
+            FixedType::I16 => NarrowInt::I16(word as i16),
+            FixedType::I32 => NarrowInt::I32(word as i32),
+            FixedType::U8 => NarrowInt::U8(word as u8),
+            FixedType::U16 => NarrowInt::U16(word as u16),
+            FixedType::U32 => NarrowInt::U32(word as u32),
+            FixedType::I64 | FixedType::U64 => return None,
+        })
+    }
+
+    pub fn ty(self) -> FixedType {
+        match self {
+            NarrowInt::I8(_) => FixedType::I8,
+            NarrowInt::I16(_) => FixedType::I16,
+            NarrowInt::I32(_) => FixedType::I32,
+            NarrowInt::U8(_) => FixedType::U8,
+            NarrowInt::U16(_) => FixedType::U16,
+            NarrowInt::U32(_) => FixedType::U32,
+        }
+    }
+
+    /// The value in the 64-bit word it travels in outside the box.
+    pub fn word(self) -> i64 {
+        match self {
+            NarrowInt::I8(v) => v.to_word(),
+            NarrowInt::I16(v) => v.to_word(),
+            NarrowInt::I32(v) => v.to_word(),
+            NarrowInt::U8(v) => v.to_word(),
+            NarrowInt::U16(v) => v.to_word(),
+            NarrowInt::U32(v) => v.to_word(),
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -376,7 +415,7 @@ pub(crate) enum BoxedObj {
     /// width could drift from the type.
     Float32(f32),
     Float64(f64),
-    /// An `i8`/`i16`/`u8`/`u16`/`u32`, carrying its own width and signedness.
+    /// An `i8`/`i16`/`i32`/`u8`/`u16`/`u32`, as the type it is.
     ///
     /// Boxed for the same reason a float is: the tagged word has three bits
     /// of tag and all eight patterns are spoken for, so a value that must

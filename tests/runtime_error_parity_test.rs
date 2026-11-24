@@ -132,6 +132,32 @@ const CASES: &[Case] = &[
         message: "arithmetic overflow: -2147483648 / -1",
     },
     Case {
+        // The same overflow at a narrower width: the test and the message
+        // are the receiver type's own, not `i32`'s.
+        what: "i8 division overflowing",
+        defs: "(defun f ((a i8) (b i8)) i8 (/ a b))",
+        call: "(f -128 -1)",
+        message: "arithmetic overflow: -128 / -1",
+    },
+    Case {
+        what: "u8 division by zero",
+        defs: "(defun f ((a u8) (b u8)) u8 (/ a b))",
+        call: "(f 5 0)",
+        message: "divide by zero",
+    },
+    Case {
+        what: "u16 mod by zero",
+        defs: "(defun f ((a u16) (b u16)) u16 (mod a b))",
+        call: "(f 5 0)",
+        message: "mod by zero",
+    },
+    Case {
+        what: "i16 rem by zero",
+        defs: "(defun f ((a i16) (b i16)) i16 (rem a b))",
+        call: "(f 5 0)",
+        message: "divide by zero",
+    },
+    Case {
         // `rem` is a prelude method built out of `/`, so this is the
         // divide-by-zero above reached through a compiled prelude body.
         what: "int rem by zero",

@@ -65,11 +65,11 @@ CL の派生カタログ（`abs`/`signum`/`gcd`/`lcm`/`isqrt`/`expt` と 9 章�
 | `int->i8` … `int->u32` | `(int->W x)` | `T→W` | 1 章と同じ幅変換。入らない値は切り詰める |
 | `try-int->i8` … `try-int->u32` | `(try-int->W x)` | `T→Option<W>` | 同じ変換を問いとして |
 | `int->c-long` `int->c-ulong` | `(int->W x)` | `T→W` | 生の語どうし、および 1 章の整数型から作る入口 |
-| `try-int->c-long` `try-int->c-ulong` | `(try-int->W x)` | `T→Option<W>` | 同上 |
 | `int->int` | `(int->int x)` | `T→int` | **常に正確**。`i32` に入らない `size_t` を読む正直な方法 |
 
 `(as i32 x)` / `(try-as i32 x)` / `(as int x)` / `(as c-ulong n)` がこれらの実体で、変換は
-1 章の整数型との全ペアにある。`ptr` にはこの表も付かない——ポインタを数として読む道は用意して
+1 章の整数型との全ペアにある。C の語への `try-` 形は無い。`Option<c-long>` は C の語を別の型の
+中に入れることになり、書けないため。`ptr` にはこの表も付かない——ポインタを数として読む道は用意して
 いない。渡す・受け取る・別の C 関数へ渡し直すだけの値。
 
 **印字もできない。** `(println "~a" x)` は生の語を受けない（`Sexpr` 表現を持たないため）ので、

@@ -23,7 +23,8 @@ use num_integer::Integer;
 use num_rational::BigRational;
 use num_traits::{ToPrimitive, Zero};
 use typelisp_abi::{active_heap, fatal, raise};
-use typelisp_mem::{decode, encode, fixnum_fits, normalize_int, IntArg, Value};
+use typelisp_mem::fixed::{self, Fixed};
+use typelisp_mem::{decode, encode, fixnum_fits, IntArg, Value};
 
 /// # Safety
 ///
@@ -345,61 +346,87 @@ fn scalar_of(a: &IntArg) -> Option<u32> {
     }
 }
 
-/// `int->W` — the raw normalized word of width `wsig` (`args[1]`, the
-/// `width * 2 + signed` code every `rt_int_*` shim takes): a cast out of an
-/// `int` truncates, as every width cast does.
-///
-/// # Safety
-///
-/// `argc >= 2`; `args[0]` as [`integer_arg`], `args[1]` a raw `wsig`.
-#[no_mangle]
-pub unsafe extern "C" fn rt_integer_narrow(args: *const i64, argc: u32) -> i64 {
-    if argc < 2 {
-        fatal("rt_integer_narrow: expected 2 arguments");
-    }
-    let a = integer_arg(args, 0, "rt_integer_narrow");
-    let (width, signed) = crate::wsig(*args.add(1));
-    normalize_int(a.low_word(), width, signed)
+macro_rules! integer_to_fixed {
+    ($($t:ident: $to:ident;)*) => {$(
+        /// `int->W` for this `W`: `typelisp_mem::fixed::from_int`, the
+        /// value's low bits as the raw word of the type.
+        ///
+        /// # Safety
+        ///
+        /// `argc >= 1`; `args[0]` as [`integer_arg`].
+        #[no_mangle]
+        pub unsafe extern "C" fn $to(args: *const i64, argc: u32) -> i64 {
+            if argc < 1 {
+                fatal(concat!(stringify!($to), ": expected 1 argument"));
+            }
+            fixed::from_int::<$t>(integer_arg(args, 0, stringify!($to))).to_word()
+        }
+    )*};
+}
+integer_to_fixed! {
+    i8: rt_integer_to_i8;
+    i16: rt_integer_to_i16;
+    i32: rt_integer_to_i32;
+    i64: rt_integer_to_c_long;
+    u8: rt_integer_to_u8;
+    u16: rt_integer_to_u16;
+    u32: rt_integer_to_u32;
+    u64: rt_integer_to_c_ulong;
 }
 
-/// `try-int->W`'s question — raw `0`/`1`: a fixnum fits when normalizing
-/// leaves it alone; a bignum fits a 64-bit C word when it is in that word's
-/// range, and never anything narrower.
-///
-/// # Safety
-///
-/// Same as [`rt_integer_narrow`].
-#[no_mangle]
-pub unsafe extern "C" fn rt_integer_fits(args: *const i64, argc: u32) -> i64 {
-    if argc < 2 {
-        fatal("rt_integer_fits: expected 2 arguments");
-    }
-    let a = integer_arg(args, 0, "rt_integer_fits");
-    let (width, signed) = crate::wsig(*args.add(1));
-    let fits = match &a {
-        IntArg::Fix(n) => normalize_int(*n, width, signed) == *n,
-        IntArg::Big(n) => width == 64 && if signed { n.to_i64().is_some() } else { n.to_u64().is_some() },
-    };
-    fits as i64
+macro_rules! integer_fits_fixed {
+    ($($t:ident: $fits:ident;)*) => {$(
+        /// `try-int->W`'s question for this `W` — raw `0`/`1`. When it is
+        /// yes, the value is the one `int->W` gives.
+        ///
+        /// # Safety
+        ///
+        /// `argc >= 1`; `args[0]` as [`integer_arg`].
+        #[no_mangle]
+        pub unsafe extern "C" fn $fits(args: *const i64, argc: u32) -> i64 {
+            if argc < 1 {
+                fatal(concat!(stringify!($fits), ": expected 1 argument"));
+            }
+            fixed::try_from_int::<$t>(&integer_arg(args, 0, stringify!($fits))).is_some() as i64
+        }
+    )*};
+}
+integer_fits_fixed! {
+    i8: rt_integer_fits_i8;
+    i16: rt_integer_fits_i16;
+    i32: rt_integer_fits_i32;
+    u8: rt_integer_fits_u8;
+    u16: rt_integer_fits_u16;
+    u32: rt_integer_fits_u32;
 }
 
-/// `int->int` on a fixed-width receiver (`(as int x)`): the raw word
-/// `args[0]` read at width `wsig` (`args[1]`), made canonical. `c-ulong`
-/// (wsig 128) is the one receiver whose 64 bits are unsigned; every
-/// narrower unsigned type is already non-negative in the register.
+/// `int->int` on a signed fixed-width receiver or one narrower than 64 bits
+/// (`(as int x)`): the raw word `args[0]`, which is the number, made
+/// canonical.
 ///
 /// # Safety
 ///
-/// `argc >= 2`; `args[0]` a raw word, `args[1]` a raw `wsig`; a `Heap`
-/// must be registered on this thread.
+/// `argc >= 1`; `args[0]` a raw word; a `Heap` must be registered on this
+/// thread.
 #[no_mangle]
 pub unsafe extern "C" fn rt_integer_from_word(args: *const i64, argc: u32) -> i64 {
-    if argc < 2 {
-        fatal("rt_integer_from_word: expected 2 arguments");
+    if argc < 1 {
+        fatal("rt_integer_from_word: expected 1 argument");
     }
-    let word = *args;
-    let (width, signed) = crate::wsig(*args.add(1));
-    wide_result(if !signed && width == 64 { i128::from(word as u64) } else { i128::from(word) })
+    wide_result(fixed::to_int(*args))
+}
+
+/// `int->int` on a `c-ulong`: the one receiver whose 64 bits are all value.
+///
+/// # Safety
+///
+/// Same as [`rt_integer_from_word`].
+#[no_mangle]
+pub unsafe extern "C" fn rt_integer_from_c_ulong(args: *const i64, argc: u32) -> i64 {
+    if argc < 1 {
+        fatal("rt_integer_from_c_ulong: expected 1 argument");
+    }
+    wide_result(fixed::to_int(*args as u64))
 }
 
 /// `(untag-int E)`'s refusal: an `int` in a machine-word position (an index,

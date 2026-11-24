@@ -940,14 +940,15 @@ use crate::sexpr_variant::{
 /// The `(width, signed)` pair each narrow-integer `Sexpr` variant names, or
 /// `None` for every other variant — the one table mapping between the two,
 /// read by `match_sexpr_core`, `construct_sexpr_core` and the accessors.
-pub(crate) fn narrow_variant(variant: usize) -> Option<(u8, bool)> {
+pub(crate) fn narrow_variant(variant: usize) -> Option<typelisp_mem::fixed::FixedType> {
+    use typelisp_mem::fixed::FixedType;
     Some(match variant {
-        SEXPR_I8 => (8, true),
-        SEXPR_I16 => (16, true),
-        SEXPR_U8 => (8, false),
-        SEXPR_U16 => (16, false),
-        SEXPR_U32 => (32, false),
-        SEXPR_I32 => (32, true),
+        SEXPR_I8 => FixedType::I8,
+        SEXPR_I16 => FixedType::I16,
+        SEXPR_U8 => FixedType::U8,
+        SEXPR_U16 => FixedType::U16,
+        SEXPR_U32 => FixedType::U32,
+        SEXPR_I32 => FixedType::I32,
         _ => return None,
     })
 }

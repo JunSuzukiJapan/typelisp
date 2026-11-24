@@ -228,9 +228,9 @@ fn a_c_word_is_read_as_an_int_by_the_declaration_s_signedness() {
 
 #[test]
 fn a_compiled_body_reads_a_c_word_the_same_way() {
-    // The interpreter reads the word in `int_to_bignum` and compiled code in
-    // `rt_uint_to_bignum`, chosen by the island from the receiver's `int-wsig`
-    // — two places, one answer.
+    // The interpreter reads the word as `typelisp_mem::fixed::to_int` at the
+    // receiver's type and compiled code calls `rt_integer_from_c_ulong`, chosen
+    // by the island from the receiver's type — two places, one answer.
     assert_eq!(
         text(
             r#"

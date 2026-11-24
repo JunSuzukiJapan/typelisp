@@ -3,7 +3,6 @@
 use typelisp_mem::prelude::*;
 use typelisp_abi::{active_heap, decode, encode, fatal, raise};
 use typelisp_mem::{Heap, Value};
-use crate::sexpr_narrow_value;
 
 /// `(cons car cdr)` for compiled code.
 ///
@@ -221,21 +220,6 @@ pub unsafe extern "C-unwind" fn rt_sexpr_int(args: *const i64, argc: u32) -> i64
         }
         _ => raise("sexpr-int: expected an int Sexpr node".to_string()).into_word(),
     }
-}
-
-/// `(sexpr-i32 x)`: the raw normalized word inside an `i32` node — a
-/// `NarrowInt` box like the five narrower widths' since `int` took the bare
-/// fixnum word.
-///
-/// # Safety
-///
-/// Same as [`rt_consp`].
-#[no_mangle]
-pub unsafe extern "C-unwind" fn rt_sexpr_i32(args: *const i64, argc: u32) -> i64 {
-    if argc < 1 {
-        fatal("rt_sexpr_i32: expected 1 argument");
-    }
-    sexpr_narrow_value(*args, 32, true)
 }
 
 /// `(sexpr-bool x)`: the `Bool` node's payload as compiled `0`/`1`.

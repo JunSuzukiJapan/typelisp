@@ -84,7 +84,7 @@ pub enum Repr {
     ///
     /// Named `int-any-width` in the core IR: one representation really does
     /// serve all six, because the word already holds the number the type
-    /// names (sign- or zero-extended, `types::normalize_int`). What a width
+    /// names (sign- or zero-extended, `typelisp_mem::fixed::Fixed::to_word`). What a width
     /// still decides is how the value is *boxed*, and that is
     /// [`Repr::field_kind`]'s business, not this tag's.
     ///

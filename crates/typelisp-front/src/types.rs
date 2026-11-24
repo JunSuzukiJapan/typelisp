@@ -458,8 +458,8 @@ impl Type {
 
     /// The six fixed-width integer types — the ones with a width to
     /// normalize to. `int` is deliberately not one of them: it has no width,
-    /// and everything this predicate gates (range checks, `normalize_int`,
-    /// the `wsig` operand) is about a width.
+    /// and everything this predicate gates (range checks, the fixed-width
+    /// builders' `wsig`) is about a width.
     pub fn is_integer(&self) -> bool {
         matches!(self, Type::I8 | Type::I16 | Type::I32 | Type::U8 | Type::U16 | Type::U32)
     }
@@ -497,13 +497,10 @@ pub const C_WORD_TYPES: [Type; 2] = [Type::CLong, Type::CULong];
 ///
 /// A type name says exactly two things and nothing else — how many bits, and
 /// whether the top one is a sign — and this is where both are read off. Both
-/// execution engines carry every integer in a 64-bit word, so this pair is
-/// what tells them where to cut it back after an operation: the value in the
-/// word is always the one the type claims, sign-extended (signed) or
-/// zero-extended (unsigned) into the rest. Keeping that invariant is what
-/// lets a comparison, a division and a remainder stay ordinary *signed*
-/// 64-bit instructions for the unsigned types too — every width here is at
-/// most 32, so a normalized unsigned value is a non-negative `i64`.
+/// execution engines carry every integer in a 64-bit word, the value
+/// sign-extended (signed) or zero-extended (unsigned) into the rest, and
+/// compute each operation at the type's own width
+/// (`typelisp_mem::fixed::FixedType::of` turns this pair into the type).
 pub fn int_width_signed(ty: &Type) -> Option<(u32, bool)> {
     Some(match ty {
         // The C words: 64 bits under LP64, which is every platform this
@@ -522,15 +519,6 @@ pub fn int_width_signed(ty: &Type) -> Option<(u32, bool)> {
         _ => return None,
     })
 }
-
-/// `v` cut back to `width` bits and re-extended into the 64-bit word both
-/// engines carry integers in. See [`int_width_signed`] for why this is the
-/// one invariant.
-///
-/// Defined in `typelisp-mem` rather than here, because the heap enforces it
-/// too when it boxes a narrow integer (`Heap::alloc_narrow`) and an
-/// invariant with two statements of it has two chances to drift.
-pub use typelisp_mem::normalize_int;
 
 
 /// All primitive value types that can be a `defmethod` receiver (every

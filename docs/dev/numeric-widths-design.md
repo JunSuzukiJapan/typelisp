@@ -78,3 +78,41 @@
 3. 命令を作る関数: 型を受け取る整数・浮動小数の関数を足す（チェッカーの登録 `typeck/builtins/llvm.rs` と well-known 記号も）。
 4. 島: 数値の分岐を新しい関数と幅ごとのランタイム関数に乗せ替え、`build-normalize-int` と `round-f32-if` を消す。島を 2 回再生成、prelude を再生成、ABI。
 5. 命令の形とリンクのテスト、AVR での命令数の測り直し。
+
+## 実装（2026-11-24）
+
+段階 1〜5 を実装した。
+
+- 意味の層: `typelisp_mem::fixed`（trait `Fixed` を Rust の `i8`〜`u64` に実装し、演算は総称関数。実行時に型を選ぶ側のために `FixedType` と `with_fixed!`）と `typelisp_mem::float`（`max`/`min`）。インタプリタ（`eval_fixed_builtin`、`float_builtin`）、定数の畳み込み、リテラルの範囲検査、ランタイムの幅ごとの関数は全てこれを呼ぶ。`normalize_int` は消した。
+- 命令を作る関数: `src/compile/llvm_builtins/numeric.rs` の 5 つ（`build-fixed-binop`、`build-fixed-unary`、`build-fixed-div-check`、`build-float-binop`、`build-float-unary`）。島は型（`wsig` か浮動小数の幅）とメソッド名を渡す。古い浮動小数の関数（`build-fadd`、`build-fcmp-*`、`build-fsqrt` など、`build-fround32`、`build-sitofp`、`build-fptosi`、`build-fmaxnum`/`fminnum`）と、島の `build-normalize-int`、`round-f32-if` は消した。
+- 割り算: 島の `fixed-division` が `build-fixed-div-check` で分岐し、失敗の側だけ `rt_int_div_fault`/`rt_int_mod_fault` を呼ぶ。どちらも幅を受け取らない（溢れは符号付きにしか起きず、語は符号拡張されているのでそのまま数として書ける）。
+- ランタイム: 幅を引数で受け取る関数（`rt_int_div`/`mod`/`ash`/`logbitp`/`logcount`/`integer_length`/`fits`、`rt_integer_narrow`/`fits`、`rt_narrow_new`/`value`）を消し、型ごとの記号にした（`rt_u8_box`/`rt_u8_unbox`、`rt_integer_to_u8`/`rt_integer_fits_u8`、`rt_integer_from_word`/`rt_integer_from_c_ulong`、`rt_f32_tan` など）。`NarrowInt` は型ごとの値を持つ `enum` にした。
+- JIT: `f32` の組み込み関数が呼ぶ libm の関数（`floorf` など）を `orc.rs` の表に足した。
+
+### 実装中に決めたこと
+
+- `rem` を固定幅の組み込みにした。prelude の `rem` は `/` で書かれていたので、`(rem 最小値 -1)` が溢れで panic していた（`mod` は `0` だった）。今は `0`。ゼロ除算の文言は `divide by zero` のまま。
+- `try-int->c-long`/`try-int->c-ulong` を消した。`Option<c-long>` は C の語を別の型の中に入れることになり、`no_nested_raw_word` が他の全ての場所で断っている形だった。実際、コンパイルできず（`compile-sexpr-field: field type is not representable`）、`(try-as c-ulong (the i32 -1))` が `(Some -1)` を返していた。`int->c-long`/`int->c-ulong` は残した。
+- 浮動小数の `max`/`min` は「第 2 引数が厳密に大きい（小さい）ときだけ第 2 引数、それ以外は第 1 引数」。インタプリタ（Rust の `f64::max`）とコンパイル済み（`llvm.maxnum`）で `(max 0.0 -0.0)` が食い違っていた。
+- `logbitp` の負の位置は、`int` と同じく符号を読む。インタプリタは Rust のシフトの溢れで落ちていた。
+- `f32` の超越関数は binary32 で計算する（`f32::tan`、`rt_f32_tan`、`llvm.sin.f32`）。前は `double` で計算して丸めていた。
+- 64bit の符号なし（`c-ulong`）の `int->float` は `uitofp`。前は符号付きとして変換していた。
+
+### 確かめ方（実装したもの）
+
+- `tests/numeric_agreement_test.rs`: 6 つの幅と `f32`/`f64`、C の語の変換について、端の値の組で、インタプリタ・コンパイル済み・畳み込みの答えの一致。
+- `tests/numeric_codegen_test.rs`: 幅ごとの `+`/`/`/`<` が `add i8`/`udiv i8`/`icmp ult i8` などで、`shl i64`/`ashr i64` が無いこと。`f32` の `+` が `fadd float`。
+- `tests/aot_embedded_test.rs` の `a_width_s_runtime_is_linked_only_when_the_width_is_used`: `u8` だけのプログラムに、ほかの幅の箱詰め・変換の関数が無いこと。
+- `tests/runtime_error_parity_test.rs`: 固定幅の割り算の失敗の文言が両方の経路で同じこと。
+
+### AVR での命令数（測り直し）
+
+`(defun add8 ((a i8) (b i8)) i8 (+ a b))` の AOT の IR から関数を抜き出し、`opt -O2` と `llc -mtriple=avr -mcpu=atmega328p -O2` で数えた。
+
+| | 演算の IR | AVR の命令（関数全体） |
+|---|---|---|
+| 前 | `add i64` のあと `shl i64 56` と `ashr i64 56` | 168 |
+| 後 | `trunc` 2 つ、`add i8`、`sext` | 165 |
+| `i8 add8(i8, i8)` だけの関数 | `add i8` | 2 |
+
+演算は 8bit になったが、関数全体はほとんど減っていない。残りは語の層、つまりフレームの ABI（`rt_frame_open`、`rt_pending_arg`、64bit のスロットへの格納と読み出し）で、この作業では変えないと決めた部分である。8bit の機械で効くのは、組み込みの話の続き（フレームを持たない関数、語の幅）のほうである。

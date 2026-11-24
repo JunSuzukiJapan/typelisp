@@ -769,14 +769,18 @@ const SOURCE_TEMPLATE: &str = r#"
 (defun small-tag-test ((builder llvm-builder) (v llvm-value) (subtag int)) llvm-value
   (build-icmp-eq builder (build-and builder v (const-word builder 63)) (const-word builder (+ (* subtag 8) 7))))
 
-;; The `wsig` code (`width * 2 + signed`, `typelisp-rt`'s `wsig`) the five
-;; narrow-integer `Sexpr` variants name: 12=i8 13=i16 14=u8 15=u16 16=u32.
-;; A constant emitted from the *variant*, never read off the value — the
+;; The runtime shim that boxes (`suffix` `"_box"`) or unboxes (`"_unbox"`)
+;; the fixed-width integer type a `Sexpr` variant names, one pair per type
+;; (`rt_u8_box`). Chosen from the *variant*, never read off the value — the
 ;; word a compiled `u8` sits in is the same bit pattern an `i32` would have,
 ;; which is the whole reason these are separate variants.
-(defun narrow-wsig ((variant int)) int
-  (case variant (#%sexpr-i8 17) (#%sexpr-i16 33) (#%sexpr-u8 16) (#%sexpr-u16 32) (#%sexpr-u32 64) (#%sexpr-i32 65)
-    (:else (panic "narrow-wsig: not a narrow-integer Sexpr variant"))))
+(defun narrow-shim ((variant int) (suffix string)) string
+  (append
+    (case variant
+      (#%sexpr-i8 "rt_i8") (#%sexpr-i16 "rt_i16") (#%sexpr-i32 "rt_i32")
+      (#%sexpr-u8 "rt_u8") (#%sexpr-u16 "rt_u16") (#%sexpr-u32 "rt_u32")
+      (:else (panic "narrow-shim: not a fixed-width integer Sexpr variant")))
+    suffix))
 
 ;; The kind number a `Sexpr` variant's payload is read and written with.
 ;; `Repr::field_kind` and `sexpr_def`'s numbering are one space, with one
@@ -838,14 +842,13 @@ const SOURCE_TEMPLATE: &str = r#"
           (build-call builder (get-function m "rt_sexpr_tuple_items") args-ptr 1)))
     ;; `i8`/`i16`/`u8`/`u16`/`u32`/`i32`: the payload
     ;; is inside a `BoxedObj::Narrow`, and the variant says which type that
-    ;; box must be. `rt_narrow_value` refuses any other, so a `(U8 x)`
+    ;; box must be. The type's own unbox shim refuses any other, so a `(U8 x)`
     ;; pattern can never bind a `u16` node's value. What comes back is the
-    ;; plain normalized word compiled code carries every integer in.
+    ;; word compiled code carries the integer in.
     ((#%sexpr-i8 #%sexpr-i16 #%sexpr-u8 #%sexpr-u16 #%sexpr-u32 #%sexpr-i32)
-     (let ((args-ptr (alloca-args builder 2)))
+     (let ((args-ptr (alloca-args builder 1)))
        (store-arg builder args-ptr 0 v)
-       (store-arg builder args-ptr 1 (const-word builder (narrow-wsig variant)))
-       (build-call builder (get-function m "rt_narrow_value") args-ptr 2)))
+       (build-call builder (get-function m (narrow-shim variant "_unbox")) args-ptr 1)))
     ;; `unit`: never a real `Sexpr` variant — this number only ever
     ;; arrives as a *struct/enum field* kind (`Repr::field_kind`), the decode
     ;; half of `compile-tag-struct-field`'s `kind-unit` arm. The stored word
@@ -1267,30 +1270,8 @@ const SOURCE_TEMPLATE: &str = r#"
 ;; `(Scope::new)`.
 (defun new-acc-table () Scope<llvm-value> (Scope::new))
 
-;; Shared two-operand `rt_int_*` call shape (`ash`/`logbitp`, whose shift/
-;; index argument makes a bare LLVM instruction unsafe — see
-;; `int-native-method?`'s doc comment) — the integer counterpart of
-;; `bignum-binop-call`. `wsig` is the receiver type's width and signedness
-;; (`int-wsig`), the third operand every integer shim takes.
-(defun int-binop-shim-call ((builder llvm-builder) (m llvm-module) (fname string) (x llvm-value) (y llvm-value) (wsig int)) llvm-value
-  (let ((args-ptr (alloca-args builder 3)))
-    (store-arg builder args-ptr 0 x)
-    (store-arg builder args-ptr 1 y)
-    (store-arg builder args-ptr 2 (const-word builder wsig))
-    (build-call builder (get-function m fname) args-ptr 3)))
-
-;; Shared one-operand `rt_int_*` call shape (`logcount`/`integer-length`) —
-;; the integer counterpart of `bignum-unary-call`, `wsig` as above.
-(defun int-unary-shim-call ((builder llvm-builder) (m llvm-module) (fname string) (x llvm-value) (wsig int)) llvm-value
-  (let ((args-ptr (alloca-args builder 2)))
-    (store-arg builder args-ptr 0 x)
-    (store-arg builder args-ptr 1 (const-word builder wsig))
-    (build-call builder (get-function m fname) args-ptr 2)))
-
-;; One raw operand in, one out — the `rt_f64_*` transcendentals that have no
-;; LLVM intrinsic in the pinned version. These used to share
-;; `int-unary-shim-call`, which stopped fitting when the integer shims grew
-;; their `wsig` operand; they never had anything to do with integers anyway.
+;; One raw operand in, one out — the `rt_f32_*`/`rt_f64_*` transcendentals
+;; that have no LLVM intrinsic in the pinned version.
 (defun unary-shim-call ((builder llvm-builder) (m llvm-module) (fname string) (x llvm-value)) llvm-value
   (let ((args-ptr (alloca-args builder 1)))
     (store-arg builder args-ptr 0 x)
@@ -1304,13 +1285,12 @@ const SOURCE_TEMPLATE: &str = r#"
 ;; `compile-assoc-user`'s ordinary call by symbol. (Chained `if`s: the
 ;; prelude's `or` macro isn't loaded under `run_with_compiler`.)
 ;; Which receiver type names go to `int-native-method?`/`float-native-method?`
-;; above. Every integer width is one catalog and one 64-bit register, and both
-;; float widths one 64-bit word — but the width is *not* only a type-checking
-;; distinction: it decides where each arithmetic result is cut back to
-;; (`build-normalize-int`) and what the `rt_int_*` shims are told, so the
-;; lowering that serves `i32` serves `u8` only up to that one constant. Kept
-;; as their own predicates rather than inlined at the dispatch so the two
-;; lists read next to each other.
+;; above. Every integer width is one catalog carried in one 64-bit word, and
+;; both float widths one 64-bit word — but every operation is computed at the
+;; receiver's own width, which the numeric builders are told
+;; (`build-fixed-binop`, `build-float-binop`, ...). Kept as their own
+;; predicates rather than inlined at the dispatch so the two lists read next
+;; to each other.
 (defun int-receiver-type? ((name Option<Sexpr>)) bool
   (case name
     ((i8 i16 i32 u8 u16 u32) true)
@@ -1328,16 +1308,14 @@ const SOURCE_TEMPLATE: &str = r#"
 
 ;; The receiver type's width and signedness as one number,
 ;; `width * 2 + (signed ? 1 : 0)` — `types::int_width_signed` on the Rust
-;; side, and the third operand every `rt_int_*` shim takes. A type name says
-;; how many bits and whether the top one is a sign, and nothing else; this is
+;; side, and what the fixed-width builders are told. A type name says how
+;; many bits and whether the top one is a sign, and nothing else; this is
 ;; where the island reads both off.
 (defun int-wsig ((name Option<Sexpr>)) int
   (case name
     (i8 17) (i16 33) (i32 65)
     (u8 16) (u16 32) (u32 64)
-    ;; 64 bits under LP64. `build-normalize-int` shifts by `64 - 64`, so a
-    ;; cast to one of these is the identity — which is what a cast to the
-    ;; register's own width should be.
+    ;; 64 bits under LP64.
     (c-long 129) (c-ulong 128)
     (:else (panic (append "int-wsig: not an integer type: " (sexpr-sym-name name))))))
 
@@ -1352,78 +1330,33 @@ const SOURCE_TEMPLATE: &str = r#"
     (("int->u8" "try-int->u8") (quote u8))
     (("int->u16" "try-int->u16") (quote u16))
     (("int->u32" "try-int->u32") (quote u32))
-    (("int->c-long" "try-int->c-long") (quote c-long))
-    (("int->c-ulong" "try-int->c-ulong") (quote c-ulong))
+    ("int->c-long" (quote c-long))
+    ("int->c-ulong" (quote c-ulong))
     (:else (panic (append "width-cast-target: not a width cast: " method)))))
 
-;; `v` cut back to the type's width and re-extended into the 64-bit register
-;; every compiled integer lives in: `shl` then `ashr` (signed) or `lshr`
-;; (unsigned) — `types::normalize_int`'s IR.
-;;
-;; A shift pair rather than a mask because the mask for a 32-bit width is
-;; itself past `i32`, a constant this island cannot write. Emitted after
-;; `+`/`-`/`*` and `lognot`, the operations whose 64-bit result can carry bits
-;; the type does not have; the comparisons, `/`, `mod` and `and`/`or`/`xor`
-;; need none, because operands arrive normalized and those preserve it.
-(defun build-normalize-int ((builder llvm-builder) (v llvm-value) (wsig int)) llvm-value
-  (let ((shift (const-word builder (- 64 (truncate wsig 2)))))
-    (if (eq (mod wsig 2) 1)
-        (build-ashr builder (build-shl builder v shift) shift)
-        (build-lshr builder (build-shl builder v shift) shift))))
-
+;; A fixed-width integer's natively-compilable methods: every one of them,
+;; each an instruction sequence at the receiver's width (`build-fixed-binop`,
+;; `build-fixed-unary`, `fixed-division`) or, for the conversions into the
+;; arbitrary-precision types and `char`, a runtime call.
 (defun int-native-method? ((method string)) bool
   (case method
-    (("+" "-" "*") true)
-    ;; `/`/`mod` lower to the `rt_int_div`/`rt_int_mod` shims (integer division
-    ;; can't be a bare LLVM instruction — `sdiv`/`srem` by zero is UB), not a
-    ;; straight instruction like the others, but they're still native here.
-    (("/" "mod") true)
+    (("+" "-" "*" "/" "mod" "rem") true)
     (("<" "<=" ">" ">=") true)
     ;; `eq`/`eql`/`equal`/`equalp` are four more names for `=` on an integer
     ;; (same-type operands, no case to fold and no structure to recurse
-    ;; into), so all five are the same `icmp eq`. `case` expands to `equal`
-    ;; comparisons, so leaving these out made every `case` over an integer
-    ;; uncompilable.
+    ;; into). `case` expands to `equal` comparisons, so leaving these out made
+    ;; every `case` over an integer uncompilable.
     (("=" "eq" "eql" "equal" "equalp" "/=") true)
-    ;; `int->bignum`/`int->ratio`: always-exact widening into the two
-    ;; arbitrary-precision types (`rt_int_to_bignum`/`rt_int_to_ratio`) — unary,
-    ;; checked before `b2` the same way `float-native-method?`'s own unary
-    ;; conversions are. `int->float` is the third of them and a single
-    ;; `sitofp`, the inverse of `float->int`'s `fptosi`.
     (("int->int" "int->ratio" "int->float") true)
     ;; `int->char`: the identity on the word, plus the Unicode-scalar-value
-    ;; check that makes it a `char`. The check is the whole reason it is a
-    ;; shim (`rt_int_to_char`) while its inverse `char->int` is nothing at
-    ;; all, and the reason it goes through `emit-direct-call`: it can raise.
+    ;; check that makes it a `char` and can raise (`rt_int_to_char`).
     ("int->char" true)
-    ;; The `Option`-returning conversions. No prelude definition reaches
-    ;; these; they are lowered so a *user's* `defun` naming one — which is
-    ;; what `(try-as char n)` expands to — can be compiled at all.
+    ;; The `Option`-returning conversions, which `try-as` expands to.
     ("try-int->char" true)
     (("try-int->i8" "try-int->i16" "try-int->i32" "try-int->u8" "try-int->u16" "try-int->u32") true)
-    (("try-int->c-long" "try-int->c-ulong") true)
-    ;; `max`/`min`: `icmp`+`select`, branch-free (`build-select`).
     (("max" "min") true)
-    ;; `logand`/`logior`/`logxor`: bare LLVM instructions
-    ;; (`build-and`/`build-or`/`build-xor`), same as `+`/`-`/`*`. `lognot` is
-    ;; one too — `xor -1` — which is why it sits here rather than with the
-    ;; shims below, whatever the old chain's ordering suggested.
-    (("logand" "logior" "logxor" "lognot") true)
-    ;; `logtest`: `icmp ne (and a b), 0` — an `and` plus the existing
-    ;; `build-icmp-ne`, no shim needed.
-    ("logtest" true)
-    ;; `ash`/`logbitp`/`logcount`/`integer-length`: each has an edge case a
-    ;; bare LLVM instruction can't express safely (a variable shift/count past
-    ;; the operand's bit width is undefined behavior in LLVM, unlike this
-    ;; language's own clamped semantics — see `eval_int_builtin`'s doc
-    ;; comment), so all four lower to `rt_int_*` shims instead, the same
-    ;; reasoning `/`/`mod` already use.
+    (("logand" "logior" "logxor" "lognot" "logtest") true)
     (("ash" "logbitp" "logcount" "integer-length") true)
-    ;; `int->i8`/`int->u32`/...: a cast between two integer widths, which is
-    ;; `build-normalize-int` at the *target*'s width — the same two shifts
-    ;; every arithmetic result already ends with. The `try-` counterparts are
-    ;; not here: they build an `Option`, like `try-int->char`, and share its
-    ;; gap.
     (("int->i8" "int->i16" "int->i32" "int->u8" "int->u16" "int->u32") true)
     (("int->c-long" "int->c-ulong") true)
     (:else false)))
@@ -1526,65 +1459,35 @@ const SOURCE_TEMPLATE: &str = r#"
          ("eq" true)
          (:else (equal method "eql"))))
 
-;; `f64`'s natively-compilable methods: arithmetic (`+`/`-`/`*`/`/`) lowers to
-;; LLVM float instructions (`build-fadd`/... — each `bitcast`s the
-;; `i64`-carried `f64` bits to `double` and back internally), comparisons
-;; (`<`/`<=`/`>`/`>=`/`=`/`/=` and the `eq`/`eql`/`equal`/`equalp` aliases) to
-;; `build-fcmp-*`. `expt` and the unary `sqrt`/`floor`/`ceiling`/`round`/
-;; `truncate` family lower to the corresponding LLVM intrinsic (`build-fpow`/
-;; `build-fsqrt`/...), and `float->int` to a single `fptosi` instruction
-;; (`build-fptosi`) — all native, same as the arithmetic ops. `float->bignum`/
-;; `float->ratio` are unary too (`rt_float_to_bignum`/`rt_float_to_ratio`),
-;; now that `bignum`/`ratio` have a compiled representation.
+;; A float's natively-compilable methods: arithmetic, comparisons, `expt`,
+;; `max`/`min` (`build-float-binop`), the rounding/root family and the
+;; transcendentals with an LLVM intrinsic and the width casts
+;; (`build-float-unary`), each at the receiver's width. The transcendentals
+;; without an intrinsic in the pinned LLVM are runtime calls, one per width
+;; (`rt_f32_tan`), and `float->int`/`float->ratio` are runtime calls too.
 ;;
 ;; `mod`/`rem` are deliberately NOT native: CL `mod` is floored and `rem`
 ;; truncated, so they're ordinary `prelude.rs` methods (`a - b*floor|trunc(a/b)`)
-;; compiled the normal way. (The `build-frem` arm in the dispatch below is now
-;; unreachable for `mod` and left only as a no-op.)
+;; compiled the normal way.
 (defun float-native-method? ((method string)) bool
   (case method
     (("+" "-" "*" "/" "expt" "sqrt" "floor" "ceiling" "round" "truncate"
       "float->int" "float->ratio" "<" "<=" ">" ">=" "=" "/="
       "eq" "eql" "equal" "equalp") true)
-    ;; `float->f32`/`float->f64`: the cast between the two float widths.
-    ;; Narrowing is `build-fround32`, widening is nothing at all — a value in
-    ;; the register is already the binary32 one. `try-float->f32` is not here:
-    ;; it builds an `Option`, and shares `try-int->char`'s gap.
     (("float->f32" "float->f64") true)
     (("try-float->f32" "try-float->f64") true)
-    ;; `max`/`min`: `llvm.maxnum.f64`/`llvm.minnum.f64` (`build-fmaxnum`/
-    ;; `build-fminnum`), same intrinsic-call shape as `expt`'s `llvm.pow.f64`.
     (("max" "min") true)
-    ;; The transcendental family: `sin`/`cos`/`exp`/`log` have long-standing
-    ;; LLVM intrinsics (`build-fsin`/`build-fcos`/`build-fexp`/`build-flog`,
-    ;; same shape as `sqrt`). `tan`/`asin`/`acos`/`atan`/`sinh`/`cosh`/`tanh`/
-    ;; `asinh`/`acosh`/`atanh` have none in the LLVM version this project pins,
-    ;; so they lower to `rt_f64_*` shims instead — still native here, same
-    ;; reasoning `/`/`mod` already use for `i64`.
     (("sin" "cos" "tan" "asin" "acos" "atan" "sinh" "cosh" "tanh" "asinh"
       "acosh" "atanh" "exp" "log") true)
     (:else false)))
 
-;; Whether `method`'s *result* is a float, so an `f32` receiver has to round
-;; it. The conversions out of the float family (`float->int`/`->bignum`/
-;; `->ratio`) and the comparisons are the ones that are not, and
-;; `float->f32`/`float->f64` are excluded because they name their own target
-;; — rounding those by the *receiver*'s width would be the wrong width.
-(defun float-result-method? ((method string)) bool
-  (case method
-    (("+" "-" "*" "/" "mod" "expt" "sqrt" "floor" "ceiling" "round" "truncate"
-      "max" "min" "sin" "cos" "tan" "asin" "acos" "atan" "sinh" "cosh" "tanh"
-      "asinh" "acosh" "atanh" "exp" "log") true)
-    (:else false)))
-
-;; `v` rounded to binary32 when the receiver is `f32` and the method's result
-;; is a float — what makes `f32` arithmetic binary32 arithmetic rather than
-;; `f64` arithmetic under another name (`docs/ja/reference/functions/numbers.md` §1). Every other
-;; case returns `v` untouched.
-(defun round-f32-if ((builder llvm-builder) (type-name Option<Sexpr>) (method string) (v llvm-value)) llvm-value
-  (if (if (equal type-name (quote f32)) (float-result-method? method) false)
-      (build-fround32 builder v)
-      v))
+;; The width in bits of a float receiver type, which is what the float
+;; builders are told.
+(defun float-bits ((name Option<Sexpr>)) int
+  (case name
+    (f32 32)
+    (f64 64)
+    (:else (panic (append "float-bits: not a float type: " (sexpr-sym-name name))))))
 
 ;; Emits `rt_str_lt(x, y)` (strict lexicographic less-than, an `i64` 0/1). The
 ;; four string comparison operators all derive from it: `<`=lt(a,b),
@@ -1608,7 +1511,7 @@ const SOURCE_TEMPLATE: &str = r#"
     (("ash" "logbitp") true)
     (("int->float" "int->ratio" "int->int" "int->char" "try-int->char") true)
     (("int->i8" "int->i16" "int->i32" "int->u8" "int->u16" "int->u32" "int->c-long" "int->c-ulong") true)
-    (("try-int->i8" "try-int->i16" "try-int->i32" "try-int->u8" "try-int->u16" "try-int->u32" "try-int->c-long" "try-int->c-ulong") true)
+    (("try-int->i8" "try-int->i16" "try-int->i32" "try-int->u8" "try-int->u16" "try-int->u32") true)
     (:else false)))
 
 ;; `ratio` (`registry::ratio_assoc`)'s natively-compilable methods — the
@@ -1654,7 +1557,7 @@ const SOURCE_TEMPLATE: &str = r#"
     (build-call builder (get-function m fname) args-ptr 1)))
 
 ;; [`bignum-binop-call`]'s shape for the shims that can *raise*: a zero
-;; divisor (`rt_int_div`/`rt_int_mod`/`rt_bignum_div`/`rt_bignum_mod`/
+;; divisor (`rt_bignum_div`/`rt_bignum_mod`/
 ;; `rt_ratio_div`), an index past the end of a string (`rt_str_ref`). Those
 ;; unwind (`typelisp_rt::raise`) instead of aborting the process.
 ;;
@@ -1669,15 +1572,29 @@ const SOURCE_TEMPLATE: &str = r#"
     (store-arg builder args-ptr 1 y)
     (build-call builder (get-function m fname) args-ptr 2)))
 
-;; [`raising-binop-call`] with the integer shims' third `wsig` operand —
-;; `rt_int_div`/`rt_int_mod`, the two that both raise *and* need to know the
-;; receiver's width.
-(defun raising-int-binop-call ((builder llvm-builder) (m llvm-module) (cur-fn llvm-function) (protect Option<llvm-basic-block>) (fname string) (x llvm-value) (y llvm-value) (wsig int)) llvm-value
-  (let ((args-ptr (alloca-args builder 3)))
-    (store-arg builder args-ptr 0 x)
-    (store-arg builder args-ptr 1 y)
-    (store-arg builder args-ptr 2 (const-word builder wsig))
-    (build-call builder (get-function m fname) args-ptr 3)))
+;; `/`, `mod` and `rem` on a fixed-width integer: the division at the type's
+;; width when it has an answer, and otherwise the runtime's fault, which
+;; raises. Whether it has one is `build-fixed-div-check`'s question — a zero
+;; divisor, or for `/` the most negative value over `-1`.
+(defun fixed-division ((builder llvm-builder) (m llvm-module) (cur-fn llvm-function) (wsig int) (method string) (a llvm-value) (b llvm-value)) llvm-value
+  (let* ((fault-block (append-block cur-fn "div-fault"))
+         (ok-block (append-block cur-fn "div-ok"))
+         (merge-block (append-block cur-fn "div-merge"))
+         (slot (alloca-args builder 1)))
+    (build-cond-br builder (build-fixed-div-check builder wsig method a b) fault-block ok-block)
+    (position-at-end builder fault-block)
+    ;; The shim raises and never returns; the store and branch after it are
+    ;; the block's terminator, not a path anything takes.
+    (let ((args-ptr (alloca-args builder 2)))
+      (store-arg builder args-ptr 0 a)
+      (store-arg builder args-ptr 1 b)
+      (store-arg builder slot 0 (build-call builder (get-function m (if (equal method "mod") "rt_int_mod_fault" "rt_int_div_fault")) args-ptr 2)))
+    (build-br builder merge-block)
+    (position-at-end builder ok-block)
+    (store-arg builder slot 0 (build-fixed-binop builder wsig method a b))
+    (build-br builder merge-block)
+    (position-at-end builder merge-block)
+    (load-raw builder slot 0)))
 
 ;; Whether both `a` and `b` are fixnums: `(a | b) & 1 == 0` — one test for
 ;; the two, which is what makes the fast paths below one branch each.
@@ -1690,12 +1607,15 @@ const SOURCE_TEMPLATE: &str = r#"
     (store-arg builder args-ptr 0 x)
     (build-call builder (get-function m fname) args-ptr 1)))
 
-;; `rt_integer_*` call with a raw second operand — a `wsig`, a bit count.
-(defun integer-word-call ((builder llvm-builder) (m llvm-module) (fname string) (x llvm-value) (w int)) llvm-value
-  (let ((args-ptr (alloca-args builder 2)))
-    (store-arg builder args-ptr 0 x)
-    (store-arg builder args-ptr 1 (const-word builder w))
-    (build-call builder (get-function m fname) args-ptr 2)))
+;; The runtime shim of an `int->W`/`try-int->W` cast out of an `int`:
+;; `prefix` (`"rt_integer_to_"`, `"rt_integer_fits_"`) and the target,
+;; one shim per target (`rt_integer_to_u8`).
+(defun integer-cast-shim ((prefix string) (method string)) string
+  (append prefix
+    (case (width-cast-target method)
+      (i8 "i8") (i16 "i16") (i32 "i32") (c-long "c_long")
+      (u8 "u8") (u16 "u16") (u32 "u32") (c-ulong "c_ulong")
+      (:else (panic (append "integer-cast-shim: not a width cast: " method))))))
 
 ;; The role of an arithmetic operation's merge slot (`scratch-slot`): filled
 ;; on the fast and the slow branch, read where they meet, and never asked for
@@ -2759,117 +2679,45 @@ const SOURCE_TEMPLATE: &str = r#"
         ((if (int-receiver-type? type-name) (int-native-method? method) false)
          (let ((a (load-raw builder ops 0))
                (wsig (int-wsig type-name)))
-           ;; `int->bignum`/`int->ratio`: unary, checked before `b2`
-           ;; is read — same reason `float-native-method?`'s own
-           ;; unary conversions are checked first (there is no
-           ;; second argument form to compile for these).
+           ;; The unary methods are read before `b2`: there is no second
+           ;; argument form to compile for them.
            (case method
              ;; `int->int`: the exact widening into the arbitrary-precision
-             ;; type, `(as int x)`. The word is read at the receiver's own
-             ;; width and sign (`wsig`), which is how `c-ulong`'s top bit
-             ;; stays a value bit — the same reason `int->bignum` above
-             ;; picks between two entry points.
+             ;; type, `(as int x)`. `c-ulong` is the one receiver whose 64
+             ;; bits are all value.
              ("int->int"
-              (integer-word-call builder m "rt_integer_from_word" a wsig))
+              (integer-unary-call builder m (if (equal type-name (quote c-ulong)) "rt_integer_from_c_ulong" "rt_integer_from_word") a))
              ("int->ratio"
               (let ((args-ptr (alloca-args builder 1)))
                 (store-arg builder args-ptr 0 a)
                 (build-call builder (get-function m "rt_int_to_ratio") args-ptr 1)))
-             ("int->float"
-              (build-sitofp builder a))
              ("int->char"
               (let ((args-ptr (alloca-args builder 1)))
                 (store-arg builder args-ptr 0 a)
                 (build-call builder (get-function m "rt_int_to_char") args-ptr 1)))
-             ;; A width cast is the normalization on its own: cut the value to
-             ;; the *target*'s width and re-extend. `int-wsig` reads the target
-             ;; out of the method name, which is the only place it is written.
-             (("int->i8" "int->i16" "int->i32" "int->u8" "int->u16" "int->u32" "int->c-long" "int->c-ulong")
-              (build-normalize-int builder a (int-wsig (width-cast-target method))))
-             ;; The `Option`-returning halves of those two. `rt_int_fits*`
-             ;; answers the question and nothing else: a value that fits its
-             ;; target is *unchanged* by the cast, so the `Some` payload is
-             ;; the operand already in hand rather than a converted one.
              ("try-int->char"
               (let ((fits-args (alloca-args builder 1)))
                 (store-arg builder fits-args 0 a)
                 (build-try-option builder m cur-fn
                   (build-call builder (get-function m "rt_int_fits_char") fits-args 1) a 3)))
-             (("try-int->i8" "try-int->i16" "try-int->i32" "try-int->u8" "try-int->u16" "try-int->u32" "try-int->c-long" "try-int->c-ulong")
-              (let ((fits-args (alloca-args builder 2)))
-                (store-arg builder fits-args 0 a)
-                (store-arg builder fits-args 1 (const-word builder (int-wsig (width-cast-target method))))
-                (build-try-option builder m cur-fn
-                  (build-call builder (get-function m "rt_int_fits") fits-args 2) a 1)))
-             ("logcount"
-              (int-unary-shim-call builder m "rt_int_logcount" a wsig))
-             ("integer-length"
-              (int-unary-shim-call builder m "rt_int_integer_length" a wsig))
-             ;; `lognot` is `xor -1`, but the complement of a normalized
-             ;; value is not itself normalized — `(lognot (the u8 0))` is
-             ;; `255`, and the raw `xor` gives `-1`.
-             ("lognot"
-              (build-normalize-int builder (build-xor builder a (const-word builder -1)) wsig))
+             ;; `build-fixed-unary` answers whether the value fits; a value
+             ;; that fits is the same word in both types, so the `Some`
+             ;; holds the operand already in hand.
+             (("try-int->i8" "try-int->i16" "try-int->i32" "try-int->u8" "try-int->u16" "try-int->u32")
+              (build-try-option builder m cur-fn (build-fixed-unary builder m wsig method a) a 1))
+             (("int->float" "lognot" "logcount" "integer-length"
+               "int->i8" "int->i16" "int->i32" "int->u8" "int->u16" "int->u32" "int->c-long" "int->c-ulong")
+              (build-fixed-unary builder m wsig method a))
              (:else (let ((b2 (load-raw builder ops 1)))
                       (case method
-                        ;; The low `w` bits of a 64-bit sum are the sum's
-                        ;; own low `w` bits, so the wide instruction is a
-                        ;; correct way to compute the narrow one — as long as
-                        ;; the bits above `w` are put back the way the type
-                        ;; says (`build-normalize-int`).
-                        ("+"
-                         (build-normalize-int builder (build-add builder a b2) wsig))
-                        ("-"
-                         (build-normalize-int builder (build-sub builder a b2) wsig))
-                        ("*"
-                         (build-normalize-int builder (build-mul builder a b2) wsig))
-                        ;; `/` and `mod`: unlike `+`/`-`/`*`, integer
-                        ;; division can't be a bare LLVM instruction —
-                        ;; `sdiv`/`srem` by zero is UB — so both route
-                        ;; through `rt_int_div`/`rt_int_mod`, which
-                        ;; check the divisor (and `MIN/-1`) and raise
-                        ;; the interpreter's own `divide by zero`/`mod
-                        ;; by zero`. Raising means unwinding, so the
-                        ;; call is made through `raising-binop-call`.
-                        ("/"
-                         (raising-int-binop-call builder m cur-fn protect "rt_int_div" a b2 wsig))
-                        ("mod"
-                         (raising-int-binop-call builder m cur-fn protect "rt_int_mod" a b2 wsig))
-                        ("<"
-                         (build-icmp-lt builder a b2))
-                        ("<="
-                         (build-icmp-le builder a b2))
-                        (">"
-                         (build-icmp-gt builder a b2))
-                        (">="
-                         (build-icmp-ge builder a b2))
-                        ;; The five names CL gives one `icmp eq` on two
-                        ;; integers — `int-native-method?` lists the same
-                        ;; set, which is what makes them reachable here.
-                        (("=" "eq" "eql" "equal" "equalp")
-                         (build-icmp-eq builder a b2))
-                        ("/="
-                         (build-icmp-ne builder a b2))
-                        ("logand"
-                         (build-and builder a b2))
-                        ("logior"
-                         (build-or builder a b2))
-                        ("logxor"
-                         (build-xor builder a b2))
-                        ("logtest"
-                         (build-icmp-ne builder (build-and builder a b2) (const-word builder 0)))
-                        ("max"
-                         (build-select builder (build-icmp-gt builder a b2) a b2))
-                        ("min"
-                         (build-select builder (build-icmp-lt builder a b2) a b2))
+                        (("/" "mod" "rem")
+                         (fixed-division builder m cur-fn wsig method a b2))
                         ;; The count/position is an `int` word: untagged
                         ;; here, and a bignum refused as the language error
                         ;; it is.
-                        ("ash"
-                         (int-binop-shim-call builder m "rt_int_ash" a (untag-int-value builder m cur-fn b2) wsig))
-                        ("logbitp"
-                         (int-binop-shim-call builder m "rt_int_logbitp" a (untag-int-value builder m cur-fn b2) wsig))
-                        (:else (panic (append "compile-assoc: unsupported method " method)))))))))
+                        (("ash" "logbitp")
+                         (build-fixed-binop builder wsig method a (untag-int-value builder m cur-fn b2)))
+                        (:else (build-fixed-binop builder wsig method a b2))))))))
         ((if (equal type-name (quote char)) (char-native-method? method) false)
          (let ((a (load-raw builder ops 0)))
            ;; `char->int` is unary (receiver only) and the
@@ -2918,40 +2766,22 @@ const SOURCE_TEMPLATE: &str = r#"
                 (b2 (load-raw builder ops 1)))
            (build-icmp-eq builder a b2)))
         ((if (float-receiver-type? type-name) (float-native-method? method) false)
-         (let ((a (load-raw builder ops 0)))
-           (round-f32-if builder type-name method
+         (let ((a (load-raw builder ops 0))
+               (bits (float-bits type-name)))
            (case method
-             ("float->f32"
-              (build-fround32 builder a))
-             ;; Widening is exact and needs no instruction: the value in the
-             ;; register is already the nearest binary32 one.
-             ("float->f64"
-              a)
              ;; `try-float->f32` narrows only when the value survives the
              ;; round trip; `try-float->f64` widens, which is always exact, so
-             ;; it has no question to ask and emits the `Some` directly rather
-             ;; than branching on a constant.
+             ;; it has no question to ask.
              ("try-float->f32"
-              (let ((fits-args (alloca-args builder 1)))
-                (store-arg builder fits-args 0 a)
-                (build-try-option builder m cur-fn
-                  (build-call builder (get-function m "rt_f64_fits_f32") fits-args 1)
-                  (build-fround32 builder a) 11)))
+              (build-try-option builder m cur-fn
+                (build-float-unary builder m bits method a)
+                (build-float-unary builder m bits "float->f32" a) 11))
              ("try-float->f64"
               (build-some-of builder m a #%kind-f64))
-             ("sqrt"
-              (build-fsqrt builder m a))
-             ("floor"
-              (build-ffloor builder m a))
-             ("ceiling"
-              (build-fceil builder m a))
-             ("round"
-              (build-fround builder m a))
-             ("truncate"
-              (build-ftrunc builder m a))
+             (("float->f32" "float->f64" "sqrt" "floor" "ceiling" "round" "truncate" "sin" "cos" "exp" "log")
+              (build-float-unary builder m bits method a))
              ;; `float->int` answers an `int` — a tagged word, a bignum for
-             ;; a magnitude past the fixnum range — so it is a shim, not the
-             ;; saturating `fptosi` a fixed width would get.
+             ;; a magnitude past the fixnum range — so it is a shim.
              ("float->int"
               (let ((args-ptr (alloca-args builder 1)))
                 (store-arg builder args-ptr 0 a)
@@ -2960,63 +2790,11 @@ const SOURCE_TEMPLATE: &str = r#"
               (let ((args-ptr (alloca-args builder 1)))
                 (store-arg builder args-ptr 0 a)
                 (build-call builder (get-function m "rt_float_to_ratio") args-ptr 1)))
-             ("sin"
-              (build-fsin builder m a))
-             ("cos"
-              (build-fcos builder m a))
-             ("exp"
-              (build-fexp builder m a))
-             ("log"
-              (build-flog builder m a))
-             ("tan"
-              (unary-shim-call builder m "rt_f64_tan" a))
-             ("asin"
-              (unary-shim-call builder m "rt_f64_asin" a))
-             ("acos"
-              (unary-shim-call builder m "rt_f64_acos" a))
-             ("atan"
-              (unary-shim-call builder m "rt_f64_atan" a))
-             ("sinh"
-              (unary-shim-call builder m "rt_f64_sinh" a))
-             ("cosh"
-              (unary-shim-call builder m "rt_f64_cosh" a))
-             ("tanh"
-              (unary-shim-call builder m "rt_f64_tanh" a))
-             ("asinh"
-              (unary-shim-call builder m "rt_f64_asinh" a))
-             ("acosh"
-              (unary-shim-call builder m "rt_f64_acosh" a))
-             ("atanh"
-              (unary-shim-call builder m "rt_f64_atanh" a))
-             (:else (let ((b2 (load-raw builder ops 1)))
-                      (case method
-                        ("+"
-                         (build-fadd builder a b2))
-                        ("-"
-                         (build-fsub builder a b2))
-                        ("*"
-                         (build-fmul builder a b2))
-                        ("/"
-                         (build-fdiv builder a b2))
-                        ("mod"
-                         (build-frem builder a b2))
-                        ("expt"
-                         (build-fpow builder m a b2))
-                        ("<"
-                         (build-fcmp-lt builder a b2))
-                        ("<="
-                         (build-fcmp-le builder a b2))
-                        (">"
-                         (build-fcmp-gt builder a b2))
-                        (">="
-                         (build-fcmp-ge builder a b2))
-                        ("/="
-                         (build-fcmp-ne builder a b2))
-                        ("max"
-                         (build-fmaxnum builder m a b2))
-                        ("min"
-                         (build-fminnum builder m a b2))
-                        (:else (build-fcmp-eq builder a b2)))))))))
+             ;; No LLVM intrinsic in the pinned version: the runtime's, one
+             ;; per width (`rt_f32_tan`, `rt_f64_tan`).
+             (("tan" "asin" "acos" "atan" "sinh" "cosh" "tanh" "asinh" "acosh" "atanh")
+              (unary-shim-call builder m (append (if (eq bits 32) "rt_f32_" "rt_f64_") method) a))
+             (:else (build-float-binop builder m bits method a (load-raw builder ops 1))))))
         ((if (equal type-name (quote int)) (integer-native-method? method) false)
          (let ((a (load-raw builder ops 0)))
            (case method
@@ -3030,12 +2808,11 @@ const SOURCE_TEMPLATE: &str = r#"
               (build-try-option builder m cur-fn
                 (integer-unary-call builder m "rt_integer_fits_char" a) (untag-fixnum builder a) 3))
              (("int->i8" "int->i16" "int->i32" "int->u8" "int->u16" "int->u32" "int->c-long" "int->c-ulong")
-              (integer-word-call builder m "rt_integer_narrow" a (int-wsig (width-cast-target method))))
-             (("try-int->i8" "try-int->i16" "try-int->i32" "try-int->u8" "try-int->u16" "try-int->u32" "try-int->c-long" "try-int->c-ulong")
-              (let ((wsig (int-wsig (width-cast-target method))))
-                (build-try-option builder m cur-fn
-                  (integer-word-call builder m "rt_integer_fits" a wsig)
-                  (integer-word-call builder m "rt_integer_narrow" a wsig) 1)))
+              (integer-unary-call builder m (integer-cast-shim "rt_integer_to_" method) a))
+             (("try-int->i8" "try-int->i16" "try-int->i32" "try-int->u8" "try-int->u16" "try-int->u32")
+              (build-try-option builder m cur-fn
+                (integer-unary-call builder m (integer-cast-shim "rt_integer_fits_" method) a)
+                (integer-unary-call builder m (integer-cast-shim "rt_integer_to_" method) a) 1))
              ("lognot" (integer-unary-call builder m "rt_integer_lognot" a))
              ("logcount" (integer-unary-call builder m "rt_integer_logcount" a))
              ("integer-length" (integer-unary-call builder m "rt_integer_integer_length" a))
@@ -5173,10 +4950,9 @@ const SOURCE_TEMPLATE: &str = r#"
       ;; variant, exactly the way `f32`/`f64` above are. (`i32` joined the
       ;; boxed widths when `int` took the bare fixnum word.)
       ((#%sexpr-i8 #%sexpr-i16 #%sexpr-u8 #%sexpr-u16 #%sexpr-u32 #%sexpr-i32)
-       (let ((args-ptr (alloca-args builder 2)))
+       (let ((args-ptr (alloca-args builder 1)))
          (store-arg builder args-ptr 0 (compile-value m fn-name builder env fn-env captured cur-fn loop-exit loop-slot block-names block-exits block-slots protect exit-cleanup (sexpr-car arg-forms)))
-         (store-arg builder args-ptr 1 (const-word builder (narrow-wsig variant)))
-         (build-call builder (get-function m "rt_narrow_new") args-ptr 2)))
+         (build-call builder (get-function m (narrow-shim variant "_box")) args-ptr 1)))
       (:else (panic "compile-construct-sexpr: field type is not representable in compiled code yet"))))
 
 ;; `(field-get idx-unary-list kind-i64 obj-form)`

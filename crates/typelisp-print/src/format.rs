@@ -1210,7 +1210,7 @@ fn normal_set(curs: Curs) -> Exits {
 fn int_of(heap: &Heap, v: Value) -> Option<i64> {
     match v {
         Value::Int(n) => Some(n),
-        Value::Boxed(id) => heap.narrow_box(id).map(|n| n.value),
+        Value::Boxed(id) => heap.narrow_box(id).map(|n| n.word()),
         _ => None,
     }
 }
@@ -1224,7 +1224,7 @@ fn float_of(heap: &Heap, v: Value) -> Option<f64> {
         // A narrow integer is a number like any other: `~f` on a `u8` is
         // binary64 arithmetic on its value, exactly as on an `i32`.
         Value::Boxed(id) if heap.narrow_box(id).is_some() => {
-            heap.narrow_box(id).map(|n| n.value as f64)
+            heap.narrow_box(id).map(|n| n.word() as f64)
         }
         Value::Boxed(id) if heap.is_bignum(id) => heap.bignum_value(id).to_f64(),
         Value::Boxed(id) if heap.is_ratio(id) => heap.ratio_value(id).to_f64(),
@@ -1712,7 +1712,7 @@ pub(crate) fn render_number(heap: &Heap, ctx: RenderCtx<'_>, v: Value, out: &mut
         // included. The box exists so the *type* survives into a `Sexpr`,
         // not to make the number print differently.
         Value::Boxed(id) if heap.narrow_box(id).is_some() => {
-            let n = heap.narrow_box(id).expect("just tested").value;
+            let n = heap.narrow_box(id).expect("just tested").word();
             out.push_str(&Renderer::integer_text(ctx, || n.to_string(), |r| int_to_radix(n, r))?);
         }
         // Positively a float box, as in `float_of`: a fall-through on any

@@ -78,7 +78,7 @@ pub fn eql_val(heap: &Heap, a: Value, b: Value) -> bool {
         // type-sensitive, so a `u8` `5` and a `u16` `5` are two different
         // numbers of two different types and not `eql` — while two
         // separately boxed `u8` `5`s are. Comparing the whole `NarrowInt`
-        // (width, signedness and value) says both at once.
+        // (its type and its value) says both at once.
         if let (Some(na), Some(nb)) = (heap.narrow_box(ia), heap.narrow_box(ib)) {
             return na == nb;
         }
@@ -133,7 +133,7 @@ fn numeric_as_ratio(heap: &Heap, v: Value) -> Option<BigRational> {
             // still read out rather than assumed — the box is asked, and a
             // narrow integer is already the number its type names.
             None if heap.narrow_box(id).is_some() => {
-                Some(BigRational::from_integer(BigInt::from(heap.narrow_box(id).expect("just tested").value)))
+                Some(BigRational::from_integer(BigInt::from(heap.narrow_box(id).expect("just tested").word())))
             }
             None if heap.is_bignum(id) => Some(BigRational::from_integer(heap.bignum_value(id).clone())),
             None if heap.is_ratio(id) => Some(heap.ratio_value(id).clone()),
@@ -228,7 +228,7 @@ pub fn sxhash_eql_val(heap: &Heap, v: Value) -> i64 {
             Some(FloatBox::F32(f)) => (9u8, f.to_bits()).hash(&mut h),
             Some(FloatBox::F64(f)) => (10u8, f.to_bits()).hash(&mut h),
             None => match heap.narrow_box(id) {
-                Some(n) => (11u8, n.width, n.signed, n.value).hash(&mut h),
+                Some(n) => (11u8, n.ty() as u8, n.word()).hash(&mut h),
                 None if heap.is_bignum(id) => (12u8, heap.bignum_value(id).clone()).hash(&mut h),
                 None if heap.is_ratio(id) => (13u8, heap.ratio_value(id).clone()).hash(&mut h),
                 None => identity_hash(v, &mut h),

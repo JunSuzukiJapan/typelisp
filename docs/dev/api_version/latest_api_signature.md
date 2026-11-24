@@ -1,11 +1,11 @@
-# ABI バージョン 0.3.73
+# ABI バージョン 0.3.74
 
 `scripts/regen-abi-version.sh` が生成した文書。手で編集しない。
 
-コンパイラが生成するコードが、ABI バージョン 0.3.73 のランタイムライブラリについて仮定していることの一覧。
+コンパイラが生成するコードが、ABI バージョン 0.3.74 のランタイムライブラリについて仮定していることの一覧。
 ここに書かれていない前提(シムが引数をどう扱うか、生成コードがヒープを直接読む箇所など)は含まない。
 
-内容ハッシュ (FNV-1a 64): `8b9cd9e819a8245d`
+内容ハッシュ (FNV-1a 64): `73f938cab66a8313`
 
 ## 呼び出し規約 (typelisp_abi)
 
@@ -461,373 +461,351 @@
 | 338 | `build-call` |
 | 339 | `build-call-with-env` |
 | 340 | `build-cond-br` |
-| 341 | `build-fadd` |
-| 342 | `build-fceil` |
-| 343 | `build-fcmp-eq` |
-| 344 | `build-fcmp-ge` |
-| 345 | `build-fcmp-gt` |
-| 346 | `build-fcmp-le` |
-| 347 | `build-fcmp-lt` |
-| 348 | `build-fcmp-ne` |
-| 349 | `build-fcos` |
-| 350 | `build-fdiv` |
-| 351 | `build-fexp` |
-| 352 | `build-ffloor` |
-| 353 | `build-flog` |
-| 354 | `build-fmaxnum` |
-| 355 | `build-fminnum` |
-| 356 | `build-fmul` |
-| 357 | `build-fn-address` |
-| 358 | `build-fpow` |
-| 359 | `build-fptosi` |
-| 360 | `build-free` |
-| 361 | `build-frem` |
-| 362 | `build-fround` |
-| 363 | `build-fround32` |
-| 364 | `build-fsin` |
-| 365 | `build-fsqrt` |
-| 366 | `build-fsub` |
-| 367 | `build-ftrunc` |
-| 368 | `build-icmp-eq` |
-| 369 | `build-icmp-ge` |
-| 370 | `build-icmp-gt` |
-| 371 | `build-icmp-le` |
-| 372 | `build-icmp-lt` |
-| 373 | `build-icmp-ne` |
-| 374 | `build-int-to-ptr` |
-| 375 | `build-lshr` |
-| 376 | `build-make-closure` |
-| 377 | `build-malloc` |
-| 378 | `build-mul` |
-| 379 | `build-or` |
-| 380 | `build-ptr-to-int` |
-| 381 | `build-ret` |
-| 382 | `build-sadd-overflow` |
-| 383 | `build-select` |
-| 384 | `build-shl` |
-| 385 | `build-sitofp` |
-| 386 | `build-slot-ptr` |
-| 387 | `build-smul-overflow` |
-| 388 | `build-ssub-overflow` |
-| 389 | `build-sub` |
-| 390 | `build-xor` |
-| 391 | `cap` |
-| 392 | `ceiling` |
-| 393 | `char->int` |
-| 394 | `char->string` |
-| 395 | `clear` |
-| 396 | `clone-frames` |
-| 397 | `close` |
-| 398 | `const-word` |
-| 399 | `coroutine-apply` |
-| 400 | `coroutine-begin` |
-| 401 | `coroutine-call` |
-| 402 | `coroutine-call-env` |
-| 403 | `coroutine-dyn-call` |
-| 404 | `coroutine-end` |
-| 405 | `coroutine-suspend` |
-| 406 | `coroutine-unwind` |
-| 407 | `cos` |
-| 408 | `cosh` |
-| 409 | `count` |
-| 410 | `create` |
-| 411 | `current-id` |
-| 412 | `denominator` |
-| 413 | `digitp` |
-| 414 | `downcase` |
-| 415 | `entries` |
-| 416 | `eq` |
-| 417 | `eql` |
-| 418 | `equal` |
-| 419 | `equalp` |
-| 420 | `exp` |
-| 421 | `expt` |
-| 422 | `float->f32` |
-| 423 | `float->f64` |
-| 424 | `float->int` |
-| 425 | `float->ratio` |
-| 426 | `floor` |
-| 427 | `frame-clear-handler` |
-| 428 | `frame-set-handler` |
-| 429 | `frame-slot` |
-| 430 | `frame-slot-rooted` |
-| 431 | `function-param` |
-| 432 | `get` |
-| 433 | `get-function` |
-| 434 | `int->c-long` |
-| 435 | `int->c-ulong` |
-| 436 | `int->char` |
-| 437 | `int->float` |
-| 438 | `int->i16` |
-| 439 | `int->i32` |
-| 440 | `int->i8` |
-| 441 | `int->int` |
-| 442 | `int->ratio` |
-| 443 | `int->u16` |
-| 444 | `int->u32` |
-| 445 | `int->u8` |
-| 446 | `integer-length` |
-| 447 | `join` |
-| 448 | `keys` |
-| 449 | `len` |
-| 450 | `length` |
-| 451 | `load-arg` |
-| 452 | `load-env` |
-| 453 | `load-raw` |
-| 454 | `load-type` |
-| 455 | `log` |
-| 456 | `logand` |
-| 457 | `logbitp` |
-| 458 | `logcount` |
-| 459 | `logior` |
-| 460 | `lognot` |
-| 461 | `logtest` |
-| 462 | `logxor` |
-| 463 | `lt` |
-| 464 | `max` |
-| 465 | `min` |
-| 466 | `mod` |
-| 467 | `new` |
-| 468 | `numerator` |
-| 469 | `pop` |
-| 470 | `pop-frame` |
-| 471 | `position-at-end` |
-| 472 | `push` |
-| 473 | `push-frame` |
-| 474 | `ratio->float` |
-| 475 | `ratio->int` |
-| 476 | `ratio->rational` |
-| 477 | `rational->float` |
-| 478 | `rational->int` |
-| 479 | `rational->ratio` |
-| 480 | `ref` |
-| 481 | `round` |
-| 482 | `scratch-slot` |
-| 483 | `sin` |
-| 484 | `sinh` |
-| 485 | `sqrt` |
-| 486 | `store-arg` |
-| 487 | `substring` |
-| 488 | `tan` |
-| 489 | `tanh` |
-| 490 | `to-string` |
-| 491 | `truncate` |
-| 492 | `try-float->f32` |
-| 493 | `try-float->f64` |
-| 494 | `try-int->c-long` |
-| 495 | `try-int->c-ulong` |
-| 496 | `try-int->char` |
-| 497 | `try-int->i16` |
-| 498 | `try-int->i32` |
-| 499 | `try-int->i8` |
-| 500 | `try-int->u16` |
-| 501 | `try-int->u32` |
-| 502 | `try-int->u8` |
-| 503 | `try-rational->int` |
-| 504 | `upcase` |
-| 505 | `values` |
-| 506 | `verify` |
-| 507 | `wait` |
-| 508 | `compile-file` |
-| 509 | `dump` |
-| 510 | `dribble-start` |
-| 511 | `dribble-stop` |
-| 512 | `ed-open` |
-| 513 | `file-create-directories` |
-| 514 | `file-delete` |
-| 515 | `file-directory-p` |
-| 516 | `file-exists-p` |
-| 517 | `file-list-directory` |
-| 518 | `file-modified-date` |
-| 519 | `file-owner-name` |
-| 520 | `file-rename` |
-| 521 | `file-truename` |
-| 522 | `make-random-state-fresh` |
-| 523 | `net-accept` |
-| 524 | `net-buffered-p` |
-| 525 | `net-connect-begin` |
-| 526 | `net-connect-finish` |
-| 527 | `net-fill` |
-| 528 | `net-flush` |
-| 529 | `net-listen` |
-| 530 | `net-local-address` |
-| 531 | `net-peer-address` |
-| 532 | `net-peer-subject` |
-| 533 | `net-pop-byte` |
-| 534 | `net-pop-char` |
-| 535 | `net-push-byte` |
-| 536 | `net-push-string` |
-| 537 | `net-resolve-begin` |
-| 538 | `net-resolve-finish` |
-| 539 | `net-server-name` |
-| 540 | `net-set-keepalive` |
-| 541 | `net-set-keepalive-period` |
-| 542 | `net-set-nodelay` |
-| 543 | `net-shutdown-write` |
-| 544 | `net-socket-error` |
-| 545 | `net-tls-add-certificate` |
-| 546 | `net-tls-handshake` |
-| 547 | `net-tls-listen` |
-| 548 | `net-tls-start` |
-| 549 | `net-udp-bind` |
-| 550 | `net-udp-last-sender` |
-| 551 | `net-udp-recv` |
-| 552 | `net-udp-send-to` |
-| 553 | `net-unix-connect` |
-| 554 | `net-unix-listen` |
-| 555 | `net-wait` |
-| 556 | `net-wait-for` |
-| 557 | `random-state-copy` |
-| 558 | `random-state-next` |
-| 559 | `read-datum-at` |
-| 560 | `stream-at-line-start` |
-| 561 | `stream-close` |
-| 562 | `stream-describe` |
-| 563 | `stream-finish-output` |
-| 564 | `stream-input-p` |
-| 565 | `stream-listen` |
-| 566 | `stream-open-file` |
-| 567 | `stream-open-p` |
-| 568 | `stream-output-p` |
-| 569 | `stream-position` |
-| 570 | `stream-read-byte` |
-| 571 | `stream-read-char` |
-| 572 | `stream-stderr` |
-| 573 | `stream-stdin` |
-| 574 | `stream-stdout` |
-| 575 | `stream-string-input` |
-| 576 | `stream-string-output` |
-| 577 | `stream-take-output-string` |
-| 578 | `stream-unread-char` |
-| 579 | `stream-write-byte` |
-| 580 | `stream-write-string` |
-| 581 | `command-line-args` |
-| 582 | `getenv` |
-| 583 | `home-directory` |
-| 584 | `lisp-implementation-version` |
-| 585 | `machine-instance` |
-| 586 | `machine-type` |
-| 587 | `machine-version` |
-| 588 | `software-type` |
-| 589 | `software-version` |
-| 590 | `eval` |
-| 591 | `macroexpand` |
-| 592 | `macroexpand-1` |
-| 593 | `pprint-indent` |
-| 594 | `pprint-list-exhausted` |
-| 595 | `pprint-newline` |
-| 596 | `pprint-pop` |
-| 597 | `pprint-tab` |
-| 598 | `parse-float` |
-| 599 | `exit` |
-| 600 | `seed-random-state` |
-| 601 | `get-dispatch-macro-character` |
-| 602 | `get-macro-character` |
-| 603 | `read` |
-| 604 | `set-dispatch-macro-character` |
-| 605 | `set-macro-character` |
-| 606 | `heap-info` |
-| 607 | `sexpr-atom` |
-| 608 | `sexpr-bool` |
-| 609 | `sexpr-car` |
-| 610 | `sexpr-cdr` |
-| 611 | `sexpr-char` |
-| 612 | `sexpr-cons` |
-| 613 | `sexpr-consp` |
-| 614 | `sexpr-f32` |
-| 615 | `sexpr-f64` |
-| 616 | `sexpr-i16` |
-| 617 | `sexpr-i32` |
-| 618 | `sexpr-i8` |
-| 619 | `sexpr-int` |
-| 620 | `sexpr-null` |
-| 621 | `sexpr-str` |
-| 622 | `sexpr-sym-name` |
-| 623 | `sexpr-symp` |
-| 624 | `sexpr-u16` |
-| 625 | `sexpr-u32` |
-| 626 | `sexpr-u8` |
-| 627 | `keywordp` |
-| 628 | `symbol->string` |
-| 629 | `sleep` |
-| 630 | `yield` |
-| 631 | `get-internal-real-time` |
-| 632 | `get-internal-run-time` |
-| 633 | `get-universal-time` |
-| 634 | `timezone-daylight-p` |
-| 635 | `timezone-offset-seconds` |
-| 636 | `format-rt` |
-| 637 | `print-rt` |
-| 638 | `println-rt` |
-| 639 | `pprint-rt` |
-| 640 | `pprint-block-start-rt` |
-| 641 | `pprint-block-end-rt` |
-| 642 | ` c-arena-open` |
-| 643 | ` c-arena-close` |
-| 644 | ` c-alloc` |
-| 645 | ` c-ptr-check` |
-| 646 | ` c-index` |
-| 647 | ` c-offset` |
-| 648 | ` c-load` |
-| 649 | ` c-store` |
-| 650 | ` ffi-callback-address` |
-| 651 | `pat-dyn` |
-| 652 | `hash-function` |
-| 653 | `test-function` |
-| 654 | `sxhash-eq` |
-| 655 | `sxhash-eql` |
-| 656 | `sxhash-equalp` |
-| 657 | `&environment` |
-| 658 | `define-symbol-macro` |
-| 659 | `format-out` |
-| 660 | ` fmt-open` |
-| 661 | ` fmt-text` |
-| 662 | ` fmt-fresh-line` |
-| 663 | ` fmt-a` |
-| 664 | ` fmt-string` |
-| 665 | ` fmt-number` |
-| 666 | ` fmt-value` |
-| 667 | ` fmt-d` |
-| 668 | ` fmt-integer` |
-| 669 | ` fmt-integer-any` |
-| 670 | ` fmt-words` |
-| 671 | ` fmt-plural` |
-| 672 | ` fmt-char` |
-| 673 | ` fmt-fixed` |
-| 674 | ` fmt-exponent` |
-| 675 | ` fmt-general` |
-| 676 | ` fmt-dollars` |
-| 677 | ` fmt-tab` |
-| 678 | ` fmt-newline` |
-| 679 | ` fmt-indent` |
-| 680 | ` fmt-case-open` |
-| 681 | ` fmt-case-close` |
-| 682 | ` fmt-just-open` |
-| 683 | ` fmt-just-segment` |
-| 684 | ` fmt-just-close` |
-| 685 | ` fmt-block-open` |
-| 686 | ` fmt-block-close` |
-| 687 | ` fmt-result` |
-| 688 | ` fmt-emit` |
-| 689 | ` fmt-first` |
-| 690 | ` fmt-rest` |
-| 691 | ` fmt-empty` |
-| 692 | ` fmt-length` |
-| 693 | ` fmt-goto` |
-| 694 | ` fmt-as-list` |
-| 695 | ` fmt-param` |
-| 696 | ` fmt-select` |
-| 697 | ` fmt-bool` |
-| 698 | `volatile-read-u8` |
-| 699 | `volatile-read-u16` |
-| 700 | `volatile-read-u32` |
-| 701 | `volatile-write-u8` |
-| 702 | `volatile-write-u16` |
-| 703 | `volatile-write-u32` |
-| 704 | ` c-volatile-load` |
-| 705 | ` c-volatile-store` |
-| 706 | `enable-interrupt` |
-| 707 | `disable-interrupt` |
+| 341 | `build-fixed-binop` |
+| 342 | `build-fixed-div-check` |
+| 343 | `build-fixed-unary` |
+| 344 | `build-float-binop` |
+| 345 | `build-float-unary` |
+| 346 | `build-fn-address` |
+| 347 | `build-free` |
+| 348 | `build-icmp-eq` |
+| 349 | `build-icmp-ge` |
+| 350 | `build-icmp-gt` |
+| 351 | `build-icmp-le` |
+| 352 | `build-icmp-lt` |
+| 353 | `build-icmp-ne` |
+| 354 | `build-int-to-ptr` |
+| 355 | `build-lshr` |
+| 356 | `build-make-closure` |
+| 357 | `build-malloc` |
+| 358 | `build-mul` |
+| 359 | `build-or` |
+| 360 | `build-ptr-to-int` |
+| 361 | `build-ret` |
+| 362 | `build-sadd-overflow` |
+| 363 | `build-select` |
+| 364 | `build-shl` |
+| 365 | `build-slot-ptr` |
+| 366 | `build-smul-overflow` |
+| 367 | `build-ssub-overflow` |
+| 368 | `build-sub` |
+| 369 | `build-xor` |
+| 370 | `cap` |
+| 371 | `ceiling` |
+| 372 | `char->int` |
+| 373 | `char->string` |
+| 374 | `clear` |
+| 375 | `clone-frames` |
+| 376 | `close` |
+| 377 | `const-word` |
+| 378 | `coroutine-apply` |
+| 379 | `coroutine-begin` |
+| 380 | `coroutine-call` |
+| 381 | `coroutine-call-env` |
+| 382 | `coroutine-dyn-call` |
+| 383 | `coroutine-end` |
+| 384 | `coroutine-suspend` |
+| 385 | `coroutine-unwind` |
+| 386 | `cos` |
+| 387 | `cosh` |
+| 388 | `count` |
+| 389 | `create` |
+| 390 | `current-id` |
+| 391 | `denominator` |
+| 392 | `digitp` |
+| 393 | `downcase` |
+| 394 | `entries` |
+| 395 | `eq` |
+| 396 | `eql` |
+| 397 | `equal` |
+| 398 | `equalp` |
+| 399 | `exp` |
+| 400 | `expt` |
+| 401 | `float->f32` |
+| 402 | `float->f64` |
+| 403 | `float->int` |
+| 404 | `float->ratio` |
+| 405 | `floor` |
+| 406 | `frame-clear-handler` |
+| 407 | `frame-set-handler` |
+| 408 | `frame-slot` |
+| 409 | `frame-slot-rooted` |
+| 410 | `function-param` |
+| 411 | `get` |
+| 412 | `get-function` |
+| 413 | `int->c-long` |
+| 414 | `int->c-ulong` |
+| 415 | `int->char` |
+| 416 | `int->float` |
+| 417 | `int->i16` |
+| 418 | `int->i32` |
+| 419 | `int->i8` |
+| 420 | `int->int` |
+| 421 | `int->ratio` |
+| 422 | `int->u16` |
+| 423 | `int->u32` |
+| 424 | `int->u8` |
+| 425 | `integer-length` |
+| 426 | `join` |
+| 427 | `keys` |
+| 428 | `len` |
+| 429 | `length` |
+| 430 | `load-arg` |
+| 431 | `load-env` |
+| 432 | `load-raw` |
+| 433 | `load-type` |
+| 434 | `log` |
+| 435 | `logand` |
+| 436 | `logbitp` |
+| 437 | `logcount` |
+| 438 | `logior` |
+| 439 | `lognot` |
+| 440 | `logtest` |
+| 441 | `logxor` |
+| 442 | `lt` |
+| 443 | `max` |
+| 444 | `min` |
+| 445 | `mod` |
+| 446 | `new` |
+| 447 | `numerator` |
+| 448 | `pop` |
+| 449 | `pop-frame` |
+| 450 | `position-at-end` |
+| 451 | `push` |
+| 452 | `push-frame` |
+| 453 | `ratio->float` |
+| 454 | `ratio->int` |
+| 455 | `ratio->rational` |
+| 456 | `rational->float` |
+| 457 | `rational->int` |
+| 458 | `rational->ratio` |
+| 459 | `ref` |
+| 460 | `rem` |
+| 461 | `round` |
+| 462 | `scratch-slot` |
+| 463 | `sin` |
+| 464 | `sinh` |
+| 465 | `sqrt` |
+| 466 | `store-arg` |
+| 467 | `substring` |
+| 468 | `tan` |
+| 469 | `tanh` |
+| 470 | `to-string` |
+| 471 | `truncate` |
+| 472 | `try-float->f32` |
+| 473 | `try-float->f64` |
+| 474 | `try-int->char` |
+| 475 | `try-int->i16` |
+| 476 | `try-int->i32` |
+| 477 | `try-int->i8` |
+| 478 | `try-int->u16` |
+| 479 | `try-int->u32` |
+| 480 | `try-int->u8` |
+| 481 | `try-rational->int` |
+| 482 | `upcase` |
+| 483 | `values` |
+| 484 | `verify` |
+| 485 | `wait` |
+| 486 | `compile-file` |
+| 487 | `dump` |
+| 488 | `dribble-start` |
+| 489 | `dribble-stop` |
+| 490 | `ed-open` |
+| 491 | `file-create-directories` |
+| 492 | `file-delete` |
+| 493 | `file-directory-p` |
+| 494 | `file-exists-p` |
+| 495 | `file-list-directory` |
+| 496 | `file-modified-date` |
+| 497 | `file-owner-name` |
+| 498 | `file-rename` |
+| 499 | `file-truename` |
+| 500 | `make-random-state-fresh` |
+| 501 | `net-accept` |
+| 502 | `net-buffered-p` |
+| 503 | `net-connect-begin` |
+| 504 | `net-connect-finish` |
+| 505 | `net-fill` |
+| 506 | `net-flush` |
+| 507 | `net-listen` |
+| 508 | `net-local-address` |
+| 509 | `net-peer-address` |
+| 510 | `net-peer-subject` |
+| 511 | `net-pop-byte` |
+| 512 | `net-pop-char` |
+| 513 | `net-push-byte` |
+| 514 | `net-push-string` |
+| 515 | `net-resolve-begin` |
+| 516 | `net-resolve-finish` |
+| 517 | `net-server-name` |
+| 518 | `net-set-keepalive` |
+| 519 | `net-set-keepalive-period` |
+| 520 | `net-set-nodelay` |
+| 521 | `net-shutdown-write` |
+| 522 | `net-socket-error` |
+| 523 | `net-tls-add-certificate` |
+| 524 | `net-tls-handshake` |
+| 525 | `net-tls-listen` |
+| 526 | `net-tls-start` |
+| 527 | `net-udp-bind` |
+| 528 | `net-udp-last-sender` |
+| 529 | `net-udp-recv` |
+| 530 | `net-udp-send-to` |
+| 531 | `net-unix-connect` |
+| 532 | `net-unix-listen` |
+| 533 | `net-wait` |
+| 534 | `net-wait-for` |
+| 535 | `random-state-copy` |
+| 536 | `random-state-next` |
+| 537 | `read-datum-at` |
+| 538 | `stream-at-line-start` |
+| 539 | `stream-close` |
+| 540 | `stream-describe` |
+| 541 | `stream-finish-output` |
+| 542 | `stream-input-p` |
+| 543 | `stream-listen` |
+| 544 | `stream-open-file` |
+| 545 | `stream-open-p` |
+| 546 | `stream-output-p` |
+| 547 | `stream-position` |
+| 548 | `stream-read-byte` |
+| 549 | `stream-read-char` |
+| 550 | `stream-stderr` |
+| 551 | `stream-stdin` |
+| 552 | `stream-stdout` |
+| 553 | `stream-string-input` |
+| 554 | `stream-string-output` |
+| 555 | `stream-take-output-string` |
+| 556 | `stream-unread-char` |
+| 557 | `stream-write-byte` |
+| 558 | `stream-write-string` |
+| 559 | `command-line-args` |
+| 560 | `getenv` |
+| 561 | `home-directory` |
+| 562 | `lisp-implementation-version` |
+| 563 | `machine-instance` |
+| 564 | `machine-type` |
+| 565 | `machine-version` |
+| 566 | `software-type` |
+| 567 | `software-version` |
+| 568 | `eval` |
+| 569 | `macroexpand` |
+| 570 | `macroexpand-1` |
+| 571 | `pprint-indent` |
+| 572 | `pprint-list-exhausted` |
+| 573 | `pprint-newline` |
+| 574 | `pprint-pop` |
+| 575 | `pprint-tab` |
+| 576 | `parse-float` |
+| 577 | `exit` |
+| 578 | `seed-random-state` |
+| 579 | `get-dispatch-macro-character` |
+| 580 | `get-macro-character` |
+| 581 | `read` |
+| 582 | `set-dispatch-macro-character` |
+| 583 | `set-macro-character` |
+| 584 | `heap-info` |
+| 585 | `sexpr-atom` |
+| 586 | `sexpr-bool` |
+| 587 | `sexpr-car` |
+| 588 | `sexpr-cdr` |
+| 589 | `sexpr-char` |
+| 590 | `sexpr-cons` |
+| 591 | `sexpr-consp` |
+| 592 | `sexpr-f32` |
+| 593 | `sexpr-f64` |
+| 594 | `sexpr-i16` |
+| 595 | `sexpr-i32` |
+| 596 | `sexpr-i8` |
+| 597 | `sexpr-int` |
+| 598 | `sexpr-null` |
+| 599 | `sexpr-str` |
+| 600 | `sexpr-sym-name` |
+| 601 | `sexpr-symp` |
+| 602 | `sexpr-u16` |
+| 603 | `sexpr-u32` |
+| 604 | `sexpr-u8` |
+| 605 | `keywordp` |
+| 606 | `symbol->string` |
+| 607 | `sleep` |
+| 608 | `yield` |
+| 609 | `get-internal-real-time` |
+| 610 | `get-internal-run-time` |
+| 611 | `get-universal-time` |
+| 612 | `timezone-daylight-p` |
+| 613 | `timezone-offset-seconds` |
+| 614 | `format-rt` |
+| 615 | `print-rt` |
+| 616 | `println-rt` |
+| 617 | `pprint-rt` |
+| 618 | `pprint-block-start-rt` |
+| 619 | `pprint-block-end-rt` |
+| 620 | ` c-arena-open` |
+| 621 | ` c-arena-close` |
+| 622 | ` c-alloc` |
+| 623 | ` c-ptr-check` |
+| 624 | ` c-index` |
+| 625 | ` c-offset` |
+| 626 | ` c-load` |
+| 627 | ` c-store` |
+| 628 | ` ffi-callback-address` |
+| 629 | `pat-dyn` |
+| 630 | `hash-function` |
+| 631 | `test-function` |
+| 632 | `sxhash-eq` |
+| 633 | `sxhash-eql` |
+| 634 | `sxhash-equalp` |
+| 635 | `&environment` |
+| 636 | `define-symbol-macro` |
+| 637 | `format-out` |
+| 638 | ` fmt-open` |
+| 639 | ` fmt-text` |
+| 640 | ` fmt-fresh-line` |
+| 641 | ` fmt-a` |
+| 642 | ` fmt-string` |
+| 643 | ` fmt-number` |
+| 644 | ` fmt-value` |
+| 645 | ` fmt-d` |
+| 646 | ` fmt-integer` |
+| 647 | ` fmt-integer-any` |
+| 648 | ` fmt-words` |
+| 649 | ` fmt-plural` |
+| 650 | ` fmt-char` |
+| 651 | ` fmt-fixed` |
+| 652 | ` fmt-exponent` |
+| 653 | ` fmt-general` |
+| 654 | ` fmt-dollars` |
+| 655 | ` fmt-tab` |
+| 656 | ` fmt-newline` |
+| 657 | ` fmt-indent` |
+| 658 | ` fmt-case-open` |
+| 659 | ` fmt-case-close` |
+| 660 | ` fmt-just-open` |
+| 661 | ` fmt-just-segment` |
+| 662 | ` fmt-just-close` |
+| 663 | ` fmt-block-open` |
+| 664 | ` fmt-block-close` |
+| 665 | ` fmt-result` |
+| 666 | ` fmt-emit` |
+| 667 | ` fmt-first` |
+| 668 | ` fmt-rest` |
+| 669 | ` fmt-empty` |
+| 670 | ` fmt-length` |
+| 671 | ` fmt-goto` |
+| 672 | ` fmt-as-list` |
+| 673 | ` fmt-param` |
+| 674 | ` fmt-select` |
+| 675 | ` fmt-bool` |
+| 676 | `volatile-read-u8` |
+| 677 | `volatile-read-u16` |
+| 678 | `volatile-read-u32` |
+| 679 | `volatile-write-u8` |
+| 680 | `volatile-write-u16` |
+| 681 | `volatile-write-u32` |
+| 682 | ` c-volatile-load` |
+| 683 | ` c-volatile-store` |
+| 684 | `enable-interrupt` |
+| 685 | `disable-interrupt` |
 
 ## 組み込み型 (typelisp_mem::BUILTIN_TYPES)
 
@@ -979,8 +957,6 @@
 | `std::option::Option<T>` | `std::option::Option<T>` | enum | 6 | 2 |
 | `std::option::Option<V>` | `std::option::Option<V>` | enum | 6 | 2 |
 | `std::option::Option<bool>` | `std::option::Option<std::primitive::bool>` | niche | 101 | 0 |
-| `std::option::Option<c-long>` | `std::option::Option<std::primitive::c-long>` | enum | 6 | 2 |
-| `std::option::Option<c-ulong>` | `std::option::Option<std::primitive::c-ulong>` | enum | 6 | 2 |
 | `std::option::Option<char>` | `std::option::Option<std::primitive::char>` | niche | 101 | 0 |
 | `std::option::Option<f32>` | `std::option::Option<std::primitive::f32>` | niche | 101 | 2 |
 | `std::option::Option<f64>` | `std::option::Option<std::primitive::f64>` | niche | 101 | 2 |
@@ -1087,7 +1063,17 @@
 | `rt_eval_init` | `i64 (ptr, i32)` |
 | `rt_eval_state` | `i64 (ptr, i32)` |
 | `rt_exit` | `i64 (ptr, i32)` |
+| `rt_f32_acos` | `i64 (ptr, i32)` |
+| `rt_f32_acosh` | `i64 (ptr, i32)` |
+| `rt_f32_asin` | `i64 (ptr, i32)` |
+| `rt_f32_asinh` | `i64 (ptr, i32)` |
+| `rt_f32_atan` | `i64 (ptr, i32)` |
+| `rt_f32_atanh` | `i64 (ptr, i32)` |
+| `rt_f32_cosh` | `i64 (ptr, i32)` |
 | `rt_f32_new` | `i64 (ptr, i32)` |
+| `rt_f32_sinh` | `i64 (ptr, i32)` |
+| `rt_f32_tan` | `i64 (ptr, i32)` |
+| `rt_f32_tanh` | `i64 (ptr, i32)` |
 | `rt_f32_value` | `i64 (ptr, i32)` |
 | `rt_f64_acos` | `i64 (ptr, i32)` |
 | `rt_f64_acosh` | `i64 (ptr, i32)` |
@@ -1188,14 +1174,15 @@
 | `rt_heap_info` | `i64 (ptr, i32)` |
 | `rt_heap_init` | `i64 (ptr, i32)` |
 | `rt_home_directory` | `i64 (ptr, i32)` |
-| `rt_int_ash` | `i64 (ptr, i32)` |
-| `rt_int_div` | `i64 (ptr, i32)` |
-| `rt_int_fits` | `i64 (ptr, i32)` |
+| `rt_i16_box` | `i64 (ptr, i32)` |
+| `rt_i16_unbox` | `i64 (ptr, i32)` |
+| `rt_i32_box` | `i64 (ptr, i32)` |
+| `rt_i32_unbox` | `i64 (ptr, i32)` |
+| `rt_i8_box` | `i64 (ptr, i32)` |
+| `rt_i8_unbox` | `i64 (ptr, i32)` |
+| `rt_int_div_fault` | `i64 (ptr, i32)` |
 | `rt_int_fits_char` | `i64 (ptr, i32)` |
-| `rt_int_integer_length` | `i64 (ptr, i32)` |
-| `rt_int_logbitp` | `i64 (ptr, i32)` |
-| `rt_int_logcount` | `i64 (ptr, i32)` |
-| `rt_int_mod` | `i64 (ptr, i32)` |
+| `rt_int_mod_fault` | `i64 (ptr, i32)` |
 | `rt_int_not_fixnum` | `i64 (ptr, i32)` |
 | `rt_int_to_char` | `i64 (ptr, i32)` |
 | `rt_int_to_ratio` | `i64 (ptr, i32)` |
@@ -1203,8 +1190,14 @@
 | `rt_integer_ash` | `i64 (ptr, i32)` |
 | `rt_integer_cmp` | `i64 (ptr, i32)` |
 | `rt_integer_div` | `i64 (ptr, i32)` |
-| `rt_integer_fits` | `i64 (ptr, i32)` |
 | `rt_integer_fits_char` | `i64 (ptr, i32)` |
+| `rt_integer_fits_i16` | `i64 (ptr, i32)` |
+| `rt_integer_fits_i32` | `i64 (ptr, i32)` |
+| `rt_integer_fits_i8` | `i64 (ptr, i32)` |
+| `rt_integer_fits_u16` | `i64 (ptr, i32)` |
+| `rt_integer_fits_u32` | `i64 (ptr, i32)` |
+| `rt_integer_fits_u8` | `i64 (ptr, i32)` |
+| `rt_integer_from_c_ulong` | `i64 (ptr, i32)` |
 | `rt_integer_from_word` | `i64 (ptr, i32)` |
 | `rt_integer_integer_length` | `i64 (ptr, i32)` |
 | `rt_integer_logand` | `i64 (ptr, i32)` |
@@ -1216,11 +1209,18 @@
 | `rt_integer_logxor` | `i64 (ptr, i32)` |
 | `rt_integer_mod` | `i64 (ptr, i32)` |
 | `rt_integer_mul` | `i64 (ptr, i32)` |
-| `rt_integer_narrow` | `i64 (ptr, i32)` |
 | `rt_integer_sub` | `i64 (ptr, i32)` |
+| `rt_integer_to_c_long` | `i64 (ptr, i32)` |
+| `rt_integer_to_c_ulong` | `i64 (ptr, i32)` |
 | `rt_integer_to_char` | `i64 (ptr, i32)` |
 | `rt_integer_to_float` | `i64 (ptr, i32)` |
+| `rt_integer_to_i16` | `i64 (ptr, i32)` |
+| `rt_integer_to_i32` | `i64 (ptr, i32)` |
+| `rt_integer_to_i8` | `i64 (ptr, i32)` |
 | `rt_integer_to_ratio` | `i64 (ptr, i32)` |
+| `rt_integer_to_u16` | `i64 (ptr, i32)` |
+| `rt_integer_to_u32` | `i64 (ptr, i32)` |
+| `rt_integer_to_u8` | `i64 (ptr, i32)` |
 | `rt_intern` | `i64 (ptr, i32)` |
 | `rt_intern_path` | `i64 (ptr, i32)` |
 | `rt_intern_symbol` | `i64 (ptr, i32)` |
@@ -1242,8 +1242,6 @@
 | `rt_macroexpand_1` | `i64 (ptr, i32)` |
 | `rt_make_random_state_fresh` | `i64 (ptr, i32)` |
 | `rt_match_fail` | `i64 (ptr, i32)` |
-| `rt_narrow_new` | `i64 (ptr, i32)` |
-| `rt_narrow_value` | `i64 (ptr, i32)` |
 | `rt_net_accept` | `i64 (ptr, i32)` |
 | `rt_net_buffered_p` | `i64 (ptr, i32)` |
 | `rt_net_connect_begin` | `i64 (ptr, i32)` |
@@ -1421,6 +1419,12 @@
 | `rt_timezone_offset_seconds` | `i64 (ptr, i32)` |
 | `rt_truncate_sexpr_roots` | `i64 (ptr, i32)` |
 | `rt_types_define` | `i64 (ptr, i32)` |
+| `rt_u16_box` | `i64 (ptr, i32)` |
+| `rt_u16_unbox` | `i64 (ptr, i32)` |
+| `rt_u32_box` | `i64 (ptr, i32)` |
+| `rt_u32_unbox` | `i64 (ptr, i32)` |
+| `rt_u8_box` | `i64 (ptr, i32)` |
+| `rt_u8_unbox` | `i64 (ptr, i32)` |
 | `rt_unwinding` | `i64 (ptr, i32)` |
 | `rt_upcast_set` | `i64 (ptr, i32)` |
 | `rt_vector_to_sexpr_tuple` | `i64 (ptr, i32)` |
@@ -1443,33 +1447,13 @@
 - インスタンス `build-call`: `(%core::llvm-builder, %core::llvm-function, %core::llvm-value, int) -> %core::llvm-value`
 - インスタンス `build-call-with-env`: `(%core::llvm-builder, %core::llvm-function, %core::llvm-value, int, %core::llvm-value, int) -> %core::llvm-value`
 - インスタンス `build-cond-br`: `(%core::llvm-builder, %core::llvm-value, %core::llvm-basic-block, %core::llvm-basic-block) -> ()`
-- インスタンス `build-fadd`: `(%core::llvm-builder, %core::llvm-value, %core::llvm-value) -> %core::llvm-value`
-- インスタンス `build-fceil`: `(%core::llvm-builder, %core::llvm-module, %core::llvm-value) -> %core::llvm-value`
-- インスタンス `build-fcmp-eq`: `(%core::llvm-builder, %core::llvm-value, %core::llvm-value) -> %core::llvm-value`
-- インスタンス `build-fcmp-ge`: `(%core::llvm-builder, %core::llvm-value, %core::llvm-value) -> %core::llvm-value`
-- インスタンス `build-fcmp-gt`: `(%core::llvm-builder, %core::llvm-value, %core::llvm-value) -> %core::llvm-value`
-- インスタンス `build-fcmp-le`: `(%core::llvm-builder, %core::llvm-value, %core::llvm-value) -> %core::llvm-value`
-- インスタンス `build-fcmp-lt`: `(%core::llvm-builder, %core::llvm-value, %core::llvm-value) -> %core::llvm-value`
-- インスタンス `build-fcmp-ne`: `(%core::llvm-builder, %core::llvm-value, %core::llvm-value) -> %core::llvm-value`
-- インスタンス `build-fcos`: `(%core::llvm-builder, %core::llvm-module, %core::llvm-value) -> %core::llvm-value`
-- インスタンス `build-fdiv`: `(%core::llvm-builder, %core::llvm-value, %core::llvm-value) -> %core::llvm-value`
-- インスタンス `build-fexp`: `(%core::llvm-builder, %core::llvm-module, %core::llvm-value) -> %core::llvm-value`
-- インスタンス `build-ffloor`: `(%core::llvm-builder, %core::llvm-module, %core::llvm-value) -> %core::llvm-value`
-- インスタンス `build-flog`: `(%core::llvm-builder, %core::llvm-module, %core::llvm-value) -> %core::llvm-value`
-- インスタンス `build-fmaxnum`: `(%core::llvm-builder, %core::llvm-module, %core::llvm-value, %core::llvm-value) -> %core::llvm-value`
-- インスタンス `build-fminnum`: `(%core::llvm-builder, %core::llvm-module, %core::llvm-value, %core::llvm-value) -> %core::llvm-value`
-- インスタンス `build-fmul`: `(%core::llvm-builder, %core::llvm-value, %core::llvm-value) -> %core::llvm-value`
+- インスタンス `build-fixed-binop`: `(%core::llvm-builder, int, string, %core::llvm-value, %core::llvm-value) -> %core::llvm-value`
+- インスタンス `build-fixed-div-check`: `(%core::llvm-builder, int, string, %core::llvm-value, %core::llvm-value) -> %core::llvm-value`
+- インスタンス `build-fixed-unary`: `(%core::llvm-builder, %core::llvm-module, int, string, %core::llvm-value) -> %core::llvm-value`
+- インスタンス `build-float-binop`: `(%core::llvm-builder, %core::llvm-module, int, string, %core::llvm-value, %core::llvm-value) -> %core::llvm-value`
+- インスタンス `build-float-unary`: `(%core::llvm-builder, %core::llvm-module, int, string, %core::llvm-value) -> %core::llvm-value`
 - インスタンス `build-fn-address`: `(%core::llvm-builder, %core::llvm-function) -> %core::llvm-value`
-- インスタンス `build-fpow`: `(%core::llvm-builder, %core::llvm-module, %core::llvm-value, %core::llvm-value) -> %core::llvm-value`
-- インスタンス `build-fptosi`: `(%core::llvm-builder, %core::llvm-module, %core::llvm-value) -> %core::llvm-value`
 - インスタンス `build-free`: `(%core::llvm-builder, %core::llvm-value) -> ()`
-- インスタンス `build-frem`: `(%core::llvm-builder, %core::llvm-value, %core::llvm-value) -> %core::llvm-value`
-- インスタンス `build-fround`: `(%core::llvm-builder, %core::llvm-module, %core::llvm-value) -> %core::llvm-value`
-- インスタンス `build-fround32`: `(%core::llvm-builder, %core::llvm-value) -> %core::llvm-value`
-- インスタンス `build-fsin`: `(%core::llvm-builder, %core::llvm-module, %core::llvm-value) -> %core::llvm-value`
-- インスタンス `build-fsqrt`: `(%core::llvm-builder, %core::llvm-module, %core::llvm-value) -> %core::llvm-value`
-- インスタンス `build-fsub`: `(%core::llvm-builder, %core::llvm-value, %core::llvm-value) -> %core::llvm-value`
-- インスタンス `build-ftrunc`: `(%core::llvm-builder, %core::llvm-module, %core::llvm-value) -> %core::llvm-value`
 - インスタンス `build-icmp-eq`: `(%core::llvm-builder, %core::llvm-value, %core::llvm-value) -> %core::llvm-value`
 - インスタンス `build-icmp-ge`: `(%core::llvm-builder, %core::llvm-value, %core::llvm-value) -> %core::llvm-value`
 - インスタンス `build-icmp-gt`: `(%core::llvm-builder, %core::llvm-value, %core::llvm-value) -> %core::llvm-value`
@@ -1487,7 +1471,6 @@
 - インスタンス `build-sadd-overflow`: `(%core::llvm-builder, %core::llvm-module, %core::llvm-value, %core::llvm-value, %core::llvm-value) -> %core::llvm-value`
 - インスタンス `build-select`: `(%core::llvm-builder, %core::llvm-value, %core::llvm-value, %core::llvm-value) -> %core::llvm-value`
 - インスタンス `build-shl`: `(%core::llvm-builder, %core::llvm-value, %core::llvm-value) -> %core::llvm-value`
-- インスタンス `build-sitofp`: `(%core::llvm-builder, %core::llvm-value) -> %core::llvm-value`
 - インスタンス `build-slot-ptr`: `(%core::llvm-builder, %core::llvm-value, int) -> %core::llvm-value`
 - インスタンス `build-smul-overflow`: `(%core::llvm-builder, %core::llvm-module, %core::llvm-value, %core::llvm-value, %core::llvm-value) -> %core::llvm-value`
 - インスタンス `build-ssub-overflow`: `(%core::llvm-builder, %core::llvm-module, %core::llvm-value, %core::llvm-value, %core::llvm-value) -> %core::llvm-value`
@@ -1604,8 +1587,6 @@
 - インスタンス `int->u16`: `(c-long) -> u16`
 - インスタンス `int->u32`: `(c-long) -> u32`
 - インスタンス `int->u8`: `(c-long) -> u8`
-- インスタンス `try-int->c-long`: `(c-long) -> std::option::Option<c-long>`
-- インスタンス `try-int->c-ulong`: `(c-long) -> std::option::Option<c-ulong>`
 - インスタンス `try-int->i16`: `(c-long) -> std::option::Option<i16>`
 - インスタンス `try-int->i32`: `(c-long) -> std::option::Option<i32>`
 - インスタンス `try-int->i8`: `(c-long) -> std::option::Option<i8>`
@@ -1624,8 +1605,6 @@
 - インスタンス `int->u16`: `(c-ulong) -> u16`
 - インスタンス `int->u32`: `(c-ulong) -> u32`
 - インスタンス `int->u8`: `(c-ulong) -> u8`
-- インスタンス `try-int->c-long`: `(c-ulong) -> std::option::Option<c-long>`
-- インスタンス `try-int->c-ulong`: `(c-ulong) -> std::option::Option<c-ulong>`
 - インスタンス `try-int->i16`: `(c-ulong) -> std::option::Option<i16>`
 - インスタンス `try-int->i32`: `(c-ulong) -> std::option::Option<i32>`
 - インスタンス `try-int->i8`: `(c-ulong) -> std::option::Option<i8>`
@@ -1781,8 +1760,7 @@
 - インスタンス `max`: `(i16, i16) -> i16`
 - インスタンス `min`: `(i16, i16) -> i16`
 - インスタンス `mod`: `(i16, i16) -> i16`
-- インスタンス `try-int->c-long`: `(i16) -> std::option::Option<c-long>`
-- インスタンス `try-int->c-ulong`: `(i16) -> std::option::Option<c-ulong>`
+- インスタンス `rem`: `(i16, i16) -> i16`
 - インスタンス `try-int->char`: `(i16) -> std::option::Option<char>`
 - インスタンス `try-int->i16`: `(i16) -> std::option::Option<i16>`
 - インスタンス `try-int->i32`: `(i16) -> std::option::Option<i32>`
@@ -1831,8 +1809,7 @@
 - インスタンス `max`: `(i32, i32) -> i32`
 - インスタンス `min`: `(i32, i32) -> i32`
 - インスタンス `mod`: `(i32, i32) -> i32`
-- インスタンス `try-int->c-long`: `(i32) -> std::option::Option<c-long>`
-- インスタンス `try-int->c-ulong`: `(i32) -> std::option::Option<c-ulong>`
+- インスタンス `rem`: `(i32, i32) -> i32`
 - インスタンス `try-int->char`: `(i32) -> std::option::Option<char>`
 - インスタンス `try-int->i16`: `(i32) -> std::option::Option<i16>`
 - インスタンス `try-int->i32`: `(i32) -> std::option::Option<i32>`
@@ -1881,8 +1858,7 @@
 - インスタンス `max`: `(i8, i8) -> i8`
 - インスタンス `min`: `(i8, i8) -> i8`
 - インスタンス `mod`: `(i8, i8) -> i8`
-- インスタンス `try-int->c-long`: `(i8) -> std::option::Option<c-long>`
-- インスタンス `try-int->c-ulong`: `(i8) -> std::option::Option<c-ulong>`
+- インスタンス `rem`: `(i8, i8) -> i8`
 - インスタンス `try-int->char`: `(i8) -> std::option::Option<char>`
 - インスタンス `try-int->i16`: `(i8) -> std::option::Option<i16>`
 - インスタンス `try-int->i32`: `(i8) -> std::option::Option<i32>`
@@ -1932,8 +1908,6 @@
 - インスタンス `min`: `(int, int) -> int`
 - インスタンス `mod`: `(int, int) -> int`
 - インスタンス `truncate`: `(int, int) -> int`
-- インスタンス `try-int->c-long`: `(int) -> std::option::Option<c-long>`
-- インスタンス `try-int->c-ulong`: `(int) -> std::option::Option<c-ulong>`
 - インスタンス `try-int->char`: `(int) -> std::option::Option<char>`
 - インスタンス `try-int->i16`: `(int) -> std::option::Option<i16>`
 - インスタンス `try-int->i32`: `(int) -> std::option::Option<i32>`
@@ -2057,8 +2031,7 @@
 - インスタンス `max`: `(u16, u16) -> u16`
 - インスタンス `min`: `(u16, u16) -> u16`
 - インスタンス `mod`: `(u16, u16) -> u16`
-- インスタンス `try-int->c-long`: `(u16) -> std::option::Option<c-long>`
-- インスタンス `try-int->c-ulong`: `(u16) -> std::option::Option<c-ulong>`
+- インスタンス `rem`: `(u16, u16) -> u16`
 - インスタンス `try-int->char`: `(u16) -> std::option::Option<char>`
 - インスタンス `try-int->i16`: `(u16) -> std::option::Option<i16>`
 - インスタンス `try-int->i32`: `(u16) -> std::option::Option<i32>`
@@ -2107,8 +2080,7 @@
 - インスタンス `max`: `(u32, u32) -> u32`
 - インスタンス `min`: `(u32, u32) -> u32`
 - インスタンス `mod`: `(u32, u32) -> u32`
-- インスタンス `try-int->c-long`: `(u32) -> std::option::Option<c-long>`
-- インスタンス `try-int->c-ulong`: `(u32) -> std::option::Option<c-ulong>`
+- インスタンス `rem`: `(u32, u32) -> u32`
 - インスタンス `try-int->char`: `(u32) -> std::option::Option<char>`
 - インスタンス `try-int->i16`: `(u32) -> std::option::Option<i16>`
 - インスタンス `try-int->i32`: `(u32) -> std::option::Option<i32>`
@@ -2157,8 +2129,7 @@
 - インスタンス `max`: `(u8, u8) -> u8`
 - インスタンス `min`: `(u8, u8) -> u8`
 - インスタンス `mod`: `(u8, u8) -> u8`
-- インスタンス `try-int->c-long`: `(u8) -> std::option::Option<c-long>`
-- インスタンス `try-int->c-ulong`: `(u8) -> std::option::Option<c-ulong>`
+- インスタンス `rem`: `(u8, u8) -> u8`
 - インスタンス `try-int->char`: `(u8) -> std::option::Option<char>`
 - インスタンス `try-int->i16`: `(u8) -> std::option::Option<i16>`
 - インスタンス `try-int->i32`: `(u8) -> std::option::Option<i32>`

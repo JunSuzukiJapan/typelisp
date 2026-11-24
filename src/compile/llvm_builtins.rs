@@ -50,6 +50,7 @@ use crate::types::Path;
 
 mod coroutine;
 mod handles;
+mod numeric;
 
 use coroutine::*;
 pub use handles::*;
@@ -100,32 +101,11 @@ pub(crate) fn eval_llvm_builtin_method(heap: &mut Heap, type_name: &Path, method
             wk::M_BUILD_SHL => Some(llvm_builder_build_int_op(args, "shl", Builder::build_left_shift)),
             wk::M_BUILD_LSHR => Some(llvm_builder_build_int_op(args, "lshr", |b, lhs, rhs, name| b.build_right_shift(lhs, rhs, false, name))),
             wk::M_BUILD_ASHR => Some(llvm_builder_build_int_op(args, "ashr", |b, lhs, rhs, name| b.build_right_shift(lhs, rhs, true, name))),
-            wk::M_BUILD_FADD => Some(llvm_builder_build_float_op(args, "fadd", Builder::build_float_add)),
-            wk::M_BUILD_FSUB => Some(llvm_builder_build_float_op(args, "fsub", Builder::build_float_sub)),
-            wk::M_BUILD_FMUL => Some(llvm_builder_build_float_op(args, "fmul", Builder::build_float_mul)),
-            wk::M_BUILD_FDIV => Some(llvm_builder_build_float_op(args, "fdiv", Builder::build_float_div)),
-            wk::M_BUILD_FREM => Some(llvm_builder_build_float_op(args, "frem", Builder::build_float_rem)),
-            wk::M_BUILD_FCMP_LT => Some(llvm_builder_build_fcmp(args, "fcmp_lt", inkwell::FloatPredicate::OLT)),
-            wk::M_BUILD_FCMP_LE => Some(llvm_builder_build_fcmp(args, "fcmp_le", inkwell::FloatPredicate::OLE)),
-            wk::M_BUILD_FCMP_GT => Some(llvm_builder_build_fcmp(args, "fcmp_gt", inkwell::FloatPredicate::OGT)),
-            wk::M_BUILD_FCMP_GE => Some(llvm_builder_build_fcmp(args, "fcmp_ge", inkwell::FloatPredicate::OGE)),
-            wk::M_BUILD_FCMP_EQ => Some(llvm_builder_build_fcmp(args, "fcmp_eq", inkwell::FloatPredicate::OEQ)),
-            wk::M_BUILD_FCMP_NE => Some(llvm_builder_build_fcmp(args, "fcmp_ne", inkwell::FloatPredicate::UNE)),
-            wk::M_BUILD_FSQRT => Some(llvm_builder_build_float_unary_intrinsic(args, "fsqrt", "llvm.sqrt.f64")),
-            wk::M_BUILD_FFLOOR => Some(llvm_builder_build_float_unary_intrinsic(args, "ffloor", "llvm.floor.f64")),
-            wk::M_BUILD_FCEIL => Some(llvm_builder_build_float_unary_intrinsic(args, "fceil", "llvm.ceil.f64")),
-            wk::M_BUILD_FROUND => Some(llvm_builder_build_float_unary_intrinsic(args, "fround", "llvm.rint.f64")),
-            wk::M_BUILD_FTRUNC => Some(llvm_builder_build_float_unary_intrinsic(args, "ftrunc", "llvm.trunc.f64")),
-            wk::M_BUILD_FPOW => Some(llvm_builder_build_fpow(args)),
-            wk::M_BUILD_FMAXNUM => Some(llvm_builder_build_float_binary_intrinsic(args, "fmaxnum", "llvm.maxnum.f64")),
-            wk::M_BUILD_FMINNUM => Some(llvm_builder_build_float_binary_intrinsic(args, "fminnum", "llvm.minnum.f64")),
-            wk::M_BUILD_FSIN => Some(llvm_builder_build_float_unary_intrinsic(args, "fsin", "llvm.sin.f64")),
-            wk::M_BUILD_FCOS => Some(llvm_builder_build_float_unary_intrinsic(args, "fcos", "llvm.cos.f64")),
-            wk::M_BUILD_FEXP => Some(llvm_builder_build_float_unary_intrinsic(args, "fexp", "llvm.exp.f64")),
-            wk::M_BUILD_FLOG => Some(llvm_builder_build_float_unary_intrinsic(args, "flog", "llvm.log.f64")),
-            wk::M_BUILD_FPTOSI => Some(llvm_builder_build_fptosi(args)),
-            wk::M_BUILD_SITOFP => Some(llvm_builder_build_sitofp(args)),
-            wk::M_BUILD_FROUND32 => Some(llvm_builder_build_fround32(args)),
+            wk::M_BUILD_FIXED_BINOP => Some(numeric::build_fixed_binop(heap, args)),
+            wk::M_BUILD_FIXED_UNARY => Some(numeric::build_fixed_unary(heap, args)),
+            wk::M_BUILD_FIXED_DIV_CHECK => Some(numeric::build_fixed_div_check(heap, args)),
+            wk::M_BUILD_FLOAT_BINOP => Some(numeric::build_float_binop(heap, args)),
+            wk::M_BUILD_FLOAT_UNARY => Some(numeric::build_float_unary(heap, args)),
             wk::M_BUILD_SADD_OVERFLOW => Some(llvm_builder_build_int_overflow(args, "sadd", "llvm.sadd.with.overflow")),
             wk::M_BUILD_SSUB_OVERFLOW => Some(llvm_builder_build_int_overflow(args, "ssub", "llvm.ssub.with.overflow")),
             wk::M_BUILD_SMUL_OVERFLOW => Some(llvm_builder_build_int_overflow(args, "smul", "llvm.smul.with.overflow")),
@@ -509,134 +489,6 @@ fn llvm_builder_build_int_op(
     Ok(llvm_value_value(result.into()))
 }
 
-/// Shared by `build-fadd`/`build-fsub`/`build-fmul`/`build-fdiv`/`build-frem`
-/// (compiled `f64` arithmetic). A compiled `f64` value is its raw `f64::to_bits`
-/// pattern carried in an `i64` register (`compile-float`'s convention — "every
-/// compiled value is a plain `i64`"), so each operand is `bitcast`ed `i64` ->
-/// `double` here, the `op` applied, and the `double` result `bitcast`ed back to
-/// `i64` — the whole float-ness stays contained in this one instruction from
-/// the surrounding IR's point of view, exactly the way a `char`'s code point
-/// stays a plain `i64` everywhere but the `char->int`/`int->char` edges.
-fn llvm_builder_build_float_op(
-    args: &[Value],
-    name: &str,
-    op: impl FnOnce(&Builder<'static>, inkwell::values::FloatValue<'static>, inkwell::values::FloatValue<'static>, &str) -> Result<inkwell::values::FloatValue<'static>, inkwell::builder::BuilderError>,
-) -> Result<Value, EvalError> {
-    let builder = expect_llvm_builder(&args[0])?;
-    let a_bits = expect_llvm_value(&args[1])?.into_int_value();
-    let b_bits = expect_llvm_value(&args[2])?.into_int_value();
-    let bld = builder.borrow();
-    let ctx = crate::compile::llvm_context();
-    let f64_ty = ctx.f64_type();
-    let err = |e: inkwell::builder::BuilderError| EvalError::Internal(format!("build-{}: {}", name, e));
-    let a = bld.build_bit_cast(a_bits, f64_ty, "a_f").map_err(err)?.into_float_value();
-    let b = bld.build_bit_cast(b_bits, f64_ty, "b_f").map_err(err)?.into_float_value();
-    let result = op(&bld, a, b, name).map_err(err)?;
-    let bits = bld.build_bit_cast(result, ctx.i64_type(), name).map_err(err)?;
-    Ok(llvm_value_value(bits))
-}
-
-/// The `f64` comparison counterpart of [`llvm_builder_build_int_op`]/
-/// [`llvm_builder_build_icmp`] combined: `bitcast` both `i64`-carried operands
-/// to `double`, `fcmp` with `predicate`, then zero-extend the `i1` result to
-/// the `i64` every compiled value is (`build-icmp`'s own widening step).
-/// `<`/`<=`/`>`/`>=` use the *ordered* predicates (`OLT`/... — false if either
-/// operand is NaN, matching Rust's `<`/... the interpreter's `eval_float_builtin`
-/// uses); `=`/`eq`/`eql`/`equal`/`equalp` use `OEQ` (NaN never equals NaN) and
-/// `/=` uses `UNE` (Rust's `!=` is `!(a == b)`, true when either is NaN).
-fn llvm_builder_build_fcmp(args: &[Value], name: &str, predicate: inkwell::FloatPredicate) -> Result<Value, EvalError> {
-    let builder = expect_llvm_builder(&args[0])?;
-    let a_bits = expect_llvm_value(&args[1])?.into_int_value();
-    let b_bits = expect_llvm_value(&args[2])?.into_int_value();
-    let bld = builder.borrow();
-    let ctx = crate::compile::llvm_context();
-    let f64_ty = ctx.f64_type();
-    let err = |e: inkwell::builder::BuilderError| EvalError::Internal(format!("{}: {}", name, e));
-    let a = bld.build_bit_cast(a_bits, f64_ty, "a_f").map_err(err)?.into_float_value();
-    let b = bld.build_bit_cast(b_bits, f64_ty, "b_f").map_err(err)?.into_float_value();
-    let cmp = bld.build_float_compare(predicate, a, b, name).map_err(err)?;
-    let widened = bld.build_int_z_extend(cmp, ctx.i64_type(), name).map_err(err)?;
-    Ok(llvm_value_value(widened.into()))
-}
-
-/// The unary transcendental/rounding counterpart of
-/// [`llvm_builder_build_float_op`]: `bitcast` the single `i64`-carried
-/// operand to `double`, call the named LLVM intrinsic (`llvm.sqrt.f64`/
-/// `llvm.floor.f64`/`llvm.ceil.f64`/`llvm.rint.f64`/`llvm.trunc.f64`), then
-/// `bitcast` the `double` result back. Unlike `build-fadd`/... (plain LLVM
-/// instructions), these have no dedicated IR opcode, so they go through
-/// `module`'s intrinsic declaration (`Intrinsic::get_declaration`, itself
-/// idempotent — safe to call again for a later use of the same op in the
-/// same module, same as `get-function` finding an already-declared `rt_*`
-/// shim) rather than `get-function`'s fixed-ABI `rt_*` lookup. `round`
-/// matches Rust's `f64::round_ties_even` (`float-native-method?`'s uncompiled
-/// fallback, kept in sync by `tests/compile_test.rs`): both round halfway
-/// cases to even, as CL's `round` does. `round` is `llvm.rint` in the
-/// default rounding mode (nearest, ties to even) rather than
-/// `llvm.roundeven`, which some targets lower to a `roundeven` libcall that
-/// macOS's libm does not have. `sqrt`/`floor`/`ceil`/`trunc` are
-/// exact IEEE-754 operations with no rounding-mode ambiguity to begin with.
-fn llvm_builder_build_float_unary_intrinsic(args: &[Value], name: &str, intrinsic_name: &str) -> Result<Value, EvalError> {
-    let builder = expect_llvm_builder(&args[0])?;
-    let module = expect_llvm_module(&args[1])?;
-    let x_bits = expect_llvm_value(&args[2])?.into_int_value();
-    let bld = builder.borrow();
-    let ctx = crate::compile::llvm_context();
-    let f64_ty = ctx.f64_type();
-    let err = |e: String| EvalError::Internal(format!("build-{}: {}", name, e));
-    let x = bld.build_bit_cast(x_bits, f64_ty, "x_f").map_err(|e| err(e.to_string()))?.into_float_value();
-    let intrinsic = inkwell::intrinsics::Intrinsic::find(intrinsic_name)
-        .ok_or_else(|| err(format!("no such LLVM intrinsic {}", intrinsic_name)))?;
-    let decl = intrinsic
-        .get_declaration(&module.borrow(), &[f64_ty.into()])
-        .ok_or_else(|| err(format!("failed to declare {}", intrinsic_name)))?;
-    let call = bld.build_call(decl, &[x.into()], name).map_err(|e| err(e.to_string()))?;
-    let result = match call.try_as_basic_value() {
-        inkwell::values::ValueKind::Basic(v) => v.into_float_value(),
-        inkwell::values::ValueKind::Instruction(_) => return Err(err(format!("{} produced no value", intrinsic_name))),
-    };
-    let bits = bld.build_bit_cast(result, ctx.i64_type(), name).map_err(|e| err(e.to_string()))?;
-    Ok(llvm_value_value(bits))
-}
-
-/// `expt` (`f64,f64->f64`): the binary counterpart of
-/// [`llvm_builder_build_float_unary_intrinsic`], `llvm.pow.f64` — matches
-/// the interpreter's `f64::powf` (`float_expt`), both ultimately the
-/// platform libm `pow` either way.
-/// Shared by `build-fpow`/`build-fmaxnum`/`build-fminnum` — every binary
-/// `f64` LLVM intrinsic this project uses. Each `i64`-carried operand is
-/// `bitcast`ed to `double`, the intrinsic (overloaded on its `f64` operand
-/// type, hence the `module` parameter — same reason
-/// [`llvm_builder_build_float_unary_intrinsic`] takes one) applied, and the
-/// `double` result `bitcast`ed back to `i64`.
-fn llvm_builder_build_float_binary_intrinsic(args: &[Value], name: &str, intrinsic_name: &str) -> Result<Value, EvalError> {
-    let builder = expect_llvm_builder(&args[0])?;
-    let module = expect_llvm_module(&args[1])?;
-    let a_bits = expect_llvm_value(&args[2])?.into_int_value();
-    let b_bits = expect_llvm_value(&args[3])?.into_int_value();
-    let bld = builder.borrow();
-    let ctx = crate::compile::llvm_context();
-    let f64_ty = ctx.f64_type();
-    let err = |e: String| EvalError::Internal(format!("build-{}: {}", name, e));
-    let a = bld.build_bit_cast(a_bits, f64_ty, "a_f").map_err(|e| err(e.to_string()))?.into_float_value();
-    let b = bld.build_bit_cast(b_bits, f64_ty, "b_f").map_err(|e| err(e.to_string()))?.into_float_value();
-    let intrinsic = inkwell::intrinsics::Intrinsic::find(intrinsic_name).ok_or_else(|| err(format!("no such LLVM intrinsic {}", intrinsic_name)))?;
-    let decl = intrinsic
-        .get_declaration(&module.borrow(), &[f64_ty.into()])
-        .ok_or_else(|| err(format!("failed to declare {}", intrinsic_name)))?;
-    let call = bld.build_call(decl, &[a.into(), b.into()], name).map_err(|e| err(e.to_string()))?;
-    let result = match call.try_as_basic_value() {
-        inkwell::values::ValueKind::Basic(v) => v.into_float_value(),
-        inkwell::values::ValueKind::Instruction(_) => return Err(err(format!("{} produced no value", intrinsic_name))),
-    };
-    let bits = bld.build_bit_cast(result, ctx.i64_type(), name).map_err(|e| err(e.to_string()))?;
-    Ok(llvm_value_value(bits))
-}
-
-fn llvm_builder_build_fpow(args: &[Value]) -> Result<Value, EvalError> {
-    llvm_builder_build_float_binary_intrinsic(args, "fpow", "llvm.pow.f64")
-}
-
 /// `(select cond then else)`: CL's `max`/`min` (and `bignum`/`ratio`'s, via
 /// their own three-way `rt_*_cmp` comparator) all lower to this — an
 /// `icmp`+`select` pair, branch-free, rather than real control flow. `cond`
@@ -656,88 +508,6 @@ fn llvm_builder_build_select(args: &[Value]) -> Result<Value, EvalError> {
     let is_nonzero = bld.build_int_compare(inkwell::IntPredicate::NE, cond, zero, "select_cond").map_err(|e| err(e.to_string()))?;
     let result = bld.build_select(is_nonzero, then_v, else_v, "select").map_err(|e| err(e.to_string()))?;
     Ok(llvm_value_value(result.into_int_value().into()))
-}
-
-/// `float->int` (`f64->i32`, narrowing, truncating toward zero): `bitcast`
-/// the `i64`-carried operand to `double`, then the `llvm.fptosi.sat`
-/// intrinsic (overloaded on both its result and its `f64` operand type,
-/// hence the `module` parameter every other overloaded-intrinsic builtin
-/// here already takes — see [`llvm_builder_build_float_unary_intrinsic`]/
-/// [`llvm_builder_build_fpow`]) to `i32`, then `sext` back to the full `i64`
-/// register every compiled integer is carried in (see
-/// `int-native-method?`'s doc comment).
-///
-/// Saturating to `i32` and not to the register: `float->int`'s declared
-/// return type *is* `i32`, and a value in a register always holds the number
-/// its type claims, sign-extended (`types::normalize_int`). Unlike a plain
-/// `fptosi` instruction (poison on NaN/out-of-range input), `.sat` clamps:
-/// NaN -> 0, `+inf`/an overflowing magnitude -> `i32::MAX`, `-inf`/an
-/// underflowing magnitude -> `i32::MIN` — exactly Rust's `as` cast
-/// semantics, matching the interpreter's `float_to_int` (`f as i32`) bit for
-/// bit.
-fn llvm_builder_build_fptosi(args: &[Value]) -> Result<Value, EvalError> {
-    let builder = expect_llvm_builder(&args[0])?;
-    let module = expect_llvm_module(&args[1])?;
-    let x_bits = expect_llvm_value(&args[2])?.into_int_value();
-    let bld = builder.borrow();
-    let ctx = crate::compile::llvm_context();
-    let f64_ty = ctx.f64_type();
-    let i32_ty = ctx.i32_type();
-    let i64_ty = ctx.i64_type();
-    let err = |e: String| EvalError::Internal(format!("build-fptosi: {}", e));
-    let x = bld.build_bit_cast(x_bits, f64_ty, "x_f").map_err(|e| err(e.to_string()))?.into_float_value();
-    let intrinsic =
-        inkwell::intrinsics::Intrinsic::find("llvm.fptosi.sat").ok_or_else(|| err("no such LLVM intrinsic llvm.fptosi.sat".into()))?;
-    let decl = intrinsic
-        .get_declaration(&module.borrow(), &[i32_ty.into(), f64_ty.into()])
-        .ok_or_else(|| err("failed to declare llvm.fptosi.sat".into()))?;
-    let call = bld.build_call(decl, &[x.into()], "fptosi_sat").map_err(|e| err(e.to_string()))?;
-    let narrow = match call.try_as_basic_value() {
-        inkwell::values::ValueKind::Basic(v) => v.into_int_value(),
-        inkwell::values::ValueKind::Instruction(_) => return Err(err("llvm.fptosi.sat produced no value".into())),
-    };
-    let result = bld.build_int_s_extend(narrow, i64_ty, "fptosi_sext").map_err(|e| err(e.to_string()))?;
-    Ok(llvm_value_value(result.into()))
-}
-
-/// `int->float`: `sitofp` the operand (every compiled integer is carried in a
-/// full `i64` register, whatever its static width) to `double`, then
-/// `bitcast` it back to the raw word a compiled `f64` is carried in — the
-/// exact inverse of [`llvm_builder_build_fptosi`]'s opening `bitcast`.
-///
-/// No saturating intrinsic and no `module` parameter: `sitofp` is total on
-/// every input, so there is nothing to clamp, which matches the interpreter's
-/// `int_to_float` (`n as f64`).
-fn llvm_builder_build_sitofp(args: &[Value]) -> Result<Value, EvalError> {
-    let builder = expect_llvm_builder(&args[0])?;
-    let x = expect_llvm_value(&args[1])?.into_int_value();
-    let bld = builder.borrow();
-    let ctx = crate::compile::llvm_context();
-    let err = |e: String| EvalError::Internal(format!("build-sitofp: {}", e));
-    let f = bld.build_signed_int_to_float(x, ctx.f64_type(), "x_f").map_err(|e| err(e.to_string()))?;
-    let bits = bld.build_bit_cast(f, ctx.i64_type(), "x_bits").map_err(|e| err(e.to_string()))?;
-    Ok(llvm_value_value(bits.into_int_value().into()))
-}
-
-/// The nearest binary32 value, still carried as an `f64`: `fptrunc` to
-/// `float`, then `fpext` straight back to `double`.
-///
-/// This is what makes `f32` a width rather than a label. A float value lives
-/// in a 64-bit word whichever type names it — every binary32 value is exactly
-/// a binary64 value — but an `f32` *operation* rounds its result to binary32,
-/// and this is that rounding. The interpreter's `float_at` does the same
-/// thing as `v as f32 as f64`.
-fn llvm_builder_build_fround32(args: &[Value]) -> Result<Value, EvalError> {
-    let builder = expect_llvm_builder(&args[0])?;
-    let x_bits = expect_llvm_value(&args[1])?.into_int_value();
-    let bld = builder.borrow();
-    let ctx = crate::compile::llvm_context();
-    let err = |e: String| EvalError::Internal(format!("build-fround32: {}", e));
-    let x = bld.build_bit_cast(x_bits, ctx.f64_type(), "x_f").map_err(|e| err(e.to_string()))?.into_float_value();
-    let narrow = bld.build_float_trunc(x, ctx.f32_type(), "x_f32").map_err(|e| err(e.to_string()))?;
-    let wide = bld.build_float_ext(narrow, ctx.f64_type(), "x_f64").map_err(|e| err(e.to_string()))?;
-    let bits = bld.build_bit_cast(wide, ctx.i64_type(), "x_bits").map_err(|e| err(e.to_string()))?;
-    Ok(llvm_value_value(bits.into_int_value().into()))
 }
 
 /// `(build-sadd-overflow builder module a b flag-slot)` and its `ssub`/`smul`

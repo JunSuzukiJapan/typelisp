@@ -2838,8 +2838,8 @@ fn compile_transitively_compiles_a_called_user_method() {
 ///
 /// `ash`'s distance became an `int` (from "another value of the receiver's
 /// type", which made right shift unwritable on unsigned widths). Nothing in
-/// the island changed — the distance was always passed as a raw word and
-/// `rt_int_ash` always read it as signed — and this test is what says so
+/// the island changed — the distance is passed as a raw word and read as
+/// signed (`build-fixed-binop`'s `ash`) — and this test is what says so
 /// rather than assuming it.
 #[test]
 fn a_negative_shift_distance_lowers_at_every_width() {
@@ -3469,14 +3469,13 @@ fn compile_dispatches_a_user_method_on_a_primitive_receiver() {
     assert_eq!(v, Value::Bool(true));
 }
 
-/// The same on a narrow integer: the prelude's `i8::rem` (body
-/// `(- self (* b (/ self b)))`) compiles natively and a compiled caller
-/// reaches it through `compile-assoc-user`'s mangled-name call.
+/// `rem` on a narrow integer is a built-in method, lowered in place at the
+/// receiver's width (`build-fixed-binop`): truncated, so `7 rem 3` is `1`
+/// and `-8 rem 3` is `-2`.
 #[test]
 fn compile_dispatches_rem_on_a_narrow_integer_receiver() {
     let v = run_with_compiler_and_prelude(
         r#"
-        (compile i8::rem)
         (defun rem-sum ((a i8) (b i8) (c i8)) i8 (+ (rem a c) (rem b c)))
         (compile rem-sum)
         (rem-sum (the i8 7) (the i8 -8) (the i8 3))
@@ -3486,22 +3485,20 @@ fn compile_dispatches_rem_on_a_narrow_integer_receiver() {
     assert_eq!(v, Value::Int(-1));
 }
 
-/// A user method on a *primitive* receiver (the prelude's `u8::rem`) is
-/// transitively compiled too: `(compile run)` pulls in `u8::rem` on demand.
-/// Its own body is native arithmetic (lowered in-place by `compile-assoc`,
-/// no further call), so the recursion bottoms out immediately.
+/// A prelude method on a *primitive* receiver (`i32::gcd`) is transitively
+/// compiled too: `(compile run)` pulls it in on demand.
 #[test]
 fn compile_transitively_compiles_a_called_primitive_receiver_method() {
     let v = run_with_compiler_and_prelude(
         r#"
-        (defun rem2 ((a u8) (b u8)) u8 (rem a b))
-        (defun run () int (if (= (rem2 (the u8 7) (the u8 3)) (the u8 1)) (if (= (rem2 (the u8 6) (the u8 3)) (the u8 0)) 1 0) 0))
+        (defun gcd2 ((a i32) (b i32)) i32 (gcd a b))
+        (defun run () int (if (= (gcd2 (the i32 12) (the i32 18)) (the i32 6)) (if (= (gcd2 (the i32 7) (the i32 0)) (the i32 7)) 1 0) 0))
         (compile run)
         (run)
         "#,
     )
-    .expect("transitive compile of `u8::rem` should succeed");
-    assert_eq!(v, Value::Int(1), "rem2(7,3) is 1 and rem2(6,3) is 0, with `u8::rem` auto-compiled");
+    .expect("transitive compile of `i32::gcd` should succeed");
+    assert_eq!(v, Value::Int(1), "gcd2(12,18) is 6 and gcd2(7,0) is 7, with `i32::gcd` auto-compiled");
 }
 
 /// `string`'s builtin `equal` (content comparison, `rt_str_eq`) and `<`
@@ -3895,7 +3892,7 @@ fn compile_match_distinguishes_float_bignum_and_ratio_boxes() {
 /// round-trips each one's value back out.
 ///
 /// Both halves are new machinery: `compile-construct-sexpr` boxes through
-/// `rt_narrow_new` with a `wsig` constant taken from the *variant*, and
+/// the box shim of the type the *variant* names (`rt_u8_box`), and
 /// `compile-sexpr-tag-test` asks `rt_box_kind` which box it got. Neither can
 /// be derived from the value — `100` is the same machine word in all six
 /// types — which is exactly why the box exists.
@@ -5018,20 +5015,19 @@ fn compile_dispatches_string_equalp() {
 // ---- `f64` arithmetic/comparison methods, compiled -------------------------
 //
 // A compiled `f64` is its raw `f64::to_bits` pattern carried in an `i64`
-// register (`compile-float`); `compile-assoc`'s f64 branch lowers arithmetic
-// to `build-fadd`/... (each bitcasts to `double` and back), comparisons to
-// `build-fcmp-*`, the transcendental/rounding family (`sqrt`/`floor`/
-// `ceiling`/`round`/`truncate`/`expt`) to the matching LLVM intrinsic
-// (`build-fsqrt`/.../`build-fpow`), and `float->int` to a single `fptosi`
-// instruction (`build-fptosi`). The JIT boundary encodes an `f64` argument as
+// register (`compile-float`); `compile-assoc`'s float branch lowers
+// arithmetic, comparisons and `expt` through `build-float-binop` and the
+// transcendental/rounding family (`sqrt`/`floor`/`ceiling`/`round`/
+// `truncate`) through `build-float-unary` (each bitcasts to `double` and
+// back, at the receiver's width), and `float->int` to `rt_float_to_int`. The JIT boundary encodes an `f64` argument as
 // its bits and decodes an `f64` result back (`Interp::call_compiled`) — an
 // `f64` is a `BoxedObj::Float64` on the interpreter side since the scalar
 // unification, but the compiled side still keeps one in a native register,
 // so the boundary is where the two representations meet.
 
 /// f64 arithmetic returning an `f64` across the JIT boundary — exercises
-/// `build-fadd`/`build-fsub`/`build-fmul`/`build-fdiv` and the `f64`
-/// argument/return marshaling.
+/// `build-float-binop`'s `+`/`-`/`*`/`/` and the `f64` argument/return
+/// marshaling.
 #[test]
 fn compile_dispatches_f64_arithmetic() {
     let v = run_f64(
@@ -5061,8 +5057,8 @@ fn compile_dispatches_i32_floored_mod_and_agrees_with_the_interpreter() {
 }
 
 /// `mod`/`rem` on `f64` are CL-conformant (`mod` floored, `rem` truncated) and
-/// — unlike the earlier truncating `build-frem` lowering — are `prelude.rs`
-/// methods (`a - b*floor|truncate(a/b)`) compiled the normal way. This locks
+/// are `prelude.rs` methods (`a - b*floor|truncate(a/b)`) compiled the normal
+/// way. This locks
 /// the compiled path to the interpreter for a negative dividend, where floored
 /// and truncated diverge.
 #[test]
@@ -5112,14 +5108,12 @@ fn compile_dispatches_numeric_helpers_and_agrees_with_the_interpreter() {
 }
 
 /// A user `defun` whose name matches a libm symbol that an LLVM float
-/// intrinsic lowers to (here `pow`, which `expt`'s `build-fpow` emits) must
+/// intrinsic lowers to (here `pow`, which `expt`'s `llvm.pow.f64` becomes) must
 /// not collide with libm once compiled: the `tl_` symbol prefix
 /// (`ConcreteNames::symbol`) means the user
 /// `pow`'s own symbol is `tl_pow`, never bare `pow`, so the JIT's resolver
 /// binds `expt`'s lowered `pow` call to libm and the user `pow` to its own
-/// body. (This regression previously fired via `mod`->`frem`->`fmod`; `mod` no
-/// longer lowers to `frem`, but the same protection covers every libm-named
-/// intrinsic target.)
+/// body. The same protection covers every libm-named intrinsic target.
 #[test]
 fn compile_of_a_user_function_named_like_a_libm_symbol_does_not_collide() {
     let v = run_with_compiler_and_prelude(
@@ -5137,8 +5131,8 @@ fn compile_of_a_user_function_named_like_a_libm_symbol_does_not_collide() {
     assert_eq!(v, Value::Int(15));
 }
 
-/// f64 comparisons lower to `build-fcmp-*` (ordered `<`/`<=`/`>`/`>=`/`=`,
-/// unordered `/=`) — a `bool` result crosses the boundary. Agrees with the
+/// f64 comparisons lower to `build-float-binop`'s `fcmp` (ordered
+/// `<`/`<=`/`>`/`>=`/`=`, unordered `/=`) — a `bool` result crosses the boundary. Agrees with the
 /// interpreter for the same source.
 #[test]
 fn compile_dispatches_f64_comparisons_and_agrees_with_the_interpreter() {
@@ -5161,7 +5155,7 @@ fn compile_dispatches_f64_comparisons_and_agrees_with_the_interpreter() {
 
 /// The unary transcendental/rounding family (`sqrt`/`floor`/`ceiling`/
 /// `round`/`truncate`) each lower to their own LLVM intrinsic
-/// (`build-fsqrt`/...) — this exercises all five in one compiled function
+/// (`build-float-unary`) — this exercises all five in one compiled function
 /// and checks the JIT result against the interpreter's.
 #[test]
 fn compile_dispatches_f64_transcendentals_and_agrees_with_the_interpreter() {
@@ -5179,7 +5173,7 @@ fn compile_dispatches_f64_transcendentals_and_agrees_with_the_interpreter() {
 
 /// The `f64` trigonometric/hyperbolic/exponential family added alongside
 /// `sqrt`/`floor`/etc: `sin`/`cos`/`exp`/`log` lower to LLVM intrinsics
-/// (`build-fsin`/...) like `sqrt` does; `tan`/`asin`/`acos`/`atan`/`sinh`/
+/// (`build-float-unary`) like `sqrt` does; `tan`/`asin`/`acos`/`atan`/`sinh`/
 /// `cosh`/`tanh`/`asinh`/`acosh`/`atanh` have no LLVM intrinsic in the
 /// version this project pins, so they lower to `rt_f64_*` shims instead —
 /// this exercises both codegen paths in one compiled function.
@@ -5343,7 +5337,7 @@ fn compile_dispatches_variadic_arithmetic_and_comparison_sugar() {
     assert_eq!(compiled, Value::Bool(true));
 }
 
-/// `expt` (binary, `f64,f64->f64`) lowers to `build-fpow` (`llvm.pow.f64`).
+/// `expt` (binary, `f64,f64->f64`) lowers to `llvm.pow.f64` (`build-float-binop`).
 #[test]
 fn compile_dispatches_f64_expt_and_agrees_with_the_interpreter() {
     let src = r#"
@@ -5355,8 +5349,8 @@ fn compile_dispatches_f64_expt_and_agrees_with_the_interpreter() {
     assert_eq!(compiled, interpreted, "compiled expt agrees with the interpreter");
 }
 
-/// `float->int` lowers to the saturating `llvm.fptosi.sat` intrinsic
-/// (`build-fptosi`), no heap allocation involved.
+/// `float->int` answers an `int` (`rt_float_to_int`), and agrees with the
+/// interpreter.
 #[test]
 fn compile_dispatches_float_to_int_and_agrees_with_the_interpreter() {
     let src = r#"

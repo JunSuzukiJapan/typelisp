@@ -595,7 +595,6 @@ pub const SOURCE_TEMPLATE: &str = r##"
 (impl i32
   (pub defmethod abs (self) i32 (if (< self 0) (* self -1) self))
   (pub defmethod signum (self) i32 (if (= self 0) self (/ self (abs self))))
-  (pub defmethod rem (self (b i32)) i32 (- self (* b (/ self b))))
   (pub defmethod gcd (self (b i32)) i32 (if (= b 0) (abs self) (gcd b (mod self b))))
   (pub defmethod lcm (self (b i32)) i32
     (if (or (= self 0) (= b 0)) (- self self) (/ (abs (* self b)) (gcd self b)))))
@@ -2292,23 +2291,12 @@ user-visible capacity."
 ;; `(Div T)`, or `(Div T (Output T))` to divide within `T`.
 (pub deftrait Number (Add Sub Mul Rem Ord)))
 
-;; `mod`/`rem` for the widths that did not have them. Same bodies the
-;; `i32` (integer) and `f64` (float) methods above carry — floored for
-;; `mod`, truncated for `rem`. The integer widths get `mod` from the built-in
-;; table, so only `f32` needs one here.
+;; `mod`/`rem` for `f32`, the same bodies `f64`'s above carry — floored for
+;; `mod`, truncated for `rem`. The integer widths get both from the built-in
+;; table.
 (impl f32
   (pub defmethod mod (self (b f32)) f32 (- self (* b (floor (/ self b)))))
   (pub defmethod rem (self (b f32)) f32 (- self (* b (truncate (/ self b))))))
-(impl i8
-  (pub defmethod rem (self (b i8   )) i8    (- self (* b (/ self b)))))
-(impl i16
-  (pub defmethod rem (self (b i16  )) i16   (- self (* b (/ self b)))))
-(impl u8
-  (pub defmethod rem (self (b u8   )) u8    (- self (* b (/ self b)))))
-(impl u16
-  (pub defmethod rem (self (b u16  )) u16   (- self (* b (/ self b)))))
-(impl u32
-  (pub defmethod rem (self (b u32  )) u32   (- self (* b (/ self b)))))
 
 ;; The impls. A primitive type's built-in operator is the trait's method.
 (impl Add i32)

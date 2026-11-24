@@ -295,6 +295,37 @@ fn what_a_program_does_not_use_is_left_out() {
     }
 }
 
+/// The runtime's fixed-width functions are one per type, so a program
+/// links the ones of the widths it uses and no others: boxing a `u8` into a
+/// `Sexpr` brings `rt_u8_box` and not `rt_i16_box`, cutting an `int` to `u8`
+/// brings `rt_integer_to_u8` and not `rt_integer_to_u16`. Nothing takes a
+/// width as an argument any more.
+#[test]
+fn a_width_s_runtime_is_linked_only_when_the_width_is_used() {
+    let elf = built(
+        "board_one_width",
+        r#"
+(defun cut ((n int)) u8 (as u8 n))
+(defun main () ()
+  (let ((x (cut 300)))
+    (println "~a ~a" (+ x (the u8 100)) (/ x (the u8 3)))))
+"#,
+        "prog.elf",
+        &board_flags(&[]),
+    );
+    let out = run_board(&elf);
+    assert_eq!(text(&out.stdout), "144 14\n", "stderr: {}", text(&out.stderr));
+    let names = symbols(&elf);
+    for used in ["rt_u8_box", "rt_integer_to_u8", "rt_int_div_fault"] {
+        assert!(names.iter().any(|n| n == used), "{} is not linked in", used);
+    }
+    for t in ["i8", "i16", "i32", "u16", "u32"] {
+        for shim in [format!("rt_{}_box", t), format!("rt_{}_unbox", t), format!("rt_integer_to_{}", t), format!("rt_integer_fits_{}", t), format!("rt_sexpr_{}", t)] {
+            assert!(!names.contains(&shim), "{} is linked in", shim);
+        }
+    }
+}
+
 /// The arena grows from the small one a board starts with, and an
 /// executable without one runs what needs none.
 #[test]
