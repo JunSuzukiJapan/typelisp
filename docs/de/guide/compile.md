@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ 45c66940dd590920b2dccfa8ce53c13c4865b2b0 -->
+<!-- translated-from: docs/ja/guide/compile.md @ 00b2198ebe05054debbc1a0d1f9ebf1a9835d7a0 -->
 # Kompilierung
 
 Ohne weiteres Zutun laufen typelisp-Programme im Interpreter. Darüber hinaus gibt es zwei Wege, in nativen
@@ -327,14 +327,17 @@ $ typl -c blink.typl --target avr-atmega328p -O2   # erzeugt blink.elf
 $ qemu-system-avr -M uno -display none -serial stdio -bios blink.elf   # in QEMU ausführen
 ```
 
-- Es gibt keine Laufzeitumgebung, daher ist ein Programm, das sie benutzt, ein **Kompilierfehler**. Die Meldung nennt, was benötigt wird und über welche Funktionen es erreicht wird. Verwendbar sind: Rechnen mit Ganzzahlen fester Breite (`i8` bis `u32`), `bool` und `char`, Funktionsaufrufe, Verzweigungen, Schleifen, `defvar` und `defconstant` mit solchen Werten sowie `volatile-read-u8` und Ähnliches mit als Zahl oder Konstante geschriebener Adresse.
-- Nicht verwendbar sind: Werte im Heap wie Zeichenketten, Listen und Strukturen; Rechnen mit `int`; Rekursion, `catch` und Aufrufe von Funktionswerten; Aufrufe von C-Funktionen; `volatile`-Zugriffe mit berechneter Adresse.
+- Es gibt keine Laufzeitumgebung, daher ist ein Programm, das sie benutzt, ein **Kompilierfehler**. Die Meldung nennt, was benötigt wird und über welche Funktionen es erreicht wird. Verwendbar sind: Rechnen mit Ganzzahlen fester Breite (`i8` bis `u32`), `int`, `f32`, `f64`, `bool` und `char`, Funktionsaufrufe (auch rekursive), Verzweigungen, Schleifen, `defvar` und `defconstant` mit solchen Werten, `volatile-read-u8` und Ähnliches sowie Aufrufe von C-Funktionen.
+- Nicht verwendbar sind: Werte im Heap wie Zeichenketten, Listen und Strukturen; `catch` und Aufrufe von Funktionswerten; Aufrufe von C-Funktionen, die eine Zeichenkette oder eine Funktion erhalten; mathematische Funktionen von Gleitkommazahlen wie `sin` und `expt` (`sqrt` und Rundungen wie `floor` sind verwendbar).
 - Ein Interrupt-Handler wird als `#[interrupt(N)]` geschrieben ([Syntax](../reference/syntax.md), Abschnitt 3.17). `N` ist die Interrupt-Nummer des ATmega328P, 1 bis 25, wobei Reset als 0 zählt (der Überlauf von Timer 1 ist 13). Siehe das Beispiel unten.
 - Eine Division durch 0 hält den Mikrocontroller an dieser Stelle an (es kommen auch keine Interrupts mehr). Ebenso `/` des kleinsten vorzeichenbehafteten Werts durch `-1`.
+- Ein `int` reicht von -16384 bis 16383. Liegt das Ergebnis einer Rechnung oder ein in `int` umgewandelter Wert außerhalb dieses Bereichs, hält der Mikrocontroller an. Eine Gleitkommazahl wird über `int` in eine Ganzzahl umgewandelt, daher gilt dieser Bereich auch dafür.
+- Reicht der Stack für eine Rekursion nicht aus, hält der Mikrocontroller an.
+- Eine C-Funktion wird mit `defffi` deklariert; die für AVR kompilierte Objektdatei wird mit `--link FILE` übergeben.
 - Eine Schleife, die nichts tut, wird ab `-O1` entfernt. Lesen Sie in einer Warteschleife zum Beispiel ein Register.
 - Wenn `main` endet, hält der Mikrocontroller an.
 - Mit `--linker-script FILE` lässt sich die Speicheraufteilung ändern. Ohne Angabe sind es 32 KiB Flash abzüglich der letzten 512 Bytes des Bootloaders und 2 KiB RAM. RAM-Adressen werden mit addiertem `0x800000` geschrieben, etwa `0x800100`.
-- Rechnen mit `f32` und `f64` führt zu einem Linkerfehler, weil es keine Hilfsfunktionen für AVR gibt.
+- Das Rechnen mit `f32` und `f64` übernehmen Hilfsfunktionen. Die benutzten kommen in den Flash (die für `f64` sind größer).
 - Gelinkt wird wie in Abschnitt 3.8 mit dem Linker der rustup-Toolchain.
 
 Ein Beispiel, das die LED mit einem Timer-Interrupt blinken lässt. Ein Interrupt wird im Register des jeweiligen Geräts eingeschaltet.
@@ -363,7 +366,7 @@ Ein Beispiel, das die LED mit einem Timer-Interrupt blinken lässt. Ein Interrup
 - Ein Programm mit einem Handler lässt Interrupts zu, sobald die globalen Variablen initialisiert sind. Richten Sie die Geräte am Anfang von `main` ein.
 - `enable-interrupt` und `#[exception(NAME)]` sind nicht verwendbar (Übersetzungsfehler).
 - Während ein Handler läuft, warten andere Interrupts. Wie jede andere Funktion kann ein Handler die Laufzeit nicht verwenden.
-- Ein einzelnes Lesen oder Schreiben einer globalen Variable wird nicht von einem Handler unterbrochen, auch nicht bei Werten von zwei Byte oder mehr. Eine Variable, für die dazu Interrupts gesperrt werden, nennt eine Warnung beim Kompilieren. Zwischen Lesen und Schreiben einer Aktualisierung (`(setf n (+ n 1))`) kann ein Interrupt kommen. Um eine Variable zu aktualisieren, die auch ein Handler schreibt, lesen Sie das Statusregister (Adresse `#x5F`) und merken es sich, schreiben 0 hinein, um Interrupts anzuhalten, und schreiben danach den gemerkten Wert zurück.
+- Ein einzelnes Lesen oder Schreiben einer globalen Variable wird nicht von einem Handler unterbrochen, auch nicht bei Werten von zwei Byte oder mehr. Dazu werden Interrupts beim Lesen einer Variable gesperrt, die ein Handler schreibt, und beim Schreiben einer Variable, die ein Handler liest oder schreibt; eine Warnung beim Kompilieren nennt die Variable. Zwischen Lesen und Schreiben einer Aktualisierung (`(setf n (+ n 1))`) kann ein Interrupt kommen. Um eine Variable zu aktualisieren, die auch ein Handler schreibt, lesen Sie das Statusregister (Adresse `#x5F`) und merken es sich, schreiben 0 hinein, um Interrupts anzuhalten, und schreiben danach den gemerkten Wert zurück.
 - Ein Interrupt ohne Handler hält den Mikrocontroller an.
 
 ## 4. Dumps

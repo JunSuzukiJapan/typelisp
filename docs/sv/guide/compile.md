@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ 45c66940dd590920b2dccfa8ce53c13c4865b2b0 -->
+<!-- translated-from: docs/ja/guide/compile.md @ 00b2198ebe05054debbc1a0d1f9ebf1a9835d7a0 -->
 # Kompilering
 
 Om du inte gör något annat körs typelisp-program i tolken. Dessutom finns två sätt att kompilera till
@@ -324,14 +324,17 @@ $ typl -c blink.typl --target avr-atmega328p -O2   # skapar blink.elf
 $ qemu-system-avr -M uno -display none -serial stdio -bios blink.elf   # kör i QEMU
 ```
 
-- Det finns ingen runtime, så ett program som använder den ger ett **kompileringsfel**. Felet anger vad som behövs och genom vilka funktioner det nås. Det som kan användas är beräkningar med heltal av fast bredd (`i8` till `u32`), `bool` och `char`, funktionsanrop, villkor, loopar, `defvar` och `defconstant` med sådana värden samt `volatile-read-u8` med flera där adressen skrivs som ett tal eller en konstant.
-- Det som inte kan användas är värden i heapen, till exempel strängar, listor och strukturer; beräkningar med `int`; rekursion, `catch` och anrop av funktionsvärden; anrop av C-funktioner; `volatile`-åtkomst där adressen beräknas.
+- Det finns ingen runtime, så ett program som använder den ger ett **kompileringsfel**. Felet anger vad som behövs och genom vilka funktioner det nås. Det som kan användas är beräkningar med heltal av fast bredd (`i8` till `u32`), `int`, `f32`, `f64`, `bool` och `char`, funktionsanrop (även rekursiva), villkor, loopar, `defvar` och `defconstant` med sådana värden, `volatile-read-u8` med flera samt anrop av C-funktioner.
+- Det som inte kan användas är värden i heapen, till exempel strängar, listor och strukturer; `catch` och anrop av funktionsvärden; anrop av C-funktioner som tar en sträng eller en funktion; matematiska funktioner av flyttal som `sin` och `expt` (`sqrt` och avrundning som `floor` kan användas).
 - En avbrottshanterare skrivs `#[interrupt(N)]` ([Syntax](../reference/syntax.md), avsnitt 3.17). `N` är avbrottets nummer på ATmega328P, 1 till 25 med återställning räknad som 0 (spill i timer 1 är 13). Se exemplet nedan.
 - Division med 0 stoppar mikrokontrollern på stället (inga fler avbrott kommer heller). Detsamma gäller `/` av det minsta värdet med tecken med `-1`.
+- En `int` går från -16384 till 16383. Om svaret på en beräkning, eller ett värde som omvandlas till `int`, hamnar utanför det intervallet stannar mikrokontrollern. Ett flyttal omvandlas till heltal via `int`, så intervallet gäller även där.
+- Om stacken tar slut vid rekursion stannar mikrokontrollern.
+- Deklarera en C-funktion med `defffi` och skicka med en objektfil kompilerad för AVR med `--link FILE`.
 - En loop som inte gör något tas bort från och med `-O1`. Läs till exempel ett register i en vänteloop.
 - När `main` är klar stannar mikrokontrollern.
 - Minnets placering ändras med `--linker-script FILE`. Utan den är det 32 KiB flash minus de sista 512 byten, som är startladdarens, och 2 KiB RAM. RAM-adresser skrivs med `0x800000` adderat, till exempel `0x800100`.
-- Beräkningar med `f32` och `f64` ger ett länkfel, eftersom det inte finns några hjälpfunktioner för AVR.
+- Beräkningar med `f32` och `f64` görs av hjälpfunktioner. De som används hamnar i flashminnet (de för `f64` är större).
 - Länkningen använder länkaren i rustups verktygskedja, som i avsnitt 3.8.
 
 Ett exempel som blinkar lysdioden med ett timeravbrott. Ett avbrott slås på i enhetens eget register.
@@ -360,7 +363,7 @@ Ett exempel som blinkar lysdioden med ett timeravbrott. Ett avbrott slås på i 
 - Ett program med en hanterare släpper fram avbrott så snart de globala variablerna är initierade. Ställ in enheterna i början av `main`.
 - `enable-interrupt` och `#[exception(NAME)]` kan inte användas (kompileringsfel).
 - Medan en hanterare körs väntar andra avbrott. Som alla andra funktioner kan en hanterare inte använda körtidsmiljön.
-- En enskild läsning eller skrivning av en global variabel avbryts inte av en hanterare, inte ens för värden på två byte eller mer. En variabel som kräver att avbrott stängs av för detta anges med en varning vid kompileringen. Mellan läsningen och skrivningen i en uppdatering (`(setf n (+ n 1))`) kan ett avbrott komma. För att uppdatera en variabel som en hanterare också skriver, läs och spara statusregistret (adress `#x5F`), skriv 0 i det för att stoppa avbrott och skriv sedan tillbaka det sparade värdet.
+- En enskild läsning eller skrivning av en global variabel avbryts inte av en hanterare, inte ens för värden på två byte eller mer. För detta stängs avbrott av när en variabel som en hanterare skriver läses och när en variabel som en hanterare läser eller skriver skrivs, och en varning vid kompileringen anger variabeln. Mellan läsningen och skrivningen i en uppdatering (`(setf n (+ n 1))`) kan ett avbrott komma. För att uppdatera en variabel som en hanterare också skriver, läs och spara statusregistret (adress `#x5F`), skriv 0 i det för att stoppa avbrott och skriv sedan tillbaka det sparade värdet.
 - Ett avbrott utan hanterare stoppar mikrokontrollern.
 
 ## 4. Dumpar

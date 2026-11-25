@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ 45c66940dd590920b2dccfa8ce53c13c4865b2b0 -->
+<!-- translated-from: docs/ja/guide/compile.md @ 00b2198ebe05054debbc1a0d1f9ebf1a9835d7a0 -->
 # Kompilasi
 
 Jika Anda tidak melakukan apa-apa lagi, program typelisp berjalan di interpreter. Selain itu ada dua
@@ -326,14 +326,17 @@ $ typl -c blink.typl --target avr-atmega328p -O2   # menghasilkan blink.elf
 $ qemu-system-avr -M uno -display none -serial stdio -bios blink.elf   # jalankan di QEMU
 ```
 
-- Tidak ada runtime, jadi program yang memakai runtime adalah **galat kompilasi**. Galat menyebutkan apa yang diperlukan dan melalui fungsi mana hal itu dicapai. Yang dapat dipakai: perhitungan bilangan bulat berlebar tetap (`i8` sampai `u32`), `bool`, dan `char`, pemanggilan fungsi, percabangan, perulangan, `defvar` dan `defconstant` yang berisi nilai tersebut, serta `volatile-read-u8` dan sejenisnya dengan alamat yang ditulis sebagai angka atau konstanta.
-- Yang tidak dapat dipakai: nilai yang berada di heap seperti string, list, dan struct; perhitungan `int`; rekursi, `catch`, dan pemanggilan nilai fungsi; pemanggilan fungsi C; akses `volatile` yang alamatnya dihitung.
+- Tidak ada runtime, jadi program yang memakai runtime adalah **galat kompilasi**. Galat menyebutkan apa yang diperlukan dan melalui fungsi mana hal itu dicapai. Yang dapat dipakai: perhitungan bilangan bulat berlebar tetap (`i8` sampai `u32`), `int`, `f32`, `f64`, `bool`, dan `char`, pemanggilan fungsi (juga yang rekursif), percabangan, perulangan, `defvar` dan `defconstant` yang berisi nilai tersebut, `volatile-read-u8` dan sejenisnya, serta pemanggilan fungsi C.
+- Yang tidak dapat dipakai: nilai yang berada di heap seperti string, list, dan struct; `catch` dan pemanggilan nilai fungsi; pemanggilan fungsi C yang menerima string atau fungsi; fungsi matematika bilangan titik mengambang seperti `sin` dan `expt` (`sqrt` dan pembulatan seperti `floor` dapat dipakai).
 - Penangan interupsi ditulis `#[interrupt(N)]` ([Sintaks](../reference/syntax.md), bagian 3.17). `N` adalah nomor interupsi ATmega328P, 1 sampai 25 dengan reset dihitung 0 (luapan timer 1 adalah 13). Lihat contoh di bawah.
 - Pembagian dengan 0 menghentikan mikrokontroler di tempat itu (interupsi pun tidak datang lagi). Begitu pula `/` dari nilai bertanda terkecil dengan `-1`.
+- `int` berkisar dari -16384 sampai 16383. Bila hasil perhitungan, atau nilai yang diubah menjadi `int`, berada di luar kisaran itu, mikrokontroler berhenti. Bilangan titik mengambang diubah menjadi bilangan bulat melalui `int`, jadi kisaran itu juga batas yang dapat diubah.
+- Bila rekursi kehabisan stack, mikrokontroler berhenti.
+- Deklarasikan fungsi C dengan `defffi`, dan berikan berkas objek yang dikompilasi untuk AVR dengan `--link FILE`.
 - Perulangan yang tidak melakukan apa-apa dihapus pada `-O1` ke atas. Dalam perulangan yang menunggu, bacalah misalnya sebuah register.
 - Ketika `main` berakhir, mikrokontroler berhenti.
 - Tata letak memori diubah dengan `--linker-script FILE`. Jika dihilangkan, yang dipakai adalah flash 32 KiB dikurangi 512 byte terakhir milik bootloader, dan RAM 2 KiB. Alamat RAM ditulis dengan ditambah `0x800000`, seperti `0x800100`.
-- Perhitungan `f32` dan `f64` adalah galat penautan, karena tidak ada fungsi pembantu untuk AVR.
+- Perhitungan `f32` dan `f64` dilakukan oleh fungsi pembantu. Yang dipakai masuk ke flash (yang untuk `f64` lebih besar).
 - Penautan memakai linker dari toolchain rustup, seperti pada bagian 3.8.
 
 Contoh yang mengedipkan LED dengan interupsi timer. Interupsi diaktifkan di register perangkatnya sendiri.
@@ -362,7 +365,7 @@ Contoh yang mengedipkan LED dengan interupsi timer. Interupsi diaktifkan di regi
 - Program yang punya penangan menerima interupsi begitu variabel globalnya selesai diinisialisasi. Atur perangkat di awal `main`.
 - `enable-interrupt` dan `#[exception(NAME)]` tidak dapat dipakai (galat kompilasi).
 - Selama sebuah penangan berjalan, interupsi lain menunggu. Seperti fungsi lain, penangan tidak dapat memakai runtime.
-- Satu pembacaan atau penulisan variabel global tidak disela oleh penangan, juga untuk nilai dua byte atau lebih. Variabel yang untuk itu memerlukan interupsi dimatikan disebutkan dalam peringatan saat kompilasi. Di antara pembacaan dan penulisan sebuah pembaruan (`(setf n (+ n 1))`) interupsi dapat datang. Untuk memperbarui variabel yang juga ditulis penangan, baca dan simpan register status (alamat `#x5F`), tulis 0 untuk menghentikan interupsi, lalu tulis kembali nilai yang disimpan.
+- Satu pembacaan atau penulisan variabel global tidak disela oleh penangan, juga untuk nilai dua byte atau lebih. Untuk itu interupsi dimatikan saat membaca variabel yang ditulis penangan dan saat menulis variabel yang dibaca atau ditulis penangan, dan variabel itu disebutkan dalam peringatan saat kompilasi. Di antara pembacaan dan penulisan sebuah pembaruan (`(setf n (+ n 1))`) interupsi dapat datang. Untuk memperbarui variabel yang juga ditulis penangan, baca dan simpan register status (alamat `#x5F`), tulis 0 untuk menghentikan interupsi, lalu tulis kembali nilai yang disimpan.
 - Interupsi tanpa penangan menghentikan mikrokontroler.
 
 ## 4. Dump

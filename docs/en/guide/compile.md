@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ 45c66940dd590920b2dccfa8ce53c13c4865b2b0 -->
+<!-- translated-from: docs/ja/guide/compile.md @ 00b2198ebe05054debbc1a0d1f9ebf1a9835d7a0 -->
 # Compiling
 
 Unless you do anything else, typelisp programs run in the interpreter. In addition there are two
@@ -330,14 +330,17 @@ $ typl -c blink.typl --target avr-atmega328p -O2   # makes blink.elf
 $ qemu-system-avr -M uno -display none -serial stdio -bios blink.elf   # run it in QEMU
 ```
 
-- There is no runtime, so a program that uses the runtime is a **compile error**. The error says what is needed and through which functions it is reached. What can be used: arithmetic on fixed-width integers (`i8` to `u32`), `bool` and `char`, function calls, conditionals, loops, `defvar` and `defconstant` holding those values, and `volatile-read-u8` and the like with the address written as a number or a constant.
-- What cannot be used: values that live in the heap, such as strings, lists and structs; `int` arithmetic; recursion, `catch`, and calls of function values; calls of C functions; `volatile` accesses whose address is computed.
+- There is no runtime, so a program that uses the runtime is a **compile error**. The error says what is needed and through which functions it is reached. What can be used: arithmetic on fixed-width integers (`i8` to `u32`), `int`, `f32`, `f64`, `bool` and `char`, function calls (recursive ones too), conditionals, loops, `defvar` and `defconstant` holding those values, `volatile-read-u8` and the like, and calls of C functions.
+- What cannot be used: values that live in the heap, such as strings, lists and structs; `catch`, and calls of function values; calls of C functions that take a string or a function; mathematical functions of floating-point numbers such as `sin` and `expt` (`sqrt`, and rounding such as `floor`, can be used).
 - An interrupt handler is written `#[interrupt(N)]` ([Syntax](../reference/syntax.md), section 3.17). `N` is the ATmega328P's number of the interrupt, 1 to 25 counting reset as 0 (timer 1 overflowing is 13). See the example below.
 - Dividing by 0 stops the microcontroller there (no interrupt comes any more). So does `/` of the smallest signed value by `-1`.
+- An `int` is from -16384 to 16383. When the answer of a calculation, or a value converted to `int`, is outside that range, the microcontroller stops. A floating-point number is converted to an integer by way of `int`, so that range is also what can be converted.
+- When a recursion runs out of stack, the microcontroller stops.
+- Declare a C function with `defffi`, and pass an object file compiled for AVR with `--link FILE`.
 - A loop that does nothing is removed at `-O1` and above. In a loop that waits, read a register, for example.
 - When `main` ends, the microcontroller stops.
 - `--linker-script FILE` changes where memory is. Without it, memory is 32 KiB of flash less the last 512 bytes, which are the boot loader's, and 2 KiB of RAM. Write a RAM address with `0x800000` added, as in `0x800100`.
-- `f32` and `f64` arithmetic is a link error, because there are no helper functions for AVR.
+- `f32` and `f64` arithmetic is done by helper functions. Those that are used go into flash (those for `f64` are larger).
 - Linking uses the linker of the rustup toolchain, as in section 3.8.
 
 An example that blinks the LED by a timer's interrupt. An interrupt is enabled in the device's own register.
@@ -366,7 +369,7 @@ An example that blinks the LED by a timer's interrupt. An interrupt is enabled i
 - A program with a handler lets interrupts come once its global variables are initialized. Set the devices up at the start of `main`.
 - `enable-interrupt` and `#[exception(NAME)]` cannot be used (a compile error).
 - While a handler runs, other interrupts wait. Like any other function, a handler cannot use the runtime.
-- One read or write of a global variable is not broken into by a handler, even of a value of two bytes or more. A variable that needs interrupts disabled for this is named by a warning at compile time. An interrupt can come between the read and the write of an update (`(setf n (+ n 1))`). To update a variable a handler also writes, read the status register (address `#x5F`) and keep it, write 0 to it to stop interrupts, and write the kept value back afterwards.
+- One read or write of a global variable is not broken into by a handler, even of a value of two bytes or more. Interrupts are disabled for this when reading a variable a handler writes and when writing a variable a handler reads or writes, and a warning at compile time names the variable. An interrupt can come between the read and the write of an update (`(setf n (+ n 1))`). To update a variable a handler also writes, read the status register (address `#x5F`) and keep it, write 0 to it to stop interrupts, and write the kept value back afterwards.
 - An interrupt with no handler stops the microcontroller.
 
 ## 4. Dumps

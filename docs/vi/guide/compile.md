@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ 45c66940dd590920b2dccfa8ce53c13c4865b2b0 -->
+<!-- translated-from: docs/ja/guide/compile.md @ 00b2198ebe05054debbc1a0d1f9ebf1a9835d7a0 -->
 # Biên dịch
 
 Nếu bạn không làm gì thêm, chương trình typelisp chạy trong trình thông dịch. Ngoài ra còn có hai
@@ -320,14 +320,17 @@ $ typl -c blink.typl --target avr-atmega328p -O2   # tạo ra blink.elf
 $ qemu-system-avr -M uno -display none -serial stdio -bios blink.elf   # chạy trong QEMU
 ```
 
-- Không có runtime, nên chương trình dùng runtime là **lỗi biên dịch**. Lỗi cho biết cần gì và đi tới đó qua những hàm nào. Những thứ dùng được: phép tính trên số nguyên có độ rộng cố định (từ `i8` đến `u32`), `bool` và `char`, lời gọi hàm, rẽ nhánh, vòng lặp, `defvar` và `defconstant` chứa các giá trị đó, và `volatile-read-u8` cùng các hàm tương tự với địa chỉ viết bằng số hoặc hằng.
-- Những thứ không dùng được: giá trị nằm trên heap như chuỗi, danh sách và struct; phép tính trên `int`; đệ quy, `catch` và lời gọi giá trị hàm; lời gọi hàm C; truy cập `volatile` có địa chỉ được tính ra.
+- Không có runtime, nên chương trình dùng runtime là **lỗi biên dịch**. Lỗi cho biết cần gì và đi tới đó qua những hàm nào. Những thứ dùng được: phép tính trên số nguyên có độ rộng cố định (từ `i8` đến `u32`), `int`, `f32`, `f64`, `bool` và `char`, lời gọi hàm (kể cả đệ quy), rẽ nhánh, vòng lặp, `defvar` và `defconstant` chứa các giá trị đó, `volatile-read-u8` cùng các hàm tương tự, và lời gọi hàm C.
+- Những thứ không dùng được: giá trị nằm trên heap như chuỗi, danh sách và struct; `catch` và lời gọi giá trị hàm; lời gọi hàm C nhận chuỗi hoặc hàm; các hàm toán học của số dấu phẩy động như `sin` và `expt` (`sqrt` và các phép làm tròn như `floor` thì dùng được).
 - Trình xử lý ngắt được viết bằng `#[interrupt(N)]` ([Cú pháp](../reference/syntax.md), mục 3.17). `N` là số hiệu ngắt của ATmega328P, từ 1 đến 25 với reset tính là 0 (tràn bộ định thời 1 là 13). Xem ví dụ bên dưới.
 - Chia cho 0 làm vi điều khiển dừng ngay tại đó (cũng không còn ngắt nào đến). Phép `/` của giá trị có dấu nhỏ nhất cho `-1` cũng vậy.
+- `int` nằm trong khoảng từ -16384 đến 16383. Khi kết quả của một phép tính, hoặc giá trị được chuyển sang `int`, nằm ngoài khoảng này thì vi điều khiển dừng. Số dấu phẩy động được chuyển sang số nguyên qua `int`, nên khoảng chuyển được cũng là khoảng này.
+- Khi đệ quy làm hết ngăn xếp thì vi điều khiển dừng.
+- Khai báo hàm C bằng `defffi`, và truyền tệp đối tượng đã biên dịch cho AVR bằng `--link FILE`.
 - Vòng lặp không làm gì sẽ bị xóa từ `-O1` trở lên. Trong vòng lặp chờ, hãy đọc một thanh ghi chẳng hạn.
 - Khi `main` kết thúc, vi điều khiển dừng lại.
 - Bố trí bộ nhớ được thay đổi bằng `--linker-script FILE`. Nếu bỏ qua, đó là 32 KiB flash trừ 512 byte cuối của bộ nạp khởi động, và 2 KiB RAM. Địa chỉ RAM được viết cộng thêm `0x800000`, ví dụ `0x800100`.
-- Phép tính trên `f32` và `f64` là lỗi liên kết, vì không có hàm hỗ trợ cho AVR.
+- Phép tính trên `f32` và `f64` do các hàm hỗ trợ thực hiện. Những hàm được dùng sẽ nằm trong flash (các hàm của `f64` lớn hơn).
 - Việc liên kết dùng trình liên kết của toolchain rustup như ở mục 3.8.
 
 Ví dụ nháy LED bằng ngắt của bộ định thời. Ngắt được bật trong thanh ghi của chính thiết bị.
@@ -356,7 +359,7 @@ Ví dụ nháy LED bằng ngắt của bộ định thời. Ngắt được bậ
 - Chương trình có trình xử lý sẽ nhận ngắt ngay khi các biến toàn cục được khởi tạo xong. Hãy thiết lập thiết bị ở đầu `main`.
 - Không dùng được `enable-interrupt` và `#[exception(NAME)]` (lỗi biên dịch).
 - Trong lúc một trình xử lý chạy, các ngắt khác phải chờ. Như mọi hàm khác, trình xử lý không dùng được runtime.
-- Một lần đọc hoặc ghi biến toàn cục không bị trình xử lý xen vào giữa, kể cả với giá trị từ hai byte trở lên. Biến cần tắt ngắt cho việc này sẽ được nêu trong cảnh báo khi biên dịch. Giữa lúc đọc và lúc ghi của một phép cập nhật (`(setf n (+ n 1))`) thì ngắt có thể đến. Để cập nhật biến mà trình xử lý cũng ghi, hãy đọc và giữ lại thanh ghi trạng thái (địa chỉ `#x5F`), ghi 0 vào đó để dừng ngắt, rồi ghi lại giá trị đã giữ.
+- Một lần đọc hoặc ghi biến toàn cục không bị trình xử lý xen vào giữa, kể cả với giá trị từ hai byte trở lên. Để làm vậy, ngắt được tắt khi đọc biến mà trình xử lý ghi và khi ghi biến mà trình xử lý đọc hoặc ghi, và biến đó được nêu trong cảnh báo khi biên dịch. Giữa lúc đọc và lúc ghi của một phép cập nhật (`(setf n (+ n 1))`) thì ngắt có thể đến. Để cập nhật biến mà trình xử lý cũng ghi, hãy đọc và giữ lại thanh ghi trạng thái (địa chỉ `#x5F`), ghi 0 vào đó để dừng ngắt, rồi ghi lại giá trị đã giữ.
 - Ngắt không có trình xử lý sẽ làm vi điều khiển dừng.
 
 ## 4. Dump

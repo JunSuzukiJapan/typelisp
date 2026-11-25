@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ 45c66940dd590920b2dccfa8ce53c13c4865b2b0 -->
+<!-- translated-from: docs/ja/guide/compile.md @ 00b2198ebe05054debbc1a0d1f9ebf1a9835d7a0 -->
 # Compilazione
 
 Se non fai altro, i programmi typelisp vengono eseguiti nell'interprete. Inoltre esistono due modi per
@@ -325,14 +325,17 @@ $ typl -c blink.typl --target avr-atmega328p -O2   # crea blink.elf
 $ qemu-system-avr -M uno -display none -serial stdio -bios blink.elf   # esegue in QEMU
 ```
 
-- Non c'è un runtime, quindi un programma che lo usa è un **errore di compilazione**. L'errore indica che cosa serve e attraverso quali funzioni ci si arriva. Si possono usare: i calcoli sugli interi a larghezza fissa (da `i8` a `u32`), `bool` e `char`, le chiamate di funzione, le condizioni, i cicli, `defvar` e `defconstant` con questi valori, e `volatile-read-u8` e simili con l'indirizzo scritto come numero o costante.
-- Non si possono usare: i valori che stanno nello heap, come stringhe, liste e strutture; i calcoli su `int`; la ricorsione, `catch` e le chiamate di valori funzione; le chiamate di funzioni C; gli accessi `volatile` con indirizzo calcolato.
+- Non c'è un runtime, quindi un programma che lo usa è un **errore di compilazione**. L'errore indica che cosa serve e attraverso quali funzioni ci si arriva. Si possono usare: i calcoli sugli interi a larghezza fissa (da `i8` a `u32`), `int`, `f32`, `f64`, `bool` e `char`, le chiamate di funzione (anche ricorsive), le condizioni, i cicli, `defvar` e `defconstant` con questi valori, `volatile-read-u8` e simili, e le chiamate di funzioni C.
+- Non si possono usare: i valori che stanno nello heap, come stringhe, liste e strutture; `catch` e le chiamate di valori funzione; le chiamate di funzioni C che ricevono una stringa o una funzione; le funzioni matematiche in virgola mobile come `sin` ed `expt` (`sqrt` e gli arrotondamenti come `floor` si possono usare).
 - Un gestore di interrupt si scrive `#[interrupt(N)]` ([Sintassi](../reference/syntax.md), sezione 3.17). `N` è il numero dell'interrupt dell'ATmega328P, da 1 a 25 contando il reset come 0 (l'overflow del timer 1 è 13). Vedi l'esempio sotto.
 - Una divisione per 0 ferma il microcontrollore in quel punto (non arrivano più nemmeno interrupt). Lo stesso vale per `/` del più piccolo valore con segno per `-1`.
+- Un `int` va da -16384 a 16383. Se il risultato di un calcolo, o un valore convertito in `int`, è fuori da questo intervallo, il microcontrollore si ferma. Un numero in virgola mobile viene convertito in intero passando per `int`, quindi questo intervallo è anche ciò che si può convertire.
+- Se una ricorsione esaurisce lo stack, il microcontrollore si ferma.
+- Una funzione C si dichiara con `defffi`, e il file oggetto compilato per AVR si passa con `--link FILE`.
 - Un ciclo che non fa nulla scompare da `-O1` in su. In un ciclo di attesa, per esempio, si legga un registro.
 - Quando `main` termina, il microcontrollore si ferma.
 - La disposizione della memoria si cambia con `--linker-script FILE`. Se omesso, sono 32 KiB di flash meno gli ultimi 512 byte del bootloader, e 2 KiB di RAM. Gli indirizzi di RAM si scrivono sommando `0x800000`, come `0x800100`.
-- I calcoli su `f32` e `f64` sono un errore di link, perché non ci sono funzioni ausiliarie per AVR.
+- I calcoli su `f32` e `f64` sono svolti da funzioni ausiliarie. Quelle usate finiscono nella flash (quelle per `f64` sono più grandi).
 - Il link usa il linker della toolchain di rustup, come nella sezione 3.8.
 
 Un esempio che fa lampeggiare il LED con l'interrupt di un timer. Un interrupt si abilita nel registro della periferica.
@@ -361,7 +364,7 @@ Un esempio che fa lampeggiare il LED con l'interrupt di un timer. Un interrupt s
 - Un programma con un gestore accetta gli interrupt appena le variabili globali sono inizializzate. Configurare le periferiche all'inizio di `main`.
 - `enable-interrupt` e `#[exception(NAME)]` non si possono usare (errore di compilazione).
 - Mentre un gestore è in esecuzione, gli altri interrupt attendono. Come ogni altra funzione, un gestore non può usare il runtime.
-- Una singola lettura o scrittura di una variabile globale non viene interrotta da un gestore, anche per valori di due byte o più. Una variabile che per questo richiede di disabilitare gli interrupt viene segnalata da un avviso in compilazione. Tra la lettura e la scrittura di un aggiornamento (`(setf n (+ n 1))`) può arrivare un interrupt. Per aggiornare una variabile scritta anche da un gestore, leggere e conservare il registro di stato (indirizzo `#x5F`), scriverci 0 per fermare gli interrupt e poi riscrivere il valore conservato.
+- Una singola lettura o scrittura di una variabile globale non viene interrotta da un gestore, anche per valori di due byte o più. Per questo gli interrupt vengono disabilitati quando si legge una variabile scritta da un gestore e quando si scrive una variabile letta o scritta da un gestore, e un avviso in compilazione segnala la variabile. Tra la lettura e la scrittura di un aggiornamento (`(setf n (+ n 1))`) può arrivare un interrupt. Per aggiornare una variabile scritta anche da un gestore, leggere e conservare il registro di stato (indirizzo `#x5F`), scriverci 0 per fermare gli interrupt e poi riscrivere il valore conservato.
 - Un interrupt senza gestore ferma il microcontrollore.
 
 ## 4. Dump

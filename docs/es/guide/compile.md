@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ 45c66940dd590920b2dccfa8ce53c13c4865b2b0 -->
+<!-- translated-from: docs/ja/guide/compile.md @ 00b2198ebe05054debbc1a0d1f9ebf1a9835d7a0 -->
 # Compilación
 
 Si no se hace nada más, los programas de typelisp se ejecutan en el intérprete. Además hay dos formas de
@@ -322,14 +322,17 @@ $ typl -c blink.typl --target avr-atmega328p -O2   # crea blink.elf
 $ qemu-system-avr -M uno -display none -serial stdio -bios blink.elf   # ejecutar en QEMU
 ```
 
-- No hay runtime, así que un programa que lo use es un **error de compilación**. El error indica qué se necesita y a través de qué funciones se llega a ello. Se pueden usar: cálculos con enteros de ancho fijo (de `i8` a `u32`), `bool` y `char`, llamadas a funciones, condicionales, bucles, `defvar` y `defconstant` con esos valores, y `volatile-read-u8` y similares con la dirección escrita como número o constante.
-- No se pueden usar: valores que viven en el heap, como cadenas, listas y estructuras; cálculos con `int`; la recursión, `catch` y las llamadas a valores de función; las llamadas a funciones de C; los accesos `volatile` cuya dirección se calcula.
+- No hay runtime, así que un programa que lo use es un **error de compilación**. El error indica qué se necesita y a través de qué funciones se llega a ello. Se pueden usar: cálculos con enteros de ancho fijo (de `i8` a `u32`), `int`, `f32`, `f64`, `bool` y `char`, llamadas a funciones (también recursivas), condicionales, bucles, `defvar` y `defconstant` con esos valores, `volatile-read-u8` y similares, y llamadas a funciones de C.
+- No se pueden usar: valores que viven en el heap, como cadenas, listas y estructuras; `catch` y las llamadas a valores de función; las llamadas a funciones de C que reciben una cadena o una función; las funciones matemáticas de coma flotante como `sin` y `expt` (`sqrt` y los redondeos como `floor` sí se pueden usar).
 - Un manejador de interrupción se escribe `#[interrupt(N)]` ([Sintaxis](../reference/syntax.md), sección 3.17). `N` es el número de la interrupción del ATmega328P, de 1 a 25 contando el reinicio como 0 (el desbordamiento del temporizador 1 es 13). Vea el ejemplo de abajo.
 - Dividir por 0 detiene el microcontrolador en ese punto (tampoco llegan más interrupciones). Lo mismo ocurre con `/` del menor valor con signo entre `-1`.
+- Un `int` va de -16384 a 16383. Si el resultado de un cálculo, o un valor convertido a `int`, queda fuera de ese intervalo, el microcontrolador se detiene. Un número de coma flotante se convierte en entero pasando por `int`, así que ese intervalo es también lo que se puede convertir.
+- Si una recursión agota la pila, el microcontrolador se detiene.
+- Una función de C se declara con `defffi`, y el archivo objeto compilado para AVR se pasa con `--link FILE`.
 - Un bucle que no hace nada desaparece con `-O1` o superior. En un bucle de espera, lea por ejemplo un registro.
 - Cuando `main` termina, el microcontrolador se detiene.
 - La disposición de la memoria se cambia con `--linker-script FILE`. Si se omite, son 32 KiB de flash menos los últimos 512 bytes del cargador de arranque, y 2 KiB de RAM. Las direcciones de RAM se escriben sumando `0x800000`, como `0x800100`.
-- Los cálculos con `f32` y `f64` son un error de enlace, porque no hay funciones auxiliares para AVR.
+- Los cálculos con `f32` y `f64` los hacen funciones auxiliares. Las que se usan ocupan flash (las de `f64` son más grandes).
 - El enlace usa el enlazador de la toolchain de rustup, como en la sección 3.8.
 
 Un ejemplo que hace parpadear el LED con la interrupción de un temporizador. Una interrupción se habilita en el registro del propio periférico.
@@ -358,7 +361,7 @@ Un ejemplo que hace parpadear el LED con la interrupción de un temporizador. Un
 - Un programa con un manejador admite interrupciones en cuanto se inicializan sus variables globales. Configure los periféricos al comienzo de `main`.
 - No se pueden usar `enable-interrupt` ni `#[exception(NAME)]` (error de compilación).
 - Mientras se ejecuta un manejador, las demás interrupciones esperan. Como cualquier otra función, un manejador no puede usar el runtime.
-- Una lectura o escritura de una variable global no la interrumpe un manejador, aunque el valor sea de dos bytes o más. Una variable que requiere deshabilitar las interrupciones para ello se indica con una advertencia al compilar. Entre la lectura y la escritura de una actualización (`(setf n (+ n 1))`) sí puede llegar una interrupción. Para actualizar una variable que también escribe un manejador, lea y guarde el registro de estado (dirección `#x5F`), escriba 0 en él para detener las interrupciones y después vuelva a escribir el valor guardado.
+- Una lectura o escritura de una variable global no la interrumpe un manejador, aunque el valor sea de dos bytes o más. Para ello se deshabilitan las interrupciones al leer una variable que escribe un manejador y al escribir una variable que un manejador lee o escribe, y una advertencia al compilar indica la variable. Entre la lectura y la escritura de una actualización (`(setf n (+ n 1))`) sí puede llegar una interrupción. Para actualizar una variable que también escribe un manejador, lea y guarde el registro de estado (dirección `#x5F`), escriba 0 en él para detener las interrupciones y después vuelva a escribir el valor guardado.
 - Una interrupción sin manejador detiene el microcontrolador.
 
 ## 4. Volcados

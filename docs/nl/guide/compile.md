@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ 45c66940dd590920b2dccfa8ce53c13c4865b2b0 -->
+<!-- translated-from: docs/ja/guide/compile.md @ 00b2198ebe05054debbc1a0d1f9ebf1a9835d7a0 -->
 # Compileren
 
 Tenzij je iets anders doet, draaien typelisp-programma's in de interpreter. Daarnaast zijn er twee
@@ -331,14 +331,17 @@ $ typl -c blink.typl --target avr-atmega328p -O2   # maakt blink.elf
 $ qemu-system-avr -M uno -display none -serial stdio -bios blink.elf   # in QEMU uitvoeren
 ```
 
-- Er is geen runtime, dus een programma dat die gebruikt is een **compileerfout**. De fout vermeldt wat er nodig is en via welke functies het wordt bereikt. Bruikbaar zijn: rekenen met gehele getallen van vaste breedte (`i8` tot en met `u32`), `bool` en `char`, functieaanroepen, voorwaarden, lussen, `defvar` en `defconstant` met zulke waarden, en `volatile-read-u8` en dergelijke met het adres als getal of constante geschreven.
-- Niet bruikbaar zijn: waarden in de heap, zoals strings, lijsten en structs; rekenen met `int`; recursie, `catch` en aanroepen van functiewaarden; aanroepen van C-functies; `volatile`-toegang met een berekend adres.
+- Er is geen runtime, dus een programma dat die gebruikt is een **compileerfout**. De fout vermeldt wat er nodig is en via welke functies het wordt bereikt. Bruikbaar zijn: rekenen met gehele getallen van vaste breedte (`i8` tot en met `u32`), `int`, `f32`, `f64`, `bool` en `char`, functieaanroepen (ook recursieve), voorwaarden, lussen, `defvar` en `defconstant` met zulke waarden, `volatile-read-u8` en dergelijke, en aanroepen van C-functies.
+- Niet bruikbaar zijn: waarden in de heap, zoals strings, lijsten en structs; `catch` en aanroepen van functiewaarden; aanroepen van C-functies die een string of een functie krijgen; wiskundige functies van drijvendekommagetallen zoals `sin` en `expt` (`sqrt` en afronden zoals `floor` zijn wel bruikbaar).
 - Een interrupthandler schrijf je als `#[interrupt(N)]` ([Syntaxis](../reference/syntax.md), paragraaf 3.17). `N` is het interruptnummer van de ATmega328P, 1 tot en met 25 met reset als 0 geteld (overloop van timer 1 is 13). Zie het voorbeeld hieronder.
 - Delen door 0 stopt de microcontroller ter plekke (er komen ook geen interrupts meer). Dat geldt ook voor `/` van de kleinste waarde met teken door `-1`.
+- Een `int` loopt van -16384 tot en met 16383. Ligt de uitkomst van een berekening, of een naar `int` omgezette waarde, buiten dat bereik, dan stopt de microcontroller. Een drijvendekommagetal wordt via `int` naar een geheel getal omgezet, dus dat bereik geldt ook daarvoor.
+- Raakt de stack bij een recursie op, dan stopt de microcontroller.
+- Een C-functie declareer je met `defffi`; het voor AVR gecompileerde objectbestand geef je mee met `--link FILE`.
 - Een lus die niets doet, verdwijnt vanaf `-O1`. Lees in een wachtlus bijvoorbeeld een register.
 - Als `main` eindigt, stopt de microcontroller.
 - Met `--linker-script FILE` verandert u de geheugenindeling. Zonder deze optie is dat 32 KiB flash min de laatste 512 bytes van de bootloader, en 2 KiB RAM. RAM-adressen worden geschreven met `0x800000` erbij opgeteld, zoals `0x800100`.
-- Rekenen met `f32` en `f64` is een linkfout, omdat er geen hulpfuncties voor AVR zijn.
+- Het rekenen met `f32` en `f64` doen hulpfuncties. De gebruikte komen in de flash (die voor `f64` zijn groter).
 - Voor het linken wordt, net als in paragraaf 3.8, de linker van de rustup-toolchain gebruikt.
 
 Een voorbeeld dat de led laat knipperen met een timerinterrupt. Een interrupt schakel je in het register van het apparaat zelf in.
@@ -367,7 +370,7 @@ Een voorbeeld dat de led laat knipperen met een timerinterrupt. Een interrupt sc
 - Een programma met een handler laat interrupts toe zodra de globale variabelen geïnitialiseerd zijn. Stel de apparaten in aan het begin van `main`.
 - `enable-interrupt` en `#[exception(NAME)]` zijn niet bruikbaar (compileerfout).
 - Terwijl een handler loopt, wachten andere interrupts. Net als elke andere functie kan een handler de runtime niet gebruiken.
-- Eén keer lezen of schrijven van een globale variabele wordt niet door een handler onderbroken, ook niet bij waarden van twee bytes of meer. Een variabele waarvoor daartoe interrupts worden uitgeschakeld, wordt bij het compileren met een waarschuwing gemeld. Tussen het lezen en schrijven van een bijwerking (`(setf n (+ n 1))`) kan wel een interrupt komen. Om een variabele bij te werken die een handler ook schrijft, lees en bewaar je het statusregister (adres `#x5F`), schrijf je er 0 in om interrupts te stoppen, en schrijf je daarna de bewaarde waarde terug.
+- Eén keer lezen of schrijven van een globale variabele wordt niet door een handler onderbroken, ook niet bij waarden van twee bytes of meer. Daartoe worden interrupts uitgeschakeld bij het lezen van een variabele die een handler schrijft en bij het schrijven van een variabele die een handler leest of schrijft, en een waarschuwing bij het compileren meldt de variabele. Tussen het lezen en schrijven van een bijwerking (`(setf n (+ n 1))`) kan wel een interrupt komen. Om een variabele bij te werken die een handler ook schrijft, lees en bewaar je het statusregister (adres `#x5F`), schrijf je er 0 in om interrupts te stoppen, en schrijf je daarna de bewaarde waarde terug.
 - Een interrupt zonder handler stopt de microcontroller.
 
 ## 4. Dumps

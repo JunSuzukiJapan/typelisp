@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ 45c66940dd590920b2dccfa8ce53c13c4865b2b0 -->
+<!-- translated-from: docs/ja/guide/compile.md @ 00b2198ebe05054debbc1a0d1f9ebf1a9835d7a0 -->
 # Compilation
 
 Sauf indication contraire, les programmes typelisp s'exécutent dans l'interpréteur. Il existe en outre deux façons
@@ -325,14 +325,17 @@ $ typl -c blink.typl --target avr-atmega328p -O2   # crée blink.elf
 $ qemu-system-avr -M uno -display none -serial stdio -bios blink.elf   # exécuter dans QEMU
 ```
 
-- Il n'y a pas de runtime : un programme qui l'utilise est une **erreur de compilation**. L'erreur indique ce qui est nécessaire et par quelles fonctions on y arrive. On peut utiliser : les calculs sur les entiers de largeur fixe (de `i8` à `u32`), `bool` et `char`, les appels de fonctions, les conditions, les boucles, `defvar` et `defconstant` contenant ces valeurs, ainsi que `volatile-read-u8` et les autres avec l'adresse écrite comme un nombre ou une constante.
-- On ne peut pas utiliser : les valeurs placées dans le tas, comme les chaînes, les listes et les structures ; les calculs sur `int` ; la récursion, `catch` et les appels de valeurs de fonction ; les appels de fonctions C ; les accès `volatile` dont l'adresse est calculée.
+- Il n'y a pas de runtime : un programme qui l'utilise est une **erreur de compilation**. L'erreur indique ce qui est nécessaire et par quelles fonctions on y arrive. On peut utiliser : les calculs sur les entiers de largeur fixe (de `i8` à `u32`), `int`, `f32`, `f64`, `bool` et `char`, les appels de fonctions (récursifs compris), les conditions, les boucles, `defvar` et `defconstant` contenant ces valeurs, `volatile-read-u8` et les autres, ainsi que les appels de fonctions C.
+- On ne peut pas utiliser : les valeurs placées dans le tas, comme les chaînes, les listes et les structures ; `catch` et les appels de valeurs de fonction ; les appels de fonctions C qui reçoivent une chaîne ou une fonction ; les fonctions mathématiques sur les flottants comme `sin` et `expt` (`sqrt` et les arrondis comme `floor` sont utilisables).
 - Un gestionnaire d'interruption s'écrit `#[interrupt(N)]` ([Syntaxe](../reference/syntax.md), section 3.17). `N` est le numéro de l'interruption de l'ATmega328P, de 1 à 25 en comptant la réinitialisation comme 0 (le débordement du timer 1 est 13). Voir l'exemple ci-dessous.
 - Une division par 0 arrête le microcontrôleur sur place (plus aucune interruption ne survient). Il en va de même de `/` de la plus petite valeur signée par `-1`.
+- Un `int` va de -16384 à 16383. Si le résultat d'un calcul, ou une valeur convertie en `int`, sort de cet intervalle, le microcontrôleur s'arrête. Un flottant est converti en entier en passant par `int` : cet intervalle est donc aussi ce qui peut être converti.
+- Si une récursion épuise la pile, le microcontrôleur s'arrête.
+- Une fonction C se déclare avec `defffi`, et le fichier objet compilé pour AVR se passe avec `--link FILE`.
 - Une boucle qui ne fait rien disparaît à partir de `-O1`. Dans une boucle d'attente, lisez par exemple un registre.
 - Quand `main` se termine, le microcontrôleur s'arrête.
 - `--linker-script FILE` change la disposition de la mémoire. Sans cette option, ce sont 32 Kio de flash moins les 512 derniers octets, ceux du chargeur d'amorçage, et 2 Kio de RAM. Les adresses de RAM s'écrivent en ajoutant `0x800000`, comme `0x800100`.
-- Les calculs sur `f32` et `f64` sont une erreur d'édition de liens, car il n'y a pas de fonctions auxiliaires pour AVR.
+- Les calculs sur `f32` et `f64` sont faits par des fonctions auxiliaires. Celles qui sont utilisées vont en mémoire flash (celles de `f64` sont plus grosses).
 - L'édition de liens utilise l'éditeur de liens de la toolchain rustup, comme à la section 3.8.
 
 Un exemple qui fait clignoter la LED par l'interruption d'un timer. Une interruption s'active dans le registre du périphérique.
@@ -361,7 +364,7 @@ Un exemple qui fait clignoter la LED par l'interruption d'un timer. Une interrup
 - Un programme qui a un gestionnaire accepte les interruptions dès que ses variables globales sont initialisées. Réglez les périphériques au début de `main`.
 - `enable-interrupt` et `#[exception(NAME)]` ne sont pas utilisables (erreur de compilation).
 - Pendant qu'un gestionnaire s'exécute, les autres interruptions attendent. Comme toute autre fonction, un gestionnaire ne peut pas utiliser le runtime.
-- Une lecture ou une écriture d'une variable globale n'est pas interrompue par un gestionnaire, même pour une valeur de deux octets ou plus. Une variable qui exige pour cela de désactiver les interruptions est signalée par un avertissement à la compilation. Une interruption peut survenir entre la lecture et l'écriture d'une mise à jour (`(setf n (+ n 1))`). Pour mettre à jour une variable qu'un gestionnaire écrit aussi, lisez et gardez le registre d'état (adresse `#x5F`), écrivez-y 0 pour arrêter les interruptions, puis remettez la valeur gardée.
+- Une lecture ou une écriture d'une variable globale n'est pas interrompue par un gestionnaire, même pour une valeur de deux octets ou plus. Pour cela, les interruptions sont désactivées à la lecture d'une variable qu'un gestionnaire écrit et à l'écriture d'une variable qu'un gestionnaire lit ou écrit, et un avertissement à la compilation signale la variable. Une interruption peut survenir entre la lecture et l'écriture d'une mise à jour (`(setf n (+ n 1))`). Pour mettre à jour une variable qu'un gestionnaire écrit aussi, lisez et gardez le registre d'état (adresse `#x5F`), écrivez-y 0 pour arrêter les interruptions, puis remettez la valeur gardée.
 - Une interruption sans gestionnaire arrête le microcontrôleur.
 
 ## 4. Dumps
