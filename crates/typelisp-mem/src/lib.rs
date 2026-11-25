@@ -20,6 +20,7 @@ pub mod float;
 pub mod heap;
 pub mod host;
 pub mod int_arg;
+pub mod memory;
 pub mod name_view;
 pub mod names;
 pub mod option;

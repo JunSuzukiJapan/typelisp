@@ -151,6 +151,7 @@ pub(crate) fn eval_llvm_builtin_method(heap: &mut Heap, type_name: &Path, method
             wk::M_COROUTINE_DYN_CALL => Some(llvm_builder_coroutine_dyn_call(args)),
             wk::M_COROUTINE_END => Some(llvm_builder_coroutine_end(args)),
             wk::M_ENTRY_VALUE => Some(coroutine::llvm_builder_entry_value(heap, args)),
+            wk::M_ENTRY_SAFEPOINT => Some(coroutine::llvm_builder_entry_safepoint(args)),
             wk::M_LOOP_SAFEPOINT => Some(coroutine::llvm_builder_loop_safepoint(args)),
             wk::M_BUILD_ICMP_LT => Some(llvm_builder_build_icmp(args, "icmp_lt", inkwell::IntPredicate::SLT)),
             wk::M_BUILD_ICMP_LE => Some(llvm_builder_build_icmp(args, "icmp_le", inkwell::IntPredicate::SLE)),

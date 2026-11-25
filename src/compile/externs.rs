@@ -370,7 +370,6 @@ const NEVER_RAISING_SHIMS: [&str; 26] = [
     "rt_str_new",
     "rt_wk_symbol",
     "rt_intern_symbol",
-    "rt_push_permanent_sexpr_root",
     "rt_push_sexpr_root",
     "rt_pop_sexpr_root",
     "rt_truncate_sexpr_roots",
@@ -387,6 +386,7 @@ const NEVER_RAISING_SHIMS: [&str; 26] = [
     "rt_cons",
     "rt_integer_cmp",
     "rt_loop_safepoint",
+    "rt_safepoint",
 ];
 
 /// Whether a call to the function `name` needs no raise check after it.
@@ -841,13 +841,6 @@ pub(crate) fn native_lowered_primitive_methods(ty: u32) -> &'static [u32] {
 /// the same forward-declaration/global-mapping treatment as every other
 /// `rt_*` shim, so they belong in this one shared list regardless.
 ///
-/// `rt_push_permanent_sexpr_root` (general-ADT box field GC root
-/// protection): `compiler.rs`'s `compile-construct-box-fields` calls this
-/// directly for the same reason, one level down from a box's own
-/// never-`build-free`'d field storage rather than a call-stack scope — see
-/// `typelisp_rt::rt_push_permanent_sexpr_root`'s doc comment for why it has
-/// no `rt_pop_permanent_sexpr_root` counterpart.
-///
 /// `rt_root_count`/`rt_set_sexpr_root` (the `setf`-reassignment GC-root fix):
 /// `compiler.rs`'s `retain-bindings`/`bind-let-values` call `rt_root_count`
 /// right before their own `rt_push_sexpr_root` call for a `kind = 2` binding,
@@ -974,7 +967,7 @@ fn rt_shims() -> [(&'static str, Shim); 355] {
     };
     use typelisp_read::shim::{rt_read, rt_read_datum_at};
     use typelisp_rt::coroutine::{
-        rt_loop_safepoint, rt_suspend_chan_cap, rt_suspend_chan_close, rt_suspend_chan_len,
+        rt_loop_safepoint, rt_safepoint, rt_suspend_chan_cap, rt_suspend_chan_close, rt_suspend_chan_len,
         rt_suspend_chan_new, rt_suspend_chan_recv, rt_suspend_chan_select, rt_suspend_chan_send,
         rt_suspend_task, rt_suspend_main, rt_suspend_sleep,
         rt_suspend_wait, rt_suspend_yield,
@@ -1020,7 +1013,7 @@ fn rt_shims() -> [(&'static str, Shim); 355] {
         rt_hashtable_bucket_value,
         rt_hashtable_clear, rt_hashtable_count, rt_hashtable_entries, rt_hashtable_keys,
         rt_hashtable_function, rt_hashtable_new, rt_hashtable_values, rt_int_to_ratio,
-        rt_intern, rt_intern_path, rt_intern_symbol, rt_keywordp, rt_wk_symbol, rt_list_to_path, rt_list_to_sexpr_vector, rt_lists_to_sexpr_array, rt_list_to_sexpr_tuple, rt_vector_to_sexpr_tuple, rt_sexpr_tuple_items, rt_match_fail, rt_null, rt_panic, rt_path_to_list, rt_pop_sexpr_root, rt_push_permanent_sexpr_root,
+        rt_intern, rt_intern_path, rt_intern_symbol, rt_keywordp, rt_wk_symbol, rt_list_to_path, rt_list_to_sexpr_vector, rt_lists_to_sexpr_array, rt_list_to_sexpr_tuple, rt_vector_to_sexpr_tuple, rt_sexpr_tuple_items, rt_match_fail, rt_null, rt_panic, rt_path_to_list, rt_pop_sexpr_root,
         rt_push_sexpr_root, rt_ratio_add, rt_ratio_cmp, rt_ratio_denominator, rt_ratio_div, rt_ratio_from_bignums, rt_ratio_mul,
         rt_ratio_numerator, rt_ratio_sub, rt_ratio_to_int, rt_ratio_to_float, rt_root_count, rt_set_car, rt_set_cdr,
         rt_set_sexpr_root, rt_sexpr_bool, rt_sexpr_char, rt_sexpr_f32, rt_sexpr_f64, rt_sexpr_instance_test, rt_sexpr_int, rt_sexpr_i32, rt_sexpr_i8, rt_sexpr_i16, rt_sexpr_u8, rt_sexpr_u16, rt_sexpr_u32, rt_sexpr_str, rt_str_append, rt_str_eq, rt_str_equalp,
@@ -1196,7 +1189,6 @@ fn rt_shims() -> [(&'static str, Shim); 355] {
         ("rt_unwinding", shim(rt_unwinding as unsafe extern "C" fn() -> Word)),
         ("rt_push_sexpr_root", shim(rt_push_sexpr_root as unsafe extern "C" fn(Word) -> Word)),
         ("rt_pop_sexpr_root", shim(rt_pop_sexpr_root as unsafe extern "C" fn() -> Word)),
-        ("rt_push_permanent_sexpr_root", shim(rt_push_permanent_sexpr_root as unsafe extern "C" fn(Word) -> Word)),
         ("rt_root_count", shim(rt_root_count as unsafe extern "C" fn() -> Word)),
         ("rt_set_sexpr_root", shim(rt_set_sexpr_root as unsafe extern "C" fn(Word, Word) -> Word)),
         ("rt_truncate_sexpr_roots", shim(rt_truncate_sexpr_roots as unsafe extern "C" fn(Word) -> Word)),
@@ -1387,6 +1379,7 @@ fn rt_shims() -> [(&'static str, Shim); 355] {
         ("rt_suspend_chan_send", shim(rt_suspend_chan_send as unsafe extern "C" fn(Word, Word) -> Word)),
         ("rt_suspend_chan_recv", shim(rt_suspend_chan_recv as unsafe extern "C" fn(Word, Word) -> Word)),
         ("rt_suspend_chan_select", shim(rt_suspend_chan_select as unsafe extern "C" fn(*const Word, u32) -> Word)),
+        ("rt_safepoint", shim(rt_safepoint as unsafe extern "C" fn() -> Word)),
         ("rt_loop_safepoint", shim(rt_loop_safepoint as unsafe extern "C" fn() -> Word)),
         ("rt_stream_listen", shim(rt_stream_listen as unsafe extern "C" fn(i32) -> Word)),
         ("rt_stream_position", shim(rt_stream_position as unsafe extern "C" fn(i32) -> Word)),

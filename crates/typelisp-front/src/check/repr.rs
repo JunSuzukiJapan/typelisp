@@ -572,15 +572,9 @@ impl Repr {
     /// committed bitcode: island trio, `compile_test`, and
     /// `compiled_binding_gc_test` all stayed green.
     ///
-    /// `Struct`/`Vector`/`Dyn` reaching this as `KIND_PLAIN` was not an
-    /// oversight: `compile-construct-boxed-struct`'s doc comment
-    /// (`src/compiler.rs`) argues the classifier "deliberately doesn't classify
-    /// a `mutable` struct type as `KIND_SEXPR`", because
-    /// `push-permanent-sexpr-root` already keeps every box compiled code builds
-    /// alive from birth, making a per-binding push/pop redundant. That is true
-    /// — and it is correctness resting on a leak, since a permanent root is
-    /// never popped by design (`rt_push_permanent_sexpr_root`'s own doc). The
-    /// derivation here pays that redundancy back to be independent of it.
+    /// The slot a binding has in its frame is the only thing that keeps a box
+    /// alive, so a representation that can be reclaimed and is not a `2` is
+    /// a value swept while it is in use.
     pub fn binding_kind(&self) -> i64 {
         /// No bookkeeping at a binding boundary.
         const KIND_PLAIN: i64 = 0;

@@ -207,11 +207,35 @@ impl Heap {
     /// are the places a thread can run for a long time without consing: a
     /// compiled loop's back edge and the scheduler's step boundary.
     ///
-    /// One relaxed load when nobody is collecting.
+    /// It is also where this thread collects itself, when strings and boxes
+    /// have been allocated up to [`short_of_memory`](Self::short_of_memory):
+    /// those allocations cannot ([`alloc_boxed`](Self::alloc_boxed)), so a
+    /// program that makes nothing else depends on reaching a safepoint. Every
+    /// loop's back edge and every function's entry is one, where anything is
+    /// allocated.
+    ///
+    /// A few relaxed loads when nobody is collecting.
     pub fn safepoint(&mut self) {
         if self.shared.threads.gc_requested.load(Ordering::Relaxed) {
             self.park();
         }
+        if (self.short_of_memory() || self.gc_stress()) && !self.shared.collect_inhibited.load(Ordering::SeqCst) {
+            self.gc();
+        }
+    }
+
+    /// Whether as much has been allocated since the last collection as makes
+    /// another one due.
+    fn short_of_memory(&self) -> bool {
+        self.memory_used() >= self.shared.next_collection.load(Ordering::Relaxed)
+    }
+
+    /// The process's memory in use ([`crate::memory`]), less what the slots
+    /// this heap has free take of it: a collection empties slots and keeps
+    /// them, so what is left for it to do is not in how many there are.
+    fn memory_used(&self) -> usize {
+        let spare = self.shared.spare_strings.load(Ordering::Relaxed) + self.shared.spare_boxes.load(Ordering::Relaxed);
+        crate::memory::in_use().saturating_sub(spare)
     }
 
     /// Wait at a safepoint until the collection in progress ends.
@@ -566,8 +590,18 @@ impl Heap {
         drop(arena);
 
         // SWEEP strings and boxed objects, one lock at a time.
-        self.shared.strings.write().store.sweep();
-        self.shared.boxes.write().sweep();
+        {
+            let mut strings = self.shared.strings.write();
+            strings.store.sweep();
+            self.shared.spare_strings.store(strings.store.spare_bytes(), Ordering::Relaxed);
+        }
+        {
+            let mut boxes = self.shared.boxes.write();
+            boxes.sweep();
+            self.shared.spare_boxes.store(boxes.spare_bytes(), Ordering::Relaxed);
+        }
+        drop(stack);
+        self.shared.next_collection.store(crate::memory::next_collection(self.memory_used()), Ordering::Relaxed);
 
         new_free_count - old_free
     }

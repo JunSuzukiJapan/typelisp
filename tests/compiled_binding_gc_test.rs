@@ -1,40 +1,8 @@
 //! Compiled locals that hold heap values must survive collection.
 //!
-//! `compiler.rs`'s `retain-bindings`/`bind-let-values` push a GC root for a
-//! binding only when `Repr::binding_kind` gave it `KIND_SEXPR` (or the
-//! cell-boxed `kind >= 10`). That classifier used to be *coarser* than the
-//! field one, which called the same types kind `6` — a tagged heap pointer —
-//! so a `defstruct`/`Vector`-typed binding and a `:dyn T` reached it as
-//! `KIND_PLAIN` and got no root. Both now derive from one `Repr::class`, and
-//! every reclaimable representation gets a root.
-//!
-//! **These tests never could have failed, and the reason is worth knowing.**
-//! They were written to exploit that asymmetry and never managed to. It is
-//! `compile-construct-boxed-struct` (`src/compiler.rs`): every box compiled
-//! code builds — struct, enum, `Vector`, `HashTable`, `:dyn`, `Option` — is
-//! `push-permanent-sexpr-root`ed the moment it is created, and a permanent
-//! root is never popped (`rt_push_permanent_sexpr_root`; there is no
-//! `rt_pop_permanent_sexpr_root`, and `Heap::gc`'s mark phase walks
-//! `permanent_roots` in full). So a compiled struct local is immortal no
-//! matter what its binding kind says, and no arrangement of allocations can
-//! reclaim it.
-//!
-//! **The island says that coupling was on purpose**, not an oversight —
-//! `compile-construct-boxed-struct`'s own doc comment argues the classifier
-//! "deliberately doesn't classify a `mutable` struct type as `KIND_SEXPR`:
-//! this permanent root already keeps every boxed struct alive from birth, so
-//! per-binding push/pop would only add redundant bookkeeping". So this was
-//! never a latent crash; it was correctness resting on a leak. The permanent
-//! rooting *is* a leak by design (`rt_push_permanent_sexpr_root`'s doc: "this
-//! leaks one root slot per call, forever", matching a box that is never
-//! `build-free`'d). Deriving both kinds from one `Repr::class` costs redundant
-//! push/pop and buys back independence: whoever eventually gives compiled
-//! boxes real lifetimes no longer removes the only thing standing between an
-//! unrooted binding and a collection.
-//!
-//! What these tests still hold is the composite property — a compiled local
-//! stays valid across collections under `gc_stress` — whichever mechanism
-//! provides it.
+//! A binding's slot in its frame is a root when `Repr::binding_kind` says so,
+//! and the slot is all that keeps a box compiled code made alive. These tests
+//! run under `gc_stress`, where every safepoint collects.
 
 mod common;
 use common::{Load, Session, eval_in};

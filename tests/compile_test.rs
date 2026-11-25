@@ -4959,9 +4959,8 @@ fn compile_dispatches_hashtable_remove_to_native_code() {
 }
 
 /// `get`/`remove` over a `HashTable<i64,string>` — a passthrough (kind `6`)
-/// value type — exercises the `push-permanent-sexpr-root`ed branch of
-/// `compile-hashtable-op`'s decode (a heap-referencing `Str` surviving
-/// inside the never-GC-scanned `Option` box).
+/// value type: `compile-hashtable-op`'s decode of a heap-referencing `Str`,
+/// which has to survive inside the `Option` box.
 #[test]
 fn compile_dispatches_hashtable_get_of_a_passthrough_string_value_to_native_code() {
     let v = run_with_compiler_and_prelude(

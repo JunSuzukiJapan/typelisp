@@ -144,7 +144,7 @@ mod tests {
 
     use super::{
         active_heap, decode, encode, reset_global_table, rt_car, rt_cdr, rt_cons, rt_global_get, rt_global_new, rt_global_set,
-        rt_heap_init, rt_heap_live_count, rt_ping, rt_pop_sexpr_root, rt_push_permanent_sexpr_root, rt_push_sexpr_root, rt_root_count,
+        rt_heap_init, rt_heap_live_count, rt_ping, rt_pop_sexpr_root, rt_push_sexpr_root, rt_root_count,
         rt_char_equalp, rt_set_car, rt_set_cdr, rt_set_sexpr_root, rt_str_append, rt_str_eq, rt_str_equalp, rt_str_length, rt_str_lt,
         rt_str_new, rt_str_ref, rt_hashtable_bucket_count, rt_hashtable_bucket_delete, rt_hashtable_bucket_key,
         rt_hashtable_bucket_put, rt_hashtable_bucket_value, rt_hashtable_count, rt_hashtable_entries,
@@ -314,53 +314,6 @@ mod tests {
         let car_after = decode(unsafe { rt_car(one_arg[0]) });
         let cdr_after = decode(unsafe { rt_cdr(one_arg[0]) });
         assert_ne!((car_after, cdr_after), (Value::Int(111), Value::Int(222)));
-    }
-
-    /// [`rt_push_permanent_sexpr_root`]'s own version of
-    /// [`rt_push_sexpr_root_protects_a_value_across_a_gc_triggered_by_other_allocations`]
-    /// — protects a value across a forced `gc()` with *no* matching pop at
-    /// all (unlike the ordinary root, which the other test still pops at
-    /// the end).
-    #[test]
-    fn rt_push_permanent_sexpr_root_protects_a_value_across_a_gc_with_no_matching_pop() {
-        let mut heap = Heap::with_capacity(4);
-        set_active_heap(&mut heap as *mut Heap);
-
-        let precious_args = [encode(Value::Int(111)), encode(Value::Int(222))];
-        let precious = unsafe { rt_cons(precious_args[0], precious_args[1]) };
-        let pushed = unsafe { rt_push_permanent_sexpr_root(precious) };
-        assert_eq!(pushed, precious, "rt_push_permanent_sexpr_root returns its argument unchanged");
-
-        for i in 0..20 {
-            let args = [encode(Value::Int(i)), encode(Value::Int(i))];
-            unsafe { rt_cons(args[0], args[1]) };
-        }
-
-        let one_arg = [precious];
-        assert_eq!(decode(unsafe { rt_car(one_arg[0]) }), Value::Int(111));
-        assert_eq!(decode(unsafe { rt_cdr(one_arg[0]) }), Value::Int(222));
-    }
-
-    /// A permanent root pushed in between an ordinary push/pop pair must
-    /// not desync that pair's LIFO accounting — the reason
-    /// [`rt_push_permanent_sexpr_root`] feeds a separate `Vec`
-    /// (`Heap::push_permanent_root`) rather than the same stack
-    /// [`rt_push_sexpr_root`]/[`rt_pop_sexpr_root`] share.
-    #[test]
-    fn rt_push_permanent_sexpr_root_does_not_desync_an_interleaved_ordinary_root_pop() {
-        let mut heap = Heap::with_capacity(8);
-        set_active_heap(&mut heap as *mut Heap);
-
-        let ordinary_args = [encode(Value::Int(1)), encode(Value::Int(1))];
-        let ordinary = unsafe { rt_cons(ordinary_args[0], ordinary_args[1]) };
-        unsafe { rt_push_sexpr_root(ordinary) };
-
-        let permanent_args = [encode(Value::Int(2)), encode(Value::Int(2))];
-        let permanent = unsafe { rt_cons(permanent_args[0], permanent_args[1]) };
-        unsafe { rt_push_permanent_sexpr_root(permanent) };
-
-        let popped = unsafe { rt_pop_sexpr_root() };
-        assert_eq!(popped, ordinary, "the ordinary root pops, unaffected by the permanent push");
     }
 
     /// The problem [`rt_set_sexpr_root`] exists to fix, reproduced directly:
@@ -1023,8 +976,8 @@ mod tests {
 
     /// A global's id (`rt_global_new`'s return value) is a small sequential
     /// counter driven purely by `rt_global_new` call order — an unrelated
-    /// permanent-root push (`rt_push_permanent_sexpr_root`, what ordinary
-    /// boxed-struct field construction uses) interleaved between two
+    /// permanent-root push (`Heap::push_permanent_root`)
+    /// interleaved between two
     /// globals must not perturb that numbering, even though both features
     /// share the same underlying `Heap::permanent_roots` storage.
     #[test]
@@ -1036,8 +989,7 @@ mod tests {
         let first = [encode(Value::Int(10))];
         let first_id = unsafe { rt_global_new(first[0]) };
 
-        let unrelated = [encode(Value::Int(-1))];
-        unsafe { rt_push_permanent_sexpr_root(unrelated[0]) };
+        heap.push_permanent_root(Value::Int(-1));
 
         let second = [encode(Value::Int(20))];
         let second_id = unsafe { rt_global_new(second[0]) };
@@ -1050,9 +1002,7 @@ mod tests {
     }
 
     /// A global survives a forced `gc()` triggered by unrelated allocations
-    /// with no matching pop at all — the same permanent-root protection
-    /// [`rt_push_permanent_sexpr_root_protects_a_value_across_a_gc_with_no_matching_pop`]
-    /// proves for its own direct use of `Heap::push_permanent_root`.
+    /// with no matching pop at all: it is a permanent root.
     #[test]
     fn rt_global_protects_its_value_across_a_gc_triggered_by_other_allocations() {
         reset_global_table();

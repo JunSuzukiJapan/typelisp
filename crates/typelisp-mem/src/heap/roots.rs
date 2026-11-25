@@ -207,21 +207,11 @@ impl Heap {
         );
     }
 
-    /// Registers `v` as a root with no matching pop, ever — for a value
-    /// whose owner isn't a call-stack activation but a heap-external,
-    /// never-freed allocation (e.g. compiled code's general-ADT box fields:
-    /// a `defstruct`/`Option`/`Result` value stored in a `malloc`'d box
-    /// outlives the activation that built it, so it can't use
-    /// [`push_root`](Self::push_root)'s push-on-entry/pop-on-exit discipline
-    /// without desyncing every *other* caller's strict LIFO pairing on the
-    /// same `roots` stack). Kept in a wholly separate `Vec` rather than
-    /// appended to `roots` for exactly that reason — `gc()` walks both, but
-    /// only `roots` has to nest correctly.
+    /// Registers `v` as a root with no matching pop, ever — for a value that
+    /// lives as long as the process: a global variable, the program's own
+    /// forms. Kept apart from `roots`, which has to nest.
     ///
-    /// This leaks one root slot per call, forever (no removal API): the
-    /// matching trade-off compiled code already makes for the box itself
-    /// (never `build-free`'d) — see `compiler.rs`'s `compile-construct-box`
-    /// doc comment.
+    /// Not for a value a program makes: it would never be collected.
     pub fn push_permanent_root(&mut self, v: Value) {
         self.shared.permanent_roots.lock().push(Some(v));
     }

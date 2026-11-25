@@ -11,9 +11,8 @@ use crate::shared;
 // compiled code can reach — the interpreter's own `Interp.globals` is a
 // plain Rust `HashMap` on the other side of the JIT/AOT boundary, invisible
 // here. Each such global is instead backed by a permanent GC root
-// (`Heap::push_permanent_root`, the same mechanism `rt_push_permanent_sexpr_root`
-// already uses for boxed-struct fields — "lives for the process, no matching
-// pop" is exactly a global's actual lifetime). `rt_global_new`/`rt_global_get`/
+// (`Heap::push_permanent_root`): living for the process, with no matching
+// pop, is exactly a global's actual lifetime. `rt_global_new`/`rt_global_get`/
 // `rt_global_set` are the read/write surface; see `rt_global_new`'s doc
 // comment for why a global's *id* (what `compiler.rs`'s generated code
 // addresses it by) and its raw permanent-root position aren't the same
@@ -51,8 +50,7 @@ pub fn reset_global_table() {
 /// plain `pub fn`s rather than FFI-only.
 ///
 /// The id is *not* the slot's `Heap::permanent_root` position: unrelated
-/// code ([`rt_push_permanent_sexpr_root`], called by `compiler.rs`'s
-/// `compile-construct-box-fields` for an ordinary boxed-struct field) also
+/// code (the checker and the interpreter, for forms they keep) also
 /// pushes permanent roots, so a global's raw heap-root position isn't
 /// predictable at the point `compiler.rs` generates a reference to it. What
 /// *is* predictable: only this function ever appends to `GLOBAL_INDEX`, and

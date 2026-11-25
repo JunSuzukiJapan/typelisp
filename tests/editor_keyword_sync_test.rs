@@ -129,7 +129,7 @@ fn is_excluded(name: &str) -> bool {
     // the builder of the function being built.
     const ISLAND_PREFIXES: [&str; 8] =
         ["build-", "llvm-", "const-", "load-", "slot-", "position-", "frame-", "coroutine-"];
-    const ISLAND_EXACT: [&str; 31] = [
+    const ISLAND_EXACT: [&str; 32] = [
         "add-function",
         "add-function-with-env",
         // The coroutine ABI's declarer and its raw parameter reader (Phase C2)
@@ -158,6 +158,7 @@ fn is_excluded(name: &str) -> bool {
         "c-long-bits",
         // A function's argument as it was entered with, and a loop's back
         // edge — under either shape of function.
+        "entry-safepoint",
         "entry-value",
         "loop-safepoint",
         "pop-frame",

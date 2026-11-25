@@ -64,7 +64,6 @@ const ISLAND_DEFUNS: &[&str] = &[
     "compute-sexpr-mask-part",
     "name-is-borrowed?",
     "form-is-borrowed?",
-    "push-permanent-sexpr-root",
     "new-env",
     "new-fn-env",
     "new-acc-table",

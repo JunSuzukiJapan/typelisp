@@ -68,8 +68,11 @@ thread_local! {
     /// call, which has the function and nothing else.
     static UNWIND_EXITS: RefCell<HashMap<usize, BasicBlock<'static>>> = RefCell::new(HashMap::new());
 
-    /// How many loop safepoints direct functions were built without.
+    /// How many of the direct functions' loops offer no turn.
     static SKIPPED_SAFEPOINTS: Cell<usize> = const { Cell::new(0) };
+
+    /// Whether the build's target has a collector: see [`collects`].
+    static COLLECTS: Cell<bool> = const { Cell::new(false) };
 }
 
 /// The direct functions of a build, in effect until dropped.
@@ -83,8 +86,10 @@ impl Drop for Producing {
     }
 }
 
-/// Builds `functions` as direct functions until the answer is dropped.
-pub(crate) fn producing(functions: HashMap<String, DirectSig>) -> Producing {
+/// Builds `functions` as direct functions until the answer is dropped, for a
+/// target that has a collector if `collects`.
+pub(crate) fn producing(functions: HashMap<String, DirectSig>, collects: bool) -> Producing {
+    COLLECTS.with(|c| c.set(collects));
     DIRECT.with(|d| *d.borrow_mut() = functions);
     SKIPPED_SAFEPOINTS.with(|s| s.set(0));
     Producing(())
@@ -109,7 +114,12 @@ pub(crate) fn unwind_exit(f: FunctionValue<'static>) -> Option<BasicBlock<'stati
     UNWIND_EXITS.with(|u| u.borrow().get(&(f.as_value_ref() as usize)).copied())
 }
 
-/// A direct function's loop went without its safepoint: right only in a
+/// Whether a direct function has safepoints: its target has a collector.
+pub(crate) fn collects() -> bool {
+    COLLECTS.with(|c| c.get())
+}
+
+/// A direct function's loop offers the scheduler no turn: right only in a
 /// program that runs no other task.
 pub(crate) fn skipped_safepoint() {
     SKIPPED_SAFEPOINTS.with(|s| s.set(s.get() + 1));

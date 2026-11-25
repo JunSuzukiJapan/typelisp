@@ -866,19 +866,8 @@ const SOURCE_TEMPLATE: &str = r#"
 ;; one call (`push-sexpr-root`/`pop-sexpr-root`) since tagging a `kind = 2`
 ;; (`f64`) payload allocates a fresh `rt_f64_new` box that would otherwise
 ;; sit one GC away from being reclaimed before `rt_cell_new` gets to copy it
-;; in. The resulting cell reference is then given its own *permanent* root —
-;; pushed here and never popped by this function, unlike the transient one
-;; just above — because `retain-bindings`'s own later pass (this function's
-;; caller always runs it right after) only ever pushes for `kind = 2`, never
-;; `kind >= 10`: a cell must be protected from the very *first* instant it
-;; exists, not just once every name in `names` has been bound. Left for
-;; `retain-bindings` to push instead, a second cell-kind param bound moments
-;; later could allocate (its own `rt_cell_new`) and trigger a GC that
-;; reclaims the *first* one, still sitting unrooted in its own slot at that
-;; point — this permanent push closes exactly that window.
-;; `release-bindings` pops it at function exit, alongside every `kind = 2`
-;; root `retain-bindings` pushed — see that function's own doc comment for
-;; why popping order among a same-activation batch never matters.
+;; in. The cell reference's slot is a marked one (`binding-slot`), so the cell
+;; is rooted for as long as the frame lives.
 ;; One binding's home in the current function's frame (Phase C1).
 ;;
 ;; `kind` is the whole of the decision, and it is the same three-way split
@@ -1119,25 +1108,6 @@ const SOURCE_TEMPLATE: &str = r#"
 
 (defun root-temporary ((builder llvm-builder) (m llvm-module) (v llvm-value)) ()
   (slot-set builder (frame-slot-rooted builder) 0 v))
-
-;; `push-sexpr-root`'s permanent counterpart (general-ADT box field GC root
-;; protection): `compile-construct-box-fields` calls this for a `kind = 2`
-;; field right after storing it, instead of `push-sexpr-root`. The
-;; difference is *why* no pop ever follows: `push-sexpr-root`'s caller
-;; always knows, at LLVM-build time, the matching `pop-sexpr-root`(s) to
-;; emit later in the *same* activation (a `let`'s own end, a call's return) —
-;; but a box field's value must stay reachable for as long as the box
-;; itself does, which can outlive this activation entirely (the box can be
-;; returned, stored elsewhere, ...). `rt_push_permanent_sexpr_root` (see its
-;; own doc comment) registers the root on a separate, append-only list
-;; `Heap::gc`'s mark phase also walks, so it never has to be popped and
-;; never desyncs `push-sexpr-root`/`pop-sexpr-root`'s own LIFO pairing
-;; elsewhere. This is the same accepted trade-off as the box itself
-;; (deliberately never `build-free`'d, see `compile-construct-box`'s doc
-;; comment) — both leak for the process's lifetime rather than tracking a
-;; box's real lifetime.
-(defun push-permanent-sexpr-root ((builder llvm-builder) (m llvm-module) (v llvm-value)) ()
-  (let ((ignored (call-1 builder m "rt_push_permanent_sexpr_root" v))) ()))
 
 ;; `Scope::new` is a static call whose generic `V` can only be inferred from
 ;; an *expected* type (e.g. a `defun`'s declared return type), never from a
@@ -1616,11 +1586,9 @@ const SOURCE_TEMPLATE: &str = r#"
 ;; promotion `bind-params`'s own `kind >= 10` branch does, for the identical
 ;; reason (this specific `let`-bound name is captured by a closure nested in
 ;; its own scope) — tag `v` per `kind - 10`, allocate a cell holding it, and
-;; give the *cell reference* a permanent root immediately (not deferred to
-;; any later pass, and not recorded in the slot's offset 1 either: unlike a
-;; `kind = 2` binding, a cell-kind slot's own word 0 never changes after this
-;; — `compile-cellset` mutates the cell in place, never the slot — so there
-;; is no root-index for a later `setf` to update).
+;; keep the cell reference in the binding's slot, which is marked. A cell-kind
+;; slot's own word 0 never changes after this: `compile-cellset` mutates the
+;; cell in place, never the slot.
 (defun bind-let-values ((builder llvm-builder) (m llvm-module) (env Scope<llvm-value>) (bindings Option<Sexpr>) (acc Scope<llvm-value>)) ()
   (if (sexpr-consp bindings)
       (let ((pair (sexpr-car bindings)) (rest (sexpr-cdr bindings)))
@@ -1977,7 +1945,7 @@ const SOURCE_TEMPLATE: &str = r#"
         (slot-set builder none-args 0 name-v)
         (slot-set builder none-args 1 (const-word builder 1))
         (let ((none-box (build-call builder (get-function m "rt_data_new") none-args)))
-          (push-permanent-sexpr-root builder m none-box)
+          (root-temporary builder m none-box)
           (slot-set builder slot 0 none-box)))
       (build-br builder merge-block)
       (position-at-end builder some-block)
@@ -1986,7 +1954,7 @@ const SOURCE_TEMPLATE: &str = r#"
         (slot-set builder some-args 1 (const-word builder 0))
         (slot-set builder some-args 2 v)
         (let ((some-box (build-call builder (get-function m "rt_data_new") some-args)))
-          (push-permanent-sexpr-root builder m some-box)
+          (root-temporary builder m some-box)
           (slot-set builder slot 0 some-box)))
       (build-br builder merge-block)
       (position-at-end builder merge-block)
@@ -3340,6 +3308,7 @@ const SOURCE_TEMPLATE: &str = r#"
           (coroutine-begin nested-builder m nested-fn)
           (bind-captures nested-env nested-builder m nested-fn lcaptured 0)
           (bind-params nested-env nested-builder m nested-fn lparams 0)
+          (entry-safepoint nested-builder m)
           ;; `loop`/`break`/`return`/`setf`: a
           ;; `lambda` is a new function
           ;; boundary — `break`/`return` can't
@@ -3447,6 +3416,7 @@ const SOURCE_TEMPLATE: &str = r#"
                 (coroutine-begin sib-builder m sib-fn)
                 (bind-captures sib-env sib-builder m sib-fn captured 0)
                 (bind-params sib-env sib-builder m sib-fn param-syms 0)
+                (entry-safepoint sib-builder m)
                 ;; `loop`/`break`/`return`/`setf`:
                 ;; a `labels` sibling's own body is
                 ;; a new function boundary too
@@ -3534,7 +3504,7 @@ const SOURCE_TEMPLATE: &str = r#"
 ;; activation and come back through the `pc` dispatch
 ;; like any other resume. A direct function, which is
 ;; only ever built for a program that runs no other
-;; task, goes straight back.
+;; task, is asked for no turn.
 ;;
 ;; The handler slot needs no reinstalling here: the
 ;; poll block is written in the same region the loop
@@ -4209,10 +4179,7 @@ const SOURCE_TEMPLATE: &str = r#"
 ;; The scrutinee's root still matters (a field is
 ;; reached *through* the box between the tag test and
 ;; the extraction), but a bound field is no longer
-;; visible only by way of it. A sum-ADT box (`scrut-kind`
-;; 1) needs none of this — it isn't GC-managed (never
-;; scanned or freed) and its `Sexpr` fields are
-;; permanently rooted from construction. Popped only
+;; visible only by way of it. Popped only
 ;; on the normal `merge-block` path (that block is
 ;; always freshly appended, never `block-terminated?`
 ;; itself, so this is safe to emit unconditionally
@@ -4465,29 +4432,9 @@ const SOURCE_TEMPLATE: &str = r#"
 ;; every argument after the type name to already be a
 ;; properly tagged `Sexpr` (that function's own
 ;; `decode()` call on each). The freshly built struct
-;; is `push-permanent-sexpr-root`ed immediately —
-;; the same accepted-leak treatment
-;; `compile-construct-box-fields` already gives a
-;; general-ADT box's own `Sexpr`-typed fields, just
-;; applied to the struct itself rather than to one of
-;; its fields, so this sidesteps tracking the struct's
-;; own binding scope at all.
-;;
-;; This root used to be the *only* thing keeping such a
-;; struct alive: `binding_kind` classified a struct
-;; binding `KIND_PLAIN`, on the argument that a
-;; permanent root already keeps every boxed struct alive
-;; from birth and per-binding push/pop would be
-;; redundant. True, but it made correctness rest on a
-;; leak — a permanent root is never popped, by design
-;; (`rt_push_permanent_sexpr_root`'s doc comment), so
-;; whoever gives compiled boxes real lifetimes would
-;; have removed the only thing standing between an
-;; unrooted binding and a collection. `Repr::class` now
-;; derives both kinds from one judgement, so a struct
-;; binding is `kind = 2` like any other reclaimable
-;; value and this root is redundant rather than load-
-;; bearing.
+;; is rooted in the frame (`root-temporary`) until it
+;; is put where it is going; from there on what holds
+;; it keeps it, as with any other reclaimable value.
 (defun compile-construct-boxed-struct ((m llvm-module) (fn-name string) (builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Option<Sexpr>) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (block-names string) (block-exits Scope<llvm-basic-block>) (block-slots Scope<llvm-value>) (protect Option<llvm-basic-block>) (exit-cleanup Option<llvm-basic-block>) (type-name-form Option<Sexpr>) (arg-forms Option<Sexpr>))llvm-value
     (let* ((argc (sexpr-list-length arg-forms))
            (args-ptr (rooted-slots builder (+ argc 1)))
@@ -4495,7 +4442,7 @@ const SOURCE_TEMPLATE: &str = r#"
       (slot-set builder args-ptr 0 name-v)
       (compile-construct-boxed-struct-fields m fn-name builder env fn-env captured cur-fn loop-exit loop-slot block-names block-exits block-slots protect exit-cleanup args-ptr arg-forms 1)
       (let ((result (build-call builder (get-function m "rt_struct_new") args-ptr)))
-        (push-permanent-sexpr-root builder m result)
+        (root-temporary builder m result)
         result)))
 
 ;; Fills a `compile-construct-boxed-struct`-allocated
@@ -4543,11 +4490,8 @@ const SOURCE_TEMPLATE: &str = r#"
 ;; (see `Repr::field_kind`'s doc comment),
 ;; so there is no longer a distinct "general-ADT field"
 ;; tagging scheme to keep separate. The freshly built
-;; enum value is `push-permanent-sexpr-root`ed
-;; immediately, the same accepted-forever-alive
-;; treatment `compile-construct-boxed-struct` already
-;; gives its own result (not a leak: a real GC-managed
-;; value now, just never released early).
+;; enum value is rooted in the frame, as
+;; `compile-construct-boxed-struct` roots its own.
 (defun compile-construct-box ((m llvm-module) (fn-name string) (builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Option<Sexpr>) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (block-names string) (block-exits Scope<llvm-basic-block>) (block-slots Scope<llvm-value>) (protect Option<llvm-basic-block>) (exit-cleanup Option<llvm-basic-block>) (type-name-form Option<Sexpr>) (variant int) (arg-forms Option<Sexpr>))llvm-value
     (let* ((argc (sexpr-list-length arg-forms))
            ;; Slot 1 holds the variant number as a raw word, so it is the one
@@ -4562,7 +4506,7 @@ const SOURCE_TEMPLATE: &str = r#"
       (slot-set builder args-ptr 1 (const-word builder variant))
       (compile-construct-boxed-struct-fields m fn-name builder env fn-env captured cur-fn loop-exit loop-slot block-names block-exits block-slots protect exit-cleanup args-ptr arg-forms 2)
       (let ((result (build-call builder (get-function m "rt_data_new") args-ptr)))
-        (push-permanent-sexpr-root builder m result)
+        (root-temporary builder m result)
         result)))
 
 ;; `Sexpr`'s own variants, encoded directly as the
@@ -4811,7 +4755,7 @@ const SOURCE_TEMPLATE: &str = r#"
                                       (slot-set builder none-args 0 option-name-v)
                                       (slot-set builder none-args 1 (const-word builder 1))
                                       (let ((none-box (build-call builder (get-function m "rt_data_new") none-args)))
-                                        (push-permanent-sexpr-root builder m none-box)
+                                        (root-temporary builder m none-box)
                                         none-box))))))
                  (build-br builder merge-block))
                (position-at-end builder else-block)
@@ -4824,7 +4768,7 @@ const SOURCE_TEMPLATE: &str = r#"
                                        (slot-set builder some-args 1 (const-word builder 0))
                                        (slot-set builder some-args 2 raw)
                                        (let ((some-box (build-call builder (get-function m "rt_data_new") some-args)))
-                                         (push-permanent-sexpr-root builder m some-box)
+                                         (root-temporary builder m some-box)
                                          some-box))))))
                  (build-br builder merge-block))
                (position-at-end builder merge-block)
@@ -4871,8 +4815,8 @@ const SOURCE_TEMPLATE: &str = r#"
 ;; returns `Unit`; and `keys`/`values`/`entries` each
 ;; build a fresh `Vector` (`entries`'s of `cons-cell`s)
 ;; that — like a `compile-construct-boxed-struct` result
-;; — is `push-permanent-sexpr-root`ed on the spot so a
-;; later allocation can't reclaim it.
+;; — is rooted in the frame on the spot so a later
+;; allocation can't reclaim it.
 ;;
 ;; `get`/`set`/`remove` are **not** here, and no longer
 ;; anywhere in this file: they are prelude methods
@@ -4899,7 +4843,7 @@ const SOURCE_TEMPLATE: &str = r#"
             (slot-set builder args-ptr 1 (slot-get builder hash-slot 0))
             (slot-set builder args-ptr 2 (slot-get builder test-slot 0))
             (let ((result (build-call builder (get-function m "rt_hashtable_new") args-ptr)))
-              (push-permanent-sexpr-root builder m result)
+              (root-temporary builder m result)
               result))
           (let* ((key-kind (sexpr-int (sexpr-car (sexpr-cdr (sexpr-cdr e)))))
                  (val-kind (sexpr-int (sexpr-car (sexpr-cdr (sexpr-cdr (sexpr-cdr e))))))
@@ -4978,7 +4922,7 @@ const SOURCE_TEMPLATE: &str = r#"
                      (slot-set builder args-ptr 0 (slot-get builder ht-slot 0))
                      (slot-set builder args-ptr 1 name-v)
                      (let ((result (build-call builder (get-function m (append "rt_hashtable_" method)) args-ptr)))
-                       (push-permanent-sexpr-root builder m result)
+                       (root-temporary builder m result)
                        result))))))))
 
 ;; `(global id kind)` — `id` is the global's compiled
@@ -5613,6 +5557,7 @@ const SOURCE_TEMPLATE: &str = r#"
       (let ((env (new-env)))
         (coroutine-begin builder m f)
         (bind-params env builder m f param-names 0)
+        (entry-safepoint builder m)
         (let* ((fn-env (new-fn-env))
                (v (compile-value m name builder env fn-env '() f (Option::None) (Option::None) "" (Scope::new) (Scope::new) (Option::None) (Option::None) body)))
           (coroutine-end builder m v)

@@ -1030,4 +1030,7 @@ well_known_symbols! {
     "Appended 2026-11-25. How many bytes a value takes."
     SIZE_OF => "size-of"
     SIZE_OF_VAL => "size-of-val"
+    "Appended 2026-11-25. Where compiled code may collect on its way into a
+     function."
+    M_ENTRY_SAFEPOINT => "entry-safepoint"
 }

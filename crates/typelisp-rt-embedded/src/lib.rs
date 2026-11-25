@@ -145,6 +145,7 @@ pub mod start {
         // SAFETY: once, before anything allocates, with memory nothing else
         // uses.
         unsafe { HEAP.init(heap_start, heap_end - heap_start) };
+        typelisp_mem::memory::set_capacity(heap_end - heap_start);
         typelisp_rt::interrupt::set_controller(&NVIC);
         TYPELISP_ARRIVED.store(typelisp_rt::interrupt::arrived as *mut (), Ordering::SeqCst);
     }

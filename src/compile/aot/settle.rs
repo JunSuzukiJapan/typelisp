@@ -1,8 +1,8 @@
 //! What is known of the direct functions once all of them are emitted, made
 //! use of: their slots are values, a volatile access of a constant address
 //! is an instruction, a call that cannot raise is not followed by a check
-//! for a raise, and slots no collection can happen under are not the
-//! collector's.
+//! for a raise, what allocates nothing has no safepoints, and slots no
+//! collection can happen under are not the collector's.
 //!
 //! At every optimization level, because they decide what the executable
 //! needs of the runtime (`build_main_wrapper`), and what a program needs
@@ -27,13 +27,17 @@ pub(super) fn settle(module: &Module<'static>, direct: &[String]) -> Result<(), 
         simplify(*f)?;
         volatile_accesses(*f)?;
     }
+    let idle = only_calling(&functions, |c| ALLOCATING_NOTHING.contains(&c));
+    for f in functions.iter().filter(|f| idle.contains(&name_of(**f))) {
+        drop_safepoints(*f);
+    }
     let raising = raising(&functions);
     for f in functions.iter().filter(|f| !raising.contains(&name_of(**f))) {
         for call in calls_of(*f) {
             drop_check(call);
         }
     }
-    let quiet = quiet(&functions);
+    let quiet = only_calling(&functions, |c| QUIET.contains(&c));
     for f in functions.iter().filter(|f| quiet.contains(&name_of(**f))) {
         frame_on_the_stack(*f)?;
     }
@@ -46,27 +50,59 @@ pub(super) fn settle(module: &Module<'static>, direct: &[String]) -> Result<(), 
 const FRAME_OPEN: &str = "rt_local_frame_open";
 const FRAME_CLOSE: &str = "rt_local_frame_close";
 
-/// The functions among `functions` nothing can be collected under: all they
-/// call is one another, LLVM's own, and the opening and closing of a frame.
-fn quiet(functions: &[FunctionValue<'static>]) -> HashSet<String> {
-    let mut quiet: HashSet<String> = functions.iter().map(|f| name_of(*f)).collect();
+/// What a function nothing can be collected under calls, besides others
+/// like it.
+const QUIET: [&str; 2] = [FRAME_OPEN, FRAME_CLOSE];
+
+/// What a function that allocates nothing calls, besides others like it. A
+/// raise does allocate, and leaves the loop.
+const ALLOCATING_NOTHING: [&str; 12] = [
+    FRAME_OPEN,
+    FRAME_CLOSE,
+    SAFEPOINT,
+    crate::compile::raise_check::RT_UNWINDING,
+    "rt_c_address",
+    "rt_c_volatile_load",
+    "rt_c_volatile_store",
+    "rt_data_variant",
+    "rt_data_field",
+    "rt_f64_value",
+    "rt_integer_cmp",
+    "rt_wk_symbol",
+];
+
+const SAFEPOINT: &str = "rt_safepoint";
+
+/// Takes away the safepoints in `f`.
+fn drop_safepoints(f: FunctionValue<'static>) {
+    for i in instructions(f) {
+        if callee(i).is_some_and(|c| c.get_name().to_bytes() == SAFEPOINT.as_bytes()) {
+            i.erase_from_basic_block();
+        }
+    }
+}
+
+/// The functions among `functions` that call nothing but one another, LLVM's
+/// own, and what `allowed` says.
+fn only_calling(functions: &[FunctionValue<'static>], allowed: impl Fn(&str) -> bool) -> HashSet<String> {
+    let mut those: HashSet<String> = functions.iter().map(|f| name_of(*f)).collect();
     loop {
-        let loud: Vec<String> = functions
+        let others: Vec<String> = functions
             .iter()
-            .filter(|f| quiet.contains(&name_of(**f)))
+            .filter(|f| those.contains(&name_of(**f)))
             .filter(|f| {
                 instructions(**f).into_iter().filter(|i| i.get_opcode() == InstructionOpcode::Call).any(|i| match callee(i).map(name_of) {
                     None => true,
-                    Some(c) => c != FRAME_OPEN && c != FRAME_CLOSE && !c.starts_with("llvm.") && !quiet.contains(&c),
+                    Some(c) => !allowed(&c) && !c.starts_with("llvm.") && !those.contains(&c),
                 })
             })
             .map(|f| name_of(*f))
             .collect();
-        if loud.is_empty() {
-            return quiet;
+        if others.is_empty() {
+            return those;
         }
-        for f in loud {
-            quiet.remove(&f);
+        for f in others {
+            those.remove(&f);
         }
     }
 }
@@ -113,8 +149,10 @@ pub(super) fn settle_inits(module: &Module<'static>, inits: &[(String, String, b
     for (name, variable, assigned) in inits {
         let f = module.get_function(name).ok_or_else(|| format!("internal error: `{}` was not compiled", name))?;
         let g = module.get_global(variable).ok_or_else(|| format!("internal error: `{}` sets no global", name))?;
+        // It runs once, when there is nothing to collect yet.
+        drop_safepoints(f);
         simplify(f)?;
-        if !quiet(&[f]).is_empty() {
+        if !only_calling(&[f], |c| QUIET.contains(&c)).is_empty() {
             frame_on_the_stack(f)?;
             simplify(f)?;
         }

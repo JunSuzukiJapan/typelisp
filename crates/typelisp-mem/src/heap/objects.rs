@@ -1,6 +1,7 @@
 //! Symbols, paths, strings and the boxed objects: allocation and access.
 
 use crate::prelude::*;
+use core::sync::atomic::Ordering;
 use crate::symbols::{self, SymRef};
 use crate::value::{BoxId, BoxedObj, FloatBox, NarrowInt, PathId, StrId, StructPayload, TypeId, Value};
 use super::{Heap, NAMES_HELD, NamesGuard};
@@ -89,7 +90,10 @@ impl Heap {
     /// Store a string, returning its `Value::Str`. Strings are GC-collected.
     pub fn alloc_string(&mut self, s: String) -> Value {
         self.debug_assert_not_native("alloc_string");
-        Value::Str(StrId(self.shared.strings.write().store.alloc(s)))
+        let mut strings = self.shared.strings.write();
+        let id = strings.store.alloc(s);
+        self.shared.spare_strings.store(strings.store.spare_bytes(), Ordering::Relaxed);
+        Value::Str(StrId(id))
     }
 
     /// The contents of a stored string. See `path_segments`'s doc comment
@@ -108,12 +112,15 @@ impl Heap {
     /// whatever `Value`s the payload itself holds (see [`gc`](Self::gc)).
     ///
     /// Not a safepoint, and neither is [`alloc_string`](Self::alloc_string):
-    /// neither has ever collected, so callers hold unrooted values across
-    /// them (a struct's fields, on their way into `obj`), and letting
-    /// another thread's collection run here would sweep those.
+    /// callers hold unrooted values across them (a struct's fields, on their
+    /// way into `obj`), which a collection here would sweep. What they
+    /// allocate is collected at the next [`safepoint`](Self::safepoint).
     pub(super) fn alloc_boxed(&mut self, obj: BoxedObj) -> Value {
         self.debug_assert_not_native("alloc_boxed");
-        Value::Boxed(BoxId(self.shared.boxes.write().alloc(obj)))
+        let mut boxes = self.shared.boxes.write();
+        let id = boxes.alloc(obj);
+        self.shared.spare_boxes.store(boxes.spare_bytes(), Ordering::Relaxed);
+        Value::Boxed(BoxId(id))
     }
 
     /// Store an `f64`, returning its `Value::Boxed` — `Sexpr`'s `f64`

@@ -51,9 +51,6 @@ const HELPERS: &str = r#"
 (defvar (*made* int) 0)
 (defun check ((what string) (got int) (want int)) ()
   (setf *made* (+ *made* 1))
-  ;; Only taking a cons cell collects, and a board has no room for all the
-  ;; strings and cells of variables the checks make.
-  (list 1 2 3 4)
   (unless (= got want) (setf *bad* (format false "~a~a: ~a and not ~a~%" *bad* what got want)))
   ())
 (defun wrapped ((n int) (bytes int) (signed bool)) int

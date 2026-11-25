@@ -234,6 +234,8 @@ fn builder(reg: &mut Registry) {
     // looking, which is the dynamic half of `emit-unwind-onward`.
     def.instance("coroutine-unwind", vec![builder_ty(), module_ty()], Type::Unit);
     def.instance("coroutine-end", vec![builder_ty(), module_ty(), value_ty()], Type::Unit);
+    // `entry-safepoint`: a function's entry, its arguments in its frame.
+    def.instance("entry-safepoint", vec![builder_ty(), module_ty()], Type::Unit);
     // `loop-safepoint`: a loop's back edge, offering the scheduler a turn on
     // the way in a coroutine.
     def.instance("loop-safepoint", vec![builder_ty(), module_ty(), basic_block_ty()], Type::Unit);

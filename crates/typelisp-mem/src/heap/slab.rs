@@ -44,6 +44,11 @@ impl<T> Slab<T> {
         self.len
     }
 
+    /// How many slots there is room for without another chunk.
+    pub(super) fn capacity(&self) -> usize {
+        self.chunks.len() * SLAB_CHUNK_LEN
+    }
+
     /// Appends `v` as a new slot, growing by one chunk if the current one is
     /// full, and returns the index it landed at.
     pub(super) fn push(&mut self, v: Option<T>) -> usize {

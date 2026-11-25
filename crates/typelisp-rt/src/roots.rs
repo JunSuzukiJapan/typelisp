@@ -49,36 +49,6 @@ pub unsafe extern "C" fn rt_pop_sexpr_root() -> Word {
     }
 }
 
-/// Registers a `Sexpr`-typed value as a *permanent* GC root — for a value
-/// stored into a general-ADT box's field (`compiler.rs`'s
-/// `compile-construct-box-fields`), not a call-stack-scoped local.
-/// [`rt_push_sexpr_root`]'s root lives on `Heap`'s ordinary `roots` stack,
-/// which every caller above and below relies on strict LIFO pairing for
-/// (push on scope entry, pop on scope exit) — a box field has no such scope:
-/// it must stay reachable for as long as the box itself does, which can
-/// outlive the activation that built it. Pushing it there with no matching
-/// pop would desync every *other* `rt_pop_sexpr_root` call still to come in
-/// the same thread (the next one would pop this field's root instead of
-/// whatever it actually owns). [`typelisp_mem::Heap::push_permanent_root`]
-/// exists precisely to take such a value off to one side, in a `Vec`
-/// `Heap::gc`'s mark phase walks but no `rt_*` function ever pops from — see
-/// that method's doc comment. No `rt_pop_permanent_sexpr_root` exists, by
-/// design: this leaks one root slot per call, forever, the same trade-off
-/// the box itself already makes (never `build-free`'d — `compiler.rs`'s
-/// `compile-construct-box` doc comment).
-///
-/// Returns its argument unchanged, like [`rt_push_sexpr_root`].
-///
-/// # Safety
-///
-/// Same as [`rt_push_sexpr_root`].
-#[no_mangle]
-pub unsafe extern "C" fn rt_push_permanent_sexpr_root(tagged: Word) -> Word {
-    let tagged = tagged;
-    active_heap().push_permanent_root(decode(tagged));
-    tagged
-}
-
 /// Returns the active `Heap`'s current root count (`Heap::root_count`), as a
 /// raw host index — never a tagged `Sexpr`, unlike every other `rt_*`
 /// function's `i64` payload. `compiler.rs`'s `retain-bindings`/

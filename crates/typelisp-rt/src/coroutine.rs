@@ -826,6 +826,21 @@ pub unsafe extern "C" fn rt_loop_safepoint() -> Word {
     })
 }
 
+/// A safepoint in compiled code that offers no turn
+/// ([`typelisp_mem::Heap::safepoint`]): the entry of a function, once its
+/// arguments are in its frame, and the back edge of a direct
+/// function's loop. Calls and loops are the only ways to run for long, so
+/// every program keeps reaching one.
+///
+/// # Safety
+///
+/// A `Heap` must be registered on this thread.
+#[no_mangle]
+pub unsafe extern "C" fn rt_safepoint() -> Word {
+    typelisp_abi::active_heap().safepoint();
+    0
+}
+
 /// `(sleep secs)` for compiled code: `x` is an `f64`'s raw bit pattern.
 ///
 /// The bits travel as the payload untouched — this shim does not sleep, and

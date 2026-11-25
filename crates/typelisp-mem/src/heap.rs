@@ -58,7 +58,7 @@
 use crate::prelude::*;
 use crate::collections::HashMap;
 use core::ptr;
-use core::sync::atomic::{AtomicBool, Ordering};
+use core::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use alloc::sync::Arc;
 use crate::sync::Mutex;
 
@@ -256,6 +256,12 @@ impl<T> SlotStore<T> {
         }
     }
 
+    /// The bytes of slots that are allocated and hold nothing: what can be
+    /// stored before the store itself takes more memory.
+    fn spare_bytes(&self) -> usize {
+        (self.slots.capacity() - (self.slots.len() - self.free.len())) * size_of::<Option<T>>()
+    }
+
     fn occupied(&self) -> usize {
         self.slots.iter().filter(|s| s.is_some()).count()
     }
@@ -353,11 +359,19 @@ pub struct HeapShared {
     // pattern does not thrash — see `gc_count`. Shared, because a
     // collection run from any view collects the whole heap.
     gc_count: crate::sync::AtomicCount,
-    // When set, every `cons` collects first — see `set_gc_stress`. Shared
+    // The memory use at which the heap next collects — see
+    // `Heap::short_of_memory`.
+    next_collection: AtomicUsize,
+    // `SlotStore::spare_bytes` of `strings` and of `boxes`, as the last
+    // change to each left it, for `Heap::memory_used` to read without
+    // taking their locks.
+    spare_strings: AtomicUsize,
+    spare_boxes: AtomicUsize,
+    // When set, every safepoint collects — see `set_gc_stress`. Shared
     // so that a view attached after it was switched on is under stress too.
     gc_stress: AtomicBool,
-    /// Whether a `cons` that finds no free cell grows the arena instead of
-    /// collecting — [`Heap::inhibit_collection`].
+    /// Whether nothing may collect, so that a `cons` that finds no free cell
+    /// grows the arena instead — [`Heap::inhibit_collection`].
     collect_inhibited: AtomicBool,
 }
 
@@ -468,6 +482,9 @@ impl Heap {
             cell_registry: Mutex::new(Vec::new()),
             threads: ThreadRegistry::new(),
             gc_count: crate::sync::AtomicCount::new(0),
+            next_collection: AtomicUsize::new(crate::memory::next_collection(crate::memory::in_use())),
+            spare_strings: AtomicUsize::new(0),
+            spare_boxes: AtomicUsize::new(0),
             gc_stress: AtomicBool::new(false),
             collect_inhibited: AtomicBool::new(false),
         });

@@ -1,7 +1,8 @@
 //! The upper bound on what a process allocates (`typl -c --max-memory`).
 //!
 //! Every allocation of the process goes through [`CountingAlloc`], which
-//! keeps the number of bytes currently allocated. Everything counts: the cons
+//! keeps the number of bytes currently allocated ([`typelisp_mem::memory`],
+//! where the heap reads when to collect). Everything counts: the cons
 //! arena, the string and box stores, and the runtime's own Rust values. The
 //! bound is unset (unbounded) until [`set_memory_limit`] gives one; an
 //! executable's `main` sets it through `rt_heap_init` before anything else
@@ -14,7 +15,7 @@
 //! what just failed.
 
 use core::alloc::{GlobalAlloc, Layout};
-use core::sync::atomic::{AtomicUsize, Ordering};
+use typelisp_mem::memory;
 
 /// The process's allocator: [`INNER`], counted.
 pub struct CountingAlloc;
@@ -30,37 +31,31 @@ const INNER: typelisp_mem::host::board::BoardAlloc = typelisp_mem::host::board::
 #[global_allocator]
 static ALLOCATOR: CountingAlloc = CountingAlloc;
 
-/// Bytes currently allocated.
-static IN_USE: AtomicUsize = AtomicUsize::new(0);
-
-/// The bound on [`IN_USE`]; `usize::MAX` is no bound.
-static LIMIT: AtomicUsize = AtomicUsize::new(usize::MAX);
-
 /// Bounds the process's allocations at `bytes` from now on. Must be called
 /// before the bound matters: what is already allocated counts toward it, so a
 /// bound below the current use fails the next allocation.
 pub fn set_memory_limit(bytes: usize) {
-    LIMIT.store(bytes, Ordering::Relaxed);
+    memory::set_limit(bytes);
 }
 
 /// Bytes the process has allocated and not freed.
 pub fn memory_in_use() -> usize {
-    IN_USE.load(Ordering::Relaxed)
+    memory::in_use()
 }
 
-/// Takes `size` more bytes into [`IN_USE`], or does not and reports why the
+/// Takes `size` more bytes into the count, or does not and reports why the
 /// bound refuses them.
 fn reserve(size: usize) {
-    let before = IN_USE.fetch_add(size, Ordering::Relaxed);
-    let limit = LIMIT.load(Ordering::Relaxed);
+    let before = memory::taken(size);
+    let limit = memory::limit();
     if before.checked_add(size).is_none_or(|after| after > limit) {
-        IN_USE.fetch_sub(size, Ordering::Relaxed);
+        memory::given_back(size);
         exceeded(size, before, limit);
     }
 }
 
 fn release(size: usize) {
-    IN_USE.fetch_sub(size, Ordering::Relaxed);
+    memory::given_back(size);
 }
 
 unsafe impl GlobalAlloc for CountingAlloc {

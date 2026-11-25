@@ -207,6 +207,7 @@ pub const MEMBER_VOCABULARY: &[u32] = &[
     wk::M_SLOT_GET,
     wk::M_LOAD_TYPE,
     wk::M_LOOP_SAFEPOINT,
+    wk::M_ENTRY_SAFEPOINT,
     wk::M_LOG,
     wk::M_LOGAND,
     wk::M_LOGBITP,

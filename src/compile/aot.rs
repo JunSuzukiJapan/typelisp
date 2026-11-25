@@ -708,7 +708,7 @@ pub fn compile_file_with(source_path: &str, output_path: &str, options: &BuildOp
         bodies.retain(|b| called.contains(&b.symbol));
     }
     let direct_names: Vec<String> = sigs.keys().cloned().collect();
-    let producing_direct = crate::compile::direct::producing(sigs);
+    let producing_direct = crate::compile::direct::producing(sigs, options.target.has_runtime());
     let producing_static =
         crate::compile::llvm_builtins::globals::producing(statics.values().map(|(id, assigned)| (*id as i64, *assigned)).collect());
     // What runs at startup for each static global, its variable, and whether

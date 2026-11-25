@@ -29,9 +29,7 @@ pub const DEFAULT_AOT_HEAP_CAPACITY: usize = 1 << 16;
 /// capacity (`typl -c --heap-cells`); otherwise it grows as
 /// [`Heap::with_capacity`] lets it. The allocated `Heap` is deliberately
 /// never freed — it must outlive every other compiled function in the
-/// process, i.e. live until the OS reclaims everything at process exit, the
-/// same trade-off [`rt_push_permanent_sexpr_root`] already accepts for values
-/// that outlive their last explicit owner.
+/// process, i.e. live until the OS reclaims everything at process exit.
 ///
 /// # Safety
 ///

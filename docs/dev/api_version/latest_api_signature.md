@@ -1,11 +1,11 @@
-# ABI バージョン 0.3.86
+# ABI バージョン 0.3.88
 
 `scripts/regen-abi-version.sh` が生成した文書。手で編集しない。
 
-コンパイラが生成するコードが、ABI バージョン 0.3.86 のランタイムライブラリについて仮定していることの一覧。
+コンパイラが生成するコードが、ABI バージョン 0.3.88 のランタイムライブラリについて仮定していることの一覧。
 ここに書かれていない前提(シムが引数をどう扱うか、生成コードがヒープを直接読む箇所など)は含まない。
 
-内容ハッシュ (FNV-1a 64): `74d9c9c110c5eb62`
+内容ハッシュ (FNV-1a 64): `2f7626173c942227`
 
 ## 呼び出し規約 (typelisp_abi)
 
@@ -823,6 +823,7 @@
 | 699 | ` c-address` |
 | 700 | `size-of` |
 | 701 | `size-of-val` |
+| 702 | `entry-safepoint` |
 
 ## 組み込み型 (typelisp_mem::BUILTIN_TYPES)
 
@@ -1320,7 +1321,6 @@
 | `rt_print_global` | `word (word, word, word)` |
 | `rt_print_names` | `word (word)` |
 | `rt_print_object_method` | `word (word, word)` |
-| `rt_push_permanent_sexpr_root` | `word (word)` |
 | `rt_push_sexpr_root` | `word (word)` |
 | `rt_random_state_copy` | `word (word)` |
 | `rt_random_state_next` | `word (word, word)` |
@@ -1358,6 +1358,7 @@
 | `rt_run_program_interp_int` | `word (word, word, word)` |
 | `rt_run_program_threads` | `word (word, word, word)` |
 | `rt_run_program_threads_int` | `word (word, word, word)` |
+| `rt_safepoint` | `word ()` |
 | `rt_seed_random_state` | `word (word)` |
 | `rt_set_car` | `word (word, word)` |
 | `rt_set_cdr` | `word (word, word)` |
@@ -1518,6 +1519,7 @@
 - インスタンス `coroutine-suspend`: `(%core::llvm-builder, %core::llvm-module) -> %core::llvm-value`
 - インスタンス `coroutine-unwind`: `(%core::llvm-builder, %core::llvm-module) -> ()`
 - 関連関数 `create`: `() -> %core::llvm-builder`
+- インスタンス `entry-safepoint`: `(%core::llvm-builder, %core::llvm-module) -> ()`
 - インスタンス `entry-value`: `(%core::llvm-builder, %core::llvm-module, string, int, int) -> %core::llvm-value`
 - インスタンス `frame-clear-handler`: `(%core::llvm-builder, %core::llvm-module) -> ()`
 - インスタンス `frame-set-handler`: `(%core::llvm-builder, %core::llvm-module, %core::llvm-basic-block) -> ()`

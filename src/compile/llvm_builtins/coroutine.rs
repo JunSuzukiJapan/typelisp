@@ -1081,20 +1081,41 @@ pub(super) fn llvm_builder_entry_value(heap: &typelisp_mem::Heap, args: &[Value]
     Ok(llvm_value_value(carrier.from_words(&b, &words).map_err(err)?))
 }
 
+/// `(entry-safepoint builder m)` — the entry of a function, its arguments
+/// and captures in its frame, is a safepoint (`rt_safepoint`): a coroutine
+/// may be recursive, and a long run of calls of direct functions may have no
+/// loop in it. A direct function's is taken away as its loops' are.
+pub(super) fn llvm_builder_entry_safepoint(args: &[Value]) -> Result<Value, EvalError> {
+    let builder = expect_llvm_builder(&args[0])?;
+    let module = expect_llvm_module(&args[1])?;
+    if direct_sig(&builder).is_none() || crate::compile::direct::collects() {
+        crate::compile::runtime_abi::call_word(&builder.borrow(), &module.borrow(), "rt_safepoint", &[])
+            .map_err(|e| EvalError::Internal(format!("entry-safepoint: {}", e)))?;
+    }
+    Ok(Value::Empty)
+}
+
 /// `(loop-safepoint builder m loop-block)` — the back edge of a loop, to
 /// `loop-block`.
 ///
 /// A coroutine offers the scheduler a turn on the way (`rt_loop_safepoint`)
 /// and stops there when it is asked to: a loop that calls nothing would
-/// otherwise keep every other task waiting. A direct function goes straight
-/// back: it is direct only in a program with no other task to run.
+/// otherwise keep every other task waiting. A direct function is direct only
+/// in a program with no other task to run, so its back edge is a safepoint
+/// for collection only (`rt_safepoint`) — which `aot::settle` takes away
+/// where nothing is allocated, and which is not there at all on a target with
+/// no runtime.
 pub(super) fn llvm_builder_loop_safepoint(args: &[Value]) -> Result<Value, EvalError> {
     let builder = expect_llvm_builder(&args[0])?;
     let module = expect_llvm_module(&args[1])?;
     let loop_block = expect_llvm_basic_block(&args[2])?;
     let err = |step: &str, e: String| EvalError::Internal(format!("loop-safepoint: {}: {}", step, e));
     if direct_sig(&builder).is_some() {
-        builder.borrow().build_unconditional_branch(loop_block).map_err(|e| err("br", e.to_string()))?;
+        let b = builder.borrow();
+        if crate::compile::direct::collects() {
+            crate::compile::runtime_abi::call_word(&b, &module.borrow(), "rt_safepoint", &[]).map_err(|e| err("call", e))?;
+        }
+        b.build_unconditional_branch(loop_block).map_err(|e| err("br", e.to_string()))?;
         crate::compile::direct::skipped_safepoint();
         return Ok(Value::Empty);
     }

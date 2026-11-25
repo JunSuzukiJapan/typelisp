@@ -28,7 +28,7 @@ impl Heap {
         self.shared.arena.lock().growth_limit
     }
 
-    /// Collect before *every* cons allocation. Enormously slow — this is a
+    /// Collect at *every* safepoint, a cons allocation being one. Enormously slow — this is a
     /// test/debug mode, never a production setting.
     ///
     /// It exists because a missing GC root is otherwise close to undebuggable:
@@ -42,7 +42,7 @@ impl Heap {
         self.shared.gc_stress.store(on, Ordering::Relaxed);
     }
 
-    /// While `on`, a `cons` that finds no free cell grows the arena rather
+    /// While `on`, nothing collects, and a `cons` that finds no free cell grows the arena rather
     /// than collect, and fails with [`Error::HeapExhausted`] when it cannot
     /// grow. For code that runs where a collection is not safe: an interrupt
     /// handler, entered between any two instructions of a program that may
@@ -106,14 +106,6 @@ impl Heap {
         // *another* thread's collection run too.
         self.safepoint();
         let inhibited = self.shared.collect_inhibited.load(Ordering::SeqCst);
-        if self.gc_stress() && !inhibited {
-            // Deliberately collect before *every* allocation so a caller that
-            // failed to root an intermediate value is caught here, at the
-            // allocation that invalidates it, instead of surfacing later as
-            // corruption far from the missing root. Test-only — see
-            // `set_gc_stress`.
-            self.gc();
-        }
         loop {
             if let Some(v) = self.pop_free(car, cdr) {
                 return Ok(v);
