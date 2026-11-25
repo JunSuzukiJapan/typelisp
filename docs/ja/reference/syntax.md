@@ -1294,6 +1294,8 @@ test result: FAILED. 1 passed; 1 failed; 0 filtered out
 `UsageFault`、`SVCall`、`DebugMonitor`、`PendSV`、`SysTick` のどれか（`HardFault` はランタイムが受け持ち、
 プログラムを終わらせる）。
 
+- Arduino Uno 向けでは番号の数え方と有効にする方法が違い、`#[exception(NAME)]` と `enable-interrupt` は使えない
+  （[コンパイル](../guide/compile.md) の 3.9 節）。下の説明のうちランタイムに関わるものは、Cortex-M のもの。
 - 引数を取らず `()` を返す、トップレベルの `defun` に付ける（型パラメータも取れない）。1 つの割り込みに
   ハンドラは 1 つ、1 つの関数が受け持つ割り込みも 1 つ。
 - 周辺機器の割り込みは `(enable-interrupt N)` で有効にするまで来ない（`(disable-interrupt N)` で止める。

@@ -384,13 +384,46 @@ $ qemu-system-avr -M uno -display none -serial stdio -bios blink.elf   # QEMU �
   何が必要で、どの関数から届くのかが出ます。使えるのは、固定幅の整数（`i8` から `u32`）、`bool`、`char` の計算、
   関数呼び出し、条件分岐、ループ、それらの値を持つ `defvar` と `defconstant`、番地を数か定数で書いた `volatile-read-u8` などです。
 - 使えないもの: 文字列・リスト・構造体など、ヒープに置く値。`int` の計算。再帰、`catch`、関数値の呼び出し。C の関数の呼び出し。
-  割り込みのハンドラ。変数で割る除算（数で割る除算は使えます）。番地を計算して求める `volatile`。
+  変数で割る除算（数で割る除算は使えます）。番地を計算して求める `volatile`。
+- 割り込みのハンドラは `#[interrupt(N)]` で書きます（[構文](../reference/syntax.md) の 3.17 節）。`N` は ATmega328P の
+  割り込みの番号で、リセットを 0 と数えた 1〜25 です（タイマ 1 のオーバーフローは 13）。下の例を見てください。
 - 何もしないループは `-O1` 以上で消えます。待つループの中では、レジスタを読むなどしてください。
 - `main` が終わると、マイコンは止まります。
 - メモリの配置は `--linker-script FILE` で変えられます。省いたときは、フラッシュ 32KiB から末尾のブートローダの
   512 バイトを除いた分と、RAM 2KiB です。RAM の番地は `0x800100` のように `0x800000` を足して書きます。
 - `f32` と `f64` の計算は、AVR 用の補助関数が無いのでリンクのエラーになります。
 - リンクには 3.8 節と同じ、rustup の toolchain のリンカを使います。
+
+タイマの割り込みで LED を点滅させる例です。割り込みは、周辺機器のレジスタで有効にします。
+
+```lisp
+(defconstant (PINB int) #x23)
+(defconstant (DDRB int) #x24)
+(defconstant (LED u8) 32)
+(defconstant (TIMSK1 int) #x6F)
+(defconstant (TCCR1B int) #x81)
+(defvar (ticks u16) 0)
+
+#[interrupt(13)]                                  ; タイマ 1 のオーバーフロー
+(defun on-overflow () ()
+  (unsafe (volatile-write-u8 PINB LED))           ; 反転する
+  (setf ticks (+ ticks 1))
+  ())
+
+(defun main () ()
+  (unsafe (volatile-write-u8 DDRB LED)
+          (volatile-write-u8 TIMSK1 1)            ; オーバーフローの割り込みを有効にする
+          (volatile-write-u8 TCCR1B 3))           ; クロックの 64 分の 1 で数え始める
+  (while true))
+```
+
+- ハンドラがあるプログラムは、大域変数の初期化が終わると割り込みを受け付けます。`main` の初めで周辺機器を設定してください。
+- `enable-interrupt` と `#[exception(NAME)]` は使えません（コンパイルエラー）。
+- ハンドラの実行中は、ほかの割り込みは待たされます。ハンドラは普通の関数と同じく、ランタイムを使えません。
+- 大域変数の 1 回の読み書きは、2 バイト以上の値でも途中でハンドラに割り込まれません。読んでから書く更新
+  （`(setf n (+ n 1))`）の間には割り込みが来ます。ハンドラも書く変数を更新するときは、状態レジスタ（`#x5F` 番地）を
+  読んで取っておき、0 を書いて割り込みを止め、終わったら元の値を書き戻してください。
+- ハンドラの無い割り込みが来ると、マイコンは止まります。
 
 ## 4. ダンプ
 
