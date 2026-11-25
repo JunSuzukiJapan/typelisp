@@ -351,6 +351,48 @@ $ qemu-system-arm -M mps2-an505 -nographic \
 - cons アリーナは 1024 セルから始まり、足りなければ伸びます。`--heap-cells`、`--max-memory`、`--no-cons`、
   `-O<N>`、`--release` はそのまま使えます。
 
+### 3.9 Arduino Uno（AVR）向けにコンパイルする
+
+`--target avr-atmega328p` を付けると、Arduino Uno のマイコン（ATmega328P）向けの実行ファイル（ELF）を
+作ります。次のプログラムは、ボードの LED を点滅させます。
+
+```lisp
+(define-symbol-macro PINB #x23)
+(define-symbol-macro DDRB #x24)
+(define-symbol-macro LED (the u8 32))             ; PB5
+
+(defun wait-a-bit () ()
+  (let ((i (the u32 0)))
+    (while (< i (the u32 400000))
+      (unsafe (volatile-read-u8 PINB))
+      (setf i (+ i 1)))
+    ()))
+
+(defun main () ()
+  (unsafe (volatile-write-u8 DDRB LED))           ; 出力にする
+  (while true
+    (unsafe (volatile-write-u8 PINB LED))         ; 反転する
+    (wait-a-bit)))
+```
+
+```sh
+$ typl -c blink.typl --target avr-atmega328p -O2   # blink.elf ができる
+$ qemu-system-avr -M uno -display none -serial stdio -bios blink.elf   # QEMU で実行する
+```
+
+- ランタイムが無いので、ランタイムを使うプログラムは**コンパイルエラー**になります。エラーには、
+  何が必要で、どの関数から届くのかが出ます。使えるのは、固定幅の整数（`i8` から `u32`）、`bool`、`char` の計算、
+  関数呼び出し、条件分岐、ループ、番地を数で書いた `volatile-read-u8` などです。
+- 使えないもの: 文字列・リスト・構造体など、ヒープに置く値。`int` の計算。`defvar` と `defconstant`
+  （名前の付いた定数には `define-symbol-macro` を使います）。再帰、`catch`、関数値の呼び出し。C の関数の呼び出し。
+  割り込みのハンドラ。変数で割る除算（数で割る除算は使えます）。番地を計算して求める `volatile`。
+- 何もしないループは `-O1` 以上で消えます。待つループの中では、レジスタを読むなどしてください。
+- `main` が終わると、マイコンは止まります。
+- メモリの配置は `--linker-script FILE` で変えられます。省いたときは、フラッシュ 32KiB から末尾のブートローダの
+  512 バイトを除いた分と、RAM 2KiB です。RAM の番地は `0x800100` のように `0x800000` を足して書きます。
+- `f32` と `f64` の計算は、AVR 用の補助関数が無いのでリンクのエラーになります。
+- リンクには 3.8 節と同じ、rustup の toolchain のリンカを使います。
+
 ## 4. ダンプ
 
 いまのセッションの定義を 1 ファイルに保存し、次回はそこから起動できます。
