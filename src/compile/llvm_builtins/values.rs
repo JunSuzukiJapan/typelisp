@@ -155,7 +155,7 @@ pub(super) fn untag_field(args: &[Value]) -> Result<Value, EvalError> {
         k::UNIT => Carrier::Unit.zero(),
         k::RAW_INT => fixnum(word.into_int_value())?.into(),
         k::TAGGED | k::NICHE => word,
-        _ => carrier.from_word(&b, fixnum(word.into_int_value())?).map_err(err)?,
+        _ => carrier.coerce(&b, fixnum(word.into_int_value())?.into()).map_err(err)?,
     };
     Ok(llvm_value_value(v))
 }

@@ -109,12 +109,10 @@ pub enum Repr {
     Int,
     /// `f64` — raw `f64::to_bits` in an `i64`.
     F64,
-    /// `f32` — also a raw `f64::to_bits` pattern, of the binary32 value
-    /// widened into binary64.
+    /// `f32` — raw `f32::to_bits` in the low 32 bits of a word.
     ///
-    /// A separate representation from [`Repr::F64`] even though the carrier
-    /// word is identical, because the carrier is not the only thing a `Repr`
-    /// decides: a compiled value coming *back* has to be put in a box, and
+    /// Apart from [`Repr::F64`] because how the value crosses is not the only
+    /// thing a `Repr` decides: a compiled value coming *back* has to be put in a box, and
     /// the box has to say which width it is. One `Float` variant meant the
     /// return path had to guess, and it guessed `f64`.
     F32,

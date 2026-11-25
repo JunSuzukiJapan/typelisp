@@ -34,7 +34,7 @@ pub mod dribble;
 // `concat!` takes literals only. `scripts/regen-abi-version.sh` is what
 // rewrites them, and only when that description changed or the typelisp
 // version's MAJOR.MINOR did.
-macro_rules! with_abi_version { ($then:ident) => { $then!(0, 3, 81) }; }
+macro_rules! with_abi_version { ($then:ident) => { $then!(0, 3, 82) }; }
 
 macro_rules! dotted { ($major:literal, $minor:literal, $patch:literal) => { concat!($major, ".", $minor, ".", $patch) }; }
 
@@ -350,7 +350,8 @@ pub const BODY_ABI_CLASSIC: u8 = 0;
 pub const BODY_ABI_COROUTINE: u8 = 1;
 
 /// The frame slot the driver protocol reserves for the value in flight —
-/// a function's result, and the result of a call it is waiting on. The
+/// a function's result, and the result of a call it is waiting on: as many
+/// words as the widest value takes (`typelisp_mem::VALUE_WORDS`). The
 /// island's slot allocator hands out [`FRAME_RESERVED_SLOTS`] upward.
 pub const FRAME_VALUE_SLOT: usize = 0;
 
@@ -368,7 +369,7 @@ pub const FRAME_VALUE_SLOT: usize = 0;
 /// region never touches it, and `rt_frame_open` zero-fills.
 ///
 /// Never masked: a `pc` is a raw integer, not a tagged value.
-pub const FRAME_HANDLER_SLOT: usize = 1;
+pub const FRAME_HANDLER_SLOT: usize = frame_handler_slot(typelisp_mem::VALUE_WORDS);
 
 /// The frame slot holding where the function resumes: 0 on entry, a call
 /// site's id afterwards.
@@ -376,7 +377,7 @@ pub const FRAME_HANDLER_SLOT: usize = 1;
 /// A slot rather than a field the runtime keeps beside the words, so that
 /// compiled code sets it with a plain store before handing control back, and
 /// reads it with a plain load on resuming — no call either way. Never masked.
-pub const FRAME_PC_SLOT: usize = 2;
+pub const FRAME_PC_SLOT: usize = frame_pc_slot(typelisp_mem::VALUE_WORDS);
 
 /// How many slots at the bottom of a frame the driver protocol owns:
 /// [`FRAME_VALUE_SLOT`], [`FRAME_HANDLER_SLOT`] and [`FRAME_PC_SLOT`].
@@ -387,7 +388,24 @@ pub const FRAME_PC_SLOT: usize = 2;
 /// `FrameStack::unwind` reads the handler slot of every frame it walks, so a
 /// frame one word short is a frame the driver cannot ask; it says so rather
 /// than reading past the end.
-pub const FRAME_RESERVED_SLOTS: usize = 3;
+pub const FRAME_RESERVED_SLOTS: usize = frame_reserved_slots(typelisp_mem::VALUE_WORDS);
+
+/// [`FRAME_HANDLER_SLOT`] on a machine whose widest value takes `value_words`
+/// words — what the compiler, which may be building for another machine than
+/// its own, asks.
+pub const fn frame_handler_slot(value_words: usize) -> usize {
+    FRAME_VALUE_SLOT + value_words
+}
+
+/// [`FRAME_PC_SLOT`], as [`frame_handler_slot`].
+pub const fn frame_pc_slot(value_words: usize) -> usize {
+    frame_handler_slot(value_words) + 1
+}
+
+/// [`FRAME_RESERVED_SLOTS`], as [`frame_handler_slot`].
+pub const fn frame_reserved_slots(value_words: usize) -> usize {
+    frame_pc_slot(value_words) + 1
+}
 
 /// The state one coroutine-ABI call is in flight through.
 ///

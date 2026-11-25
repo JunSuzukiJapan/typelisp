@@ -123,6 +123,10 @@ fn every_shared_constant_is_described() {
     for (file, excluded) in files {
         for line in read(&root().join(file)).lines() {
             let Some(rest) = line.trim_start().strip_prefix("pub const ") else { continue };
+            // A `const fn` is how a described constant is computed.
+            if rest.starts_with("fn ") {
+                continue;
+            }
             let name = rest.split(':').next().unwrap().trim();
             if excluded.contains(&name) {
                 continue;

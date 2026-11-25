@@ -66,9 +66,9 @@ pub(crate) fn decode_crossing_return(heap: &mut Heap, raw: i64, ret: &Repr) -> R
         // (`llvm_builder_build_float_op`'s final `bitcast`).
         // The width the *declared return type* named decides the box, which
         // is the whole reason the two are separate `Repr`s: the word coming
-        // back is the same bit pattern either way.
+        // back says nothing of it.
         Repr::F64 => heap.alloc_f64(f64::from_bits(raw as u64)),
-        Repr::F32 => heap.alloc_f32(f64::from_bits(raw as u64) as f32),
+        Repr::F32 => heap.alloc_f32(f32::from_bits(raw as u32)),
         // A tagged word whose decode must land on the shape the
         // declaration promised — a mismatch here means the compiled side
         // and this side disagree about the ABI, which is an internal
@@ -147,7 +147,7 @@ pub(crate) fn crossing_bits(repr: &Repr) -> u32 {
     use typelisp_mem::fixed::FixedType;
     match repr {
         Repr::F64 => 64,
-        Repr::Narrow(FixedType::I32 | FixedType::U32) | Repr::Char => 32,
+        Repr::Narrow(FixedType::I32 | FixedType::U32) | Repr::Char | Repr::F32 => 32,
         Repr::RawWord => Word::BITS.max(std::ffi::c_long::BITS),
         _ => Word::BITS,
     }
@@ -229,17 +229,15 @@ pub(crate) fn encode_crossing_value(heap: &Heap, v: &Value, repr: &Repr) -> Resu
         Repr::Unit => Ok(0),
         // A float is its raw `f64::to_bits` pattern in an `i64`
         // (`compile-float`/`llvm_builder_build_float_op`), the inverse of
-        // `decode_compiled_return`'s float arms. An `f32` crosses as the
-        // binary32 value widened into that same pattern — the carrier is
-        // wider than the type, exactly as a `u8` rides in an `i64` word —
-        // so each width is read out of its own box and then widened here,
-        // rather than one arm accepting whichever box turns up.
+        // `decode_compiled_return`'s float arms, and an `f32` its own 32
+        // bits. Each width is read out of its own box, rather than one arm
+        // accepting whichever box turns up.
         Repr::F64 => match v {
             Value::Boxed(id) if heap.is_f64(*id) => Ok(heap.f64_value(*id).to_bits() as i64),
             other => Err(EvalError::Internal(format!("compiled call: expected an f64 argument, got {:?}", other))),
         },
         Repr::F32 => match v {
-            Value::Boxed(id) if heap.is_f32(*id) => Ok(f64::from(heap.f32_value(*id)).to_bits() as i64),
+            Value::Boxed(id) if heap.is_f32(*id) => Ok(i64::from(heap.f32_value(*id).to_bits())),
             other => Err(EvalError::Internal(format!("compiled call: expected an f32 argument, got {:?}", other))),
         },
         // An LLVM handle crosses as the *raw* registry index — never

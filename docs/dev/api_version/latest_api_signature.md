@@ -1,11 +1,11 @@
-# ABI バージョン 0.3.81
+# ABI バージョン 0.3.82
 
 `scripts/regen-abi-version.sh` が生成した文書。手で編集しない。
 
-コンパイラが生成するコードが、ABI バージョン 0.3.81 のランタイムライブラリについて仮定していることの一覧。
+コンパイラが生成するコードが、ABI バージョン 0.3.82 のランタイムライブラリについて仮定していることの一覧。
 ここに書かれていない前提(シムが引数をどう扱うか、生成コードがヒープを直接読む箇所など)は含まない。
 
-内容ハッシュ (FNV-1a 64): `12f28eac03ff47d3`
+内容ハッシュ (FNV-1a 64): `b0e9a1db94959b50`
 
 ## 呼び出し規約 (typelisp_abi)
 
@@ -1100,7 +1100,7 @@
 | `rt_f64_value` | `double (word)` |
 | `rt_ffi_callback_address` | `word (word, word)` |
 | `rt_ffi_callback_enter` | `word ()` |
-| `rt_ffi_callback_invoke` | `word (ptr, u32)` |
+| `rt_ffi_callback_invoke` | `i64 (ptr, u32)` |
 | `rt_ffi_callback_leave` | `word ()` |
 | `rt_ffi_callback_register` | `word (word, word, word, word)` |
 | `rt_ffi_cstring_free` | `word (word)` |

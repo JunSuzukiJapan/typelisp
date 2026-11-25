@@ -11,6 +11,8 @@
 //!   call's argument are kept in, and what is still there when the function
 //!   is entered again.
 //!
+//! A value wider than a word takes as many slots of the frame as it is words.
+//!
 //! A place's type is the type of the first value put in it, and every other
 //! value put there has that type. So the island says which value waits where
 //! and whether the collector follows it, and nothing about how wide it is.
@@ -31,6 +33,7 @@ use typelisp_mem::Value;
 use super::coroutine::{builder_key, new_frame_slot, FRAME_CTXS};
 use super::handles::{expect_handle, handle_value, NativeHandle};
 use super::{entry_alloca, expect_int, expect_llvm_builder};
+use crate::compile::carriers;
 use crate::eval::interp::EvalError;
 
 /// A value, or none where the code that makes it does not come back.
@@ -186,10 +189,10 @@ pub(super) fn put(builder: &Rc<RefCell<Builder<'static>>>, slots: &Shared, i: us
                 Some(p) => p,
                 None => {
                     let ty = v.get_type();
-                    if slot.rooted && ty != crate::compile::carriers::word().as_basic_type_enum() {
+                    if slot.rooted && ty != carriers::word().as_basic_type_enum() {
                         return Err(err(format!("the collector cannot follow a {}", ty.print_to_string())));
                     }
-                    let ptr = new_frame_slot(builder, slot.rooted)?;
+                    let ptr = new_frame_slot(builder, slot.rooted, carriers::words_of(ty))?;
                     *slot.place.insert(Place { ptr, ty })
                 }
             }
@@ -199,7 +202,7 @@ pub(super) fn put(builder: &Rc<RefCell<Builder<'static>>>, slots: &Shared, i: us
     if v.get_type() != place.ty {
         return Err(err(format!("a {} put where a {} is", v.get_type().print_to_string(), place.ty.print_to_string())));
     }
-    builder.borrow().build_store(place.ptr, v).map_err(|e| err(e.to_string()))?;
+    carriers::store(&builder.borrow(), place.ptr, v).map_err(err)?;
     Ok(())
 }
 
@@ -220,7 +223,7 @@ fn get(b: &Builder<'static>, slots: &Slots, i: usize) -> Result<Operand, EvalErr
         Slots::Frame(all) => all.get(i).ok_or_else(|| err(format!("frame slot {} of {}", i, all.len())))?.place,
     };
     let Some(place) = place else { return Ok(None) };
-    Ok(Some(b.build_load(place.ty, place.ptr, "slot").map_err(|e| err(e.to_string()))?))
+    Ok(Some(carriers::load(b, place.ty, place.ptr, "slot").map_err(err)?))
 }
 
 /// Every value in `slots`, in order: what a call takes.

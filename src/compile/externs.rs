@@ -1209,7 +1209,7 @@ fn rt_shims() -> [(&'static str, Shim); 353] {
         ("rt_ffi_callback_address", shim(rt_ffi_callback_address as unsafe extern "C-unwind" fn(Word, Word) -> Word)),
         ("rt_ffi_callback_register", shim(rt_ffi_callback_register as unsafe extern "C" fn(Word, Word, Word, Word) -> Word)),
         ("rt_ffi_callback_enter", shim(rt_ffi_callback_enter as unsafe extern "C" fn() -> Word)),
-        ("rt_ffi_callback_invoke", shim(rt_ffi_callback_invoke as unsafe extern "C" fn(*const Word, u32) -> Word)),
+        ("rt_ffi_callback_invoke", shim(rt_ffi_callback_invoke as unsafe extern "C" fn(*const Word, u32) -> i64)),
         ("rt_ffi_callback_leave", shim(rt_ffi_callback_leave as unsafe extern "C" fn() -> Word)),
         // The memory behind `def-c-struct`s and typed pointers
         // (`typelisp_front::c_struct`).

@@ -55,6 +55,7 @@ mod slots;
 mod values;
 
 use coroutine::*;
+pub(crate) use coroutine::{pending_words, store_words};
 use slots::{all_of, expect_slots, operand};
 use values::value_or_return;
 pub use handles::*;

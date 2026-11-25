@@ -67,9 +67,8 @@ fn passes_and_returns_a_double() {
 
 #[test]
 fn passes_and_returns_a_float() {
-    // `f32` crosses the compiled boundary as the bits of its value widened to
-    // `f64`, so the thunk has to narrow on the way in and widen on the way
-    // out. Getting either half wrong gives a number, just not this one.
+    // `f32` crosses as its own 32 bits; reading an `f64`'s there, or the
+    // other way round, gives a number, just not this one.
     assert_eq!(float(r#"(defffi (c-fabsf "fabsf") (f32) f32) (unsafe (c-fabsf (the f32 -2.5)))"#), 2.5);
 }
 

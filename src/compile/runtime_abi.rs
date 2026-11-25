@@ -218,7 +218,7 @@ pub(crate) fn call_word(
 /// `v` as the parameter type `ty`, which it has unless one of the two is
 /// wider: a word for a narrower integer, an integer for a wider one (the
 /// callee reads the low bits its value has), an `f32` for a `double`, or a
-/// float where the callee takes any value's bits.
+/// float where the callee takes any value's bits (its own width's).
 fn argument(
     b: &inkwell::builder::Builder<'static>,
     v: BasicValueEnum<'static>,
@@ -242,7 +242,7 @@ fn argument(
             c.coerce(b, v)?
         }
         (BasicValueEnum::FloatValue(f), BasicTypeEnum::FloatType(t)) if t == ctx.f64_type() => b.build_float_ext(f, t, "arg").map_err(e)?.into(),
-        (BasicValueEnum::FloatValue(_), BasicTypeEnum::IntType(_)) => crate::compile::carriers::to_word(b, v)?.into(),
+        (BasicValueEnum::FloatValue(_), BasicTypeEnum::IntType(_)) => argument(b, crate::compile::carriers::to_bits(b, v)?.into(), ty)?,
         _ => return Err(format!("a {:?} parameter given a {}", ty, v.get_type().print_to_string())),
     })
 }

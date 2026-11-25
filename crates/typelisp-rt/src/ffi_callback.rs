@@ -182,7 +182,8 @@ pub unsafe extern "C" fn rt_ffi_callback_leave() -> Word {
 
 /// Runs the callback: `args` is `[function address, n, kind0, word0, aux0,
 /// ..., kind(n-1), word(n-1), aux(n-1)]`, the function a coroutine-ABI body.
-/// A kind of `0` is a word already in the function's own representation; `1`
+/// A kind of `0` is a word already in the function's own representation (a
+/// value wider than a word is several of them, the low one first); `1`
 /// is a C string's address, copied into a typelisp string here; `2` is a
 /// typed pointer, whose `aux` is its pointee type (a `TypeId::word`) — it
 /// has to point at such an object in memory an `unsafe`
@@ -198,7 +199,7 @@ pub unsafe extern "C" fn rt_ffi_callback_leave() -> Word {
 /// words given, and run between [`rt_ffi_callback_enter`] and
 /// [`rt_ffi_callback_leave`].
 #[no_mangle]
-pub unsafe extern "C" fn rt_ffi_callback_invoke(args: *const Word, argc: u32) -> Word {
+pub unsafe extern "C" fn rt_ffi_callback_invoke(args: *const Word, argc: u32) -> i64 {
     if argc < 2 {
         fatal("rt_ffi_callback_invoke: expected the function and its argument count");
     }
@@ -234,7 +235,7 @@ pub unsafe extern "C" fn rt_ffi_callback_invoke(args: *const Word, argc: u32) ->
         crate::drive_to_completion(f, &words, &[], "a C callback")
     };
     match run() {
-        Ok(v) => v as Word,
+        Ok(v) => v,
         // Kept rather than left raised: what C calls next must not see it,
         // and nothing but the thunk around the C call may raise it again.
         Err(_raised) => {

@@ -92,6 +92,10 @@ struct CoroCtx {
     /// a fact about the function, so it is given where the frame is made, not
     /// on every resume.
     frame_open: InstructionValue<'static>,
+    /// How far the prologue has read each list the driver left (by the
+    /// runtime function that reads it): the next value's index, and the word
+    /// it starts at, which depends on how wide the ones before it are.
+    entry: HashMap<String, (usize, usize)>,
 }
 
 /// What a direct function's prologue leaves behind.
@@ -185,8 +189,8 @@ fn ensure_declared(module: &Rc<RefCell<Module<'static>>>, name: &str) -> Functio
     crate::compile::runtime_abi::declare(&module.borrow(), name, sig)
 }
 
-/// The address of a fresh slot of the frame on `builder`, followed by the
-/// collector when `rooted`: a bit in the function's mask table
+/// The address of a fresh slot of the frame on `builder`, `words` words of it,
+/// followed by the collector when `rooted`: a bit in the function's mask table
 /// (`rooted_table`), not code, so the slot is a root for as long as the frame
 /// lives and no early exit can leave anything out of step.
 ///
@@ -194,7 +198,7 @@ fn ensure_declared(module: &Rc<RefCell<Module<'static>>>, name: &str) -> Functio
 /// the one block every entry falls into — because the resume blocks use it
 /// and nothing in the body dominates them. A rooted slot is only recorded
 /// here; `coroutine-end` puts them all in the mask table.
-pub(super) fn new_frame_slot(builder: &Rc<RefCell<Builder<'static>>>, rooted: bool) -> Result<PointerValue<'static>, EvalError> {
+pub(super) fn new_frame_slot(builder: &Rc<RefCell<Builder<'static>>>, rooted: bool, words: usize) -> Result<PointerValue<'static>, EvalError> {
     let word_ty = carriers::word();
     let (data, idx, prologue_end) = FRAME_CTXS.with(|c| {
         let mut map = c.borrow_mut();
@@ -202,7 +206,7 @@ pub(super) fn new_frame_slot(builder: &Rc<RefCell<Builder<'static>>>, rooted: bo
             .get_mut(&builder_key(builder))
             .ok_or_else(|| EvalError::Internal("frame-slot: no frame is open on this builder".to_string()))?;
         let idx = f.next;
-        f.next += 1;
+        f.next += words as u64;
         if rooted {
             f.rooted.push(idx);
         }
@@ -237,7 +241,7 @@ fn store_resume_point(b: &Builder<'static>, data: PointerValue<'static>, id: u64
     let word_ty = crate::compile::carriers::word();
     let err = |step: &str, e: String| EvalError::Internal(format!("{}: {}: {}", what, step, e));
     let slot = unsafe {
-        b.build_gep(word_ty, data, &[word_ty.const_int(typelisp_abi::FRAME_PC_SLOT as u64, false)], "frame_pc_slot")
+        b.build_gep(word_ty, data, &[word_ty.const_int(typelisp_abi::frame_pc_slot(carriers::value_words()) as u64, false)], "frame_pc_slot")
             .map_err(|e| err("gep", e.to_string()))?
     };
     b.build_store(slot, word_ty.const_int(id, false)).map_err(|e| err("store", e.to_string()))?;
@@ -256,9 +260,9 @@ pub(super) fn emit_rt_call(
 ) -> Result<Option<BasicValueEnum<'static>>, EvalError> {
     let ctx = crate::compile::llvm_context();
     let err = |step: &str, e: String| EvalError::Internal(format!("{}: {}: {}", what, step, e));
-    let arr = word_array(b, vals, &format!("{}_args", name)).map_err(|e| err("the arguments", e))?;
+    let (arr, n) = word_array(b, vals, &format!("{}_args", name)).map_err(|e| err("the arguments", e))?;
     let call = b
-        .build_call(f, &[arr.into(), ctx.i32_type().const_int(vals.len() as u64, false).into()], name)
+        .build_call(f, &[arr.into(), ctx.i32_type().const_int(n as u64, false).into()], name)
         .map_err(|e| err("call", e.to_string()))?;
     crate::compile::raise_check::after_call(b, f).map_err(|e| err("raise check", e))?;
     Ok(match call.try_as_basic_value() {
@@ -357,7 +361,7 @@ pub(super) fn llvm_builder_coroutine_begin(args: &[Value]) -> Result<Value, Eval
         .build_int_to_ptr(param, ctx.ptr_type(inkwell::AddressSpace::default()), "resumed_ptr")
         .map_err(|e| err("inttoptr", e.to_string()))?;
     let pc_slot = unsafe {
-        b.build_gep(word_ty, resumed_ptr, &[word_ty.const_int(typelisp_abi::FRAME_PC_SLOT as u64, false)], "resumed_pc_slot")
+        b.build_gep(word_ty, resumed_ptr, &[word_ty.const_int(typelisp_abi::frame_pc_slot(carriers::value_words()) as u64, false)], "resumed_pc_slot")
             .map_err(|e| err("gep", e.to_string()))?
     };
     let resumed_pc = b.build_load(word_ty, pc_slot, "resumed_pc").map_err(|e| err("load", e.to_string()))?.into_int_value();
@@ -391,12 +395,12 @@ pub(super) fn llvm_builder_coroutine_begin(args: &[Value]) -> Result<Value, Eval
                 data,
                 // The driver protocol's own slots are never handed out as
                 // locals.
-                next: typelisp_abi::FRAME_RESERVED_SLOTS as u64,
+                next: typelisp_abi::frame_reserved_slots(carriers::value_words()) as u64,
                 function,
                 rooted: Vec::new(),
                 prologue_end,
                 scratch: HashMap::new(),
-                shape: Shape::Coroutine(CoroCtx { body, dispatch, pc, resumes: Vec::new(), handlers: Vec::new(), frame_open }),
+                shape: Shape::Coroutine(CoroCtx { body, dispatch, pc, resumes: Vec::new(), handlers: Vec::new(), frame_open, entry: HashMap::new() }),
             },
         );
     });
@@ -622,7 +626,7 @@ fn frame_handler(args: &[Value], pad: Option<BasicBlock<'static>>, what: &str) -
 
     let b = builder.borrow();
     let slot = unsafe {
-        b.build_gep(word_ty, data, &[word_ty.const_int(typelisp_abi::FRAME_HANDLER_SLOT as u64, false)], "handler_slot")
+        b.build_gep(word_ty, data, &[word_ty.const_int(typelisp_abi::frame_handler_slot(carriers::value_words()) as u64, false)], "handler_slot")
             .map_err(|e| err("gep", e.to_string()))?
     };
     b.build_store(slot, word_ty.const_int(id, false)).map_err(|e| err("store", e.to_string()))?;
@@ -698,9 +702,9 @@ fn coroutine_call_impl(
     call_args.extend(head);
     if let Some(env) = env {
         let captured: Vec<_> = all_of(&b, &env)?.into_iter().map(or_zero).collect();
-        let array = word_array(&b, &captured, "coro_env").map_err(|e| err("captures", e))?;
+        let (array, n) = word_array(&b, &captured, "coro_env").map_err(|e| err("captures", e))?;
         call_args.push(array.into());
-        call_args.push(word_ty.const_int(captured.len() as u64, false).into());
+        call_args.push(word_ty.const_int(n as u64, false).into());
     }
     call_args.extend(passed.into_iter().map(or_zero));
     emit_rt_call(&b, frame_call, &call_args, "frame_call", what)?;
@@ -710,27 +714,63 @@ fn coroutine_call_impl(
 
     // Everything after the call belongs to the resume block.
     b.position_at_end(resume);
-    let value_slot = unsafe {
-        b.build_gep(word_ty, data, &[word_ty.const_int(typelisp_abi::FRAME_VALUE_SLOT as u64, false)], "coro_result_slot")
-            .map_err(|e| err("gep", e.to_string()))?
-    };
-    let word = b.build_load(word_ty, value_slot, "coro_result").map_err(|e| err("load", e.to_string()))?.into_int_value();
-    let result = carrier.from_word(&b, word).map_err(|e| err("the answer", e))?;
+    let words = load_words(&b, data, typelisp_abi::FRAME_VALUE_SLOT, carrier.words(), "coro_result_slot").map_err(|e| err("load", e))?;
+    let result = carrier.from_words(&b, &words).map_err(|e| err("the answer", e))?;
     drop(b);
     push_resume(&builder, id, resume);
     Ok(llvm_value_value(result))
 }
 
-/// `vals` as an array of words on the machine stack.
-pub(super) fn word_array(b: &Builder<'static>, vals: &[BasicValueEnum<'static>], name: &str) -> Result<PointerValue<'static>, String> {
-    let word_ty = carriers::word();
-    let array = entry_alloca(b, word_ty.array_type(vals.len().max(1) as u32).into(), name)?;
-    for (i, v) in vals.iter().enumerate() {
-        // SAFETY: within the array just made.
-        let slot = unsafe { b.build_gep(word_ty, array, &[word_ty.const_int(i as u64, false)], "element") }.map_err(|e| e.to_string())?;
-        b.build_store(slot, carriers::to_word(b, *v)?).map_err(|e| e.to_string())?;
+/// `vals` as an array of words on the machine stack, and how many words.
+pub(super) fn word_array(b: &Builder<'static>, vals: &[BasicValueEnum<'static>], name: &str) -> Result<(PointerValue<'static>, usize), String> {
+    let mut words = Vec::with_capacity(vals.len());
+    for v in vals {
+        words.extend(carriers::to_words(b, *v)?);
     }
-    Ok(array)
+    let array = entry_alloca(b, carriers::word().array_type(words.len().max(1) as u32).into(), name)?;
+    store_words(b, array, 0, &words, "element")?;
+    Ok((array, words.len()))
+}
+
+/// Stores `words` in the words of the array at `array`, from word `first` on.
+pub(crate) fn store_words(b: &Builder<'static>, array: PointerValue<'static>, first: usize, words: &[IntValue<'static>], name: &str) -> Result<(), String> {
+    let word_ty = carriers::word();
+    for (i, w) in words.iter().enumerate() {
+        // SAFETY: the caller's array is that many words long.
+        let slot = unsafe { b.build_gep(word_ty, array, &[word_ty.const_int((first + i) as u64, false)], name) }.map_err(|e| e.to_string())?;
+        b.build_store(slot, *w).map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
+/// The `n` words of the array at `array`, from word `first` on.
+fn load_words(b: &Builder<'static>, array: PointerValue<'static>, first: usize, n: usize, name: &str) -> Result<Vec<IntValue<'static>>, String> {
+    let word_ty = carriers::word();
+    (0..n)
+        .map(|i| {
+            // SAFETY: the caller's array is that many words long.
+            let slot = unsafe { b.build_gep(word_ty, array, &[word_ty.const_int((first + i) as u64, false)], name) }.map_err(|e| e.to_string())?;
+            Ok(b.build_load(word_ty, slot, "word").map_err(|e| e.to_string())?.into_int_value())
+        })
+        .collect()
+}
+
+/// The `n` words from `first` on of the list the driver left that the runtime
+/// function `entry` reads.
+pub(crate) fn pending_words(
+    b: &Builder<'static>,
+    module: &Module<'static>,
+    entry: &str,
+    first: usize,
+    n: usize,
+) -> Result<Vec<IntValue<'static>>, String> {
+    (first..first + n)
+        .map(|i| {
+            let (f, word) = crate::compile::runtime_abi::call_word(b, module, entry, &[carriers::word().const_int(i as u64, false).into()])?;
+            crate::compile::raise_check::after_call(b, f)?;
+            Ok(word)
+        })
+        .collect()
 }
 
 /// The direct function a call's callee word names, with its signature: the
@@ -821,12 +861,8 @@ pub(super) fn llvm_builder_coroutine_end(args: &[Value]) -> Result<Value, EvalEr
     };
 
     let b = builder.borrow();
-    let value_slot = unsafe {
-        b.build_gep(word_ty, f.data, &[word_ty.const_int(typelisp_abi::FRAME_VALUE_SLOT as u64, false)], "coro_ret_slot")
-            .map_err(|e| err("gep", e.to_string()))?
-    };
-    let word = value.map_or(Ok(word_ty.const_zero()), |v| carriers::to_word(&b, v)).map_err(|e| err("the answer", e))?;
-    b.build_store(value_slot, word).map_err(|e| err("store", e.to_string()))?;
+    let words = value.map_or(Ok(Vec::new()), |v| carriers::to_words(&b, v)).map_err(|e| err("the answer", e))?;
+    store_words(&b, f.data, typelisp_abi::FRAME_VALUE_SLOT, &words, "coro_ret_slot").map_err(|e| err("store", e))?;
     b.build_return(Some(&word_ty.const_int(typelisp_abi::STATUS_RETURN as u64, false)))
         .map_err(|e| err("ret", e.to_string()))?;
 
@@ -976,16 +1012,18 @@ fn rooted_table(
         return None;
     }
     let word_ty = crate::compile::carriers::word();
+    // The mask's words are 64 bits wide on every machine.
+    let mask_ty = carriers::int(64);
     let m = module.borrow();
     let mut bits = vec![0u64; nslots.div_ceil(64) as usize];
     for &slot in rooted {
         bits[(slot / 64) as usize] |= 1u64 << (slot % 64);
     }
-    let table_ty = word_ty.array_type(bits.len() as u32);
+    let table_ty = mask_ty.array_type(bits.len() as u32);
     let name = format!("{}.rooted_slots", function.get_name().to_string_lossy());
     let table = m.add_global(table_ty, None, &name);
-    let words: Vec<_> = bits.iter().map(|w| word_ty.const_int(*w, false)).collect();
-    table.set_initializer(&word_ty.const_array(&words));
+    let words: Vec<_> = bits.iter().map(|w| mask_ty.const_int(*w, false)).collect();
+    table.set_initializer(&mask_ty.const_array(&words));
     table.set_constant(true);
     table.set_linkage(inkwell::module::Linkage::Private);
     table.set_unnamed_addr(true);
@@ -994,11 +1032,12 @@ fn rooted_table(
 
 /// `(entry-value builder m entry idx kind)` — the function's argument `idx`
 /// (`entry` `"rt_pending_arg"`) or capture `idx` (`"rt_pending_env"`),
-/// carried as `kind` says ([`Carrier::of_param_kind`]).
+/// carried as `kind` says ([`Carrier::of_param_kind`]). Asked for in order:
+/// where one starts is where the ones before it end.
 ///
 /// A coroutine's arguments and captures cannot arrive as parameters — it
-/// has one, the frame — so they wait in `typelisp_abi::call_state`, each in a
-/// word, for the prologue to copy in, and this asks the runtime function
+/// has one, the frame — so they wait in `typelisp_abi::call_state`, each in its
+/// words, for the prologue to copy in, and this asks the runtime function
 /// `entry` for one. A direct function's arguments are its parameters, each at
 /// its carrier; a `()` one has no parameter. A direct function captures
 /// nothing.
@@ -1026,9 +1065,21 @@ pub(super) fn llvm_builder_entry_value(heap: &typelisp_mem::Heap, args: &[Value]
         return Ok(llvm_value_value(v));
     }
     let carrier = Carrier::of_param_kind(expect_int(&args[4])?).map_err(err)?;
-    let (f, word) = crate::compile::runtime_abi::call_word(&b, &module.borrow(), &entry, &[carriers::word().const_int(idx as u64, false).into()]).map_err(err)?;
-    crate::compile::raise_check::after_call(&b, f).map_err(err)?;
-    Ok(llvm_value_value(carrier.from_word(&b, word).map_err(err)?))
+    let first = FRAME_CTXS.with(|c| match c.borrow_mut().get_mut(&builder_key(&builder)) {
+        Some(FrameCtx { shape: Shape::Coroutine(coro), .. }) => {
+            let (next, at) = coro.entry.entry(entry.clone()).or_insert((0, 0));
+            if *next != idx {
+                return Err(err(format!("`{}` {} asked for after {} of them were read", entry, idx, next)));
+            }
+            let first = *at;
+            *next += 1;
+            *at += carrier.words();
+            Ok(first)
+        }
+        _ => Err(err("no frame is open on this builder".to_string())),
+    })?;
+    let words = pending_words(&b, &module.borrow(), &entry, first, carrier.words()).map_err(err)?;
+    Ok(llvm_value_value(carrier.from_words(&b, &words).map_err(err)?))
 }
 
 /// `(loop-safepoint builder m loop-block)` — the back edge of a loop, to
