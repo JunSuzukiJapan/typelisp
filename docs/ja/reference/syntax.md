@@ -1745,6 +1745,8 @@ CL は節の語を裸のシンボルで書くが（`(loop for i from 1 to 3 coll
 (todo)                              ; (panic "todo") に展開。defmacro
 (as Type expr)                      ; 数値/文字の型変換。失敗しうる変換は失敗時に panic
 (try-as Type expr)                  ; as と同じだが結果を Option<Type> で返す（失敗は None）
+(size-of Type)                      ; Type の値のバイト数（int）
+(size-of-val expr)                  ; expr の型の値のバイト数（int）。expr は評価しない
 (print control args...)             ; 書式展開して標準出力へ（改行なし）
 (println control args...)           ; 同上（末尾に改行）
 (format dest control args...)       ; CL の format。展開結果の string を返す
@@ -1786,6 +1788,30 @@ CL は節の語を裸のシンボルで書くが（`(loop for i from 1 to 3 coll
 続けて呼ぶ。`rational` からは `int`（`as` は切り捨て、`try-as` は整数のときだけ成功）・`ratio`・`f64` へ、
 `int`/`ratio` からは `rational` へ変換できる。対応する変換メソッド（[数値](functions/numbers.md)の `int->char`/`int->int`/`int->W` 等）へ
 展開される糖衣構文。
+
+`size-of`/`size-of-val` は C の `sizeof` に当たる。答えはコンパイル時に決まる定数で、コードが動く
+ターゲットでの大きさになる:
+
+| 型 | バイト数 |
+|---|---|
+| `i8` `u8` `bool` | 1 |
+| `i16` `u16` | 2 |
+| `i32` `u32` `f32` `char` | 4 |
+| `f64` | 8 |
+| `c-long` `c-ulong` | ターゲットの C の `long` と同じ |
+| `ptr` `(ptr T)` | ターゲットのポインタと同じ |
+| `def-c-struct` の型 | C の構造体と同じ（詰め物を含む） |
+| `()` | 0 |
+| それ以外（`int`、`string`、`defstruct` の型など） | 語 1 つ（ターゲットのポインタと同じ）。値そのものか、値の場所を表す |
+
+```lisp
+(size-of u16)                       ; => 2
+(size-of-val (as i8 5))             ; => 1
+(let ((x 1.0)) (size-of-val x))     ; => 8
+```
+
+ジェネリック関数の型パラメータも書け、呼び出しごとの型で決まる。`!` には値が無いのでエラー。
+`def-c-struct` の型は `unsafe` の外でも書ける。
 
 `documentation` は `quote`/`compile` と同様、`name` を評価せず未評価の裸シンボル/`::`パスとして
 読む特殊形。CL の `(documentation 'name 'function)` と違い型引数は取らない——`name` を変数→関数→型
