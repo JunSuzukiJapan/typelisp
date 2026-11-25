@@ -201,6 +201,11 @@ pub enum Repr {
     None,
 }
 
+fn c_long_fits_the_word() -> bool {
+    let model = typelisp_mem::target::DataModel::current();
+    model.c_long_bits() <= model.pointer_bits()
+}
+
 impl Repr {
     /// Classify `ty`, resolving a nominal type's kind through `kind_of`.
     ///
@@ -213,6 +218,11 @@ impl Repr {
             // no arithmetic), and ahead of everything else for the same reason
             // the `Handle` arm is early: falling through to the tagged
             // catch-all would shift a pointer left by three.
+            // A C `long` wider than the word (AVR's) is an integer of its width.
+            Type::CLong | Type::CULong if !c_long_fits_the_word() => {
+                let bits = typelisp_mem::target::DataModel::current().c_long_bits();
+                Repr::Narrow(FixedType::of(bits, *ty == Type::CLong).unwrap_or_else(|| unreachable!("a {}-bit `long`", bits)))
+            }
             Type::Ptr | Type::CLong | Type::CULong | Type::PtrTo(_) => Repr::RawWord,
             Type::Int => Repr::Int,
             _ if ty.is_integer() => Repr::Narrow(
