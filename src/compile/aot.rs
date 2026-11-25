@@ -848,10 +848,19 @@ pub fn compile_file_with(source_path: &str, output_path: &str, options: &BuildOp
     let skipped_safepoints = crate::compile::direct::skipped_safepoints();
     // Every body is emitted. What compiles from here on compiles for this
     // process (the `eval` environment's checking), and nothing there is direct.
+    let masking = crate::compile::llvm_builtins::globals::masking();
     drop(producing_direct);
     drop(producing_static);
-    let running_inits = settle::settle_inits(&module.borrow(), &static_globals)?;
-    settle::settle(&module.borrow(), &direct_names)?;
+    for (i, (id, _)) in &statics {
+        if let Some(bytes) = masking.get(&(*id as i64)) {
+            eprintln!(
+                "warning: interrupts are disabled while the global variable `{}` is read or written: it is {} bytes, and an interrupt handler could come between them",
+                defvar_inits[*i].0, bytes
+            );
+        }
+    }
+    let running_inits = settle::settle_inits(&module.borrow(), &static_globals, options.target.has_runtime())?;
+    settle::settle(&module.borrow(), &direct_names, options.target.has_runtime())?;
     if !options.target.has_runtime() {
         let result = {
             let m = module.borrow();

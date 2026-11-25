@@ -254,6 +254,77 @@ fn arithmetic_is_at_the_type_s_width() {
     assert_eq!(values, expected);
 }
 
+/// Division by a variable at every width, of operands on both sides of zero:
+/// the program writes a `y` or an `n` for each.
+#[test]
+fn a_division_by_a_variable() {
+    for t in &widths::FIXED {
+        let n = t.name;
+        let mut main = String::from("  (start)\n");
+        let dividends = [t.min(), t.min() + 1, -100, -7, -1, 0, 1, 7, 100, 12345, t.max() - 1, t.max()];
+        let divisors = [t.min(), -128, -10, -7, -1, 1, 2, 7, 10, 127, 255, 256, 1000, t.max()];
+        let held = |v: &i64| (t.min()..=t.max()).contains(v);
+        for a in dividends.into_iter().filter(held) {
+            for b in divisors.into_iter().filter(|b| held(b) && *b != 0) {
+                // No answer.
+                if t.signed && a == t.min() && b == -1 {
+                    continue;
+                }
+                let floor = a - b * (a as f64 / b as f64).floor() as i64;
+                main.push_str(&format!("  (check {} {} {} {} {})\n", a, b, a / b, a % b, floor));
+            }
+        }
+        let program = format!(
+            "(defun say ((b bool)) () (put (if b 121 110)) ())
+(defun check ((a {n}) (b {n}) (q {n}) (r {n}) (m {n})) () (say (= (/ a b) q)) (say (= (rem a b) r)) (say (= (mod a b) m)) ())
+(defun main () ()\n{}  (put 46))\n",
+            main
+        );
+        let out = written(&format!("avr_division_{}", n), &program);
+        assert!(!out.contains('n') && out.len() > 100, "{}: {}", n, out);
+    }
+}
+
+/// A division with no answer ends the program there: the processor stops,
+/// and no interrupt comes any more.
+#[test]
+fn a_division_with_no_answer_stops_the_program() {
+    for (name, ty, dividend, divisor) in [("u8", "u8", "5", "0"), ("i16", "i16", "-5", "0"), ("u32", "u32", "5", "0"), ("overflow", "i8", "-128", "-1")] {
+        for op in ["/", "rem", "mod"] {
+            // Those have an answer: 0.
+            if name == "overflow" && op != "/" {
+                continue;
+            }
+            for level in ["-O0", "-O2"] {
+                let source = format!(
+                    "{SERIAL}
+(defvar (d {ty}) {divisor})
+#[interrupt(13)]
+(defun on-overflow () () (put 105) ())
+(defun main () ()
+  (start)
+  (put 97)
+  (unsafe (volatile-write-u8 #x6F 1) (volatile-write-u8 #x81 1))
+  (when (= ({op} (the {ty} {dividend}) d) 1) (put 98))
+  (put 99))
+"
+                );
+                let name = format!("avr_fault_{}_{}{}", name, match op { "/" => "div", o => o }, level);
+                let elf = built(&name, &source, &[level]);
+                // The `a`, and time for anything after it to come.
+                let seen = std::cell::Cell::new(None::<Instant>);
+                let out = run_until(&elf, &["-serial", "stdio"], |text| {
+                    if text.contains('a') && seen.get().is_none() {
+                        seen.set(Some(Instant::now()));
+                    }
+                    seen.get().is_some_and(|at| at.elapsed() > Duration::from_millis(500))
+                });
+                assert_eq!(out, "a", "{}", name);
+            }
+        }
+    }
+}
+
 /// Globals are in RAM, constants nowhere, and an initial value that is not a
 /// constant is worked out at the start.
 #[test]
@@ -415,6 +486,30 @@ fn a_wide_global_is_whole() {
   (put 46))
 "#;
     assert_eq!(written("avr_whole_global", source), "Y.");
+}
+
+/// Each global an access of which disables interrupts is warned about, once.
+#[test]
+fn disabling_interrupts_for_a_wide_global_is_warned_about() {
+    let program = |attribute: &str| {
+        format!(
+            "(defvar (wide u16) 0)\n(defvar (wider u32) 0)\n(defvar (small u8) 0)\n(defvar (unused u16) 0)\n(defconstant (fixed u16) 300)
+{}(defun f () () (setf wide (+ wide fixed)) (setf wider (+ wider 1)) (setf small (+ small 1)) ())
+(defun main () () (f) (while (= wide 0)))\n",
+            attribute
+        )
+    };
+    let warnings = |name: &str, attribute: &str| {
+        let (out, _) = build(name, &program(attribute), &[]);
+        let err = String::from_utf8_lossy(&out.stderr).into_owned();
+        assert!(out.status.success(), "{}", err);
+        err
+    };
+    let one = |name: &str, bytes: u8| {
+        format!("warning: interrupts are disabled while the global variable `prog::{}` is read or written: it is {} bytes, and an interrupt handler could come between them\n", name, bytes)
+    };
+    assert_eq!(warnings("avr_warned", "#[interrupt(13)]\n"), one("wide", 2) + &one("wider", 4));
+    assert_eq!(warnings("avr_not_warned", ""), "");
 }
 
 #[test]

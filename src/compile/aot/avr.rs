@@ -75,6 +75,9 @@ SECTIONS
 }
 ";
 
+/// Where a program goes that an error ends: a division with no answer.
+pub(super) const FAULT: &str = "__typelisp_stop";
+
 /// How many entries the vector table has, the first of them reset's.
 const VECTORS: u16 = 26;
 
@@ -161,7 +164,7 @@ __typelisp_vectors:
 
 /// What runs at reset: the register the compiled code takes to be zero
 /// (`r1`), the stack, RAM ([`DATA`]), `main`. A `main` that answers stops the
-/// processor, and so does an interrupt with no handler.
+/// processor, and so do an interrupt with no handler and an error ([`FAULT`]).
 const START: &str = "
     .section .init.1,\"ax\",@progbits
 __typelisp_reset:
@@ -174,6 +177,7 @@ __typelisp_reset:
 
     .section .init.4,\"ax\",@progbits
     call typelisp_main
+    .globl __typelisp_stop
 __typelisp_stop:
     cli
     sleep
@@ -243,9 +247,9 @@ __do_clear_bss:
 /// What the code generator calls for what the processor has no instructions
 /// for, under the names and the calling conventions of `libgcc`: the product
 /// of two 32-bit integers (`__mulsi3`), and the quotient and the remainder of
-/// two (`__udivmodsi4`, `__divmodsi4`). Each is linked only when it is called.
-/// A narrower division is by a constant (one by a variable checks for zero,
-/// which takes the runtime), and the code generator multiplies instead.
+/// two integers of each width (`__udivmodqi4`, `__udivmodhi4`,
+/// `__udivmodsi4`, and the signed ones). Each is linked only when it is
+/// called.
 /// Floating-point arithmetic is not here: `--link` a `libgcc.a` for it.
 const HELPERS: &str = "
     .section .text.__mulsi3,\"ax\",@progbits
@@ -282,6 +286,92 @@ __mulsi3:
     clr r1
     movw r22, r26
     movw r24, r30
+    ret
+
+    .section .text.__udivmodqi4,\"ax\",@progbits
+    .globl __udivmodqi4
+__udivmodqi4:
+    sub r25, r25
+    ldi r23, 9
+    rjmp 2f
+1:  rol r25
+    cp r25, r22
+    brcs 2f
+    sub r25, r22
+2:  rol r24
+    dec r23
+    brne 1b
+    com r24
+    ret
+
+    .section .text.__divmodqi4,\"ax\",@progbits
+    .globl __divmodqi4
+__divmodqi4:
+    bst r24, 7
+    mov r0, r24
+    eor r0, r22
+    sbrc r24, 7
+    neg r24
+    sbrc r22, 7
+    neg r22
+    call __udivmodqi4
+    brtc 1f
+    neg r25
+1:  sbrc r0, 7
+    neg r24
+    ret
+
+    .section .text.__udivmodhi4,\"ax\",@progbits
+    .globl __udivmodhi4
+__udivmodhi4:
+    clr r26
+    sub r27, r27
+    ldi r21, 17
+    rjmp 2f
+1:  rol r26
+    rol r27
+    cp r26, r22
+    cpc r27, r23
+    brcs 2f
+    sub r26, r22
+    sbc r27, r23
+2:  rol r24
+    rol r25
+    dec r21
+    brne 1b
+    com r24
+    com r25
+    movw r22, r24
+    movw r24, r26
+    ret
+
+    .section .text.__divmodhi4,\"ax\",@progbits
+    .globl __divmodhi4
+__divmodhi4:
+    bst r25, 7
+    mov r0, r23
+    brtc 1f
+    com r0
+    rcall __typelisp_negate_dividend
+1:  sbrs r23, 7
+    rjmp 2f
+    rcall __typelisp_negate_divisor
+2:  call __udivmodhi4
+    sbrs r0, 7
+    rjmp 3f
+    rcall __typelisp_negate_divisor
+3:  brtc 4f
+    rcall __typelisp_negate_dividend
+4:  ret
+__typelisp_negate_dividend:
+    com r25
+    neg r24
+    sbci r25, 0xff
+    ret
+__typelisp_negate_divisor:
+    com r23
+    neg r22
+    sbci r23, 0xff
     ret
 
     .section .text.__udivmodsi4,\"ax\",@progbits
