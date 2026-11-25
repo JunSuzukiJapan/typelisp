@@ -75,7 +75,7 @@ mod settle;
 mod made;
 mod native;
 mod reach;
-mod avr;
+pub(crate) mod avr;
 mod embedded;
 mod wasm;
 
@@ -679,13 +679,24 @@ pub fn compile_file_with(source_path: &str, output_path: &str, options: &BuildOp
     let mut pinned: std::collections::HashSet<String> = std::collections::HashSet::new();
     pinned.insert(target_symbol_name(&CompileTarget::Fn(entry_path)));
     pinned.extend(items.iter().chain(&prelude.items).filter(|i| print_object_receiver(i).is_some()).map(target_symbol_name));
-    pinned.extend(chk.interrupt_handlers().into_iter().map(|(_, path)| target_symbol_name(&CompileTarget::Fn(path))));
+    let handlers: Vec<(u16, String)> =
+        chk.interrupt_handlers().into_iter().map(|(vector, path)| (vector, target_symbol_name(&CompileTarget::Fn(path)))).collect();
+    // With no runtime, what the board enters instead.
+    let mut vectors: Vec<(u16, String)> = Vec::new();
+    if options.target.has_runtime() {
+        pinned.extend(handlers.iter().map(|(_, symbol)| symbol.clone()));
+    } else {
+        for ((vector, path), (_, symbol)) in chk.interrupt_handlers().iter().zip(&handlers) {
+            vectors.push((avr::interrupt_number(options.target, *vector, path)?, symbol.clone()));
+        }
+    }
+    let entered: Vec<String> = vectors.iter().map(|(_, symbol)| symbol.clone()).collect();
     pinned.extend(chk.ffi_callbacks().into_iter().map(|sig| ConcreteNames::symbol(&sig.function.to_string())));
     for (_, slots) in interp.vtable_descriptors() {
         pinned.extend(slots.iter().map(|(type_name, method)| ConcreteNames::method_symbol(type_name, method.name())));
     }
     let entry_symbol = target_symbol_name(&CompileTarget::Fn(entry_path));
-    let direct::Direct { sigs, emit, entry: direct_entry, called, interprets, why_not } = direct::direct_functions(&mut heap, &module.borrow(), &bodies, &static_inits, &other_inits, &pinned, &entry_symbol, |heap, symbol| {
+    let direct::Direct { sigs, emit, entry: direct_entry, called, interprets, why_not } = direct::direct_functions(&mut heap, &module.borrow(), &bodies, &static_inits, &other_inits, &pinned, &entry_symbol, &entered, |heap, symbol| {
         prelude_items.get(symbol).map(|item| translated(heap, item)).transpose()
     })?;
     bodies.extend(emit);
@@ -701,7 +712,6 @@ pub fn compile_file_with(source_path: &str, output_path: &str, options: &BuildOp
             defvar_inits.iter().enumerate().filter(|(i, _)| !statics.contains_key(i)).map(|(_, (path, _))| format!("the global variable `{}`", path)),
         );
         whys.extend(chk.ffi_callbacks().iter().map(|sig| format!("`{}`, given to C as a callback", sig.function)));
-        whys.extend(chk.interrupt_handlers().iter().map(|(_, path)| format!("the interrupt handler `{}`", path)));
         if !whys.is_empty() {
             return Err(avr::needs_runtime(options.target, &whys));
         }
@@ -710,7 +720,10 @@ pub fn compile_file_with(source_path: &str, output_path: &str, options: &BuildOp
     let direct_names: Vec<String> = sigs.keys().cloned().collect();
     let producing_direct = crate::compile::direct::producing(sigs, options.target.has_runtime());
     let producing_static =
-        crate::compile::llvm_builtins::globals::producing(statics.values().map(|(id, assigned)| (*id as i64, *assigned)).collect());
+        crate::compile::llvm_builtins::globals::producing(
+            statics.values().map(|(id, assigned)| (*id as i64, *assigned)).collect(),
+            !vectors.is_empty(),
+        );
     // What runs at startup for each static global, its variable, and whether
     // that can be assigned.
     let static_globals: Vec<(String, String, bool)> = statics
@@ -845,15 +858,23 @@ pub fn compile_file_with(source_path: &str, output_path: &str, options: &BuildOp
             let entry = direct_entry.as_deref().and_then(|name| m.get_function(name)).ok_or("internal error: the entry point was not compiled")?;
             let main_returns_int = chk.fn_ret(&entry_path).is_some_and(|ret| ret == crate::Type::Int);
             let inits: Vec<_> = running_inits.iter().filter_map(|name| m.get_function(name)).collect();
+            let handlers = vectors
+                .iter()
+                .map(|(n, symbol)| {
+                    let f = if *symbol == entry_symbol { Some(entry) } else { m.get_function(symbol) };
+                    f.map(|f| (*n, f)).ok_or_else(|| format!("internal error: the interrupt handler `{}` was not compiled", symbol))
+                })
+                .collect::<Result<Vec<_>, String>>()?;
             let reached: Result<(), String> =
-                inits.iter().copied().chain([entry]).try_for_each(|f| avr::check_reaches_no_runtime(&m, options.target, f));
+                inits.iter().copied().chain([entry]).chain(handlers.iter().map(|(_, f)| *f)).try_for_each(|f| avr::check_reaches_no_runtime(&m, options.target, f));
             reached
-                .and_then(|()| bare_main(ctx, &m, &inits, entry, main_returns_int))
+                .and_then(|()| bare_main(ctx, &m, &inits, !handlers.is_empty(), entry, main_returns_int))
+                .and_then(|()| handlers.iter().try_for_each(|(n, f)| avr::vector(&m, *n, *f)))
                 .and_then(|()| crate::compile::type_table::settle_for_export(&m).map(|_| ()))
                 .and_then(|()| m.verify().map_err(|e| format!("module failed verification: {}", e)))
                 .and_then(|()| direct::check_only_called(&m, &direct_names))
                 .and_then(|()| write_ir(&m))
-                .and_then(|()| avr::write_executable(&m, output_path, &items, options))
+                .and_then(|()| avr::write_executable(&m, output_path, &items, &handlers.iter().map(|(n, _)| *n).collect::<Vec<_>>(), options))
         };
         // Under the guard, as at the end of this function.
         drop(module);
@@ -1670,13 +1691,24 @@ fn static_global(heap: &Heap, body: Value, assigned: bool, target: Target) -> bo
 }
 
 /// `main` of a program nothing of which calls the runtime: a call of its
-/// static globals' initializers, and of its direct entry point.
-fn bare_main(ctx: &'static Context, module: &Module<'static>, inits: &[inkwell::values::FunctionValue<'static>], entry: inkwell::values::FunctionValue<'static>, main_returns_int: bool) -> Result<(), String> {
+/// static globals' initializers, and of its direct entry point. Interrupts may
+/// come, if `interrupts` says so, from when the globals are initialized.
+fn bare_main(
+    ctx: &'static Context,
+    module: &Module<'static>,
+    inits: &[inkwell::values::FunctionValue<'static>],
+    interrupts: bool,
+    entry: inkwell::values::FunctionValue<'static>,
+    main_returns_int: bool,
+) -> Result<(), String> {
     let main_fn = module.add_function(ENTRY_POINT_NAME, ctx.i32_type().fn_type(&[], false), None);
     let builder = ctx.create_builder();
     builder.position_at_end(ctx.append_basic_block(main_fn, "entry"));
     for init in inits {
         builder.build_call(*init, &[], "").map_err(|e| format!("failed to call a global's initializer: {}", e))?;
+    }
+    if interrupts {
+        avr::enable_interrupts(&builder)?;
     }
     run_bare_entry(ctx, &builder, entry, main_returns_int)
 }

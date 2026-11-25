@@ -340,6 +340,102 @@ fn every_width_is_its_own() {
     }
 }
 
+/// Timer 1 overflowing (vector 13) and the serial port ready for a byte
+/// (19). The handler and the program share a wide global, every register of
+/// the program survives the handler, and a function both call.
+#[test]
+fn interrupt_handlers_run() {
+    let source = r#"
+(defconstant (TCCR1B int) #x81)
+(defconstant (TIMSK1 int) #x6F)
+(defconstant (UCSR0B int) #xC1)
+(defvar (ticks u32) 65000)
+(defvar (text u8) 97)
+(defvar (late u16) (* (the u16 300) (the u16 2)))
+(defun add-one ((n u32)) u32 (+ n 1))
+
+#[interrupt(13)]
+(defun on-overflow () () (setf ticks (add-one ticks)) (unsafe (volatile-write-u16 #x84 65000)) ())
+
+#[interrupt(19)]
+(defun on-ready () ()
+  (put text)
+  (setf text (+ text 1))
+  (when (= text 102) (unsafe (volatile-write-u8 UCSR0B 8)))
+  ())
+
+(defun busy () u32
+  (let ((sum (the u32 0)) (i (the u32 0)))
+    (while (< (- ticks (the u32 65000)) (the u32 1000))
+      (setf i (+ i 1))
+      (setf sum (+ sum i))
+      (setf sum (- sum i)))
+    (add-one sum)))
+
+(defun main () ()
+  (start)
+  (put (if (= late 600) 89 78))
+  (unsafe (volatile-write-u8 TIMSK1 1) (volatile-write-u8 TCCR1B 1)
+          (volatile-write-u16 #x84 65000))
+  (put (if (= (busy) 1) 89 78))
+  (unsafe (volatile-write-u8 TIMSK1 0))
+  (put (if (< ticks (the u32 66000)) 78 89))
+  (unsafe (volatile-write-u8 UCSR0B 40))
+  (while (< text (the u8 102)))
+  (put 46))
+"#;
+    assert_eq!(written("avr_interrupts", source), "YYYabcde.");
+}
+
+/// A handler never sees half of what the program is storing, nor leaves it
+/// half of another value: both halves of each are the same.
+#[test]
+fn a_wide_global_is_whole() {
+    let source = r#"
+(defvar (wide u32) 0)
+(defvar (seen u16) 0)
+(defvar (torn u8) 0)
+(defun look ((n u32)) ()
+  (when (/= (logand n (the u32 65535)) (ash n -16)) (setf torn 1)) ())
+#[interrupt(13)]
+(defun on-overflow () ()
+  (look wide)
+  (setf seen (+ seen 1))
+  (setf wide 1431655765)
+  (unsafe (volatile-write-u16 #x84 65223))
+  ())
+(defun main () ()
+  (start)
+  (unsafe (volatile-write-u8 #x6F 1) (volatile-write-u8 #x81 1))
+  (let ((i (the u16 0)))
+    (while (< seen (the u16 1000))
+      (setf wide 0) (look wide) (setf wide 4294967295) (look wide) (setf i (+ i 1))))
+  (unsafe (volatile-write-u8 #x6F 0))
+  (put (if (= torn 0) 89 78))
+  (put 46))
+"#;
+    assert_eq!(written("avr_whole_global", source), "Y.");
+}
+
+#[test]
+fn a_handler_the_chip_cannot_run_is_refused() {
+    for (name, source, why) in [
+        ("reset", "#[interrupt(0)]\n(defun f () () ())\n(defun main () ())", "`prog::f` handles interrupt 0: the interrupts of --target avr-atmega328p are 1 to 25"),
+        ("past", "#[interrupt(26)]\n(defun f () () ())\n(defun main () ())", "`prog::f` handles interrupt 26: the interrupts of"),
+        ("exception", "#[exception(SysTick)]\n(defun f () () ())\n(defun main () ())", "`prog::f` handles a core exception, and --target avr-atmega328p has none"),
+        ("catches", "#[interrupt(13)]\n(defun f () () (catch 'a ()) ())\n(defun main () ())", "`catch` (in prog::f)"),
+        ("prints", "#[interrupt(13)]\n(defun f () () (println \"x\"))\n(defun main () ())", "(reached by prog::f"),
+        (
+            "enables",
+            "(use std::board::enable-interrupt)\n(defun main () () (enable-interrupt 13))",
+            "`enable-interrupt`, which is for an interrupt controller the chip has not",
+        ),
+    ] {
+        let err = refused(&format!("avr_handler_{}", name), source);
+        assert!(err.contains(why), "{}: {}", name, err);
+    }
+}
+
 /// At `-O2` the `case` is a table, which is in RAM.
 #[test]
 fn a_table_is_readied_in_ram() {

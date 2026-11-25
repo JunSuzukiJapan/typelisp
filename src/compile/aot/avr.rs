@@ -18,7 +18,8 @@ use std::process::Command;
 
 use inkwell::module::Module;
 use inkwell::targets::{CodeModel, FileType, RelocMode, Target, TargetMachine, TargetTriple};
-use inkwell::values::FunctionValue;
+use inkwell::builder::Builder;
+use inkwell::values::{FunctionValue, IntValue, PointerValue};
 
 use super::embedded::{sections_of_their_own, Board, BOARD_MAIN};
 use super::{board_linker, reach, BuildOptions, ENTRY_POINT_NAME};
@@ -74,19 +75,94 @@ SECTIONS
 }
 ";
 
-/// The interrupt vectors and what runs at reset: the register the compiled
-/// code takes to be zero (`r1`), the stack, RAM ([`DATA`]), `main`. A
-/// `main` that answers stops the processor. No interrupt is enabled; one that
-/// comes all the same stops it too.
-const START: &str = "
+/// How many entries the vector table has, the first of them reset's.
+const VECTORS: u16 = 26;
+
+/// The vector-table entry of an interrupt `0` as a handler's attribute has it
+/// (`typeck::attribute`): a Cortex-M's exceptions come before it.
+const FIRST_INTERRUPT: u16 = 16;
+
+/// The status register's address, and its bit that lets interrupts come.
+const SREG: u64 = 0x5f;
+const INTERRUPTS: u64 = 0x80;
+
+/// The interrupt the handler `path` is for, its attribute having named the
+/// entry `vector`: the number the chip's tables count from reset's 0.
+pub(super) fn interrupt_number(target: super::Target, vector: u16, path: &crate::types::Path) -> Result<u16, String> {
+    let last = VECTORS - 1;
+    match vector.checked_sub(FIRST_INTERRUPT) {
+        None => Err(format!("`{}` handles a core exception, and --target {} has none", path, target.name())),
+        Some(n) if (1..=last).contains(&n) => Ok(n),
+        Some(n) => Err(format!("`{}` handles interrupt {}: the interrupts of --target {} are 1 to {}", path, n, target.name(), last)),
+    }
+}
+
+/// The function the vector `n` jumps to.
+fn vector_symbol(n: u16) -> String {
+    format!("__typelisp_vector_{}", n)
+}
+
+/// Makes what the interrupt `n` enters: `handler`, between saving and putting
+/// back every register it changes, and a return that lets interrupts come
+/// again.
+pub(super) fn vector(module: &Module<'static>, n: u16, handler: FunctionValue<'static>) -> Result<(), String> {
+    let ctx = crate::compile::llvm_context();
+    let f = module.add_function(&vector_symbol(n), ctx.void_type().fn_type(&[], false), None);
+    // `CallingConv::AVR_SIGNAL`, and the attribute that goes with it.
+    f.set_call_conventions(85);
+    f.add_attribute(inkwell::attributes::AttributeLoc::Function, ctx.create_string_attribute("signal", ""));
+    let b = ctx.create_builder();
+    b.position_at_end(ctx.append_basic_block(f, "entry"));
+    b.build_call(handler, &[], "").map_err(|e| format!("failed to call an interrupt handler: {}", e))?;
+    b.build_return(None).map_err(|e| format!("failed to build a vector's return: {}", e))?;
+    Ok(())
+}
+
+fn status_register() -> PointerValue<'static> {
+    let ctx = crate::compile::llvm_context();
+    crate::compile::carriers::int(16).const_int(SREG, false).const_to_pointer(ctx.ptr_type(inkwell::AddressSpace::default()))
+}
+
+/// The status register's value.
+pub(crate) fn status(b: &Builder<'static>) -> Result<IntValue<'static>, String> {
+    let v = b.build_load(crate::compile::carriers::int(8), status_register(), "status").map_err(|e| e.to_string())?.into_int_value();
+    let i = v.as_instruction().ok_or("internal error: a load is an instruction")?;
+    i.set_volatile(true).map_err(|e| format!("the status register: {:?}", e))?;
+    Ok(v)
+}
+
+/// Sets the status register.
+pub(crate) fn set_status(b: &Builder<'static>, v: IntValue<'static>) -> Result<(), String> {
+    let i = b.build_store(status_register(), v).map_err(|e| e.to_string())?;
+    i.set_volatile(true).map_err(|e| format!("the status register: {:?}", e))
+}
+
+/// Lets interrupts come.
+pub(super) fn enable_interrupts(b: &Builder<'static>) -> Result<(), String> {
+    set_status(b, crate::compile::carriers::int(8).const_int(INTERRUPTS, false))
+}
+
+/// The interrupt vectors, `handled` of them the program's.
+fn vector_table(handled: &[u16]) -> String {
+    let mut table = String::from(
+        "
     .section .vectors,\"ax\",@progbits
     .globl __typelisp_vectors
 __typelisp_vectors:
     jmp __typelisp_reset
-    .rept 25
-    jmp __typelisp_stop
-    .endr
+",
+    );
+    for n in 1..VECTORS {
+        let to = if handled.contains(&n) { vector_symbol(n) } else { "__typelisp_stop".to_string() };
+        table.push_str(&format!("    jmp {}\n", to));
+    }
+    table
+}
 
+/// What runs at reset: the register the compiled code takes to be zero
+/// (`r1`), the stack, RAM ([`DATA`]), `main`. A `main` that answers stops the
+/// processor, and so does an interrupt with no handler.
+const START: &str = "
     .section .init.1,\"ax\",@progbits
 __typelisp_reset:
     clr r1
@@ -310,15 +386,22 @@ fn needs_runtime_header(target: super::Target) -> String {
 
 /// Refuses a program whose `entry` reaches a runtime function.
 pub(super) fn check_reaches_no_runtime(module: &Module<'static>, target: super::Target, entry: FunctionValue<'static>) -> Result<(), String> {
-    let uses = reach::uses(module, entry, |name| super::is_runtime(module, name).then(|| format!("the runtime function `{}`", name)));
+    let uses = reach::uses(module, entry, |name| {
+        match crate::compile::externs::BOARD_ONLY_SHIMS.iter().find(|(shim, _)| *shim == name) {
+            Some((_, what)) => Some(format!("{}, which is for an interrupt controller the chip has not: the device's own register enables its interrupt", what)),
+            None => super::is_runtime(module, name).then(|| format!("the runtime function `{}`", name)),
+        }
+    });
     if uses.is_empty() { Ok(()) } else { Err(reach::report(&needs_runtime_header(target), &uses)) }
 }
 
-/// Takes everything `main` does not reach out of `module`.
-fn keep_only_main(module: &Module<'static>, tm: &TargetMachine) -> Result<(), String> {
+/// Takes everything `main` and the vectors `handled` do not reach out of
+/// `module`.
+fn keep_only_entered(module: &Module<'static>, handled: &[u16], tm: &TargetMachine) -> Result<(), String> {
+    let kept: String = handled.iter().map(|n| format!(";preserve-gv={}", vector_symbol(*n))).collect();
     module
         .run_passes(
-            &format!("internalize<preserve-gv={}>,globaldce", BOARD_MAIN),
+            &format!("internalize<preserve-gv={}{}>,globaldce", BOARD_MAIN, kept),
             tm,
             inkwell::passes::PassBuilderOptions::create(),
         )
@@ -326,12 +409,14 @@ fn keep_only_main(module: &Module<'static>, tm: &TargetMachine) -> Result<(), St
 }
 
 /// Emits `module` as an AVR object and links it, with the start-up code and
-/// what `options` say, into an ELF executable at `output_path`. Must be
+/// what `options` say, into an ELF executable at `output_path`. `handled` are
+/// the interrupts [`vector`] was made for. Must be
 /// called with [`crate::compile::COMPILE_LOCK`] held.
 pub(super) fn write_executable(
     module: &Module<'static>,
     output_path: &str,
     items: &[CompileTarget],
+    handled: &[u16],
     options: &BuildOptions,
 ) -> Result<(), String> {
     let board = options.target.board().ok_or("internal error: an AVR target is a board")?;
@@ -353,13 +438,13 @@ pub(super) fn write_executable(
         .ok_or("internal error: the module has no `main`")?
         .as_global_value()
         .set_name(BOARD_MAIN);
-    keep_only_main(module, &tm)?;
+    keep_only_entered(module, handled, &tm)?;
     crate::compile::codegen_prep::prepare(module)?;
     crate::compile::optimize::run_llvm_passes(module, &tm)?;
     sections_of_their_own(module);
     // What is linked in besides may have something in RAM too.
     let data = if module.get_first_global().is_some() || !options.link.is_empty() { DATA } else { "" };
-    module.set_inline_assembly(&format!("{}{}{}", START, data, HELPERS));
+    module.set_inline_assembly(&format!("{}{}{}{}", vector_table(handled), START, data, HELPERS));
 
     // The object and the script, beside the executable while it links.
     let scratch = std::path::PathBuf::from(format!("{}.ld", output_path));

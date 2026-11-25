@@ -29,7 +29,9 @@
 //!
 //! A function whose address is handed to the runtime is a coroutine
 //! whatever it does (`pinned`): the entry, a method in a vtable, a
-//! registered `print-object`, an interrupt handler, a C callback. So is
+//! registered `print-object`, an interrupt handler, a C callback. (On a
+//! target with no runtime a handler is called by the vector's own code,
+//! `avr::vector`, and is an ordinary function.) So is
 //! every function of a program that can reach the interpreter, which may
 //! call any of them by name. [`check_only_called`] makes sure, after the
 //! executable's `main` is built, that nothing took a direct function's
@@ -142,8 +144,8 @@ pub(crate) struct Direct {
     pub emit: Vec<Body>,
     /// The entry point's direct copy, when it has one.
     pub entry: Option<String>,
-    /// What that copy and the static globals' initializers can call,
-    /// themselves included. Empty when there is no such copy.
+    /// What that copy, the static globals' initializers and the `handlers`
+    /// can call, themselves included. Empty when there is no such copy.
     pub called: HashSet<String>,
     /// The program reaches the interpreter, which looks globals up in the
     /// runtime's table: none of them is static, and the initializers given as
@@ -156,7 +158,8 @@ pub(crate) struct Direct {
 
 /// The direct functions of the program whose own functions are `bodies`,
 /// whose static globals' initializers are `static_inits`, each a function of
-/// its own, and whose other globals' initializers are `inits`. `module` holds the FFI thunks,
+/// its own, and whose other globals' initializers are `inits`. `handlers` are
+/// the functions a target with no runtime enters besides `entry`. `module` holds the FFI thunks,
 /// all of them coroutines; `prelude` translates the prelude function of a
 /// symbol, if it is one.
 pub(crate) fn direct_functions(
@@ -167,6 +170,7 @@ pub(crate) fn direct_functions(
     inits: &[Value],
     pinned: &HashSet<String>,
     entry: &str,
+    handlers: &[String],
     mut prelude: impl FnMut(&mut Heap, &str) -> Result<Option<Body>, String>,
 ) -> Result<Direct, String> {
     let mut known: HashMap<String, Facts> =
@@ -227,9 +231,10 @@ pub(crate) fn direct_functions(
         let body = bodies.iter().find(|b| b.symbol == entry).expect("the entry is one of the program's functions");
         let copy = format!("{}{}", entry, COPY_SUFFIX);
         let mut pending = vec![entry];
-        for init in static_inits.iter().map(|b| b.symbol.as_str()).filter(|s| direct.contains(s)) {
-            answer.called.insert(init.to_string());
-            pending.push(init);
+        let roots = static_inits.iter().map(|b| b.symbol.as_str()).chain(handlers.iter().map(String::as_str));
+        for root in roots.filter(|s| direct.contains(s)) {
+            answer.called.insert(root.to_string());
+            pending.push(root);
         }
         while let Some(at) = pending.pop() {
             for callee in known.get(at).into_iter().flat_map(|f| &f.callees) {
@@ -245,8 +250,9 @@ pub(crate) fn direct_functions(
     } else {
         answer.why_not = why_not_direct(&known, module, waits, entry);
     }
-    for init in static_inits.iter().map(|b| b.symbol.as_str()).filter(|s| !direct.contains(s)) {
-        answer.why_not.extend(why_not_direct(&known, module, waits, init));
+    let roots = static_inits.iter().map(|b| b.symbol.as_str()).chain(handlers.iter().map(String::as_str));
+    for root in roots.filter(|s| *s != entry && !direct.contains(s)) {
+        answer.why_not.extend(why_not_direct(&known, module, waits, root));
     }
     answer.emit.extend(static_inits.iter().cloned());
     let sigs: Vec<(String, DirectSig)> = bodies
