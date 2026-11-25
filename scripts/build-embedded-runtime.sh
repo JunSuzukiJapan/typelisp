@@ -17,6 +17,9 @@
 #   ld.lld                     the linker (rust-lld) of the Rust toolchain
 #                              that built it
 #
+# and the linker in <target dir>/embedded-runtime/<profile>/ too, for a board
+# that has no runtime (AVR).
+#
 #   scripts/build-embedded-runtime.sh            # the debug profile
 #   scripts/build-embedded-runtime.sh release    # the release profile
 #
@@ -53,6 +56,8 @@ fi
 
 target_dir="${CARGO_TARGET_DIR:-$root/target}"
 build_dir="$target_dir/embedded"
+mkdir -p "$target_dir/embedded-runtime/$profile"
+ln -sf "$lld" "$target_dir/embedded-runtime/$profile/ld.lld"
 
 for target in thumbv7em-none-eabihf thumbv8m.main-none-eabihf; do
   if [ ! -d "$sysroot/lib/rustlib/$target" ]; then

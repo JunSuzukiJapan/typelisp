@@ -1,7 +1,8 @@
 //! What is known of the direct functions once all of them are emitted, made
 //! use of: their slots are values, a volatile access of a constant address
-//! is an instruction, and a call that cannot raise is not followed by a
-//! check for a raise.
+//! is an instruction, a call that cannot raise is not followed by a check
+//! for a raise, and slots no collection can happen under are not the
+//! collector's.
 //!
 //! At every optimization level, because they decide what the executable
 //! needs of the runtime (`build_main_wrapper`), and what a program needs
@@ -10,7 +11,7 @@
 use std::collections::HashSet;
 
 use inkwell::module::Module;
-use inkwell::values::{AsValueRef, BasicValueEnum, FunctionValue, InstructionOpcode, InstructionValue, IntValue, Operand};
+use inkwell::values::{AsValueRef, BasicValue, BasicValueEnum, FunctionValue, InstructionOpcode, InstructionValue, IntValue, Operand};
 
 use typelisp_rt::c_mem;
 
@@ -32,9 +33,74 @@ pub(super) fn settle(module: &Module<'static>, direct: &[String]) -> Result<(), 
             drop_check(call);
         }
     }
+    let quiet = quiet(&functions);
+    for f in functions.iter().filter(|f| quiet.contains(&name_of(**f))) {
+        frame_on_the_stack(*f)?;
+    }
     for f in &functions {
         simplify(*f)?;
     }
+    Ok(())
+}
+
+const FRAME_OPEN: &str = "rt_local_frame_open";
+const FRAME_CLOSE: &str = "rt_local_frame_close";
+
+/// The functions among `functions` nothing can be collected under: all they
+/// call is one another, LLVM's own, and the opening and closing of a frame.
+fn quiet(functions: &[FunctionValue<'static>]) -> HashSet<String> {
+    let mut quiet: HashSet<String> = functions.iter().map(|f| name_of(*f)).collect();
+    loop {
+        let loud: Vec<String> = functions
+            .iter()
+            .filter(|f| quiet.contains(&name_of(**f)))
+            .filter(|f| {
+                instructions(**f).into_iter().filter(|i| i.get_opcode() == InstructionOpcode::Call).any(|i| match callee(i).map(name_of) {
+                    None => true,
+                    Some(c) => c != FRAME_OPEN && c != FRAME_CLOSE && !c.starts_with("llvm.") && !quiet.contains(&c),
+                })
+            })
+            .map(|f| name_of(*f))
+            .collect();
+        if loud.is_empty() {
+            return quiet;
+        }
+        for f in loud {
+            quiet.remove(&f);
+        }
+    }
+}
+
+/// Makes the frame `f` opens for the collector, if it opens one, a stack
+/// array.
+fn frame_on_the_stack(f: FunctionValue<'static>) -> Result<(), String> {
+    let called = |name: &str| -> Vec<InstructionValue<'static>> {
+        instructions(f).into_iter().filter(|i| callee(*i).is_some_and(|c| c.get_name().to_bytes() == name.as_bytes())).collect()
+    };
+    let opens = called(FRAME_OPEN);
+    let [open] = opens[..] else { return Ok(()) };
+    let Some(Operand::Value(BasicValueEnum::IntValue(n))) = open.get_operand(0) else {
+        return Err(format!("internal error: the frame of `{}` has no length", name_of(f)));
+    };
+    let n = n.get_zero_extended_constant().ok_or_else(|| format!("internal error: the frame of `{}` has no constant length", name_of(f)))?;
+    let word_ty = crate::compile::carriers::word();
+    let b = crate::compile::llvm_context().create_builder();
+    b.position_before(&open);
+    let slots = b.build_alloca(word_ty.array_type(n as u32), "slots").map_err(|e| format!("the frame of `{}`: {}", name_of(f), e))?;
+    for close in called(FRAME_CLOSE) {
+        close.erase_from_basic_block();
+    }
+    let data: IntValue<'static> = open.try_into().map_err(|()| "internal error: a frame is a word".to_string())?;
+    let mut at = data.get_first_use();
+    while let Some(used) = at {
+        at = used.get_next_use();
+        let inkwell::values::AnyValueEnum::PointerValue(address) = used.get_user() else {
+            return Err(format!("internal error: the frame of `{}` is used other than by its address", name_of(f)));
+        };
+        address.replace_all_uses_with(slots);
+        address.as_instruction().ok_or("internal error: a frame's address is an instruction")?.erase_from_basic_block();
+    }
+    open.erase_from_basic_block();
     Ok(())
 }
 

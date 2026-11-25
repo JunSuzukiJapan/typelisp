@@ -373,6 +373,32 @@ pub(super) fn embedded_linker(runtime: &std::path::Path) -> Result<std::path::Pa
     rustup_lld("a board")
 }
 
+/// The linker for a board that has no runtime ([`embedded_linker`] is for one
+/// that has): the same one. A debug build's is in
+/// `<target dir>/embedded-runtime/<profile>/`.
+pub(super) fn board_linker() -> Result<std::path::PathBuf, String> {
+    #[cfg(typelisp_bundled_runtime)]
+    {
+        rustup_lld("a board")
+    }
+    #[cfg(not(typelisp_bundled_runtime))]
+    {
+        let profile_dir = std::path::Path::new(env!("TYPELISP_PROFILE_DIR"));
+        let (Some(target_dir), Some(profile)) = (profile_dir.parent(), profile_dir.file_name()) else {
+            return Err(format!("internal error: {} is not <target dir>/<profile>", profile_dir.display()));
+        };
+        let linker = target_dir.join("embedded-runtime").join(profile).join("ld.lld");
+        if !linker.exists() {
+            return Err(format!(
+                "there is no {}; scripts/build-embedded-runtime.sh {} puts it there",
+                linker.display(),
+                profile.to_string_lossy()
+            ));
+        }
+        Ok(linker)
+    }
+}
+
 /// The linker for a WebAssembly module whose runtime is in `runtime`
 /// ([`wasm_runtime_dir`]), run with `-flavor wasm`.
 ///

@@ -1,0 +1,311 @@
+//! `typl -c --target avr-atmega328p`: an ELF executable for the Arduino Uno's
+//! ATmega328P, run under QEMU (`qemu-system-avr -M uno`), and the programs
+//! it refuses at compile time.
+//!
+//! A program here ends with `main` answering, which stops the processor, and
+//! QEMU with it only when it is told to: what the program writes to the
+//! serial port (USART0) ends with a `.` the test waits for.
+//!
+//! Needs the linker `scripts/build-embedded-runtime.sh` puts beside the
+//! runtimes for a board, and `qemu-system-avr` on `PATH`.
+
+use std::io::Read;
+use std::path::{Path, PathBuf};
+use std::process::{Command, Output, Stdio};
+use std::sync::mpsc;
+use std::time::{Duration, Instant};
+
+const TYPL: &str = env!("CARGO_BIN_EXE_typl");
+
+/// How long a program may run under QEMU before the test calls it hung.
+const RUN_LIMIT: Duration = Duration::from_secs(120);
+
+/// `(start)` readies USART0 and `(put c)` writes a byte to it.
+const SERIAL: &str = r#"
+(defun start () () (unsafe (volatile-write-u8 #xC1 8)) ())
+(defun put ((c u8)) ()
+  (while (= (logand (unsafe (volatile-read-u8 #xC0)) 32) 0))
+  (unsafe (volatile-write-u8 #xC6 c))
+  ())
+"#;
+
+/// Blinking the LED of an Uno: PB5 an output, then turned over again and
+/// again, waiting in between.
+const BLINK: &str = r#"
+(define-symbol-macro PINB #x23)
+(define-symbol-macro DDRB #x24)
+(define-symbol-macro LED (the u8 32))
+(defun wait-a-bit () ()
+  (let ((i (the u16 0)))
+    (while (< i (the u16 1000))
+      (unsafe (volatile-read-u8 PINB))
+      (setf i (+ i 1)))
+    ()))
+(defun main () ()
+  (unsafe (volatile-write-u8 DDRB LED))
+  (while true
+    (unsafe (volatile-write-u8 PINB LED))
+    (wait-a-bit)))
+"#;
+
+fn scratch(name: &str) -> PathBuf {
+    let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("target").join("aot-test-tmp").join(name);
+    std::fs::create_dir_all(&dir).expect("failed to create the test scratch dir");
+    dir
+}
+
+fn build(name: &str, source: &str, flags: &[&str]) -> (Output, PathBuf) {
+    let dir = scratch(name);
+    let src = dir.join("prog.typl");
+    let elf = dir.join("prog.elf");
+    std::fs::write(&src, source).unwrap();
+    let out = Command::new(TYPL)
+        .args(["-c", src.to_str().unwrap(), "-o", elf.to_str().unwrap(), "--target", "avr-atmega328p"])
+        .args(flags)
+        .output()
+        .expect("failed to start the typl binary");
+    (out, elf)
+}
+
+fn built(name: &str, source: &str, flags: &[&str]) -> PathBuf {
+    let (out, elf) = build(name, source, flags);
+    assert!(out.status.success(), "typl -c {:?} failed: {}", flags, String::from_utf8_lossy(&out.stderr));
+    elf
+}
+
+/// Runs `elf` on QEMU's Uno with `flags`, and answers what it writes to its
+/// standard output until `enough` says so.
+fn run_until(elf: &Path, flags: &[&str], enough: impl Fn(&str) -> bool) -> String {
+    let mut child = Command::new("qemu-system-avr")
+        .args(["-M", "uno", "-display", "none", "-monitor", "none", "-bios"])
+        .arg(elf)
+        .args(flags)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .expect("failed to start qemu-system-avr (the Uno's executables run under QEMU)");
+    let mut stdout = child.stdout.take().unwrap();
+    let (send, receive) = mpsc::channel();
+    let reader = std::thread::spawn(move || {
+        let mut buf = [0; 256];
+        while let Ok(n @ 1..) = stdout.read(&mut buf) {
+            if send.send(buf[..n].to_vec()).is_err() {
+                break;
+            }
+        }
+    });
+    let started = Instant::now();
+    let mut seen = Vec::new();
+    let mut text = String::new();
+    while !enough(&text) && started.elapsed() < RUN_LIMIT {
+        match receive.recv_timeout(Duration::from_millis(100)) {
+            Ok(bytes) => {
+                seen.extend(bytes);
+                text = String::from_utf8_lossy(&seen).into_owned();
+            }
+            Err(mpsc::RecvTimeoutError::Timeout) => {}
+            Err(mpsc::RecvTimeoutError::Disconnected) => break,
+        }
+    }
+    let _ = child.kill();
+    let _ = child.wait();
+    drop(receive);
+    let _ = reader.join();
+    assert!(enough(&text), "{} did not do it; it wrote: {:?}", elf.display(), text);
+    text
+}
+
+/// What `source` writes to the serial port up to its `.`, at `-O0` and at
+/// `-O2`, which must agree.
+fn written(name: &str, source: &str) -> String {
+    let source = format!("{}{}", SERIAL, source);
+    let [plain, optimized] = ["-O0", "-O2"].map(|level| {
+        let elf = built(&format!("{}{}", name, level), &source, &[level]);
+        run_until(&elf, &["-serial", "stdio"], |text| text.ends_with('.'))
+    });
+    assert_eq!(plain, optimized, "-O0 and -O2");
+    plain
+}
+
+/// The bytes `elf` puts in flash: what its loaded segments have in the file.
+fn flash_bytes(elf: &Path) -> u32 {
+    let bytes = std::fs::read(elf).unwrap();
+    let u16_at = |at: usize| u16::from_le_bytes(bytes[at..at + 2].try_into().unwrap());
+    let u32_at = |at: usize| u32::from_le_bytes(bytes[at..at + 4].try_into().unwrap());
+    let (table, size, count) = (u32_at(28) as usize, u16_at(42) as usize, u16_at(44) as usize);
+    (0..count).map(|i| table + i * size).filter(|at| u32_at(*at) == 1).map(|at| u32_at(at + 16)).sum()
+}
+
+fn refused(name: &str, source: &str) -> String {
+    let (out, _) = build(name, source, &[]);
+    assert_eq!(out.status.code(), Some(1));
+    String::from_utf8_lossy(&out.stderr).into_owned()
+}
+
+/// The LED's port is not a device QEMU has, so it logs each access.
+#[test]
+fn an_led_blinks() {
+    for (name, level) in [("avr_blink_o0", "-O0"), ("avr_blink_o2", "-O2")] {
+        let elf = built(name, BLINK, &[level]);
+        let log = scratch(name).join("log");
+        let _ = std::fs::remove_file(&log);
+        let mut child = Command::new("qemu-system-avr")
+            .args(["-M", "uno", "-display", "none", "-monitor", "none", "-serial", "null", "-d", "unimp", "-D"])
+            .arg(&log)
+            .arg("-bios")
+            .arg(&elf)
+            .stdin(Stdio::null())
+            .spawn()
+            .expect("failed to start qemu-system-avr (the Uno's executables run under QEMU)");
+        let started = Instant::now();
+        let (mut made_output, mut turned) = (0, 0);
+        while turned < 3 && started.elapsed() < RUN_LIMIT {
+            std::thread::sleep(Duration::from_millis(50));
+            let text = std::fs::read_to_string(&log).unwrap_or_default();
+            made_output = text.matches("gpio-b: unimplemented device write (size 1, offset 0x1, value 0x20)").count();
+            turned = text.matches("gpio-b: unimplemented device write (size 1, offset 0x0, value 0x20)").count();
+        }
+        let _ = child.kill();
+        let _ = child.wait();
+        assert_eq!(made_output, 1, "{}", level);
+        assert!(turned >= 3, "{}: turned over {} times", level, turned);
+    }
+}
+
+/// The interrupt vectors are 104 bytes of it.
+#[test]
+fn a_blinking_led_takes_no_more_than_it_needs() {
+    let bytes = flash_bytes(&built("avr_blink_size", BLINK, &["-O2"]));
+    assert!(bytes <= 200, "{} bytes", bytes);
+}
+
+/// Multiplication and division the processor has no instruction for, and the
+/// widths it has none for.
+#[test]
+fn arithmetic_is_at_the_type_s_width() {
+    let out = written(
+        "avr_arith",
+        r#"
+(defun hex1 ((n u8)) () (put (if (< n (the u8 10)) (+ n (the u8 48)) (+ n (the u8 87)))) ())
+(defun hex8 ((n u8)) () (hex1 (ash n -4)) (hex1 (logand n (the u8 15))) ())
+(defun hex32 ((n u32)) ()
+  (hex8 (as u8 (logand (ash n -24) (the u32 255))))
+  (hex8 (as u8 (logand (ash n -16) (the u32 255))))
+  (hex8 (as u8 (logand (ash n -8) (the u32 255))))
+  (hex8 (as u8 (logand n (the u32 255))))
+  (put 10) ())
+(defun g32 ((n u32)) u32
+  (unsafe (volatile-write-u32 #x200 n) (volatile-read-u32 #x200)))
+(defun g8 ((n u8)) u8 (unsafe (volatile-write-u8 #x200 n) (volatile-read-u8 #x200)))
+(defun g16 ((n u16)) u16 (unsafe (volatile-write-u16 #x200 n) (volatile-read-u16 #x200)))
+(defun s32 ((n i32)) () (hex32 (as u32 n)) ())
+(defun u16p ((n u16)) () (hex32 (as u32 n)) ())
+(defun u8p ((n u8)) () (hex32 (as u32 n)) ())
+(defun i8p ((n i8)) () (hex32 (as u32 n)) ())
+(defun i16p ((n i16)) () (hex32 (as u32 n)) ())
+(defun main () ()
+  (start)
+  (hex32 (* (g32 305419896) (g32 2596069104)))
+  (hex32 (mod (g32 4000000000) (the u32 7919)))
+  (hex32 (/ (g32 4000000000) (the u32 7919)))
+  (hex32 (/ (g32 4000000000) (the u32 4000000000)))
+  (s32 (mod (as i32 (g32 4000000000)) (the i32 7919)))
+  (s32 (rem (as i32 (g32 4000000000)) (the i32 7919)))
+  (s32 (/ (as i32 (g32 4000000000)) (the i32 -7919)))
+  (u16p (/ (g16 50000) (the u16 123)))
+  (u16p (mod (g16 50000) (the u16 123)))
+  (i16p (/ (as i16 (g16 50000)) (the i16 123)))
+  (i16p (rem (as i16 (g16 50000)) (the i16 -123)))
+  (u8p (/ (g8 250) (the u8 7)))
+  (u8p (mod (g8 250) (the u8 7)))
+  (i8p (/ (as i8 (g8 250)) (the i8 7)))
+  (i8p (rem (as i8 (g8 250)) (the i8 4)))
+  (i8p (mod (as i8 (g8 250)) (the i8 4)))
+  (put 46))
+"#,
+    );
+    let values: Vec<&str> = out.trim_end_matches('.').split_whitespace().collect();
+    let expected: Vec<String> = [
+        305419896u32.wrapping_mul(2596069104),
+        4000000000 % 7919,
+        4000000000 / 7919,
+        1,
+        (4000000000u32 as i32).rem_euclid(7919) as u32,
+        (4000000000u32 as i32 % 7919) as u32,
+        (4000000000u32 as i32 / -7919) as u32,
+        50000 / 123,
+        50000 % 123,
+        i32::from(50000u16 as i16 / 123) as u32,
+        i32::from(50000u16 as i16 % -123) as u32,
+        250 / 7,
+        250 % 7,
+        i32::from(250u8 as i8 / 7) as u32,
+        i32::from(250u8 as i8 % 4) as u32,
+        i32::from((250u8 as i8).rem_euclid(4)) as u32,
+    ]
+    .iter()
+    .map(|n| format!("{:08x}", n))
+    .collect();
+    assert_eq!(values, expected);
+}
+
+/// At `-O2` the `case` is a table, which is in RAM.
+#[test]
+fn a_table_is_readied_in_ram() {
+    let source = r#"
+(defun pick ((n u8)) u8
+  (case n (0 72) (1 101) (2 108) (3 108) (4 111) (5 33) (6 65) (7 90) (8 77) (:else 46)))
+(defun main () ()
+  (start)
+  (let ((i (the u8 0)))
+    (while (< i (the u8 10))
+      (put (pick (unsafe (volatile-write-u8 #x200 i) (volatile-read-u8 #x200))))
+      (setf i (+ i 1)))))
+"#;
+    assert_eq!(written("avr_table", source), "Hello!AZM.");
+}
+
+#[test]
+fn the_linker_script_says_where_memory_is() {
+    let dir = scratch("avr_linker_script");
+    let memory = dir.join("memory.x");
+    std::fs::write(&memory, "MEMORY\n{\n  FLASH : ORIGIN = 0, LENGTH = 64\n  RAM : ORIGIN = 0x800100, LENGTH = 2K\n}\n").unwrap();
+    let (out, _) = build("avr_linker_script", BLINK, &["--linker-script", memory.to_str().unwrap()]);
+    assert_eq!(out.status.code(), Some(1));
+    let err = String::from_utf8_lossy(&out.stderr).into_owned();
+    assert!(err.contains("will not fit in region 'FLASH'"), "{}", err);
+}
+
+/// The program says why it needs the runtime.
+#[test]
+fn a_program_that_needs_the_runtime_is_refused() {
+    for (name, source, why) in [
+        ("string", r#"(defun main () () (println "hi"))"#, "the runtime function `rt_str_new` (reached by prog::main)"),
+        ("variable", "(defvar (n u8) 1)\n(defun main () () (setf n 2) ())", "the global variable `prog::n`"),
+        ("bignum", "(defun main () int 100000)", "the runtime function `rt_bignum_new` (reached by prog::main)"),
+        (
+            "recursion",
+            "(defun f ((n u8)) u8 (if (= n 0) 0 (f (- n 1))))\n(defun main () () (f 3) ())",
+            "a function that calls itself (in prog::main -> prog::f)",
+        ),
+        ("c", "(defffi c-go () ())\n(defun main () () (unsafe (c-go)))", "a C function (in prog::main -> prog::c-go)"),
+        ("eval", "(defun main () () (eval '(+ 1 2)) ())", "the interpreter"),
+        ("catch", "(defun main () () (catch 'a ()) ())", "`catch` (in prog::main)"),
+    ] {
+        let err = refused(&format!("avr_refused_{}", name), source);
+        assert!(err.contains("--target avr-atmega328p: the target has no runtime, and the program needs it:"), "{}: {}", name, err);
+        assert!(err.contains(why), "{}: {}", name, err);
+    }
+}
+
+#[test]
+fn the_runtime_s_flags_are_refused() {
+    for flags in [["--board-functions", "c"], ["--heap-cells", "16"], ["--max-memory", "1K"]] {
+        let (out, _) = build("avr_runtime_flags", BLINK, &flags);
+        assert_eq!(out.status.code(), Some(1));
+        let expected = format!("{}: the target avr-atmega328p has no runtime", flags[0]);
+        let err = String::from_utf8_lossy(&out.stderr).into_owned();
+        assert!(err.contains(&expected), "{}", err);
+    }
+}

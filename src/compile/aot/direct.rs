@@ -58,8 +58,8 @@ pub(crate) struct Body {
 /// What one function's IR says about it.
 #[derive(Default)]
 struct Facts {
-    /// Something in it can stop it.
-    stops: bool,
+    /// The node that can stop it, if there is one.
+    stops: Option<&'static str>,
     /// It has a loop.
     loops: bool,
     /// It makes another task wait or run.
@@ -72,8 +72,17 @@ struct Facts {
     names: Vec<String>,
 }
 
-/// The nodes that make a function a coroutine.
-const STOPPING_NODES: [&str; 8] = ["suspend", "select", "apply", "labels", "apply-indirect", "dyn-call", "catch", "unwind-protect"];
+/// The nodes that make a function a coroutine, and what each is in a message.
+const STOPPING_NODES: [(&str, &str); 8] = [
+    ("suspend", "an operation that waits"),
+    ("select", "`select`"),
+    ("apply", "a call of a `labels` function"),
+    ("labels", "`labels`"),
+    ("apply-indirect", "a call of a function value"),
+    ("dyn-call", "a call through a `:dyn`"),
+    ("catch", "`catch`"),
+    ("unwind-protect", "`unwind-protect`"),
+];
 
 fn facts(heap: &Heap, form: Value) -> Facts {
     let mut f = Facts::default();
@@ -84,8 +93,8 @@ fn facts(heap: &Heap, form: Value) -> Facts {
                 let (Ok(head), Ok(rest)) = (heap.car(v), heap.cdr(v)) else { continue };
                 if let Value::Symbol(tag) = head {
                     let name = tag.name();
-                    if STOPPING_NODES.contains(&name) {
-                        f.stops = true;
+                    if let Some((_, what)) = STOPPING_NODES.iter().find(|(node, _)| *node == name) {
+                        f.stops = Some(what);
                     }
                     if name == "loop" {
                         f.loops = true;
@@ -133,6 +142,11 @@ pub(crate) struct Direct {
     pub emit: Vec<Body>,
     /// The entry point's direct copy, when it has one.
     pub entry: Option<String>,
+    /// What that copy can call, itself included. Empty when there is none.
+    pub called: HashSet<String>,
+    /// Why it has none, each with the functions from the entry to the one
+    /// that is the reason. Empty when it has one.
+    pub why_not: Vec<String>,
 }
 
 /// The direct functions of the program whose own functions are `bodies` and
@@ -170,13 +184,14 @@ pub(crate) fn direct_functions(
     // What the program does, with what it reaches.
     let all = || known.values().chain(&init_facts);
     if all().any(|f| f.interprets) {
+        answer.why_not.push("`eval` and the like, which need the interpreter".to_string());
         return Ok(answer);
     }
     let waits = all().any(|f| f.waits);
 
     let mut direct: HashSet<&str> = known
         .iter()
-        .filter(|(name, f)| !pinned.contains(*name) && !f.stops && !(f.loops && waits))
+        .filter(|(name, f)| !pinned.contains(*name) && f.stops.is_none() && !(f.loops && waits))
         .map(|(name, _)| name.as_str())
         .collect();
     let cyclic: HashSet<&str> = direct.iter().copied().filter(|name| calls_itself(&known, name)).collect();
@@ -199,12 +214,23 @@ pub(crate) fn direct_functions(
     // The entry is a coroutine for the runtime to drive, and a direct
     // function for a `main` that needs none of it.
     let e = &known[entry];
-    if !e.stops && !(e.loops && waits) && e.callees.iter().all(|c| direct.contains(c.as_str()) || (!known.contains_key(c) && module.get_function(c).is_none())) {
+    if e.stops.is_none() && !(e.loops && waits) && e.callees.iter().all(|c| direct.contains(c.as_str()) || (!known.contains_key(c) && module.get_function(c).is_none())) {
         let body = bodies.iter().find(|b| b.symbol == entry).expect("the entry is one of the program's functions");
         let copy = format!("{}{}", entry, COPY_SUFFIX);
+        let mut pending = vec![entry];
+        while let Some(at) = pending.pop() {
+            for callee in known.get(at).into_iter().flat_map(|f| &f.callees) {
+                if direct.contains(callee.as_str()) && answer.called.insert(callee.clone()) {
+                    pending.push(callee);
+                }
+            }
+        }
+        answer.called.insert(copy.clone());
         answer.sigs.insert(copy.clone(), DirectSig::of(&body.params, &body.ret));
         answer.emit.push(Body { symbol: copy.clone(), ..body.clone() });
         answer.entry = Some(copy);
+    } else {
+        answer.why_not = why_not_direct(&known, module, waits, entry);
     }
     let sigs: Vec<(String, DirectSig)> = bodies
         .iter()
@@ -214,6 +240,43 @@ pub(crate) fn direct_functions(
         .collect();
     answer.sigs.extend(sigs);
     Ok(answer)
+}
+
+/// What makes `entry` a coroutine: every function it can call that is one by
+/// what it does itself, with the calls that lead to it.
+fn why_not_direct(known: &HashMap<String, Facts>, module: &Module<'static>, waits: bool, entry: &str) -> Vec<String> {
+    let mut whys = Vec::new();
+    let mut seen: HashSet<&str> = HashSet::from([entry]);
+    let mut pending: std::collections::VecDeque<Vec<&str>> = [vec![entry]].into();
+    while let Some(chain) = pending.pop_front() {
+        let at = chain[chain.len() - 1];
+        let mut because = |what: &str| {
+            let chain: Vec<&str> = chain.iter().map(|s| typelisp_mem::ConcreteNames::link_name_of(s).unwrap_or(s)).collect();
+            whys.push(format!("{} (in {})", what, chain.join(" -> ")));
+        };
+        let Some(f) = known.get(at) else {
+            // A name that is no function at all is a method computed in place.
+            if module.get_function(at).is_some() {
+                because("a C function");
+            }
+            continue;
+        };
+        if let Some(what) = f.stops {
+            because(what);
+        }
+        if f.loops && waits {
+            because("a loop, in a program with tasks");
+        }
+        if calls_itself(known, at) {
+            because("a function that calls itself");
+        }
+        for callee in &f.callees {
+            if seen.insert(callee) {
+                pending.push_back(chain.iter().copied().chain([callee.as_str()]).collect());
+            }
+        }
+    }
+    whys
 }
 
 /// Whether a call of `name` can come back to `name`.

@@ -1,5 +1,5 @@
 //! The C data model of the code being produced: how wide C's `long` and a
-//! pointer are, and how they and a `double` are aligned.
+//! pointer are, and how far a scalar is aligned.
 //!
 //! Compiled code and the C it calls must agree on these, and the compiler
 //! runs on one machine while the code it produces may run on another: an
@@ -15,17 +15,16 @@
 //! The runtime does not ask: it runs on the machine the code runs on, so
 //! `core::ffi::c_long` there is already the answer.
 
-/// How wide C's `long` and a pointer are, and how a `double` is aligned.
-/// A `long` and a pointer are aligned as they are wide on every target
-/// there is a [`DataModel`] for.
+/// How wide C's `long` and a pointer are, and how far anything is aligned:
+/// a scalar is aligned as it is wide, up to that.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct DataModel {
     /// `sizeof(void *)`.
     pub pointer_bytes: u32,
     /// `sizeof(long)`.
     pub c_long_bytes: u32,
-    /// `_Alignof(double)`.
-    pub f64_align: u32,
+    /// The widest alignment a scalar has.
+    pub max_align: u32,
 }
 
 impl DataModel {
@@ -33,12 +32,16 @@ impl DataModel {
     pub const HOST: DataModel = DataModel {
         pointer_bytes: core::mem::size_of::<usize>() as u32,
         c_long_bytes: core::mem::size_of::<core::ffi::c_long>() as u32,
-        f64_align: core::mem::align_of::<f64>() as u32,
+        max_align: core::mem::align_of::<f64>() as u32,
     };
 
     /// 32-bit `int`, `long` and pointer: wasm32 and the Cortex-M boards
     /// (AAPCS aligns a `double` to 8, and so does wasm32's C ABI).
-    pub const ILP32: DataModel = DataModel { pointer_bytes: 4, c_long_bytes: 4, f64_align: 8 };
+    pub const ILP32: DataModel = DataModel { pointer_bytes: 4, c_long_bytes: 4, max_align: 8 };
+
+    /// AVR: a 16-bit pointer and a 32-bit `long`, nothing aligned to more than
+    /// a byte.
+    pub const AVR: DataModel = DataModel { pointer_bytes: 2, c_long_bytes: 4, max_align: 1 };
 
     /// `long`'s width in bits.
     pub const fn c_long_bits(self) -> u32 {

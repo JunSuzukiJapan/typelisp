@@ -107,6 +107,9 @@ pub(super) fn tag_field(args: &[Value]) -> Result<Value, EvalError> {
         k::F64 => call("rt_f64_new")?,
         k::F32 => call("rt_f32_new")?,
         k::CHAR => {
+            if word_ty.get_bit_width() < 32 {
+                return Err(err(no_room_for_char()));
+            }
             let n = b.build_int_z_extend(v.into_int_value(), word_ty, "scalar").map_err(fail)?;
             let n = b.build_left_shift(n, word_ty.const_int(typelisp_mem::tagged::SMALL_SHIFT as u64, false), "scalar").map_err(fail)?;
             b.build_or(n, word_ty.const_int(typelisp_mem::tagged::TAG_CHAR as u64, false), "char").map_err(fail)?.into()
@@ -132,6 +135,11 @@ pub(super) fn tag_field(args: &[Value]) -> Result<Value, EvalError> {
     Ok(llvm_value_value(tagged))
 }
 
+/// A character with its tag takes 27 bits.
+fn no_room_for_char() -> String {
+    format!("a character does not fit in a {}-bit word", carriers::word().get_bit_width())
+}
+
 /// `(untag-field builder m v kind)` — the value a field of the field kind
 /// `kind` holds, out of its tagged word.
 pub(super) fn untag_field(args: &[Value]) -> Result<Value, EvalError> {
@@ -154,6 +162,9 @@ pub(super) fn untag_field(args: &[Value]) -> Result<Value, EvalError> {
         k::F64 => call("rt_f64_value")?,
         k::F32 => call("rt_f32_value")?,
         k::CHAR => {
+            if word_ty.get_bit_width() < 32 {
+                return Err(err(no_room_for_char()));
+            }
             let n = b
                 .build_right_shift(word.into_int_value(), word_ty.const_int(typelisp_mem::tagged::SMALL_SHIFT as u64, false), false, "scalar")
                 .map_err(fail)?;

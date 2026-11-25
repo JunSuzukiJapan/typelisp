@@ -75,6 +75,7 @@ mod settle;
 mod made;
 mod native;
 mod reach;
+mod avr;
 mod embedded;
 mod wasm;
 
@@ -363,6 +364,9 @@ pub enum Target {
     Thumbv7em,
     /// `thumbv8m.main-none-eabihf`: the same for a Cortex-M33 board.
     Thumbv8mMain,
+    /// `avr-atmega328p`: an ELF executable for the ATmega328P (Arduino Uno),
+    /// which has no runtime ([`avr`]).
+    AvrAtmega328p,
 }
 
 impl Target {
@@ -373,6 +377,7 @@ impl Target {
             "wasm32-unknown-unknown" => Ok(Target::Wasm32Unknown),
             "thumbv7em-none-eabihf" => Ok(Target::Thumbv7em),
             "thumbv8m.main-none-eabihf" => Ok(Target::Thumbv8mMain),
+            "avr-atmega328p" => Ok(Target::AvrAtmega328p),
             _ => Err(format!(
                 "--target: unknown target `{}` (the ones there are: wasm32-wasip1, wasm32-unknown-unknown, {})",
                 name,
@@ -382,15 +387,22 @@ impl Target {
     }
 
     /// The targets that are boards without an operating system.
-    pub const BOARDS: [Target; 2] = [Target::Thumbv7em, Target::Thumbv8mMain];
+    pub const BOARDS: [Target; 3] = [Target::Thumbv7em, Target::Thumbv8mMain, Target::AvrAtmega328p];
 
     /// The board the target is, if it is one.
     pub fn board(self) -> Option<&'static embedded::Board> {
         match self {
             Target::Thumbv7em => Some(&embedded::CORTEX_M4),
             Target::Thumbv8mMain => Some(&embedded::CORTEX_M33),
+            Target::AvrAtmega328p => Some(&avr::ATMEGA328P),
             Target::Host | Target::Wasip1 | Target::Wasm32Unknown => None,
         }
+    }
+
+    /// Whether there is a runtime for the target. An executable for one there
+    /// is none for is the program's own code and nothing else.
+    pub fn has_runtime(self) -> bool {
+        self != Target::AvrAtmega328p
     }
 
     /// The boards' triples, for a message.
@@ -406,7 +418,7 @@ impl Target {
             Target::Host => &[],
             Target::Wasip1 => &[RuntimeCrate::Posix],
             Target::Wasm32Unknown => &[RuntimeCrate::Sys, RuntimeCrate::Posix],
-            Target::Thumbv7em | Target::Thumbv8mMain => &[RuntimeCrate::Sys, RuntimeCrate::Posix, RuntimeCrate::Front],
+            Target::Thumbv7em | Target::Thumbv8mMain | Target::AvrAtmega328p => &[RuntimeCrate::Sys, RuntimeCrate::Posix, RuntimeCrate::Front],
         }
     }
 
@@ -416,6 +428,7 @@ impl Target {
         match self {
             Target::Host => DataModel::HOST,
             Target::Wasip1 | Target::Wasm32Unknown | Target::Thumbv7em | Target::Thumbv8mMain => DataModel::ILP32,
+            Target::AvrAtmega328p => DataModel::AVR,
         }
     }
 
@@ -427,6 +440,7 @@ impl Target {
             Target::Wasm32Unknown => "wasm32-unknown-unknown",
             Target::Thumbv7em => "thumbv7em-none-eabihf",
             Target::Thumbv8mMain => "thumbv8m.main-none-eabihf",
+            Target::AvrAtmega328p => "avr-atmega328p",
         }
     }
 }
@@ -653,10 +667,23 @@ pub fn compile_file_with(source_path: &str, output_path: &str, options: &BuildOp
         pinned.extend(slots.iter().map(|(type_name, method)| ConcreteNames::method_symbol(type_name, method.name())));
     }
     let entry_symbol = target_symbol_name(&CompileTarget::Fn(entry_path));
-    let direct::Direct { sigs, emit, entry: direct_entry } = direct::direct_functions(&mut heap, &module.borrow(), &bodies, &init_bodies, &pinned, &entry_symbol, |heap, symbol| {
+    let direct::Direct { sigs, emit, entry: direct_entry, called, why_not } = direct::direct_functions(&mut heap, &module.borrow(), &bodies, &init_bodies, &pinned, &entry_symbol, |heap, symbol| {
         prelude_items.get(symbol).map(|item| translated(heap, item)).transpose()
     })?;
     bodies.extend(emit);
+    if !options.target.has_runtime() {
+        // What a program cannot do without the runtime is told from what it
+        // is made of; what is left is emitted as far as the entry calls it,
+        // and whether that calls the runtime is seen once it is (`avr`).
+        let mut whys = why_not;
+        whys.extend(defvar_inits.iter().map(|(path, _)| format!("the global variable `{}`", path)));
+        whys.extend(chk.ffi_callbacks().iter().map(|sig| format!("`{}`, given to C as a callback", sig.function)));
+        whys.extend(chk.interrupt_handlers().iter().map(|(_, path)| format!("the interrupt handler `{}`", path)));
+        if !whys.is_empty() {
+            return Err(avr::needs_runtime(options.target, &whys));
+        }
+        bodies.retain(|b| called.contains(&b.symbol));
+    }
     let direct_names: Vec<String> = sigs.keys().cloned().collect();
     let producing_direct = crate::compile::direct::producing(sigs);
 
@@ -720,7 +747,8 @@ pub fn compile_file_with(source_path: &str, output_path: &str, options: &BuildOp
     // one: its compiled bodies address their globals by baked-in slot id, so
     // `*print-pretty*` has to have storage before anything that prints runs.
     let mut global_init_names: Vec<String> = Vec::with_capacity(prelude.global_inits.len() + defvar_inits.len());
-    for (_, form) in &prelude.global_inits {
+    let prelude_inits: &[(Path, Value)] = if options.target.has_runtime() { &prelude.global_inits } else { &[] };
+    for (_, form) in prelude_inits {
         let internal_name = format!("$global_init${}", global_init_names.len());
         crate::compile::driver::add_compiled_global_init(&interp, &mut heap, module.clone(), &internal_name, *form).map_err(|e| e.to_string())?;
         global_init_names.push(internal_name);
@@ -743,6 +771,7 @@ pub fn compile_file_with(source_path: &str, output_path: &str, options: &BuildOp
         .filter(|i| print_object_receiver(i).is_some())
         .map(target_symbol_name)
         .chain(pinned)
+        .filter(|_| options.target.has_runtime())
         .collect();
     loop {
         let missing = |m: &Module<'static>, symbol: &str| m.get_function(symbol).is_some_and(|f| f.count_basic_blocks() == 0);
@@ -773,6 +802,23 @@ pub fn compile_file_with(source_path: &str, output_path: &str, options: &BuildOp
     // process (the `eval` environment's checking), and nothing there is direct.
     drop(producing_direct);
     settle::settle(&module.borrow(), &direct_names)?;
+    if !options.target.has_runtime() {
+        let result = {
+            let m = module.borrow();
+            let entry = direct_entry.as_deref().and_then(|name| m.get_function(name)).ok_or("internal error: the entry point was not compiled")?;
+            let main_returns_int = chk.fn_ret(&entry_path).is_some_and(|ret| ret == crate::Type::Int);
+            avr::check_reaches_no_runtime(&m, options.target, entry)
+                .and_then(|()| bare_main(ctx, &m, entry, main_returns_int))
+                .and_then(|()| crate::compile::type_table::settle_for_export(&m).map(|_| ()))
+                .and_then(|()| m.verify().map_err(|e| format!("module failed verification: {}", e)))
+                .and_then(|()| direct::check_only_called(&m, &direct_names))
+                .and_then(|()| write_ir(&m))
+                .and_then(|()| avr::write_executable(&m, output_path, &items, options))
+        };
+        // Under the guard, as at the end of this function.
+        drop(module);
+        return result;
+    }
 
     // Which types have a compiled `print-object`, for the printer's AOT
     // startup registration to choose from (`live_types` keeps those
@@ -1016,18 +1062,11 @@ pub fn compile_file_with(source_path: &str, output_path: &str, options: &BuildOp
                 Ok(())
             })
             .and_then(|()| {
-                // The whole program's IR, for reading, whatever the target.
-                // An AOT module is the one the island's output is hardest to
-                // see: it is neither `disassemble`'s single function nor a
-                // committed dump, and by the time anything is wrong it is
-                // machine code. `TYPELISP_AOT_IR=<path>` writes it here.
-                if let Ok(path) = std::env::var("TYPELISP_AOT_IR") {
-                    fs::write(&path, m.print_to_string().to_string()).map_err(|e| format!("failed to write {}: {}", path, e))?;
-                }
-                Ok(())
+                write_ir(&m)
             })
             .and_then(|()| match options.target {
                 Target::Host => write_executable(&m, output_path, &link_libraries, &items),
+                Target::AvrAtmega328p => Err("internal error: a target without a runtime is built without a driver".to_string()),
                 Target::Wasip1 | Target::Wasm32Unknown | Target::Thumbv7em | Target::Thumbv8mMain => {
                     let missing = options.target.missing_runtimes();
                     // A board calls its vendor's C functions; a WebAssembly
@@ -1153,7 +1192,6 @@ fn build_main_wrapper(
         .set_volatile(true)
         .map_err(|e| format!("failed to mark the ABI marker load volatile: {:?}", e))?;
 
-
     // A program nothing of which calls the runtime: no heap, and nothing to
     // start. What it runs is all there is.
     let outside = !callback_entries.is_empty() || !interrupt_handlers.is_empty() || eval_env.is_some();
@@ -1163,18 +1201,7 @@ fn build_main_wrapper(
     };
     if let Some(entry) = direct_entry {
         if globals.inits.iter().all(|i| !i.always) && !reach::reached(module, &[entry], None).functions.iter().any(|f| is_runtime(module, f)) {
-            let call = builder.build_call(entry, &[], "answer").map_err(|e| format!("failed to call the entry point: {}", e))?;
-            let code = match call.try_as_basic_value() {
-                // With no runtime there is no bignum, so an `int` is a fixnum.
-                inkwell::values::ValueKind::Basic(word) if main_returns_int => {
-                    let n = builder
-                        .build_right_shift(word.into_int_value(), word.get_type().into_int_type().const_int(1, false), true, "code")
-                        .map_err(|e| format!("failed to read the exit code: {}", e))?;
-                    builder.build_int_truncate(n, i32_type, "exit_code").map_err(|e| format!("failed to truncate exit code: {}", e))?
-                }
-                _ => i32_type.const_zero(),
-            };
-            builder.build_return(Some(&code)).map_err(|e| format!("failed to build entry-point return: {}", e))?;
+            run_bare_entry(ctx, &builder, entry, main_returns_int)?;
             return crate::compile::type_table::settle_for_export(module).map(|_| ());
         }
     }
@@ -1551,6 +1578,50 @@ fn run_direct_entry(
     debug_assert_eq!(call.get_type(), word_ty);
     call.replace_all_uses_with(code);
     call.as_instruction().expect("a call").erase_from_basic_block();
+    Ok(())
+}
+
+/// The whole program's IR, for reading, whatever the target.
+/// An AOT module is the one the island's output is hardest to
+/// see: it is neither `disassemble`'s single function nor a
+/// committed dump, and by the time anything is wrong it is
+/// machine code. `TYPELISP_AOT_IR=<path>` writes it here.
+fn write_ir(module: &Module<'static>) -> Result<(), String> {
+    if let Ok(path) = std::env::var("TYPELISP_AOT_IR") {
+        fs::write(&path, module.print_to_string().to_string()).map_err(|e| format!("failed to write {}: {}", path, e))?;
+    }
+    Ok(())
+}
+
+/// `main` of a program nothing of which calls the runtime: a call of its
+/// direct entry point.
+fn bare_main(ctx: &'static Context, module: &Module<'static>, entry: inkwell::values::FunctionValue<'static>, main_returns_int: bool) -> Result<(), String> {
+    let main_fn = module.add_function(ENTRY_POINT_NAME, ctx.i32_type().fn_type(&[], false), None);
+    let builder = ctx.create_builder();
+    builder.position_at_end(ctx.append_basic_block(main_fn, "entry"));
+    run_bare_entry(ctx, &builder, entry, main_returns_int)
+}
+
+/// Calls the direct entry point and returns the exit code its answer is.
+fn run_bare_entry(
+    ctx: &'static Context,
+    builder: &inkwell::builder::Builder<'static>,
+    entry: inkwell::values::FunctionValue<'static>,
+    main_returns_int: bool,
+) -> Result<(), String> {
+    let i32_type = ctx.i32_type();
+    let call = builder.build_call(entry, &[], "answer").map_err(|e| format!("failed to call the entry point: {}", e))?;
+    let code = match call.try_as_basic_value() {
+        // With no runtime there is no bignum, so an `int` is a fixnum.
+        inkwell::values::ValueKind::Basic(word) if main_returns_int => {
+            let n = builder
+                .build_right_shift(word.into_int_value(), word.get_type().into_int_type().const_int(1, false), true, "code")
+                .map_err(|e| format!("failed to read the exit code: {}", e))?;
+            builder.build_int_cast_sign_flag(n, i32_type, true, "exit_code").map_err(|e| format!("failed to read the exit code: {}", e))?
+        }
+        _ => i32_type.const_zero(),
+    };
+    builder.build_return(Some(&code)).map_err(|e| format!("failed to build entry-point return: {}", e))?;
     Ok(())
 }
 

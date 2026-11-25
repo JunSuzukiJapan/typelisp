@@ -109,13 +109,14 @@ fn c_struct_def<'r>(reg: &'r Registry, path: &Path) -> Result<&'r CStructDef, Er
 /// `(sizeof, _Alignof)` of a C type, by the target's data model.
 fn c_layout(reg: &Registry, ty: &Type) -> Result<(u64, u64), Error> {
     let model = typelisp_mem::target::DataModel::current();
+    let scalar = |size: u64| (size, size.min(u64::from(model.max_align)));
     Ok(match ty {
-        Type::I8 | Type::U8 | Type::Bool => (1, 1),
-        Type::I16 | Type::U16 => (2, 2),
-        Type::I32 | Type::U32 | Type::F32 => (4, 4),
-        Type::CLong | Type::CULong => (u64::from(model.c_long_bytes), u64::from(model.c_long_bytes)),
-        Type::Ptr | Type::PtrTo(_) => (u64::from(model.pointer_bytes), u64::from(model.pointer_bytes)),
-        Type::F64 => (8, u64::from(model.f64_align)),
+        Type::I8 | Type::U8 | Type::Bool => scalar(1),
+        Type::I16 | Type::U16 => scalar(2),
+        Type::I32 | Type::U32 | Type::F32 => scalar(4),
+        Type::CLong | Type::CULong => scalar(u64::from(model.c_long_bytes)),
+        Type::Ptr | Type::PtrTo(_) => scalar(u64::from(model.pointer_bytes)),
+        Type::F64 => scalar(8),
         Type::CStruct(p) => {
             let d = c_struct_def(reg, p)?;
             (d.size, d.align)

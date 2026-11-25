@@ -34,7 +34,7 @@ use crate::CompileTarget;
 
 /// What the runtime's entry calls: `main` taking nothing and answering the
 /// exit code.
-const BOARD_MAIN: &str = "typelisp_main";
+pub(super) const BOARD_MAIN: &str = "typelisp_main";
 
 /// A target that is a board: the core its code is for, and the QEMU board
 /// that stands for it, whose memory a program is linked for when the user
@@ -119,7 +119,7 @@ fn target_machine(triple: &str, cpu: &str) -> Result<TargetMachine, String> {
 /// whole, and with them the calls the program never makes into shims the
 /// board's runtime has not got. The names are the ones `link.x` gathers
 /// (`.text.*`, `.rodata.*`, `.data.*`, `.bss.*`).
-fn sections_of_their_own(module: &Module<'static>) {
+pub(super) fn sections_of_their_own(module: &Module<'static>) {
     for f in module.get_functions() {
         if f.count_basic_blocks() > 0 {
             let name = f.get_name().to_string_lossy().into_owned();
