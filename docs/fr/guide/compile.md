@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ 66155a938dbf56e43296ef8cfe54dfdfe3182721 -->
+<!-- translated-from: docs/ja/guide/compile.md @ c4e9ddb5a894a69547e3fb5c7aa3d030e8a82821 -->
 # Compilation
 
 Sauf indication contraire, les programmes typelisp s'exécutent dans l'interpréteur. Il existe en outre deux façons
@@ -296,6 +296,42 @@ $ qemu-system-arm -M mps2-an505 -nographic \
 - `throw`/`catch`/`panic`, les bignums, les fractions et les flottants, ainsi que les tâches, les canaux et `sleep` se comportent comme dans l'exécutable. Les tâches s'exécutent à tour de rôle sur l'unique cœur. Les fonctions C (`defffi`) sont utilisables.
 - Un programme qui utilise ce que la carte n'a pas est une **erreur de compilation** : en plus de ce que la section 3.7 ne permet pas, `eval` et `macroexpand`. L'heure locale est inconnue (comme à la section 3.6).
 - L'arène de cons commence à 1024 cellules et grandit au besoin. `--heap-cells`, `--max-memory`, `--no-cons`, `-O<N>` et `--release` fonctionnent tels quels.
+
+### 3.9 Compiler pour Arduino Uno (AVR)
+
+Avec `--target avr-atmega328p`, on crée un exécutable (ELF) pour le microcontrôleur de l'Arduino Uno (ATmega328P). Le programme suivant fait clignoter la LED de la carte.
+
+```lisp
+(define-symbol-macro PINB #x23)
+(define-symbol-macro DDRB #x24)
+(define-symbol-macro LED (the u8 32))             ; PB5
+
+(defun wait-a-bit () ()
+  (let ((i (the u32 0)))
+    (while (< i (the u32 400000))
+      (unsafe (volatile-read-u8 PINB))
+      (setf i (+ i 1)))
+    ()))
+
+(defun main () ()
+  (unsafe (volatile-write-u8 DDRB LED))           ; mettre en sortie
+  (while true
+    (unsafe (volatile-write-u8 PINB LED))         ; inverser
+    (wait-a-bit)))
+```
+
+```sh
+$ typl -c blink.typl --target avr-atmega328p -O2   # crée blink.elf
+$ qemu-system-avr -M uno -display none -serial stdio -bios blink.elf   # exécuter dans QEMU
+```
+
+- Il n'y a pas de runtime : un programme qui l'utilise est une **erreur de compilation**. L'erreur indique ce qui est nécessaire et par quelles fonctions on y arrive. On peut utiliser : les calculs sur les entiers de largeur fixe (de `i8` à `u32`), `bool` et `char`, les appels de fonctions, les conditions, les boucles, ainsi que `volatile-read-u8` et les autres avec l'adresse écrite comme un nombre.
+- On ne peut pas utiliser : les valeurs placées dans le tas, comme les chaînes, les listes et les structures ; les calculs sur `int` ; `defvar` et `defconstant` (pour une constante nommée, utilisez `define-symbol-macro`) ; la récursion, `catch` et les appels de valeurs de fonction ; les appels de fonctions C ; les gestionnaires d'interruption ; la division par une variable (la division par un nombre est utilisable) ; les accès `volatile` dont l'adresse est calculée.
+- Une boucle qui ne fait rien disparaît à partir de `-O1`. Dans une boucle d'attente, lisez par exemple un registre.
+- Quand `main` se termine, le microcontrôleur s'arrête.
+- `--linker-script FILE` change la disposition de la mémoire. Sans cette option, ce sont 32 Kio de flash moins les 512 derniers octets, ceux du chargeur d'amorçage, et 2 Kio de RAM. Les adresses de RAM s'écrivent en ajoutant `0x800000`, comme `0x800100`.
+- Les calculs sur `f32` et `f64` sont une erreur d'édition de liens, car il n'y a pas de fonctions auxiliaires pour AVR.
+- L'édition de liens utilise l'éditeur de liens de la toolchain rustup, comme à la section 3.8.
 
 ## 4. Dumps
 

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ 66155a938dbf56e43296ef8cfe54dfdfe3182721 -->
+<!-- translated-from: docs/ja/guide/compile.md @ c4e9ddb5a894a69547e3fb5c7aa3d030e8a82821 -->
 # الترجمة
 
 إذا لم تفعل شيئًا آخر فإن برامج typelisp تعمل في المفسِّر (interpreter). وإضافة إلى ذلك توجد طريقتان
@@ -291,6 +291,42 @@ $ qemu-system-arm -M mps2-an505 -nographic \
 - يعمل `throw`/`catch`/`panic` والأعداد الكبيرة والكسور والأعداد العشرية والمهام والقنوات و`sleep` كما في الملف التنفيذي. تعمل المهام بالتناوب على النواة الوحيدة. يمكن استخدام دوال C (`defffi`).
 - البرنامج الذي يستخدم ما ليس في اللوحة **خطأ ترجمة**: بالإضافة إلى ما لا يمكن استخدامه في القسم 3.7، `eval` و`macroexpand`. الوقت المحلي غير معروف (كما في القسم 3.6).
 - تبدأ ساحة cons بـ1024 خلية وتكبر عند الحاجة. تعمل `--heap-cells` و`--max-memory` و`--no-cons` و`-O<N>` و`--release` كما هي.
+
+### 3.9 الترجمة لـ Arduino Uno ‏(AVR)
+
+مع `--target avr-atmega328p` يُنشأ ملف تنفيذي (ELF) للمتحكم الدقيق في Arduino Uno ‏(ATmega328P). البرنامج التالي يجعل مصباح LED على اللوحة يومض.
+
+```lisp
+(define-symbol-macro PINB #x23)
+(define-symbol-macro DDRB #x24)
+(define-symbol-macro LED (the u8 32))             ; PB5
+
+(defun wait-a-bit () ()
+  (let ((i (the u32 0)))
+    (while (< i (the u32 400000))
+      (unsafe (volatile-read-u8 PINB))
+      (setf i (+ i 1)))
+    ()))
+
+(defun main () ()
+  (unsafe (volatile-write-u8 DDRB LED))           ; اجعله خرجًا
+  (while true
+    (unsafe (volatile-write-u8 PINB LED))         ; اعكسه
+    (wait-a-bit)))
+```
+
+```sh
+$ typl -c blink.typl --target avr-atmega328p -O2   # ينشئ blink.elf
+$ qemu-system-avr -M uno -display none -serial stdio -bios blink.elf   # شغّله في QEMU
+```
+
+- لا توجد بيئة تشغيل، لذا فإن البرنامج الذي يستخدمها **خطأ ترجمة**. يذكر الخطأ ما المطلوب وعبر أي دوال يُوصل إليه. ما يمكن استخدامه: حسابات الأعداد الصحيحة ثابتة العرض (من `i8` إلى `u32`) و`bool` و`char`، واستدعاء الدوال، والشروط، والحلقات، و`volatile-read-u8` وما شابهها بعنوان مكتوب كرقم.
+- ما لا يمكن استخدامه: القيم الموجودة في الكومة مثل السلاسل والقوائم والبنى؛ حسابات `int`؛ `defvar` و`defconstant` (للثابت المسمى استخدم `define-symbol-macro`)؛ الاستدعاء الذاتي و`catch` واستدعاء قيم الدوال؛ استدعاء دوال C؛ معالجات المقاطعة؛ القسمة على متغير (القسمة على رقم ممكنة)؛ وصول `volatile` بعنوان محسوب.
+- الحلقة التي لا تفعل شيئًا تُحذف ابتداءً من `-O1`. في حلقة الانتظار اقرأ سجلًا مثلًا.
+- عند انتهاء `main` يتوقف المتحكم الدقيق.
+- يُغيَّر توزيع الذاكرة باستخدام `--linker-script FILE`. عند حذفه تكون الذاكرة 32 KiB من الفلاش ناقصًا آخر 512 بايت الخاصة بمحمّل الإقلاع، و2 KiB من RAM. تُكتب عناوين RAM مع إضافة `0x800000`، مثل `0x800100`.
+- حسابات `f32` و`f64` خطأ ربط، لعدم وجود دوال مساعدة لـ AVR.
+- يستخدم الربط رابط سلسلة أدوات rustup كما في القسم 3.8.
 
 ## 4. ملفات الـ dump
 

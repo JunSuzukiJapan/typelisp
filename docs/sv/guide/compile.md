@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ 66155a938dbf56e43296ef8cfe54dfdfe3182721 -->
+<!-- translated-from: docs/ja/guide/compile.md @ c4e9ddb5a894a69547e3fb5c7aa3d030e8a82821 -->
 # Kompilering
 
 Om du inte gör något annat körs typelisp-program i tolken. Dessutom finns två sätt att kompilera till
@@ -295,6 +295,42 @@ $ qemu-system-arm -M mps2-an505 -nographic \
 - `throw`/`catch`/`panic`, bignums, bråk och flyttal samt uppgifter, kanaler och `sleep` beter sig som i den körbara filen. Uppgifter körs i tur och ordning på den enda kärnan. C-funktioner (`defffi`) kan användas.
 - Ett program som använder det kortet inte har är ett **kompileringsfel**: utöver det som inte kan användas i avsnitt 3.7, `eval` och `macroexpand`. Lokal tid är okänd (som i avsnitt 3.6).
 - Cons-arenan börjar med 1024 celler och växer vid behov. `--heap-cells`, `--max-memory`, `--no-cons`, `-O<N>` och `--release` fungerar som de är.
+
+### 3.9 Kompilera för Arduino Uno (AVR)
+
+Med `--target avr-atmega328p` skapas en körbar fil (ELF) för mikrokontrollern i Arduino Uno (ATmega328P). Följande program får kortets lysdiod att blinka.
+
+```lisp
+(define-symbol-macro PINB #x23)
+(define-symbol-macro DDRB #x24)
+(define-symbol-macro LED (the u8 32))             ; PB5
+
+(defun wait-a-bit () ()
+  (let ((i (the u32 0)))
+    (while (< i (the u32 400000))
+      (unsafe (volatile-read-u8 PINB))
+      (setf i (+ i 1)))
+    ()))
+
+(defun main () ()
+  (unsafe (volatile-write-u8 DDRB LED))           ; gör till utgång
+  (while true
+    (unsafe (volatile-write-u8 PINB LED))         ; växla
+    (wait-a-bit)))
+```
+
+```sh
+$ typl -c blink.typl --target avr-atmega328p -O2   # skapar blink.elf
+$ qemu-system-avr -M uno -display none -serial stdio -bios blink.elf   # kör i QEMU
+```
+
+- Det finns ingen runtime, så ett program som använder den ger ett **kompileringsfel**. Felet anger vad som behövs och genom vilka funktioner det nås. Det som kan användas är beräkningar med heltal av fast bredd (`i8` till `u32`), `bool` och `char`, funktionsanrop, villkor, loopar samt `volatile-read-u8` med flera där adressen skrivs som ett tal.
+- Det som inte kan användas är värden i heapen, till exempel strängar, listor och strukturer; beräkningar med `int`; `defvar` och `defconstant` (använd `define-symbol-macro` för en namngiven konstant); rekursion, `catch` och anrop av funktionsvärden; anrop av C-funktioner; avbrottshanterare; division med en variabel (division med ett tal går bra); `volatile`-åtkomst där adressen beräknas.
+- En loop som inte gör något tas bort från och med `-O1`. Läs till exempel ett register i en vänteloop.
+- När `main` är klar stannar mikrokontrollern.
+- Minnets placering ändras med `--linker-script FILE`. Utan den är det 32 KiB flash minus de sista 512 byten, som är startladdarens, och 2 KiB RAM. RAM-adresser skrivs med `0x800000` adderat, till exempel `0x800100`.
+- Beräkningar med `f32` och `f64` ger ett länkfel, eftersom det inte finns några hjälpfunktioner för AVR.
+- Länkningen använder länkaren i rustups verktygskedja, som i avsnitt 3.8.
 
 ## 4. Dumpar
 

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ 66155a938dbf56e43296ef8cfe54dfdfe3182721 -->
+<!-- translated-from: docs/ja/guide/compile.md @ c4e9ddb5a894a69547e3fb5c7aa3d030e8a82821 -->
 # 컴파일
 
 아무것도 하지 않으면 typelisp 프로그램은 인터프리터에서 실행된다. 그 밖에 네이티브 코드로 컴파일하는 방법이 두 가지,
@@ -286,6 +286,42 @@ $ qemu-system-arm -M mps2-an505 -nographic \
 - `throw`/`catch`/`panic`, bignum・ratio・부동소수, 태스크・채널・`sleep`은 실행 파일과 똑같이 동작합니다. 태스크는 하나의 코어에서 차례로 실행됩니다. C 함수(`defffi`)도 쓸 수 있습니다.
 - 보드에 없는 것을 쓰는 프로그램은 **컴파일 오류**가 됩니다. 3.7절에서 쓸 수 없는 것에 더해 `eval`・`macroexpand`를 쓸 수 없습니다. 지방시는 알 수 없습니다(3.6절과 같음).
 - cons 아레나는 1024셀에서 시작해 모자라면 늘어납니다. `--heap-cells`, `--max-memory`, `--no-cons`, `-O<N>`, `--release`는 그대로 쓸 수 있습니다.
+
+### 3.9 Arduino Uno(AVR)용으로 컴파일하기
+
+`--target avr-atmega328p`를 붙이면 Arduino Uno의 마이크로컨트롤러(ATmega328P)용 실행 파일(ELF)을 만듭니다. 다음 프로그램은 보드의 LED를 깜박입니다.
+
+```lisp
+(define-symbol-macro PINB #x23)
+(define-symbol-macro DDRB #x24)
+(define-symbol-macro LED (the u8 32))             ; PB5
+
+(defun wait-a-bit () ()
+  (let ((i (the u32 0)))
+    (while (< i (the u32 400000))
+      (unsafe (volatile-read-u8 PINB))
+      (setf i (+ i 1)))
+    ()))
+
+(defun main () ()
+  (unsafe (volatile-write-u8 DDRB LED))           ; 출력으로 설정
+  (while true
+    (unsafe (volatile-write-u8 PINB LED))         ; 반전
+    (wait-a-bit)))
+```
+
+```sh
+$ typl -c blink.typl --target avr-atmega328p -O2   # blink.elf가 만들어짐
+$ qemu-system-avr -M uno -display none -serial stdio -bios blink.elf   # QEMU에서 실행
+```
+
+- 런타임이 없으므로 런타임을 사용하는 프로그램은 **컴파일 오류**가 됩니다. 오류에는 무엇이 필요하고 어떤 함수를 거쳐 도달하는지가 나옵니다. 사용할 수 있는 것은 고정 폭 정수(`i8`부터 `u32`까지), `bool`, `char`의 계산, 함수 호출, 조건 분기, 반복문, 주소를 숫자로 쓴 `volatile-read-u8` 등입니다.
+- 사용할 수 없는 것: 문자열·리스트·구조체처럼 힙에 놓이는 값. `int` 계산. `defvar`와 `defconstant`(이름 있는 상수에는 `define-symbol-macro`를 사용합니다). 재귀, `catch`, 함수 값 호출. C 함수 호출. 인터럽트 핸들러. 변수로 나누는 나눗셈(숫자로 나누는 것은 가능합니다). 주소를 계산해서 구하는 `volatile`.
+- 아무것도 하지 않는 반복문은 `-O1` 이상에서 제거됩니다. 기다리는 반복문 안에서는 레지스터를 읽는 등의 작업을 하십시오.
+- `main`이 끝나면 마이크로컨트롤러가 멈춥니다.
+- 메모리 배치는 `--linker-script FILE`로 바꿀 수 있습니다. 생략하면 플래시 32KiB에서 끝부분의 부트로더 512바이트를 뺀 영역과 RAM 2KiB입니다. RAM 주소는 `0x800100`처럼 `0x800000`을 더해서 씁니다.
+- `f32`와 `f64`의 계산은 AVR용 보조 함수가 없으므로 링크 오류가 됩니다.
+- 링크에는 3.8절과 같이 rustup 툴체인의 링커를 사용합니다.
 
 ## 4. 덤프
 

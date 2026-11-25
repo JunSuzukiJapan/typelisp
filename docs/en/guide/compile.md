@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ 66155a938dbf56e43296ef8cfe54dfdfe3182721 -->
+<!-- translated-from: docs/ja/guide/compile.md @ c4e9ddb5a894a69547e3fb5c7aa3d030e8a82821 -->
 # Compiling
 
 Unless you do anything else, typelisp programs run in the interpreter. In addition there are two
@@ -301,6 +301,42 @@ $ qemu-system-arm -M mps2-an505 -nographic \
 - `throw`/`catch`/`panic`, bignums, ratios and floats, and tasks, channels and `sleep` behave as in the executable. Tasks run in turn on the one core. C functions (`defffi`) can be used.
 - A program that uses what the board does not have is a **compile error**: besides what section 3.7 cannot use, `eval` and `macroexpand`. Local time is unknown (as in section 3.6).
 - The cons arena starts at 1024 cells and grows when it needs more. `--heap-cells`, `--max-memory`, `--no-cons`, `-O<N>` and `--release` work as they are.
+
+### 3.9 Compiling for an Arduino Uno (AVR)
+
+With `--target avr-atmega328p`, `typl` makes an executable (ELF) for the microcontroller of an Arduino Uno (ATmega328P). The following program blinks the board's LED.
+
+```lisp
+(define-symbol-macro PINB #x23)
+(define-symbol-macro DDRB #x24)
+(define-symbol-macro LED (the u8 32))             ; PB5
+
+(defun wait-a-bit () ()
+  (let ((i (the u32 0)))
+    (while (< i (the u32 400000))
+      (unsafe (volatile-read-u8 PINB))
+      (setf i (+ i 1)))
+    ()))
+
+(defun main () ()
+  (unsafe (volatile-write-u8 DDRB LED))           ; make it an output
+  (while true
+    (unsafe (volatile-write-u8 PINB LED))         ; turn it over
+    (wait-a-bit)))
+```
+
+```sh
+$ typl -c blink.typl --target avr-atmega328p -O2   # makes blink.elf
+$ qemu-system-avr -M uno -display none -serial stdio -bios blink.elf   # run it in QEMU
+```
+
+- There is no runtime, so a program that uses the runtime is a **compile error**. The error says what is needed and through which functions it is reached. What can be used: arithmetic on fixed-width integers (`i8` to `u32`), `bool` and `char`, function calls, conditionals, loops, and `volatile-read-u8` and the like with the address written as a number.
+- What cannot be used: values that live in the heap, such as strings, lists and structs; `int` arithmetic; `defvar` and `defconstant` (use `define-symbol-macro` for a named constant); recursion, `catch`, and calls of function values; calls of C functions; interrupt handlers; division by a variable (division by a number can be used); `volatile` accesses whose address is computed.
+- A loop that does nothing is removed at `-O1` and above. In a loop that waits, read a register, for example.
+- When `main` ends, the microcontroller stops.
+- `--linker-script FILE` changes where memory is. Without it, memory is 32 KiB of flash less the last 512 bytes, which are the boot loader's, and 2 KiB of RAM. Write a RAM address with `0x800000` added, as in `0x800100`.
+- `f32` and `f64` arithmetic is a link error, because there are no helper functions for AVR.
+- Linking uses the linker of the rustup toolchain, as in section 3.8.
 
 ## 4. Dumps
 

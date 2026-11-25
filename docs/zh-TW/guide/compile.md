@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ 66155a938dbf56e43296ef8cfe54dfdfe3182721 -->
+<!-- translated-from: docs/ja/guide/compile.md @ c4e9ddb5a894a69547e3fb5c7aa3d030e8a82821 -->
 # 編譯
 
 不做任何處理的話，typelisp 程式由直譯器執行。此外還有兩種編譯為原生碼的方法，以及一種保存環境的方法。規格的詳情見
@@ -278,6 +278,42 @@ $ qemu-system-arm -M mps2-an505 -nographic \
 - `throw`/`catch`/`panic`、bignum、ratio、浮點數，以及任務、通道和 `sleep` 的行為與可執行檔相同。任務在唯一的核心上依序執行。也可以使用 C 函式（`defffi`）。
 - 使用開發板沒有的東西的程式是**編譯錯誤**。除了 3.7 節中不能使用的東西，還不能使用 `eval` 和 `macroexpand`。本地時間未知（與 3.6 節相同）。
 - cons 區域從 1024 個單元開始，不夠時會成長。`--heap-cells`、`--max-memory`、`--no-cons`、`-O<N>`、`--release` 可以照常使用。
+
+### 3.9 為 Arduino Uno（AVR）編譯
+
+加上 `--target avr-atmega328p`，會產生供 Arduino Uno 的微控制器（ATmega328P）使用的執行檔（ELF）。下面的程式讓開發板上的 LED 閃爍。
+
+```lisp
+(define-symbol-macro PINB #x23)
+(define-symbol-macro DDRB #x24)
+(define-symbol-macro LED (the u8 32))             ; PB5
+
+(defun wait-a-bit () ()
+  (let ((i (the u32 0)))
+    (while (< i (the u32 400000))
+      (unsafe (volatile-read-u8 PINB))
+      (setf i (+ i 1)))
+    ()))
+
+(defun main () ()
+  (unsafe (volatile-write-u8 DDRB LED))           ; 設為輸出
+  (while true
+    (unsafe (volatile-write-u8 PINB LED))         ; 反轉
+    (wait-a-bit)))
+```
+
+```sh
+$ typl -c blink.typl --target avr-atmega328p -O2   # 產生 blink.elf
+$ qemu-system-avr -M uno -display none -serial stdio -bios blink.elf   # 在 QEMU 中執行
+```
+
+- 由於沒有執行階段，使用執行階段的程式會成為**編譯錯誤**。錯誤會指出需要什麼，以及經由哪些函式到達。可以使用的有：固定寬度整數（`i8` 到 `u32`）、`bool`、`char` 的計算，函式呼叫，條件分支，迴圈，以及位址寫成數字的 `volatile-read-u8` 等。
+- 不能使用的有：字串、串列、結構等放在堆積上的值；`int` 的計算；`defvar` 和 `defconstant`（具名常數請使用 `define-symbol-macro`）；遞迴、`catch`、函式值的呼叫；C 函式的呼叫；中斷處理函式；除以變數的除法（除以數字的除法可以使用）；位址由計算得出的 `volatile`。
+- 什麼都不做的迴圈在 `-O1` 以上會被移除。在等待的迴圈中，請讀取暫存器等。
+- `main` 結束後，微控制器停止。
+- 記憶體配置可以用 `--linker-script FILE` 更改。省略時為 32KiB 快閃記憶體去掉末尾 512 位元組的開機載入程式後的部分，以及 2KiB RAM。RAM 的位址要加上 `0x800000` 來寫，例如 `0x800100`。
+- `f32` 和 `f64` 的計算會成為連結錯誤，因為沒有 AVR 用的輔助函式。
+- 連結與 3.8 節一樣，使用 rustup 工具鏈的連結器。
 
 ## 4. 傾印
 

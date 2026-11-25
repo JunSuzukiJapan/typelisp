@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ 66155a938dbf56e43296ef8cfe54dfdfe3182721 -->
+<!-- translated-from: docs/ja/guide/compile.md @ c4e9ddb5a894a69547e3fb5c7aa3d030e8a82821 -->
 # Biên dịch
 
 Nếu bạn không làm gì thêm, chương trình typelisp chạy trong trình thông dịch. Ngoài ra còn có hai
@@ -291,6 +291,42 @@ $ qemu-system-arm -M mps2-an505 -nographic \
 - `throw`/`catch`/`panic`, số lớn, phân số và số thực dấu phẩy động, cùng tác vụ, kênh và `sleep` hoạt động như trong tệp thực thi. Các tác vụ chạy lần lượt trên lõi duy nhất. Có thể dùng hàm C (`defffi`).
 - Chương trình dùng thứ bo mạch không có là **lỗi biên dịch**: ngoài những gì không dùng được ở mục 3.7, còn `eval` và `macroexpand`. Giờ địa phương không xác định (như ở mục 3.6).
 - Vùng cons bắt đầu với 1024 ô và lớn lên khi cần. `--heap-cells`, `--max-memory`, `--no-cons`, `-O<N>` và `--release` dùng như bình thường.
+
+### 3.9 Biên dịch cho Arduino Uno (AVR)
+
+Với `--target avr-atmega328p`, `typl` tạo tệp thực thi (ELF) cho vi điều khiển của Arduino Uno (ATmega328P). Chương trình sau làm nhấp nháy đèn LED trên bo mạch.
+
+```lisp
+(define-symbol-macro PINB #x23)
+(define-symbol-macro DDRB #x24)
+(define-symbol-macro LED (the u8 32))             ; PB5
+
+(defun wait-a-bit () ()
+  (let ((i (the u32 0)))
+    (while (< i (the u32 400000))
+      (unsafe (volatile-read-u8 PINB))
+      (setf i (+ i 1)))
+    ()))
+
+(defun main () ()
+  (unsafe (volatile-write-u8 DDRB LED))           ; đặt làm ngõ ra
+  (while true
+    (unsafe (volatile-write-u8 PINB LED))         ; đảo trạng thái
+    (wait-a-bit)))
+```
+
+```sh
+$ typl -c blink.typl --target avr-atmega328p -O2   # tạo ra blink.elf
+$ qemu-system-avr -M uno -display none -serial stdio -bios blink.elf   # chạy trong QEMU
+```
+
+- Không có runtime, nên chương trình dùng runtime là **lỗi biên dịch**. Lỗi cho biết cần gì và đi tới đó qua những hàm nào. Những thứ dùng được: phép tính trên số nguyên có độ rộng cố định (từ `i8` đến `u32`), `bool` và `char`, lời gọi hàm, rẽ nhánh, vòng lặp, và `volatile-read-u8` cùng các hàm tương tự với địa chỉ viết bằng số.
+- Những thứ không dùng được: giá trị nằm trên heap như chuỗi, danh sách và struct; phép tính trên `int`; `defvar` và `defconstant` (dùng `define-symbol-macro` cho hằng có tên); đệ quy, `catch` và lời gọi giá trị hàm; lời gọi hàm C; trình xử lý ngắt; phép chia cho một biến (chia cho một số thì dùng được); truy cập `volatile` có địa chỉ được tính ra.
+- Vòng lặp không làm gì sẽ bị xóa từ `-O1` trở lên. Trong vòng lặp chờ, hãy đọc một thanh ghi chẳng hạn.
+- Khi `main` kết thúc, vi điều khiển dừng lại.
+- Bố trí bộ nhớ được thay đổi bằng `--linker-script FILE`. Nếu bỏ qua, đó là 32 KiB flash trừ 512 byte cuối của bộ nạp khởi động, và 2 KiB RAM. Địa chỉ RAM được viết cộng thêm `0x800000`, ví dụ `0x800100`.
+- Phép tính trên `f32` và `f64` là lỗi liên kết, vì không có hàm hỗ trợ cho AVR.
+- Việc liên kết dùng trình liên kết của toolchain rustup như ở mục 3.8.
 
 ## 4. Dump
 

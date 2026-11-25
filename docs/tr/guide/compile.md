@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ 66155a938dbf56e43296ef8cfe54dfdfe3182721 -->
+<!-- translated-from: docs/ja/guide/compile.md @ c4e9ddb5a894a69547e3fb5c7aa3d030e8a82821 -->
 # Derleme
 
 Başka bir şey yapmazsanız typelisp programları yorumlayıcıda çalışır. Buna ek olarak yerel koda
@@ -294,6 +294,42 @@ $ qemu-system-arm -M mps2-an505 -nographic \
 - `throw`/`catch`/`panic`, büyük sayılar, kesirler ve kayan noktalı sayılar ile görevler, kanallar ve `sleep` çalıştırılabilir dosyadaki gibi davranır. Görevler tek çekirdekte sırayla çalışır. C işlevleri (`defffi`) kullanılabilir.
 - Kartta olmayan bir şeyi kullanan program bir **derleme hatasıdır**: Bölüm 3.7'de kullanılamayanlara ek olarak `eval` ve `macroexpand`. Yerel saat bilinmez (Bölüm 3.6'daki gibi).
 - Cons arenası 1024 hücreyle başlar ve gerektiğinde büyür. `--heap-cells`, `--max-memory`, `--no-cons`, `-O<N>` ve `--release` olduğu gibi çalışır.
+
+### 3.9 Arduino Uno (AVR) için derlemek
+
+`--target avr-atmega328p` ile Arduino Uno'nun mikrodenetleyicisi (ATmega328P) için çalıştırılabilir dosya (ELF) oluşturulur. Aşağıdaki program kartın LED'ini yakıp söndürür.
+
+```lisp
+(define-symbol-macro PINB #x23)
+(define-symbol-macro DDRB #x24)
+(define-symbol-macro LED (the u8 32))             ; PB5
+
+(defun wait-a-bit () ()
+  (let ((i (the u32 0)))
+    (while (< i (the u32 400000))
+      (unsafe (volatile-read-u8 PINB))
+      (setf i (+ i 1)))
+    ()))
+
+(defun main () ()
+  (unsafe (volatile-write-u8 DDRB LED))           ; çıkış yap
+  (while true
+    (unsafe (volatile-write-u8 PINB LED))         ; tersine çevir
+    (wait-a-bit)))
+```
+
+```sh
+$ typl -c blink.typl --target avr-atmega328p -O2   # blink.elf oluşur
+$ qemu-system-avr -M uno -display none -serial stdio -bios blink.elf   # QEMU'da çalıştır
+```
+
+- Çalışma zamanı yoktur; bu yüzden çalışma zamanını kullanan bir program **derleme hatasıdır**. Hata, neyin gerektiğini ve ona hangi fonksiyonlardan ulaşıldığını söyler. Kullanılabilenler: sabit genişlikli tam sayılar (`i8` ile `u32` arası), `bool` ve `char` hesapları, fonksiyon çağrıları, koşullar, döngüler ve adresi sayı olarak yazılmış `volatile-read-u8` gibi işlemler.
+- Kullanılamayanlar: dizgi, liste ve yapı gibi heap'te duran değerler; `int` hesapları; `defvar` ve `defconstant` (adlandırılmış sabit için `define-symbol-macro` kullanın); özyineleme, `catch` ve fonksiyon değerlerinin çağrılması; C fonksiyonlarının çağrılması; kesme işleyicileri; bir değişkene bölme (bir sayıya bölme kullanılabilir); adresi hesaplanan `volatile` erişimleri.
+- Hiçbir şey yapmayan bir döngü `-O1` ve üstünde kaldırılır. Bekleme döngüsünde örneğin bir yazmaç okuyun.
+- `main` bittiğinde mikrodenetleyici durur.
+- Bellek yerleşimi `--linker-script FILE` ile değiştirilir. Verilmezse, sondaki 512 baytlık önyükleyici dışında 32 KiB flash ve 2 KiB RAM'dir. RAM adresleri `0x800100` gibi `0x800000` eklenerek yazılır.
+- `f32` ve `f64` hesapları, AVR için yardımcı fonksiyonlar olmadığından bağlama hatasıdır.
+- Bağlama için 3.8 bölümündeki gibi rustup araç zincirinin bağlayıcısı kullanılır.
 
 ## 4. Dump'lar
 

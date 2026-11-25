@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ 66155a938dbf56e43296ef8cfe54dfdfe3182721 -->
+<!-- translated-from: docs/ja/guide/compile.md @ c4e9ddb5a894a69547e3fb5c7aa3d030e8a82821 -->
 # Compileren
 
 Tenzij je iets anders doet, draaien typelisp-programma's in de interpreter. Daarnaast zijn er twee
@@ -302,6 +302,42 @@ $ qemu-system-arm -M mps2-an505 -nographic \
 - `throw`/`catch`/`panic`, bignums, breuken en drijvende-kommagetallen, en taken, kanalen en `sleep` gedragen zich zoals in het uitvoerbare bestand. Taken draaien om de beurt op de ene kern. C-functies (`defffi`) kunnen worden gebruikt.
 - Een programma dat iets gebruikt wat het bord niet heeft, is een **compileerfout**: naast wat in paragraaf 3.7 niet kan, `eval` en `macroexpand`. De lokale tijd is onbekend (zoals in paragraaf 3.6).
 - De cons-arena begint met 1024 cellen en groeit wanneer nodig. `--heap-cells`, `--max-memory`, `--no-cons`, `-O<N>` en `--release` werken zoals ze zijn.
+
+### 3.9 Compileren voor een Arduino Uno (AVR)
+
+Met `--target avr-atmega328p` maakt u een uitvoerbaar bestand (ELF) voor de microcontroller van de Arduino Uno (ATmega328P). Het volgende programma laat de led van het bord knipperen.
+
+```lisp
+(define-symbol-macro PINB #x23)
+(define-symbol-macro DDRB #x24)
+(define-symbol-macro LED (the u8 32))             ; PB5
+
+(defun wait-a-bit () ()
+  (let ((i (the u32 0)))
+    (while (< i (the u32 400000))
+      (unsafe (volatile-read-u8 PINB))
+      (setf i (+ i 1)))
+    ()))
+
+(defun main () ()
+  (unsafe (volatile-write-u8 DDRB LED))           ; als uitgang instellen
+  (while true
+    (unsafe (volatile-write-u8 PINB LED))         ; omkeren
+    (wait-a-bit)))
+```
+
+```sh
+$ typl -c blink.typl --target avr-atmega328p -O2   # maakt blink.elf
+$ qemu-system-avr -M uno -display none -serial stdio -bios blink.elf   # in QEMU uitvoeren
+```
+
+- Er is geen runtime, dus een programma dat die gebruikt is een **compileerfout**. De fout vermeldt wat er nodig is en via welke functies het wordt bereikt. Bruikbaar zijn: rekenen met gehele getallen van vaste breedte (`i8` tot en met `u32`), `bool` en `char`, functieaanroepen, voorwaarden, lussen, en `volatile-read-u8` en dergelijke met het adres als getal geschreven.
+- Niet bruikbaar zijn: waarden in de heap, zoals strings, lijsten en structs; rekenen met `int`; `defvar` en `defconstant` (gebruik `define-symbol-macro` voor een constante met een naam); recursie, `catch` en aanroepen van functiewaarden; aanroepen van C-functies; interrupthandlers; delen door een variabele (delen door een getal kan wel); `volatile`-toegang met een berekend adres.
+- Een lus die niets doet, verdwijnt vanaf `-O1`. Lees in een wachtlus bijvoorbeeld een register.
+- Als `main` eindigt, stopt de microcontroller.
+- Met `--linker-script FILE` verandert u de geheugenindeling. Zonder deze optie is dat 32 KiB flash min de laatste 512 bytes van de bootloader, en 2 KiB RAM. RAM-adressen worden geschreven met `0x800000` erbij opgeteld, zoals `0x800100`.
+- Rekenen met `f32` en `f64` is een linkfout, omdat er geen hulpfuncties voor AVR zijn.
+- Voor het linken wordt, net als in paragraaf 3.8, de linker van de rustup-toolchain gebruikt.
 
 ## 4. Dumps
 

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ 66155a938dbf56e43296ef8cfe54dfdfe3182721 -->
+<!-- translated-from: docs/ja/guide/compile.md @ c4e9ddb5a894a69547e3fb5c7aa3d030e8a82821 -->
 # Kompilasi
 
 Jika Anda tidak melakukan apa-apa lagi, program typelisp berjalan di interpreter. Selain itu ada dua
@@ -297,6 +297,42 @@ $ qemu-system-arm -M mps2-an505 -nographic \
 - `throw`/`catch`/`panic`, bilangan besar, pecahan, dan bilangan titik mengambang, serta tugas, kanal, dan `sleep` berperilaku seperti pada berkas eksekusi. Tugas berjalan bergiliran di satu inti. Fungsi C (`defffi`) dapat dipakai.
 - Program yang memakai sesuatu yang tidak dimiliki papan adalah **galat kompilasi**: selain yang tidak dapat dipakai di bagian 3.7, `eval` dan `macroexpand`. Waktu lokal tidak diketahui (seperti di bagian 3.6).
 - Arena cons dimulai dengan 1024 sel dan tumbuh saat diperlukan. `--heap-cells`, `--max-memory`, `--no-cons`, `-O<N>`, dan `--release` bekerja seperti biasa.
+
+### 3.9 Mengompilasi untuk Arduino Uno (AVR)
+
+Dengan `--target avr-atmega328p`, dibuat berkas executable (ELF) untuk mikrokontroler Arduino Uno (ATmega328P). Program berikut mengedipkan LED pada papan.
+
+```lisp
+(define-symbol-macro PINB #x23)
+(define-symbol-macro DDRB #x24)
+(define-symbol-macro LED (the u8 32))             ; PB5
+
+(defun wait-a-bit () ()
+  (let ((i (the u32 0)))
+    (while (< i (the u32 400000))
+      (unsafe (volatile-read-u8 PINB))
+      (setf i (+ i 1)))
+    ()))
+
+(defun main () ()
+  (unsafe (volatile-write-u8 DDRB LED))           ; jadikan keluaran
+  (while true
+    (unsafe (volatile-write-u8 PINB LED))         ; balikkan
+    (wait-a-bit)))
+```
+
+```sh
+$ typl -c blink.typl --target avr-atmega328p -O2   # menghasilkan blink.elf
+$ qemu-system-avr -M uno -display none -serial stdio -bios blink.elf   # jalankan di QEMU
+```
+
+- Tidak ada runtime, jadi program yang memakai runtime adalah **galat kompilasi**. Galat menyebutkan apa yang diperlukan dan melalui fungsi mana hal itu dicapai. Yang dapat dipakai: perhitungan bilangan bulat berlebar tetap (`i8` sampai `u32`), `bool`, dan `char`, pemanggilan fungsi, percabangan, perulangan, serta `volatile-read-u8` dan sejenisnya dengan alamat yang ditulis sebagai angka.
+- Yang tidak dapat dipakai: nilai yang berada di heap seperti string, list, dan struct; perhitungan `int`; `defvar` dan `defconstant` (gunakan `define-symbol-macro` untuk konstanta bernama); rekursi, `catch`, dan pemanggilan nilai fungsi; pemanggilan fungsi C; penangan interupsi; pembagian dengan variabel (pembagian dengan angka dapat dipakai); akses `volatile` yang alamatnya dihitung.
+- Perulangan yang tidak melakukan apa-apa dihapus pada `-O1` ke atas. Dalam perulangan yang menunggu, bacalah misalnya sebuah register.
+- Ketika `main` berakhir, mikrokontroler berhenti.
+- Tata letak memori diubah dengan `--linker-script FILE`. Jika dihilangkan, yang dipakai adalah flash 32 KiB dikurangi 512 byte terakhir milik bootloader, dan RAM 2 KiB. Alamat RAM ditulis dengan ditambah `0x800000`, seperti `0x800100`.
+- Perhitungan `f32` dan `f64` adalah galat penautan, karena tidak ada fungsi pembantu untuk AVR.
+- Penautan memakai linker dari toolchain rustup, seperti pada bagian 3.8.
 
 ## 4. Dump
 
