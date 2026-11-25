@@ -313,7 +313,7 @@ CL の `numberp`/`integerp`/`floatp` 等の**型述語は無い**——静的型
 
 | 名前 | 型 | 説明 |
 |---|---|---|
-| `most-positive-fixnum` / `most-negative-fixnum` | `int` | 63bit 即値の上限／下限（2^62-1 / -2^62）。これを超えた `int` は多倍長になる |
+| `most-positive-fixnum` / `most-negative-fixnum` | `int` | 63bit 即値の上限／下限（2^62-1 / -2^62。wasm32 と Cortex-M では 31bit で、2^30-1 / -2^30）。これを超えた `int` は多倍長になる |
 | `most-positive-double-float` / `most-negative-double-float` | `f64` | 有限で最大／最小 |
 | `least-positive-double-float` / `least-negative-double-float` | `f64` | 非正規化数を含む、0 でない最小の絶対値 |
 | `least-positive-normalized-double-float` / `least-negative-normalized-double-float` | `f64` | 正規化数に限った同じもの |
