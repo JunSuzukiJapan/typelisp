@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ 4963ba6fc48045aeec32b258cf56b8c1af7acc94 -->
+<!-- translated-from: docs/ja/guide/compile.md @ be54d7f19b5f87846f94e73219d59bce4604fa51 -->
 # Compilation
 
 Sauf indication contraire, les programmes typelisp s'exécutent dans l'interpréteur. Il existe en outre deux façons
@@ -326,8 +326,9 @@ $ qemu-system-avr -M uno -display none -serial stdio -bios blink.elf   # exécut
 ```
 
 - Il n'y a pas de runtime : un programme qui l'utilise est une **erreur de compilation**. L'erreur indique ce qui est nécessaire et par quelles fonctions on y arrive. On peut utiliser : les calculs sur les entiers de largeur fixe (de `i8` à `u32`), `bool` et `char`, les appels de fonctions, les conditions, les boucles, `defvar` et `defconstant` contenant ces valeurs, ainsi que `volatile-read-u8` et les autres avec l'adresse écrite comme un nombre ou une constante.
-- On ne peut pas utiliser : les valeurs placées dans le tas, comme les chaînes, les listes et les structures ; les calculs sur `int` ; la récursion, `catch` et les appels de valeurs de fonction ; les appels de fonctions C ; la division par une variable (la division par un nombre est utilisable) ; les accès `volatile` dont l'adresse est calculée.
+- On ne peut pas utiliser : les valeurs placées dans le tas, comme les chaînes, les listes et les structures ; les calculs sur `int` ; la récursion, `catch` et les appels de valeurs de fonction ; les appels de fonctions C ; les accès `volatile` dont l'adresse est calculée.
 - Un gestionnaire d'interruption s'écrit `#[interrupt(N)]` ([Syntaxe](../reference/syntax.md), section 3.17). `N` est le numéro de l'interruption de l'ATmega328P, de 1 à 25 en comptant la réinitialisation comme 0 (le débordement du timer 1 est 13). Voir l'exemple ci-dessous.
+- Une division par 0 arrête le microcontrôleur sur place (plus aucune interruption ne survient). Il en va de même de `/` de la plus petite valeur signée par `-1`.
 - Une boucle qui ne fait rien disparaît à partir de `-O1`. Dans une boucle d'attente, lisez par exemple un registre.
 - Quand `main` se termine, le microcontrôleur s'arrête.
 - `--linker-script FILE` change la disposition de la mémoire. Sans cette option, ce sont 32 Kio de flash moins les 512 derniers octets, ceux du chargeur d'amorçage, et 2 Kio de RAM. Les adresses de RAM s'écrivent en ajoutant `0x800000`, comme `0x800100`.

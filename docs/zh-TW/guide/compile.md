@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ 4963ba6fc48045aeec32b258cf56b8c1af7acc94 -->
+<!-- translated-from: docs/ja/guide/compile.md @ be54d7f19b5f87846f94e73219d59bce4604fa51 -->
 # 編譯
 
 不做任何處理的話，typelisp 程式由直譯器執行。此外還有兩種編譯為原生碼的方法，以及一種保存環境的方法。規格的詳情見
@@ -308,8 +308,9 @@ $ qemu-system-avr -M uno -display none -serial stdio -bios blink.elf   # 在 QEM
 ```
 
 - 由於沒有執行階段，使用執行階段的程式會成為**編譯錯誤**。錯誤會指出需要什麼，以及經由哪些函式到達。可以使用的有：固定寬度整數（`i8` 到 `u32`）、`bool`、`char` 的計算，函式呼叫，條件分支，迴圈，保存這些值的 `defvar` 和 `defconstant`，以及位址寫成數字或常數的 `volatile-read-u8` 等。
-- 不能使用的有：字串、串列、結構等放在堆積上的值；`int` 的計算；遞迴、`catch`、函式值的呼叫；C 函式的呼叫；除以變數的除法（除以數字的除法可以使用）；位址由計算得出的 `volatile`。
+- 不能使用的有：字串、串列、結構等放在堆積上的值；`int` 的計算；遞迴、`catch`、函式值的呼叫；C 函式的呼叫；位址由計算得出的 `volatile`。
 - 中斷處理函式用 `#[interrupt(N)]` 撰寫（[語法](../reference/syntax.md) 3.17 節）。`N` 是 ATmega328P 的中斷編號，以重設為 0 計，從 1 到 25（計時器 1 溢位是 13）。請看下面的例子。
+- 除以 0 時，微控制器會當場停止（中斷也不再到來）。用 `/` 將有號的最小值除以 `-1` 也一樣。
 - 什麼都不做的迴圈在 `-O1` 以上會被移除。在等待的迴圈中，請讀取暫存器等。
 - `main` 結束後，微控制器停止。
 - 記憶體配置可以用 `--linker-script FILE` 更改。省略時為 32KiB 快閃記憶體去掉末尾 512 位元組的開機載入程式後的部分，以及 2KiB RAM。RAM 的位址要加上 `0x800000` 來寫，例如 `0x800100`。

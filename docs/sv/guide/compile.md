@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ 4963ba6fc48045aeec32b258cf56b8c1af7acc94 -->
+<!-- translated-from: docs/ja/guide/compile.md @ be54d7f19b5f87846f94e73219d59bce4604fa51 -->
 # Kompilering
 
 Om du inte gör något annat körs typelisp-program i tolken. Dessutom finns två sätt att kompilera till
@@ -325,8 +325,9 @@ $ qemu-system-avr -M uno -display none -serial stdio -bios blink.elf   # kör i 
 ```
 
 - Det finns ingen runtime, så ett program som använder den ger ett **kompileringsfel**. Felet anger vad som behövs och genom vilka funktioner det nås. Det som kan användas är beräkningar med heltal av fast bredd (`i8` till `u32`), `bool` och `char`, funktionsanrop, villkor, loopar, `defvar` och `defconstant` med sådana värden samt `volatile-read-u8` med flera där adressen skrivs som ett tal eller en konstant.
-- Det som inte kan användas är värden i heapen, till exempel strängar, listor och strukturer; beräkningar med `int`; rekursion, `catch` och anrop av funktionsvärden; anrop av C-funktioner; division med en variabel (division med ett tal går bra); `volatile`-åtkomst där adressen beräknas.
+- Det som inte kan användas är värden i heapen, till exempel strängar, listor och strukturer; beräkningar med `int`; rekursion, `catch` och anrop av funktionsvärden; anrop av C-funktioner; `volatile`-åtkomst där adressen beräknas.
 - En avbrottshanterare skrivs `#[interrupt(N)]` ([Syntax](../reference/syntax.md), avsnitt 3.17). `N` är avbrottets nummer på ATmega328P, 1 till 25 med återställning räknad som 0 (spill i timer 1 är 13). Se exemplet nedan.
+- Division med 0 stoppar mikrokontrollern på stället (inga fler avbrott kommer heller). Detsamma gäller `/` av det minsta värdet med tecken med `-1`.
 - En loop som inte gör något tas bort från och med `-O1`. Läs till exempel ett register i en vänteloop.
 - När `main` är klar stannar mikrokontrollern.
 - Minnets placering ändras med `--linker-script FILE`. Utan den är det 32 KiB flash minus de sista 512 byten, som är startladdarens, och 2 KiB RAM. RAM-adresser skrivs med `0x800000` adderat, till exempel `0x800100`.

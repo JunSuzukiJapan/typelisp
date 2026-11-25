@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ 4963ba6fc48045aeec32b258cf56b8c1af7acc94 -->
+<!-- translated-from: docs/ja/guide/compile.md @ be54d7f19b5f87846f94e73219d59bce4604fa51 -->
 # Compileren
 
 Tenzij je iets anders doet, draaien typelisp-programma's in de interpreter. Daarnaast zijn er twee
@@ -332,8 +332,9 @@ $ qemu-system-avr -M uno -display none -serial stdio -bios blink.elf   # in QEMU
 ```
 
 - Er is geen runtime, dus een programma dat die gebruikt is een **compileerfout**. De fout vermeldt wat er nodig is en via welke functies het wordt bereikt. Bruikbaar zijn: rekenen met gehele getallen van vaste breedte (`i8` tot en met `u32`), `bool` en `char`, functieaanroepen, voorwaarden, lussen, `defvar` en `defconstant` met zulke waarden, en `volatile-read-u8` en dergelijke met het adres als getal of constante geschreven.
-- Niet bruikbaar zijn: waarden in de heap, zoals strings, lijsten en structs; rekenen met `int`; recursie, `catch` en aanroepen van functiewaarden; aanroepen van C-functies; delen door een variabele (delen door een getal kan wel); `volatile`-toegang met een berekend adres.
+- Niet bruikbaar zijn: waarden in de heap, zoals strings, lijsten en structs; rekenen met `int`; recursie, `catch` en aanroepen van functiewaarden; aanroepen van C-functies; `volatile`-toegang met een berekend adres.
 - Een interrupthandler schrijf je als `#[interrupt(N)]` ([Syntaxis](../reference/syntax.md), paragraaf 3.17). `N` is het interruptnummer van de ATmega328P, 1 tot en met 25 met reset als 0 geteld (overloop van timer 1 is 13). Zie het voorbeeld hieronder.
+- Delen door 0 stopt de microcontroller ter plekke (er komen ook geen interrupts meer). Dat geldt ook voor `/` van de kleinste waarde met teken door `-1`.
 - Een lus die niets doet, verdwijnt vanaf `-O1`. Lees in een wachtlus bijvoorbeeld een register.
 - Als `main` eindigt, stopt de microcontroller.
 - Met `--linker-script FILE` verandert u de geheugenindeling. Zonder deze optie is dat 32 KiB flash min de laatste 512 bytes van de bootloader, en 2 KiB RAM. RAM-adressen worden geschreven met `0x800000` erbij opgeteld, zoals `0x800100`.

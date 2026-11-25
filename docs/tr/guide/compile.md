@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ 4963ba6fc48045aeec32b258cf56b8c1af7acc94 -->
+<!-- translated-from: docs/ja/guide/compile.md @ be54d7f19b5f87846f94e73219d59bce4604fa51 -->
 # Derleme
 
 Başka bir şey yapmazsanız typelisp programları yorumlayıcıda çalışır. Buna ek olarak yerel koda
@@ -324,8 +324,9 @@ $ qemu-system-avr -M uno -display none -serial stdio -bios blink.elf   # QEMU'da
 ```
 
 - Çalışma zamanı yoktur; bu yüzden çalışma zamanını kullanan bir program **derleme hatasıdır**. Hata, neyin gerektiğini ve ona hangi fonksiyonlardan ulaşıldığını söyler. Kullanılabilenler: sabit genişlikli tam sayılar (`i8` ile `u32` arası), `bool` ve `char` hesapları, fonksiyon çağrıları, koşullar, döngüler, bu değerleri tutan `defvar` ve `defconstant` ile adresi sayı veya sabit olarak yazılmış `volatile-read-u8` gibi işlemler.
-- Kullanılamayanlar: dizgi, liste ve yapı gibi heap'te duran değerler; `int` hesapları; özyineleme, `catch` ve fonksiyon değerlerinin çağrılması; C fonksiyonlarının çağrılması; bir değişkene bölme (bir sayıya bölme kullanılabilir); adresi hesaplanan `volatile` erişimleri.
+- Kullanılamayanlar: dizgi, liste ve yapı gibi heap'te duran değerler; `int` hesapları; özyineleme, `catch` ve fonksiyon değerlerinin çağrılması; C fonksiyonlarının çağrılması; adresi hesaplanan `volatile` erişimleri.
 - Kesme işleyicisi `#[interrupt(N)]` ile yazılır ([Sözdizimi](../reference/syntax.md), bölüm 3.17). `N`, ATmega328P'nin kesme numarasıdır; sıfırlama 0 sayılarak 1 ile 25 arasındadır (zamanlayıcı 1 taşması 13'tür). Aşağıdaki örneğe bakın.
+- 0'a bölme mikrodenetleyiciyi olduğu yerde durdurur (artık kesme de gelmez). En küçük işaretli değerin `/` ile `-1`'e bölünmesi de öyledir.
 - Hiçbir şey yapmayan bir döngü `-O1` ve üstünde kaldırılır. Bekleme döngüsünde örneğin bir yazmaç okuyun.
 - `main` bittiğinde mikrodenetleyici durur.
 - Bellek yerleşimi `--linker-script FILE` ile değiştirilir. Verilmezse, sondaki 512 baytlık önyükleyici dışında 32 KiB flash ve 2 KiB RAM'dir. RAM adresleri `0x800100` gibi `0x800000` eklenerek yazılır.

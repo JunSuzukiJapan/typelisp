@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ 4963ba6fc48045aeec32b258cf56b8c1af7acc94 -->
+<!-- translated-from: docs/ja/guide/compile.md @ be54d7f19b5f87846f94e73219d59bce4604fa51 -->
 # Kompilasi
 
 Jika Anda tidak melakukan apa-apa lagi, program typelisp berjalan di interpreter. Selain itu ada dua
@@ -327,8 +327,9 @@ $ qemu-system-avr -M uno -display none -serial stdio -bios blink.elf   # jalanka
 ```
 
 - Tidak ada runtime, jadi program yang memakai runtime adalah **galat kompilasi**. Galat menyebutkan apa yang diperlukan dan melalui fungsi mana hal itu dicapai. Yang dapat dipakai: perhitungan bilangan bulat berlebar tetap (`i8` sampai `u32`), `bool`, dan `char`, pemanggilan fungsi, percabangan, perulangan, `defvar` dan `defconstant` yang berisi nilai tersebut, serta `volatile-read-u8` dan sejenisnya dengan alamat yang ditulis sebagai angka atau konstanta.
-- Yang tidak dapat dipakai: nilai yang berada di heap seperti string, list, dan struct; perhitungan `int`; rekursi, `catch`, dan pemanggilan nilai fungsi; pemanggilan fungsi C; pembagian dengan variabel (pembagian dengan angka dapat dipakai); akses `volatile` yang alamatnya dihitung.
+- Yang tidak dapat dipakai: nilai yang berada di heap seperti string, list, dan struct; perhitungan `int`; rekursi, `catch`, dan pemanggilan nilai fungsi; pemanggilan fungsi C; akses `volatile` yang alamatnya dihitung.
 - Penangan interupsi ditulis `#[interrupt(N)]` ([Sintaks](../reference/syntax.md), bagian 3.17). `N` adalah nomor interupsi ATmega328P, 1 sampai 25 dengan reset dihitung 0 (luapan timer 1 adalah 13). Lihat contoh di bawah.
+- Pembagian dengan 0 menghentikan mikrokontroler di tempat itu (interupsi pun tidak datang lagi). Begitu pula `/` dari nilai bertanda terkecil dengan `-1`.
 - Perulangan yang tidak melakukan apa-apa dihapus pada `-O1` ke atas. Dalam perulangan yang menunggu, bacalah misalnya sebuah register.
 - Ketika `main` berakhir, mikrokontroler berhenti.
 - Tata letak memori diubah dengan `--linker-script FILE`. Jika dihilangkan, yang dipakai adalah flash 32 KiB dikurangi 512 byte terakhir milik bootloader, dan RAM 2 KiB. Alamat RAM ditulis dengan ditambah `0x800000`, seperti `0x800100`.

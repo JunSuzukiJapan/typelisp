@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ 4963ba6fc48045aeec32b258cf56b8c1af7acc94 -->
+<!-- translated-from: docs/ja/guide/compile.md @ be54d7f19b5f87846f94e73219d59bce4604fa51 -->
 # Kompilierung
 
 Ohne weiteres Zutun laufen typelisp-Programme im Interpreter. Darüber hinaus gibt es zwei Wege, in nativen
@@ -328,8 +328,9 @@ $ qemu-system-avr -M uno -display none -serial stdio -bios blink.elf   # in QEMU
 ```
 
 - Es gibt keine Laufzeitumgebung, daher ist ein Programm, das sie benutzt, ein **Kompilierfehler**. Die Meldung nennt, was benötigt wird und über welche Funktionen es erreicht wird. Verwendbar sind: Rechnen mit Ganzzahlen fester Breite (`i8` bis `u32`), `bool` und `char`, Funktionsaufrufe, Verzweigungen, Schleifen, `defvar` und `defconstant` mit solchen Werten sowie `volatile-read-u8` und Ähnliches mit als Zahl oder Konstante geschriebener Adresse.
-- Nicht verwendbar sind: Werte im Heap wie Zeichenketten, Listen und Strukturen; Rechnen mit `int`; Rekursion, `catch` und Aufrufe von Funktionswerten; Aufrufe von C-Funktionen; Division durch eine Variable (Division durch eine Zahl ist möglich); `volatile`-Zugriffe mit berechneter Adresse.
+- Nicht verwendbar sind: Werte im Heap wie Zeichenketten, Listen und Strukturen; Rechnen mit `int`; Rekursion, `catch` und Aufrufe von Funktionswerten; Aufrufe von C-Funktionen; `volatile`-Zugriffe mit berechneter Adresse.
 - Ein Interrupt-Handler wird als `#[interrupt(N)]` geschrieben ([Syntax](../reference/syntax.md), Abschnitt 3.17). `N` ist die Interrupt-Nummer des ATmega328P, 1 bis 25, wobei Reset als 0 zählt (der Überlauf von Timer 1 ist 13). Siehe das Beispiel unten.
+- Eine Division durch 0 hält den Mikrocontroller an dieser Stelle an (es kommen auch keine Interrupts mehr). Ebenso `/` des kleinsten vorzeichenbehafteten Werts durch `-1`.
 - Eine Schleife, die nichts tut, wird ab `-O1` entfernt. Lesen Sie in einer Warteschleife zum Beispiel ein Register.
 - Wenn `main` endet, hält der Mikrocontroller an.
 - Mit `--linker-script FILE` lässt sich die Speicheraufteilung ändern. Ohne Angabe sind es 32 KiB Flash abzüglich der letzten 512 Bytes des Bootloaders und 2 KiB RAM. RAM-Adressen werden mit addiertem `0x800000` geschrieben, etwa `0x800100`.

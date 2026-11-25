@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ 4963ba6fc48045aeec32b258cf56b8c1af7acc94 -->
+<!-- translated-from: docs/ja/guide/compile.md @ be54d7f19b5f87846f94e73219d59bce4604fa51 -->
 # Kompilacja
 
 O ile nie zrobisz nic więcej, programy typelisp działają w interpreterze. Ponadto istnieją dwa
@@ -322,8 +322,9 @@ $ qemu-system-avr -M uno -display none -serial stdio -bios blink.elf   # uruchom
 ```
 
 - Nie ma środowiska uruchomieniowego, więc program, który go używa, to **błąd kompilacji**. Błąd podaje, co jest potrzebne i przez które funkcje się do tego dochodzi. Można używać: obliczeń na liczbach całkowitych o stałej szerokości (od `i8` do `u32`), `bool` i `char`, wywołań funkcji, warunków, pętli, `defvar` i `defconstant` z takimi wartościami oraz `volatile-read-u8` i podobnych z adresem zapisanym jako liczba lub stała.
-- Nie można używać: wartości na stercie, takich jak napisy, listy i struktury; obliczeń na `int`; rekurencji, `catch` i wywołań wartości funkcyjnych; wywołań funkcji C; dzielenia przez zmienną (dzielenie przez liczbę jest możliwe); dostępów `volatile` z obliczanym adresem.
+- Nie można używać: wartości na stercie, takich jak napisy, listy i struktury; obliczeń na `int`; rekurencji, `catch` i wywołań wartości funkcyjnych; wywołań funkcji C; dostępów `volatile` z obliczanym adresem.
 - Procedurę obsługi przerwania zapisuje się jako `#[interrupt(N)]` ([Składnia](../reference/syntax.md), rozdział 3.17). `N` to numer przerwania ATmega328P, od 1 do 25, licząc reset jako 0 (przepełnienie licznika 1 to 13). Zobacz przykład poniżej.
+- Dzielenie przez 0 zatrzymuje mikrokontroler w tym miejscu (nie nadchodzą też już przerwania). Tak samo `/` najmniejszej wartości ze znakiem przez `-1`.
 - Pętla, która nic nie robi, znika od `-O1` wzwyż. W pętli oczekującej należy na przykład odczytywać rejestr.
 - Gdy `main` się kończy, mikrokontroler się zatrzymuje.
 - Układ pamięci zmienia `--linker-script FILE`. Bez tej opcji jest to 32 KiB pamięci flash bez ostatnich 512 bajtów programu rozruchowego oraz 2 KiB RAM. Adresy RAM zapisuje się z dodanym `0x800000`, na przykład `0x800100`.

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ 4963ba6fc48045aeec32b258cf56b8c1af7acc94 -->
+<!-- translated-from: docs/ja/guide/compile.md @ be54d7f19b5f87846f94e73219d59bce4604fa51 -->
 # Compiling
 
 Unless you do anything else, typelisp programs run in the interpreter. In addition there are two
@@ -331,8 +331,9 @@ $ qemu-system-avr -M uno -display none -serial stdio -bios blink.elf   # run it 
 ```
 
 - There is no runtime, so a program that uses the runtime is a **compile error**. The error says what is needed and through which functions it is reached. What can be used: arithmetic on fixed-width integers (`i8` to `u32`), `bool` and `char`, function calls, conditionals, loops, `defvar` and `defconstant` holding those values, and `volatile-read-u8` and the like with the address written as a number or a constant.
-- What cannot be used: values that live in the heap, such as strings, lists and structs; `int` arithmetic; recursion, `catch`, and calls of function values; calls of C functions; division by a variable (division by a number can be used); `volatile` accesses whose address is computed.
+- What cannot be used: values that live in the heap, such as strings, lists and structs; `int` arithmetic; recursion, `catch`, and calls of function values; calls of C functions; `volatile` accesses whose address is computed.
 - An interrupt handler is written `#[interrupt(N)]` ([Syntax](../reference/syntax.md), section 3.17). `N` is the ATmega328P's number of the interrupt, 1 to 25 counting reset as 0 (timer 1 overflowing is 13). See the example below.
+- Dividing by 0 stops the microcontroller there (no interrupt comes any more). So does `/` of the smallest signed value by `-1`.
 - A loop that does nothing is removed at `-O1` and above. In a loop that waits, read a register, for example.
 - When `main` ends, the microcontroller stops.
 - `--linker-script FILE` changes where memory is. Without it, memory is 32 KiB of flash less the last 512 bytes, which are the boot loader's, and 2 KiB of RAM. Write a RAM address with `0x800000` added, as in `0x800100`.
