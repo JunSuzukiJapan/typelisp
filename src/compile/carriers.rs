@@ -192,6 +192,17 @@ pub(crate) fn words_of(ty: BasicTypeEnum<'static>) -> usize {
     bits_of(ty).div_ceil(word().get_bit_width()) as usize
 }
 
+/// Whether the `int` `n` is a fixnum in the code being produced.
+pub(crate) fn fixnum_fits(n: i64) -> bool {
+    fits_below(n, word().get_bit_width())
+}
+
+/// Whether `n` fits a word of `bits` bits with one of them spent on the tag.
+fn fits_below(n: i64, bits: u32) -> bool {
+    let unused = i64::BITS + typelisp_mem::tagged::FIXNUM_SHIFT as u32 - bits;
+    (n << unused) >> unused == n
+}
+
 /// How many words the widest value takes: what a frame's value slot is.
 pub(crate) fn value_words() -> usize {
     i64::BITS.div_ceil(word().get_bit_width()) as usize
@@ -299,6 +310,17 @@ fn join(b: &Builder<'static>, ws: &[IntValue<'static>], part: IntType<'static>) 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Where a fixnum ends, by the width of the word it is in.
+    #[test]
+    fn a_fixnum_is_one_bit_narrower_than_the_word() {
+        for bits in [16, 32, 64u32] {
+            let max = i64::MAX >> (65 - bits);
+            assert!(fits_below(max, bits) && fits_below(-max - 1, bits));
+            assert!(!fits_below(max + 1, bits) && !fits_below(-max - 2, bits));
+        }
+        assert_eq!(i64::MAX >> 1, typelisp_mem::FIXNUM_MAX);
+    }
 
     /// A value wider than the part it is kept in comes back whole: a `f64`
     /// and an `i64` in 32-bit and 16-bit words.

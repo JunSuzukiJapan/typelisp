@@ -73,15 +73,13 @@ pub fn load(heap: &mut Heap, chk: &mut crate::Checker, interp: &mut Interp) {
 /// What an AOT executable needs from the prelude on top of the definitions
 /// [`load`] installs — see [`load_for_aot`].
 pub struct AotPrelude {
-    /// The committed prelude bitcode, to be linked into the executable's own
-    /// module so a call to `abs` resolves to a body rather than to nothing.
-    pub bitcode: &'static [u8],
     /// Each prelude `defvar`, in the order its compiled slot id was assigned.
     /// The executable re-runs these at its own startup: the compiled bodies
     /// address their globals by baked-in slot id, so the storage has to exist,
     /// with the same numbering, before any of them runs.
     pub global_inits: Vec<(Path, Value)>,
-    /// Every definition the bitcode carries a body for.
+    /// Every definition with a body, for the executable to compile as far as
+    /// the program reaches.
     pub items: Vec<CompileTarget>,
 }
 
@@ -91,9 +89,9 @@ pub struct AotPrelude {
 /// The difference between the two loaders is the difference between a JIT and
 /// an executable. `load` installs the bitcode's bodies as addresses in this
 /// process ([`crate::compile::driver::install_compiled_library`]); an
-/// executable has no process to install into, so it gets the bitcode itself,
-/// linked into its module, and a startup sequence for the state those bodies
-/// assume. Today that state is the globals; the forms are read out here rather
+/// executable is for a machine of its own, so it gets the definitions, to
+/// compile for that machine, and a startup sequence for the state their
+/// bodies assume. Today that state is the globals; the forms are read out here rather
 /// than reconstructed later because the dump is parsed exactly once.
 ///
 /// The returned forms are permanently rooted — every caller is a one-shot
@@ -126,10 +124,8 @@ pub fn load_for_aot(heap: &mut Heap, chk: &mut crate::Checker, interp: &mut Inte
 
     let globals = state.globals.clone();
     let items = state.items.clone();
-    // Types and definitions only: the bodies go into the *executable* (the
-    // caller links `bitcode` into its module), so JIT-installing them here
-    // would compile every prelude body a second time, per `compile-file`, for
-    // addresses this process never calls.
+    // Types and definitions only: the caller compiles the bodies into the
+    // *executable*, and this process never calls them.
     crate::compile::dump::load_unit_types_only(heap, chk, interp, state)?;
 
     // `load_unit` already refuses a numbering it cannot reproduce; what this
@@ -149,7 +145,7 @@ pub fn load_for_aot(heap: &mut Heap, chk: &mut crate::Checker, interp: &mut Inte
         ));
     }
 
-    Ok(AotPrelude { bitcode: unit.bitcode, global_inits, items })
+    Ok(AotPrelude { global_inits, items })
 }
 
 /// The `defvar`s in `tl`, in the order [`collect_item`] numbers them:

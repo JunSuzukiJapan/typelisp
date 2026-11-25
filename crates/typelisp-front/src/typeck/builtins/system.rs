@@ -297,6 +297,9 @@ fn host(reg: &mut Registry, env: NsId, thread: NsId, time: NsId, internal: NsId)
     // `dribble` itself is a prelude `defun` with an `&optional` path; these
     // two are the halves it dispatches to. Both `Result`, since both touch a
     // file — and stopping *flushes*, which is where a full disk is found.
+    // `most-positive-fixnum`: how wide a word is, is the machine's the
+    // program runs on.
+    native(internal, "largest-fixnum", vec![], Type::Int);
     native(internal, "dribble-start", vec![Type::Str], result_of(Type::Unit, file_err.clone()));
     native(internal, "dribble-stop", vec![], result_of(Type::Unit, file_err.clone()));
     // The runtime half of the `ed` special form, which resolved the name at

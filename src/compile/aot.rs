@@ -460,8 +460,8 @@ pub fn compile_file_with(source_path: &str, output_path: &str, options: &BuildOp
     // program could call the builtins and its own definitions and nothing
     // else: `abs`, `gcd`, `identity`, every stream and pathname helper — the
     // whole prelude — answered "no such function" at compile time. Its bodies
-    // now come along in the executable (`prelude.bitcode`, linked into the
-    // module below) and its globals get their storage at the executable's own
+    // are compiled into the executable as far as the program reaches them
+    // (below), and its globals get their storage at the executable's own
     // startup (`prelude.global_inits`).
     let prelude = crate::compile::prelude_bootstrap::load_for_aot(&mut heap, &mut chk, &mut interp)?;
     crate::load_compiler(&mut heap, &mut chk, &mut interp);
@@ -594,7 +594,7 @@ pub fn compile_file_with(source_path: &str, output_path: &str, options: &BuildOp
         // here: these resolve as ordinary linker symbols against
         // `typelisp-rt`'s `staticlib` once `write_executable` links it in.
         crate::compile::externs::declare_runtime_functions(&module);
-        // The FFI thunks, before the prelude is linked in and long before any
+        // The FFI thunks, long before any
         // body is translated: a compiled call to `c-strlen` resolves
         // `tl_c-strlen` with `get-function`, and the island **aborts the
         // process** on a name it cannot find. Each thunk declares its C
@@ -604,21 +604,6 @@ pub fn compile_file_with(source_path: &str, output_path: &str, options: &BuildOp
         for decl in &ffi_decls {
             crate::compile::ffi::emit_thunk(&module, decl)?;
         }
-        // The prelude's compiled bodies, merged in here — *before* the first
-        // `add_compiled_function` below, not after. The island's
-        // `compile-call` resolves a callee with `get-function` against this
-        // very module and aborts the process when it finds nothing, so a call
-        // to `abs` needs `tl_abs` present by the time any body is translated,
-        // not merely by the time the module is written out.
-        let buffer =
-            inkwell::memory_buffer::MemoryBuffer::create_from_memory_range_copy(prelude.bitcode, "prelude");
-        let prelude_module = Module::parse_bitcode_from_buffer(&buffer, ctx)
-            .map_err(|e| format!("the committed prelude bitcode failed to parse: {}", e))?;
-        module
-            .link_in_module(prelude_module)
-            .map_err(|e| format!("linking the prelude into the compiled file failed: {}", e))?;
-        // The link left a handler of inkwell's behind — see the function.
-        crate::compile::codegen_prep::install_diagnostic_handler();
         Rc::new(RefCell::new(module))
     };
 
@@ -637,18 +622,15 @@ pub fn compile_file_with(source_path: &str, output_path: &str, options: &BuildOp
         Ok(direct::Body { symbol: target_symbol_name(item), params, ret, param_list, body })
     };
     let mut bodies: Vec<direct::Body> = Vec::with_capacity(items.len());
-    // What the prelude's bitcode has a body for: its own definitions, and a
-    // specialization of one that this file asks for too, which is the same
-    // function and is not emitted twice.
+    // The prelude's functions by symbol. A specialization of one that this
+    // file asks for too is the same function and is emitted once, as the
+    // program's.
     let mut prelude_items: std::collections::HashMap<String, &CompileTarget> =
         prelude.items.iter().map(|i| (target_symbol_name(i), i)).collect();
     for item in &items {
-        let symbol = target_symbol_name(item);
-        if module.borrow().get_function(&symbol).is_some_and(|f| f.count_basic_blocks() > 0) {
-            prelude_items.insert(symbol, item);
-        } else {
-            bodies.push(translated(&mut heap, item)?);
-        }
+        let body = translated(&mut heap, item)?;
+        prelude_items.remove(&body.symbol);
+        bodies.push(body);
     }
     let mut init_bodies: Vec<Value> = Vec::with_capacity(defvar_inits.len());
     for (_, form) in &defvar_inits {
@@ -660,19 +642,19 @@ pub fn compile_file_with(source_path: &str, output_path: &str, options: &BuildOp
     // entered under the coroutine ABI.
     let mut pinned: std::collections::HashSet<String> = std::collections::HashSet::new();
     pinned.insert(target_symbol_name(&CompileTarget::Fn(entry_path)));
-    pinned.extend(items.iter().filter(|i| print_object_receiver(i).is_some()).map(target_symbol_name));
+    pinned.extend(items.iter().chain(&prelude.items).filter(|i| print_object_receiver(i).is_some()).map(target_symbol_name));
     pinned.extend(chk.interrupt_handlers().into_iter().map(|(_, path)| target_symbol_name(&CompileTarget::Fn(path))));
     pinned.extend(chk.ffi_callbacks().into_iter().map(|sig| ConcreteNames::symbol(&sig.function.to_string())));
     for (_, slots) in interp.vtable_descriptors() {
         pinned.extend(slots.iter().map(|(type_name, method)| ConcreteNames::method_symbol(type_name, method.name())));
     }
     let entry_symbol = target_symbol_name(&CompileTarget::Fn(entry_path));
-    let direct::Direct { sigs, copies, emit, entry: direct_entry } = direct::direct_functions(&mut heap, &module.borrow(), &bodies, &init_bodies, &pinned, &entry_symbol, |heap, symbol| {
+    let direct::Direct { sigs, emit, entry: direct_entry } = direct::direct_functions(&mut heap, &module.borrow(), &bodies, &init_bodies, &pinned, &entry_symbol, |heap, symbol| {
         prelude_items.get(symbol).map(|item| translated(heap, item)).transpose()
     })?;
     bodies.extend(emit);
     let direct_names: Vec<String> = sigs.keys().cloned().collect();
-    let producing_direct = crate::compile::direct::producing(sigs, copies.clone());
+    let producing_direct = crate::compile::direct::producing(sigs);
 
     {
         // Every body this file will emit, declared before any of them is
@@ -701,10 +683,11 @@ pub fn compile_file_with(source_path: &str, output_path: &str, options: &BuildOp
             let ptr_ty = ctx.ptr_type(AddressSpace::default());
             crate::compile::carriers::word().fn_type(&[ptr_ty.into(), ctx.i32_type().into()], false)
         };
-        for b in &bodies {
-            if m.get_function(&b.symbol).is_none() {
-                let ty = crate::compile::direct::sig_of(&b.symbol).map_or(lisp_fn_ty, |sig| sig.fn_type());
-                m.add_function(&b.symbol, ty, None);
+        let symbols = bodies.iter().map(|b| &b.symbol).chain(prelude_items.keys());
+        for symbol in symbols {
+            if m.get_function(symbol).is_none() {
+                let ty = crate::compile::direct::sig_of(symbol).map_or(lisp_fn_ty, |sig| sig.fn_type());
+                m.add_function(symbol, ty, None);
             }
         }
     }
@@ -745,6 +728,42 @@ pub fn compile_file_with(source_path: &str, output_path: &str, options: &BuildOp
     }
     let all_inits: Vec<(Path, Value)> =
         prelude.global_inits.iter().chain(defvar_inits.iter()).cloned().collect();
+    // The rest of the prelude the executable may need: the `print-object`s
+    // the printer may choose, the functions whose address the runtime is
+    // handed, and what they, the globals' initializers and
+    // anything else emitted so far refer to. Which of it can run, the finished
+    // `main` says; what cannot is not linked in.
+    let mut wanted: Vec<String> = prelude
+        .items
+        .iter()
+        .filter(|i| print_object_receiver(i).is_some())
+        .map(target_symbol_name)
+        .chain(pinned)
+        .collect();
+    loop {
+        let missing = |m: &Module<'static>, symbol: &str| m.get_function(symbol).is_some_and(|f| f.count_basic_blocks() == 0);
+        wanted.retain(|symbol| prelude_items.contains_key(symbol) && missing(&module.borrow(), symbol));
+        wanted.extend(
+            prelude_items
+                .keys()
+                .filter(|symbol| {
+                    let m = module.borrow();
+                    let f = m.get_function(symbol);
+                    use inkwell::values::BasicValue;
+                    f.is_some_and(|f| f.count_basic_blocks() == 0 && f.as_global_value().as_pointer_value().get_first_use().is_some())
+                })
+                .cloned(),
+        );
+        wanted.sort();
+        wanted.dedup();
+        if wanted.is_empty() {
+            break;
+        }
+        for symbol in std::mem::take(&mut wanted) {
+            let b = translated(&mut heap, prelude_items[&symbol])?;
+            crate::compile::driver::run_compile_function(&interp, &mut heap, module.clone(), &b.symbol, b.param_list, b.body).map_err(|e| e.to_string())?;
+        }
+    }
     let skipped_safepoints = crate::compile::direct::skipped_safepoints();
     // Every body is emitted. What compiles from here on compiles for this
     // process (the `eval` environment's checking), and nothing there is direct.
@@ -756,8 +775,8 @@ pub fn compile_file_with(source_path: &str, output_path: &str, options: &BuildOp
     // the executable can make a value of): this file's, and the prelude's own (`complex`,
     // `pathname`, the streams, the error types, ...), which no item of this
     // file names — they are chosen by the printer at run time, never called.
-    // Their bodies are in the module already, the prelude bitcode having been
-    // linked in whole above, so registering them is all that is missing;
+    // Their bodies are in the module already, so registering them is all that
+    // is missing;
     // without it an executable printed a `complex` as `#<complex re: 1.0 im:
     // 2.0>` where `typl` said `#C(1.0 2.0)`. Read off the items rather than
     // off the method tables because the address has to name a function the
@@ -817,9 +836,6 @@ pub fn compile_file_with(source_path: &str, output_path: &str, options: &BuildOp
         let read = globals_read(&heap, &body)?;
         // A direct copy is the same body.
         if let Some(copy) = direct_entry.as_ref().filter(|_| symbol == entry_symbol) {
-            body_globals.insert(copy.clone(), read.clone());
-        }
-        if let Some(copy) = copies.get(&symbol) {
             body_globals.insert(copy.clone(), read.clone());
         }
         body_globals.insert(symbol, read);

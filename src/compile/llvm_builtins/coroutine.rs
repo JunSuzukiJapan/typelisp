@@ -685,7 +685,7 @@ fn coroutine_call_impl(
     let carrier = Carrier::of_code(expect_int(&args[3 + head_len])?).map_err(|e| err("the answer", e))?;
     let passed = all_of(&builder.borrow(), &slots)?;
     if env.is_none() && shim == "rt_frame_call" {
-        if let Some((callee, sig)) = direct_callee(&module, &head[0]) {
+        if let Some((callee, sig)) = direct_callee(&head[0]) {
             let b = builder.borrow();
             return direct_call(&b, callee, &sig, &passed).map(llvm_value_value).map_err(|e| err("direct call", e));
         }
@@ -774,9 +774,8 @@ pub(crate) fn pending_words(
 }
 
 /// The direct function a call's callee word names, with its signature: the
-/// word is `ptrtoint @f` (`build-fn-address`) and `f` is direct or has a
-/// direct copy.
-fn direct_callee(module: &Rc<RefCell<Module<'static>>>, callee: &BasicValueEnum<'static>) -> Option<(FunctionValue<'static>, crate::compile::direct::DirectSig)> {
+/// word is `ptrtoint @f` (`build-fn-address`) and `f` is direct.
+fn direct_callee(callee: &BasicValueEnum<'static>) -> Option<(FunctionValue<'static>, crate::compile::direct::DirectSig)> {
     use inkwell::llvm_sys::core::{LLVMGetConstOpcode, LLVMGetOperand, LLVMIsAConstantExpr, LLVMIsAFunction};
     use inkwell::values::AsValueRef;
     let v = callee.as_value_ref();
@@ -791,8 +790,8 @@ fn direct_callee(module: &Rc<RefCell<Module<'static>>>, callee: &BasicValueEnum<
             return None;
         }
         let f = FunctionValue::new(target)?;
-        let (symbol, sig) = crate::compile::direct::callee(&f.get_name().to_string_lossy())?;
-        Some((module.borrow().get_function(&symbol)?, sig))
+        let sig = crate::compile::direct::sig_of(&f.get_name().to_string_lossy())?;
+        Some((f, sig))
     }
 }
 

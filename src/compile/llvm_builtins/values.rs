@@ -116,7 +116,15 @@ pub(super) fn tag_field(args: &[Value]) -> Result<Value, EvalError> {
         k::RAW_INT => fixnum(v.into_int_value())?.into(),
         k::TAGGED | k::NICHE => carrier.coerce(&b, v).map_err(err)?,
         _ => {
-            let Carrier::Int { signed, .. } = carrier else { return Err(err(format!("the field kind {}", kind))) };
+            let Carrier::Int { bits, signed } = carrier else { return Err(err(format!("the field kind {}", kind))) };
+            if !always_fixnum(bits, signed) {
+                // The `int` it is: a bignum where a fixnum is too narrow.
+                let wide = b.build_int_cast_sign_flag(v.into_int_value(), carriers::int(64), signed, "wide").map_err(fail)?;
+                let name = if bits == 64 && !signed { "rt_integer_from_c_ulong" } else { "rt_integer_from_word" };
+                let (f, r) = crate::compile::runtime_abi::call(&b, &module.borrow(), name, &[wide.into()]).map_err(err)?;
+                crate::compile::raise_check::after_call(&b, f).map_err(err)?;
+                return Ok(llvm_value_value(r));
+            }
             let wide = b.build_int_cast_sign_flag(v.into_int_value(), word_ty, signed, "wide").map_err(fail)?;
             fixnum(wide)?.into()
         }
@@ -155,9 +163,30 @@ pub(super) fn untag_field(args: &[Value]) -> Result<Value, EvalError> {
         k::UNIT => Carrier::Unit.zero(),
         k::RAW_INT => fixnum(word.into_int_value())?.into(),
         k::TAGGED | k::NICHE => word,
-        _ => carrier.coerce(&b, fixnum(word.into_int_value())?.into()).map_err(err)?,
+        _ => {
+            let Carrier::Int { bits, signed } = carrier else { return Err(err(format!("the field kind {}", kind))) };
+            if always_fixnum(bits, signed) {
+                carrier.coerce(&b, fixnum(word.into_int_value())?.into()).map_err(err)?
+            } else {
+                call(match (bits, signed) {
+                    (16, true) => "rt_integer_to_i16",
+                    (16, false) => "rt_integer_to_u16",
+                    (32, true) => "rt_integer_to_i32",
+                    (32, false) => "rt_integer_to_u32",
+                    (64, true) => "rt_integer_to_c_long",
+                    (64, false) => "rt_integer_to_c_ulong",
+                    _ => return Err(err(format!("a field of {} bits", bits))),
+                })?
+            }
+        }
     };
     Ok(llvm_value_value(v))
+}
+
+/// Whether every integer of this width is a fixnum of the code being
+/// produced. One that is not is the `int` it is worth in a tagged word.
+fn always_fixnum(bits: u32, signed: bool) -> bool {
+    bits + u32::from(!signed) < carriers::word().get_bit_width()
 }
 
 /// The word of `false` or `true`.

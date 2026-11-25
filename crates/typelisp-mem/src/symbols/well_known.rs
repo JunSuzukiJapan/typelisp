@@ -1020,4 +1020,7 @@ well_known_symbols! {
     F_C_VOLATILE_STORE => " c-volatile-store"
     F_ENABLE_INTERRUPT => "enable-interrupt"
     F_DISABLE_INTERRUPT => "disable-interrupt"
+    "Appended 2026-11-25. The largest fixnum of the machine the code runs on,
+     which `most-positive-fixnum` is."
+    F_LARGEST_FIXNUM => "largest-fixnum"
 }

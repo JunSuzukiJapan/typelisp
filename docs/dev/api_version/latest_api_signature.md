@@ -1,11 +1,11 @@
-# ABI バージョン 0.3.82
+# ABI バージョン 0.3.83
 
 `scripts/regen-abi-version.sh` が生成した文書。手で編集しない。
 
-コンパイラが生成するコードが、ABI バージョン 0.3.82 のランタイムライブラリについて仮定していることの一覧。
+コンパイラが生成するコードが、ABI バージョン 0.3.83 のランタイムライブラリについて仮定していることの一覧。
 ここに書かれていない前提(シムが引数をどう扱うか、生成コードがヒープを直接読む箇所など)は含まない。
 
-内容ハッシュ (FNV-1a 64): `b0e9a1db94959b50`
+内容ハッシュ (FNV-1a 64): `f927162995ce7259`
 
 ## 呼び出し規約 (typelisp_abi)
 
@@ -816,6 +816,7 @@
 | 692 | ` c-volatile-store` |
 | 693 | `enable-interrupt` |
 | 694 | `disable-interrupt` |
+| 695 | `largest-fixnum` |
 
 ## 組み込み型 (typelisp_mem::BUILTIN_TYPES)
 
@@ -1238,6 +1239,7 @@
 | `rt_interrupt_enable` | `word (word)` |
 | `rt_interrupt_register` | `word (word, word)` |
 | `rt_keywordp` | `bool (word)` |
+| `rt_largest_fixnum` | `word ()` |
 | `rt_lisp_implementation_version` | `word ()` |
 | `rt_list_to_path` | `word (word)` |
 | `rt_list_to_sexpr_tuple` | `word (word)` |
@@ -2249,6 +2251,7 @@
 | `std::%internal::file-owner-name` | `rt_file_owner_name` | `(string) -> std::result::Result<std::option::Option<string>,std::fs::FileError>` |
 | `std::%internal::file-rename` | `rt_file_rename` | `(string, string) -> std::result::Result<(),std::fs::FileError>` |
 | `std::%internal::file-truename` | `rt_file_truename` | `(string) -> std::result::Result<string,std::fs::FileError>` |
+| `std::%internal::largest-fixnum` | `rt_largest_fixnum` | `() -> int` |
 | `std::%internal::make-random-state-fresh` | `rt_make_random_state_fresh` | `() -> random-state` |
 | `std::%internal::net-accept` | `rt_net_accept` | `(i32) -> std::result::Result<std::option::Option<i32>,std::net::NetError>` |
 | `std::%internal::net-buffered-p` | `rt_net_buffered_p` | `(i32) -> std::result::Result<bool,std::net::NetError>` |

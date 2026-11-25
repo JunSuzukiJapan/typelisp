@@ -317,6 +317,17 @@ fn scalar_of(a: &IntArg) -> Option<u32> {
     }
 }
 
+/// `(largest-fixnum)`: the largest `int` a word of this machine holds, as a
+/// raw word.
+///
+/// # Safety
+///
+/// Takes no arguments.
+#[no_mangle]
+pub unsafe extern "C" fn rt_largest_fixnum() -> Word {
+    typelisp_mem::FIXNUM_MAX as Word
+}
+
 macro_rules! integer_to_fixed {
     ($($t:ident: $to:ident;)*) => {$(
         /// `int->W` for this `W`: `typelisp_mem::fixed::from_int`, the

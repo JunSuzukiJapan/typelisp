@@ -743,6 +743,17 @@ fn compile_dispatches_a_defun_call_to_native_code() {
     }
 }
 
+/// A quoted float keeps its value and its width in compiled code.
+#[test]
+fn a_compiled_quoted_float_is_the_float() {
+    let src = r#"
+        (defun f () Option<Sexpr> (quote (1.5 2)))
+        (compile f)
+        (equal (f) (quote (1.5 2)))
+    "#;
+    assert!(expect_bool(eval_ok_with_compiler(src)));
+}
+
 /// A quoted symbol keeps the module that owns it when it crosses into
 /// compiled code.
 ///

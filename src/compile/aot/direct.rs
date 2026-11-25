@@ -20,10 +20,8 @@
 //!   the machine stack, and how deep a recursion goes is limited by the
 //!   heap, not by the stack.
 //!
-//! A prelude function the program calls is a coroutine in the prelude's
-//! bitcode. One that could be direct is also emitted as a direct function
-//! under a name of its own ([`COPY_SUFFIX`]), which the program's own code
-//! calls; the rest of the prelude goes on calling the coroutine.
+//! The prelude's functions the program can reach are judged with its own:
+//! they are compiled into the same executable.
 //!
 //! The judgement errs one way only. A node it does not know is not looked
 //! at, and the builders refuse to emit anything that stops in a direct
@@ -70,6 +68,8 @@ struct Facts {
     interprets: bool,
     /// The functions it calls by name.
     callees: Vec<String>,
+    /// Every name in it, functions it only refers to included.
+    names: Vec<String>,
 }
 
 /// The nodes that make a function a coroutine.
@@ -114,6 +114,7 @@ fn facts(heap: &Heap, form: Value) -> Facts {
                 if crate::compile::externs::needs_interpreter(s) || s == crate::compile::externs::RT_SUSPEND_MAIN {
                     f.interprets = true;
                 }
+                f.names.push(s.to_string());
             }
             _ => {}
         }
@@ -121,26 +122,23 @@ fn facts(heap: &Heap, form: Value) -> Facts {
     f
 }
 
-/// What a prelude function's direct copy is called, after the function's own
-/// symbol.
+/// What the entry's direct copy is called, after the entry's own symbol.
 pub(super) const COPY_SUFFIX: &str = "$direct";
 
 /// A build's direct functions ([`crate::compile::direct::producing`]), and
-/// the prelude functions among them to emit, each already under its copy's
-/// symbol.
+/// the functions to emit besides the program's own.
 #[derive(Default)]
 pub(crate) struct Direct {
     pub sigs: HashMap<String, DirectSig>,
-    pub copies: HashMap<String, String>,
     pub emit: Vec<Body>,
     /// The entry point's direct copy, when it has one.
     pub entry: Option<String>,
 }
 
 /// The direct functions of the program whose own functions are `bodies` and
-/// whose `defvar`s' initializers are `inits`. `module` holds everything else
-/// they can call (the prelude, the FFI thunks), all of it coroutines;
-/// `prelude` translates the prelude function of a symbol, if it is one.
+/// whose `defvar`s' initializers are `inits`. `module` holds the FFI thunks,
+/// all of them coroutines; `prelude` translates the prelude function of a
+/// symbol, if it is one.
 pub(crate) fn direct_functions(
     heap: &mut Heap,
     module: &Module<'static>,
@@ -153,42 +151,28 @@ pub(crate) fn direct_functions(
     let mut known: HashMap<String, Facts> = bodies.iter().map(|b| (b.symbol.clone(), facts(heap, b.body))).collect();
     let init_facts: Vec<Facts> = inits.iter().map(|f| facts(heap, *f)).collect();
 
-    // What the program does, and what the functions outside it that it calls
-    // can reach.
-    let all = || known.values().chain(&init_facts);
-    let mut waits = all().any(|f| f.waits);
-    let interprets = all().any(|f| f.interprets);
-    let outside: HashSet<String> = all().flat_map(|f| f.callees.iter()).filter(|c| !known.contains_key(*c)).cloned().collect();
-    let reaches = |names: &HashSet<String>, shim: fn(&str) -> bool| {
-        names
-            .iter()
-            .filter_map(|name| module.get_function(name))
-            .any(|f| !super::reach::uses(module, f, |n| shim(n).then(String::new)).is_empty())
-    };
-    if interprets || reaches(&outside, crate::compile::externs::needs_interpreter) {
-        return Ok(Direct::default());
-    }
-    waits |= reaches(&outside, crate::compile::externs::needs_scheduler);
-
-    // The prelude functions they call, and those those call, as far as one
-    // that stops.
-    let mut copied: Vec<Body> = Vec::new();
-    let mut pending: Vec<String> = outside.into_iter().collect();
+    // The prelude functions the program refers to, and those those refer to.
+    let mut answer = Direct::default();
+    let mut pending: Vec<String> = known.values().chain(&init_facts).flat_map(|f| f.names.iter()).cloned().collect();
     pending.sort();
-    let mut seen: HashSet<String> = pending.iter().cloned().collect();
+    let mut seen: HashSet<String> = known.keys().cloned().collect();
     while let Some(name) = pending.pop() {
+        if !seen.insert(name.clone()) {
+            continue;
+        }
         let Some(body) = prelude(heap, &name)? else { continue };
         let f = facts(heap, body.body);
-        if !f.stops {
-            for callee in &f.callees {
-                if !known.contains_key(callee) && seen.insert(callee.clone()) {
-                    pending.push(callee.clone());
-                }
-            }
-        }
+        pending.extend(f.names.iter().cloned());
         known.insert(name, f);
-        copied.push(body);
+        answer.emit.push(body);
     }
+
+    // What the program does, with what it reaches.
+    let all = || known.values().chain(&init_facts);
+    if all().any(|f| f.interprets) {
+        return Ok(answer);
+    }
+    let waits = all().any(|f| f.waits);
 
     let mut direct: HashSet<&str> = known
         .iter()
@@ -212,7 +196,6 @@ pub(crate) fn direct_functions(
         direct = still;
     }
 
-    let mut answer = Direct::default();
     // The entry is a coroutine for the runtime to drive, and a direct
     // function for a `main` that needs none of it.
     let e = &known[entry];
@@ -223,15 +206,13 @@ pub(crate) fn direct_functions(
         answer.emit.push(Body { symbol: copy.clone(), ..body.clone() });
         answer.entry = Some(copy);
     }
-    for b in bodies.iter().filter(|b| direct.contains(b.symbol.as_str())) {
-        answer.sigs.insert(b.symbol.clone(), DirectSig::of(&b.params, &b.ret));
-    }
-    for mut b in copied.into_iter().filter(|b| direct.contains(b.symbol.as_str())) {
-        let copy = format!("{}{}", b.symbol, COPY_SUFFIX);
-        answer.sigs.insert(copy.clone(), DirectSig::of(&b.params, &b.ret));
-        answer.copies.insert(std::mem::replace(&mut b.symbol, copy.clone()), copy);
-        answer.emit.push(b);
-    }
+    let sigs: Vec<(String, DirectSig)> = bodies
+        .iter()
+        .chain(&answer.emit)
+        .filter(|b| direct.contains(b.symbol.as_str()))
+        .map(|b| (b.symbol.clone(), DirectSig::of(&b.params, &b.ret)))
+        .collect();
+    answer.sigs.extend(sigs);
     Ok(answer)
 }
 

@@ -63,11 +63,6 @@ thread_local! {
     /// Empty outside an ahead-of-time build.
     static DIRECT: RefCell<HashMap<String, DirectSig>> = RefCell::new(HashMap::new());
 
-    /// The functions that exist under both ABIs: the symbol of the coroutine,
-    /// which is what a call names, and the direct copy's. A prelude function
-    /// is one: its coroutine is in the prelude's own bitcode.
-    static COPIES: RefCell<HashMap<String, String>> = RefCell::new(HashMap::new());
-
     /// Each direct function under construction, by its `LLVMValueRef`, and
     /// the block an unwind leaves it from — for the raise check after a
     /// call, which has the function and nothing else.
@@ -83,17 +78,14 @@ pub(crate) struct Producing(());
 impl Drop for Producing {
     fn drop(&mut self) {
         DIRECT.with(|d| d.borrow_mut().clear());
-        COPIES.with(|c| c.borrow_mut().clear());
         UNWIND_EXITS.with(|u| u.borrow_mut().clear());
         SKIPPED_SAFEPOINTS.with(|s| s.set(0));
     }
 }
 
-/// Builds `functions` as direct functions, and calls each key of `copies` at
-/// its value, until the answer is dropped.
-pub(crate) fn producing(functions: HashMap<String, DirectSig>, copies: HashMap<String, String>) -> Producing {
+/// Builds `functions` as direct functions until the answer is dropped.
+pub(crate) fn producing(functions: HashMap<String, DirectSig>) -> Producing {
     DIRECT.with(|d| *d.borrow_mut() = functions);
-    COPIES.with(|c| *c.borrow_mut() = copies);
     SKIPPED_SAFEPOINTS.with(|s| s.set(0));
     Producing(())
 }
@@ -101,14 +93,6 @@ pub(crate) fn producing(functions: HashMap<String, DirectSig>, copies: HashMap<S
 /// The signature of `name` when it is a direct function.
 pub(crate) fn sig_of(name: &str) -> Option<DirectSig> {
     DIRECT.with(|d| d.borrow().get(name).cloned())
-}
-
-/// The symbol and signature a call to `name` is made directly at, when there
-/// is a direct function to call.
-pub(crate) fn callee(name: &str) -> Option<(String, DirectSig)> {
-    let symbol = COPIES.with(|c| c.borrow().get(name).cloned()).unwrap_or_else(|| name.to_string());
-    let sig = sig_of(&symbol)?;
-    Some((symbol, sig))
 }
 
 pub(crate) fn set_unwind_exit(f: FunctionValue<'static>, block: BasicBlock<'static>) {

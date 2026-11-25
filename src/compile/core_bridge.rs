@@ -413,7 +413,7 @@ fn to_island_here(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Error>
         // rather than the raw word `compile-int-any-width` produces. The
         // island cannot tell the two apart from the number.
         wk::INT => match core::field(heap, form, 0) {
-            Some(Value::Int(n)) => core::tagged(heap, wk::INT, &[half((n as u64) >> 32), half(n as u64)]),
+            Some(Value::Int(n)) => int_literal(heap, n),
             _ => Err(malformed(heap, form)),
         },
         wk::UNIT => core::tagged(heap, wk::UNIT, &[]),
@@ -1710,9 +1710,9 @@ fn quoted_form(heap: &mut Heap, datum: Value) -> Result<Value, Error> {
     match datum {
         Value::Empty => sexpr_construct(heap, SEXPR_NIL, &[]),
         // An `int` node's payload is the *tagged* word: the `(int HI LO)`
-        // literal (a fixnum, `compile-int-literal`), never the raw
+        // literal (a fixnum, `compile-int-literal`) or a bignum's, never the raw
         // `int-any-width` one — the `int` variant passes its argument through.
-        Value::Int(n) => sexpr_leaf(heap, SEXPR_INT, |h| core::tagged(h, wk::INT, &[half((n as u64) >> 32), half(n as u64)])),
+        Value::Int(n) => sexpr_leaf(heap, SEXPR_INT, |h| int_literal(h, n)),
         Value::Bool(b) => sexpr_leaf(heap, SEXPR_BOOL, |h| core::tagged(h, wk::BOOL, &[Value::Bool(b)])),
         Value::Char(c) => sexpr_leaf(heap, SEXPR_CHAR, |h| core::tagged(h, wk::CHAR, &[Value::Char(c)])),
         Value::Str(id) => {
@@ -1737,7 +1737,7 @@ fn quoted_form(heap: &mut Heap, datum: Value) -> Result<Value, Error> {
         Value::Boxed(id) if heap.is_f32(id) => {
             let bits = f64::from(heap.f32_value(id)).to_bits();
             sexpr_leaf(heap, SEXPR_F32, move |h| {
-                core::tagged(h, wk::FLOAT_ANY_WIDTH, &[half(bits >> 32), half(bits)])
+                core::tagged(h, wk::FLOAT_ANY_WIDTH, &[Value::Int(Carrier::F32.code()), half(bits >> 32), half(bits)])
             })
         }
         Value::Boxed(id) if heap.is_f64(id) => {
@@ -1746,7 +1746,7 @@ fn quoted_form(heap: &mut Heap, datum: Value) -> Result<Value, Error> {
                 core::tagged(
                     h,
                     wk::FLOAT_ANY_WIDTH,
-                    &[half(bits >> 32), half(bits)],
+                    &[Value::Int(Carrier::F64.code()), half(bits >> 32), half(bits)],
                 )
             })
         }
@@ -3047,6 +3047,16 @@ fn half(bits: u64) -> Value {
 /// whole).
 fn int_node(heap: &mut Heap, n: i64, carrier: Carrier) -> Result<Value, Error> {
     core::tagged(heap, wk::INT_ANY_WIDTH, &[Value::Int(carrier.code()), half((n as u64) >> 32), half(n as u64)])
+}
+
+/// The `int` literal `n`: `(int HI LO)`, a fixnum, or the bignum it is where
+/// the code being produced has a word too narrow for it.
+fn int_literal(heap: &mut Heap, n: i64) -> Result<Value, Error> {
+    if crate::compile::carriers::fixnum_fits(n) {
+        core::tagged(heap, wk::INT, &[half((n as u64) >> 32), half(n as u64)])
+    } else {
+        bignum_form(heap, &num_bigint::BigInt::from(n))
+    }
 }
 
 /// `(str (int c0) (int c1) ...)` for a compile-time-known string.

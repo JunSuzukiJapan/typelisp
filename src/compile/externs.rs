@@ -114,6 +114,7 @@ pub(crate) fn rt_builtin_symbol(name: SymRef) -> Option<&'static str> {
         wk::F_MACHINE_INSTANCE => "rt_machine_instance",
         wk::F_MACHINE_VERSION => "rt_machine_version",
         wk::F_SOFTWARE_VERSION => "rt_software_version",
+        wk::F_LARGEST_FIXNUM => "rt_largest_fixnum",
         wk::F_TIMEZONE_OFFSET_SECONDS => "rt_timezone_offset_seconds",
         wk::F_TIMEZONE_DAYLIGHT_P => "rt_timezone_daylight_p",
         wk::F_EXIT => "rt_exit",
@@ -946,7 +947,7 @@ pub(crate) fn runtime_addresses() -> impl Iterator<Item = (&'static str, usize)>
 
 /// The shims every target has: `typelisp-rt`'s, the printer's, the reader's
 /// and `rt_llvm_call`.
-fn rt_shims() -> [(&'static str, Shim); 353] {
+fn rt_shims() -> [(&'static str, Shim); 354] {
     use typelisp_rt::c_mem::{
         rt_c_alloc, rt_c_arena_close, rt_c_arena_open, rt_c_index, rt_c_load, rt_c_offset, rt_c_ptr_check, rt_c_store,
         rt_c_volatile_load, rt_c_volatile_store,
@@ -995,7 +996,7 @@ fn rt_shims() -> [(&'static str, Shim); 353] {
         rt_integer_logior, rt_integer_lognot, rt_integer_logtest, rt_integer_logxor, rt_integer_mod, rt_integer_mul,
         rt_integer_to_i8, rt_integer_to_i16, rt_integer_to_i32, rt_integer_to_c_long, rt_integer_to_u8, rt_integer_to_u16, rt_integer_to_u32, rt_integer_to_c_ulong,
         rt_integer_fits_i8, rt_integer_fits_i16, rt_integer_fits_i32, rt_integer_fits_u8, rt_integer_fits_u16, rt_integer_fits_u32, rt_integer_sub, rt_integer_to_char, rt_integer_to_float,
-        rt_integer_to_ratio, rt_int_not_fixnum,
+        rt_integer_to_ratio, rt_int_not_fixnum, rt_largest_fixnum,
     };
     use typelisp_rt::{
         rt_atom, rt_bignum_new,
@@ -1332,6 +1333,7 @@ fn rt_shims() -> [(&'static str, Shim); 353] {
         ("rt_integer_logcount", shim(rt_integer_logcount as unsafe extern "C" fn(Word) -> Word)),
         ("rt_integer_integer_length", shim(rt_integer_integer_length as unsafe extern "C" fn(Word) -> Word)),
         ("rt_integer_to_float", shim(rt_integer_to_float as unsafe extern "C" fn(Word) -> f64)),
+        ("rt_largest_fixnum", shim(rt_largest_fixnum as unsafe extern "C" fn() -> Word)),
         ("rt_integer_to_ratio", shim(rt_integer_to_ratio as unsafe extern "C" fn(Word) -> Word)),
         ("rt_integer_to_char", shim(rt_integer_to_char as unsafe extern "C-unwind" fn(Word) -> u32)),
         ("rt_integer_fits_char", shim(rt_integer_fits_char as unsafe extern "C" fn(Word) -> bool)),

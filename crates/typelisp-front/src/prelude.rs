@@ -3658,12 +3658,12 @@ user-visible capacity."
         out))))
 
 ;; CL's numeric limit constants (CLHS 12.1.4.2 / 12.1.3). A fixnum is an
-;; `int` that fits its 63-bit immediate word; past these bounds an `int` is
-;; a bignum box (`typelisp-mem`'s `FIXNUM_MAX`/`FIXNUM_MIN`), and the
-;; arithmetic goes on unchanged.
+;; `int` that fits a word of the machine less one bit; past these bounds an
+;; `int` is a bignum box (`typelisp-mem`'s `FIXNUM_MAX`/`FIXNUM_MIN`), and
+;; the arithmetic goes on unchanged.
 (module num
-(pub defconstant (most-positive-fixnum int) 4611686018427387903)
-(pub defconstant (most-negative-fixnum int) -4611686018427387904)
+(pub defconstant (most-positive-fixnum int) (%internal::largest-fixnum))
+(pub defconstant (most-negative-fixnum int) (- -1 (%internal::largest-fixnum)))
 (pub defconstant (most-positive-double-float f64) 1.7976931348623157e308)
 (pub defconstant (most-negative-double-float f64) -1.7976931348623157e308)
 (pub defconstant (least-positive-double-float f64) 5.0e-324)
