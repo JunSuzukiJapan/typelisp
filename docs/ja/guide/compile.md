@@ -357,9 +357,9 @@ $ qemu-system-arm -M mps2-an505 -nographic \
 作ります。次のプログラムは、ボードの LED を点滅させます。
 
 ```lisp
-(define-symbol-macro PINB #x23)
-(define-symbol-macro DDRB #x24)
-(define-symbol-macro LED (the u8 32))             ; PB5
+(defconstant (PINB int) #x23)
+(defconstant (DDRB int) #x24)
+(defconstant (LED u8) 32)                         ; PB5
 
 (defun wait-a-bit () ()
   (let ((i (the u32 0)))
@@ -382,9 +382,8 @@ $ qemu-system-avr -M uno -display none -serial stdio -bios blink.elf   # QEMU �
 
 - ランタイムが無いので、ランタイムを使うプログラムは**コンパイルエラー**になります。エラーには、
   何が必要で、どの関数から届くのかが出ます。使えるのは、固定幅の整数（`i8` から `u32`）、`bool`、`char` の計算、
-  関数呼び出し、条件分岐、ループ、番地を数で書いた `volatile-read-u8` などです。
-- 使えないもの: 文字列・リスト・構造体など、ヒープに置く値。`int` の計算。`defvar` と `defconstant`
-  （名前の付いた定数には `define-symbol-macro` を使います）。再帰、`catch`、関数値の呼び出し。C の関数の呼び出し。
+  関数呼び出し、条件分岐、ループ、それらの値を持つ `defvar` と `defconstant`、番地を数か定数で書いた `volatile-read-u8` などです。
+- 使えないもの: 文字列・リスト・構造体など、ヒープに置く値。`int` の計算。再帰、`catch`、関数値の呼び出し。C の関数の呼び出し。
   割り込みのハンドラ。変数で割る除算（数で割る除算は使えます）。番地を計算して求める `volatile`。
 - 何もしないループは `-O1` 以上で消えます。待つループの中では、レジスタを読むなどしてください。
 - `main` が終わると、マイコンは止まります。
