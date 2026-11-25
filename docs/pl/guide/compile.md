@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ be54d7f19b5f87846f94e73219d59bce4604fa51 -->
+<!-- translated-from: docs/ja/guide/compile.md @ 45c66940dd590920b2dccfa8ce53c13c4865b2b0 -->
 # Kompilacja
 
 O ile nie zrobisz nic więcej, programy typelisp działają w interpreterze. Ponadto istnieją dwa
@@ -357,7 +357,7 @@ Przykład, który miga diodą LED za pomocą przerwania licznika. Przerwanie wł
 - Program z procedurą obsługi dopuszcza przerwania, gdy tylko zmienne globalne zostaną zainicjowane. Urządzenia należy skonfigurować na początku `main`.
 - Nie można używać `enable-interrupt` ani `#[exception(NAME)]` (błąd kompilacji).
 - Gdy działa procedura obsługi, inne przerwania czekają. Jak każda inna funkcja, procedura obsługi nie może używać środowiska uruchomieniowego.
-- Pojedynczego odczytu ani zapisu zmiennej globalnej procedura obsługi nie przerywa, nawet dla wartości dwubajtowych i większych. Między odczytem a zapisem przy aktualizacji (`(setf n (+ n 1))`) przerwanie może nadejść. Aby zaktualizować zmienną, którą zapisuje też procedura obsługi, należy odczytać i zachować rejestr stanu (adres `#x5F`), zapisać do niego 0, by zatrzymać przerwania, a potem zapisać z powrotem zachowaną wartość.
+- Pojedynczego odczytu ani zapisu zmiennej globalnej procedura obsługi nie przerywa, nawet dla wartości dwubajtowych i większych. Zmienną, która wymaga do tego wyłączenia przerwań, wskazuje ostrzeżenie podczas kompilacji. Między odczytem a zapisem przy aktualizacji (`(setf n (+ n 1))`) przerwanie może nadejść. Aby zaktualizować zmienną, którą zapisuje też procedura obsługi, należy odczytać i zachować rejestr stanu (adres `#x5F`), zapisać do niego 0, by zatrzymać przerwania, a potem zapisać z powrotem zachowaną wartość.
 - Przerwanie bez procedury obsługi zatrzymuje mikrokontroler.
 
 ## 4. Zrzuty (dumps)

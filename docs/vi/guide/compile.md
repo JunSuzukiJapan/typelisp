@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ be54d7f19b5f87846f94e73219d59bce4604fa51 -->
+<!-- translated-from: docs/ja/guide/compile.md @ 45c66940dd590920b2dccfa8ce53c13c4865b2b0 -->
 # Biên dịch
 
 Nếu bạn không làm gì thêm, chương trình typelisp chạy trong trình thông dịch. Ngoài ra còn có hai
@@ -356,7 +356,7 @@ Ví dụ nháy LED bằng ngắt của bộ định thời. Ngắt được bậ
 - Chương trình có trình xử lý sẽ nhận ngắt ngay khi các biến toàn cục được khởi tạo xong. Hãy thiết lập thiết bị ở đầu `main`.
 - Không dùng được `enable-interrupt` và `#[exception(NAME)]` (lỗi biên dịch).
 - Trong lúc một trình xử lý chạy, các ngắt khác phải chờ. Như mọi hàm khác, trình xử lý không dùng được runtime.
-- Một lần đọc hoặc ghi biến toàn cục không bị trình xử lý xen vào giữa, kể cả với giá trị từ hai byte trở lên. Giữa lúc đọc và lúc ghi của một phép cập nhật (`(setf n (+ n 1))`) thì ngắt có thể đến. Để cập nhật biến mà trình xử lý cũng ghi, hãy đọc và giữ lại thanh ghi trạng thái (địa chỉ `#x5F`), ghi 0 vào đó để dừng ngắt, rồi ghi lại giá trị đã giữ.
+- Một lần đọc hoặc ghi biến toàn cục không bị trình xử lý xen vào giữa, kể cả với giá trị từ hai byte trở lên. Biến cần tắt ngắt cho việc này sẽ được nêu trong cảnh báo khi biên dịch. Giữa lúc đọc và lúc ghi của một phép cập nhật (`(setf n (+ n 1))`) thì ngắt có thể đến. Để cập nhật biến mà trình xử lý cũng ghi, hãy đọc và giữ lại thanh ghi trạng thái (địa chỉ `#x5F`), ghi 0 vào đó để dừng ngắt, rồi ghi lại giá trị đã giữ.
 - Ngắt không có trình xử lý sẽ làm vi điều khiển dừng.
 
 ## 4. Dump

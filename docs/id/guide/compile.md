@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ be54d7f19b5f87846f94e73219d59bce4604fa51 -->
+<!-- translated-from: docs/ja/guide/compile.md @ 45c66940dd590920b2dccfa8ce53c13c4865b2b0 -->
 # Kompilasi
 
 Jika Anda tidak melakukan apa-apa lagi, program typelisp berjalan di interpreter. Selain itu ada dua
@@ -362,7 +362,7 @@ Contoh yang mengedipkan LED dengan interupsi timer. Interupsi diaktifkan di regi
 - Program yang punya penangan menerima interupsi begitu variabel globalnya selesai diinisialisasi. Atur perangkat di awal `main`.
 - `enable-interrupt` dan `#[exception(NAME)]` tidak dapat dipakai (galat kompilasi).
 - Selama sebuah penangan berjalan, interupsi lain menunggu. Seperti fungsi lain, penangan tidak dapat memakai runtime.
-- Satu pembacaan atau penulisan variabel global tidak disela oleh penangan, juga untuk nilai dua byte atau lebih. Di antara pembacaan dan penulisan sebuah pembaruan (`(setf n (+ n 1))`) interupsi dapat datang. Untuk memperbarui variabel yang juga ditulis penangan, baca dan simpan register status (alamat `#x5F`), tulis 0 untuk menghentikan interupsi, lalu tulis kembali nilai yang disimpan.
+- Satu pembacaan atau penulisan variabel global tidak disela oleh penangan, juga untuk nilai dua byte atau lebih. Variabel yang untuk itu memerlukan interupsi dimatikan disebutkan dalam peringatan saat kompilasi. Di antara pembacaan dan penulisan sebuah pembaruan (`(setf n (+ n 1))`) interupsi dapat datang. Untuk memperbarui variabel yang juga ditulis penangan, baca dan simpan register status (alamat `#x5F`), tulis 0 untuk menghentikan interupsi, lalu tulis kembali nilai yang disimpan.
 - Interupsi tanpa penangan menghentikan mikrokontroler.
 
 ## 4. Dump

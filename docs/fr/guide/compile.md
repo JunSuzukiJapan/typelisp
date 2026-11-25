@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ be54d7f19b5f87846f94e73219d59bce4604fa51 -->
+<!-- translated-from: docs/ja/guide/compile.md @ 45c66940dd590920b2dccfa8ce53c13c4865b2b0 -->
 # Compilation
 
 Sauf indication contraire, les programmes typelisp s'exécutent dans l'interpréteur. Il existe en outre deux façons
@@ -361,7 +361,7 @@ Un exemple qui fait clignoter la LED par l'interruption d'un timer. Une interrup
 - Un programme qui a un gestionnaire accepte les interruptions dès que ses variables globales sont initialisées. Réglez les périphériques au début de `main`.
 - `enable-interrupt` et `#[exception(NAME)]` ne sont pas utilisables (erreur de compilation).
 - Pendant qu'un gestionnaire s'exécute, les autres interruptions attendent. Comme toute autre fonction, un gestionnaire ne peut pas utiliser le runtime.
-- Une lecture ou une écriture d'une variable globale n'est pas interrompue par un gestionnaire, même pour une valeur de deux octets ou plus. Une interruption peut survenir entre la lecture et l'écriture d'une mise à jour (`(setf n (+ n 1))`). Pour mettre à jour une variable qu'un gestionnaire écrit aussi, lisez et gardez le registre d'état (adresse `#x5F`), écrivez-y 0 pour arrêter les interruptions, puis remettez la valeur gardée.
+- Une lecture ou une écriture d'une variable globale n'est pas interrompue par un gestionnaire, même pour une valeur de deux octets ou plus. Une variable qui exige pour cela de désactiver les interruptions est signalée par un avertissement à la compilation. Une interruption peut survenir entre la lecture et l'écriture d'une mise à jour (`(setf n (+ n 1))`). Pour mettre à jour une variable qu'un gestionnaire écrit aussi, lisez et gardez le registre d'état (adresse `#x5F`), écrivez-y 0 pour arrêter les interruptions, puis remettez la valeur gardée.
 - Une interruption sans gestionnaire arrête le microcontrôleur.
 
 ## 4. Dumps

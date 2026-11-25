@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ be54d7f19b5f87846f94e73219d59bce4604fa51 -->
+<!-- translated-from: docs/ja/guide/compile.md @ 45c66940dd590920b2dccfa8ce53c13c4865b2b0 -->
 # Kompilering
 
 Om du inte gör något annat körs typelisp-program i tolken. Dessutom finns två sätt att kompilera till
@@ -360,7 +360,7 @@ Ett exempel som blinkar lysdioden med ett timeravbrott. Ett avbrott slås på i 
 - Ett program med en hanterare släpper fram avbrott så snart de globala variablerna är initierade. Ställ in enheterna i början av `main`.
 - `enable-interrupt` och `#[exception(NAME)]` kan inte användas (kompileringsfel).
 - Medan en hanterare körs väntar andra avbrott. Som alla andra funktioner kan en hanterare inte använda körtidsmiljön.
-- En enskild läsning eller skrivning av en global variabel avbryts inte av en hanterare, inte ens för värden på två byte eller mer. Mellan läsningen och skrivningen i en uppdatering (`(setf n (+ n 1))`) kan ett avbrott komma. För att uppdatera en variabel som en hanterare också skriver, läs och spara statusregistret (adress `#x5F`), skriv 0 i det för att stoppa avbrott och skriv sedan tillbaka det sparade värdet.
+- En enskild läsning eller skrivning av en global variabel avbryts inte av en hanterare, inte ens för värden på två byte eller mer. En variabel som kräver att avbrott stängs av för detta anges med en varning vid kompileringen. Mellan läsningen och skrivningen i en uppdatering (`(setf n (+ n 1))`) kan ett avbrott komma. För att uppdatera en variabel som en hanterare också skriver, läs och spara statusregistret (adress `#x5F`), skriv 0 i det för att stoppa avbrott och skriv sedan tillbaka det sparade värdet.
 - Ett avbrott utan hanterare stoppar mikrokontrollern.
 
 ## 4. Dumpar

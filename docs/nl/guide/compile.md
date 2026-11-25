@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ be54d7f19b5f87846f94e73219d59bce4604fa51 -->
+<!-- translated-from: docs/ja/guide/compile.md @ 45c66940dd590920b2dccfa8ce53c13c4865b2b0 -->
 # Compileren
 
 Tenzij je iets anders doet, draaien typelisp-programma's in de interpreter. Daarnaast zijn er twee
@@ -367,7 +367,7 @@ Een voorbeeld dat de led laat knipperen met een timerinterrupt. Een interrupt sc
 - Een programma met een handler laat interrupts toe zodra de globale variabelen geïnitialiseerd zijn. Stel de apparaten in aan het begin van `main`.
 - `enable-interrupt` en `#[exception(NAME)]` zijn niet bruikbaar (compileerfout).
 - Terwijl een handler loopt, wachten andere interrupts. Net als elke andere functie kan een handler de runtime niet gebruiken.
-- Eén keer lezen of schrijven van een globale variabele wordt niet door een handler onderbroken, ook niet bij waarden van twee bytes of meer. Tussen het lezen en schrijven van een bijwerking (`(setf n (+ n 1))`) kan wel een interrupt komen. Om een variabele bij te werken die een handler ook schrijft, lees en bewaar je het statusregister (adres `#x5F`), schrijf je er 0 in om interrupts te stoppen, en schrijf je daarna de bewaarde waarde terug.
+- Eén keer lezen of schrijven van een globale variabele wordt niet door een handler onderbroken, ook niet bij waarden van twee bytes of meer. Een variabele waarvoor daartoe interrupts worden uitgeschakeld, wordt bij het compileren met een waarschuwing gemeld. Tussen het lezen en schrijven van een bijwerking (`(setf n (+ n 1))`) kan wel een interrupt komen. Om een variabele bij te werken die een handler ook schrijft, lees en bewaar je het statusregister (adres `#x5F`), schrijf je er 0 in om interrupts te stoppen, en schrijf je daarna de bewaarde waarde terug.
 - Een interrupt zonder handler stopt de microcontroller.
 
 ## 4. Dumps

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ be54d7f19b5f87846f94e73219d59bce4604fa51 -->
+<!-- translated-from: docs/ja/guide/compile.md @ 45c66940dd590920b2dccfa8ce53c13c4865b2b0 -->
 # Compilação
 
 Se você não fizer nada além disso, os programas typelisp são executados no interpretador. Além disso há duas
@@ -358,7 +358,7 @@ Um exemplo que pisca o LED com a interrupção de um timer. Uma interrupção é
 - Um programa com um tratador aceita interrupções assim que suas variáveis globais são inicializadas. Configure os periféricos no início de `main`.
 - `enable-interrupt` e `#[exception(NAME)]` não podem ser usados (erro de compilação).
 - Enquanto um tratador executa, as outras interrupções esperam. Como qualquer outra função, um tratador não pode usar o runtime.
-- Uma leitura ou escrita de uma variável global não é interrompida por um tratador, mesmo para valores de dois bytes ou mais. Entre a leitura e a escrita de uma atualização (`(setf n (+ n 1))`) pode chegar uma interrupção. Para atualizar uma variável que um tratador também escreve, leia e guarde o registrador de status (endereço `#x5F`), escreva 0 nele para parar as interrupções e depois escreva de volta o valor guardado.
+- Uma leitura ou escrita de uma variável global não é interrompida por um tratador, mesmo para valores de dois bytes ou mais. Uma variável que exige desabilitar as interrupções para isso é indicada por um aviso na compilação. Entre a leitura e a escrita de uma atualização (`(setf n (+ n 1))`) pode chegar uma interrupção. Para atualizar uma variável que um tratador também escreve, leia e guarde o registrador de status (endereço `#x5F`), escreva 0 nele para parar as interrupções e depois escreva de volta o valor guardado.
 - Uma interrupção sem tratador para o microcontrolador.
 
 ## 4. Dumps

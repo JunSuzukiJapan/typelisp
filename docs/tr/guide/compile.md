@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ be54d7f19b5f87846f94e73219d59bce4604fa51 -->
+<!-- translated-from: docs/ja/guide/compile.md @ 45c66940dd590920b2dccfa8ce53c13c4865b2b0 -->
 # Derleme
 
 Başka bir şey yapmazsanız typelisp programları yorumlayıcıda çalışır. Buna ek olarak yerel koda
@@ -359,7 +359,7 @@ LED'i zamanlayıcı kesmesiyle yakıp söndüren bir örnek. Bir kesme, aygıtı
 - İşleyicisi olan bir program, global değişkenleri ilklendirilir ilklendirilmez kesmeleri kabul eder. Aygıtları `main`'in başında ayarlayın.
 - `enable-interrupt` ve `#[exception(NAME)]` kullanılamaz (derleme hatası).
 - Bir işleyici çalışırken diğer kesmeler bekler. Her fonksiyon gibi işleyici de çalışma zamanını kullanamaz.
-- Bir global değişkenin tek bir okunması ya da yazılması, iki bayt veya daha büyük değerlerde bile bir işleyiciyle bölünmez. Bir güncellemenin (`(setf n (+ n 1))`) okuması ile yazması arasında kesme gelebilir. Bir işleyicinin de yazdığı değişkeni güncellemek için durum yazmacını (adres `#x5F`) okuyup saklayın, kesmeleri durdurmak için ona 0 yazın, sonra sakladığınız değeri geri yazın.
+- Bir global değişkenin tek bir okunması ya da yazılması, iki bayt veya daha büyük değerlerde bile bir işleyiciyle bölünmez. Bunun için kesmelerin kapatılmasını gerektiren değişken derleme sırasında bir uyarıyla bildirilir. Bir güncellemenin (`(setf n (+ n 1))`) okuması ile yazması arasında kesme gelebilir. Bir işleyicinin de yazdığı değişkeni güncellemek için durum yazmacını (adres `#x5F`) okuyup saklayın, kesmeleri durdurmak için ona 0 yazın, sonra sakladığınız değeri geri yazın.
 - İşleyicisi olmayan bir kesme mikrodenetleyiciyi durdurur.
 
 ## 4. Dump'lar

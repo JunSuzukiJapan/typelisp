@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ be54d7f19b5f87846f94e73219d59bce4604fa51 -->
+<!-- translated-from: docs/ja/guide/compile.md @ 45c66940dd590920b2dccfa8ce53c13c4865b2b0 -->
 # Compiling
 
 Unless you do anything else, typelisp programs run in the interpreter. In addition there are two
@@ -366,7 +366,7 @@ An example that blinks the LED by a timer's interrupt. An interrupt is enabled i
 - A program with a handler lets interrupts come once its global variables are initialized. Set the devices up at the start of `main`.
 - `enable-interrupt` and `#[exception(NAME)]` cannot be used (a compile error).
 - While a handler runs, other interrupts wait. Like any other function, a handler cannot use the runtime.
-- One read or write of a global variable is not broken into by a handler, even of a value of two bytes or more. An interrupt can come between the read and the write of an update (`(setf n (+ n 1))`). To update a variable a handler also writes, read the status register (address `#x5F`) and keep it, write 0 to it to stop interrupts, and write the kept value back afterwards.
+- One read or write of a global variable is not broken into by a handler, even of a value of two bytes or more. A variable that needs interrupts disabled for this is named by a warning at compile time. An interrupt can come between the read and the write of an update (`(setf n (+ n 1))`). To update a variable a handler also writes, read the status register (address `#x5F`) and keep it, write 0 to it to stop interrupts, and write the kept value back afterwards.
 - An interrupt with no handler stops the microcontroller.
 
 ## 4. Dumps

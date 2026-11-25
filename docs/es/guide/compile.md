@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ be54d7f19b5f87846f94e73219d59bce4604fa51 -->
+<!-- translated-from: docs/ja/guide/compile.md @ 45c66940dd590920b2dccfa8ce53c13c4865b2b0 -->
 # Compilación
 
 Si no se hace nada más, los programas de typelisp se ejecutan en el intérprete. Además hay dos formas de
@@ -358,7 +358,7 @@ Un ejemplo que hace parpadear el LED con la interrupción de un temporizador. Un
 - Un programa con un manejador admite interrupciones en cuanto se inicializan sus variables globales. Configure los periféricos al comienzo de `main`.
 - No se pueden usar `enable-interrupt` ni `#[exception(NAME)]` (error de compilación).
 - Mientras se ejecuta un manejador, las demás interrupciones esperan. Como cualquier otra función, un manejador no puede usar el runtime.
-- Una lectura o escritura de una variable global no la interrumpe un manejador, aunque el valor sea de dos bytes o más. Entre la lectura y la escritura de una actualización (`(setf n (+ n 1))`) sí puede llegar una interrupción. Para actualizar una variable que también escribe un manejador, lea y guarde el registro de estado (dirección `#x5F`), escriba 0 en él para detener las interrupciones y después vuelva a escribir el valor guardado.
+- Una lectura o escritura de una variable global no la interrumpe un manejador, aunque el valor sea de dos bytes o más. Una variable que requiere deshabilitar las interrupciones para ello se indica con una advertencia al compilar. Entre la lectura y la escritura de una actualización (`(setf n (+ n 1))`) sí puede llegar una interrupción. Para actualizar una variable que también escribe un manejador, lea y guarde el registro de estado (dirección `#x5F`), escriba 0 en él para detener las interrupciones y después vuelva a escribir el valor guardado.
 - Una interrupción sin manejador detiene el microcontrolador.
 
 ## 4. Volcados

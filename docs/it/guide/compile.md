@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ be54d7f19b5f87846f94e73219d59bce4604fa51 -->
+<!-- translated-from: docs/ja/guide/compile.md @ 45c66940dd590920b2dccfa8ce53c13c4865b2b0 -->
 # Compilazione
 
 Se non fai altro, i programmi typelisp vengono eseguiti nell'interprete. Inoltre esistono due modi per
@@ -361,7 +361,7 @@ Un esempio che fa lampeggiare il LED con l'interrupt di un timer. Un interrupt s
 - Un programma con un gestore accetta gli interrupt appena le variabili globali sono inizializzate. Configurare le periferiche all'inizio di `main`.
 - `enable-interrupt` e `#[exception(NAME)]` non si possono usare (errore di compilazione).
 - Mentre un gestore è in esecuzione, gli altri interrupt attendono. Come ogni altra funzione, un gestore non può usare il runtime.
-- Una singola lettura o scrittura di una variabile globale non viene interrotta da un gestore, anche per valori di due byte o più. Tra la lettura e la scrittura di un aggiornamento (`(setf n (+ n 1))`) può arrivare un interrupt. Per aggiornare una variabile scritta anche da un gestore, leggere e conservare il registro di stato (indirizzo `#x5F`), scriverci 0 per fermare gli interrupt e poi riscrivere il valore conservato.
+- Una singola lettura o scrittura di una variabile globale non viene interrotta da un gestore, anche per valori di due byte o più. Una variabile che per questo richiede di disabilitare gli interrupt viene segnalata da un avviso in compilazione. Tra la lettura e la scrittura di un aggiornamento (`(setf n (+ n 1))`) può arrivare un interrupt. Per aggiornare una variabile scritta anche da un gestore, leggere e conservare il registro di stato (indirizzo `#x5F`), scriverci 0 per fermare gli interrupt e poi riscrivere il valore conservato.
 - Un interrupt senza gestore ferma il microcontrollore.
 
 ## 4. Dump

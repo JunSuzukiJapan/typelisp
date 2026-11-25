@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ be54d7f19b5f87846f94e73219d59bce4604fa51 -->
+<!-- translated-from: docs/ja/guide/compile.md @ 45c66940dd590920b2dccfa8ce53c13c4865b2b0 -->
 # Kompilierung
 
 Ohne weiteres Zutun laufen typelisp-Programme im Interpreter. Darüber hinaus gibt es zwei Wege, in nativen
@@ -363,7 +363,7 @@ Ein Beispiel, das die LED mit einem Timer-Interrupt blinken lässt. Ein Interrup
 - Ein Programm mit einem Handler lässt Interrupts zu, sobald die globalen Variablen initialisiert sind. Richten Sie die Geräte am Anfang von `main` ein.
 - `enable-interrupt` und `#[exception(NAME)]` sind nicht verwendbar (Übersetzungsfehler).
 - Während ein Handler läuft, warten andere Interrupts. Wie jede andere Funktion kann ein Handler die Laufzeit nicht verwenden.
-- Ein einzelnes Lesen oder Schreiben einer globalen Variable wird nicht von einem Handler unterbrochen, auch nicht bei Werten von zwei Byte oder mehr. Zwischen Lesen und Schreiben einer Aktualisierung (`(setf n (+ n 1))`) kann ein Interrupt kommen. Um eine Variable zu aktualisieren, die auch ein Handler schreibt, lesen Sie das Statusregister (Adresse `#x5F`) und merken es sich, schreiben 0 hinein, um Interrupts anzuhalten, und schreiben danach den gemerkten Wert zurück.
+- Ein einzelnes Lesen oder Schreiben einer globalen Variable wird nicht von einem Handler unterbrochen, auch nicht bei Werten von zwei Byte oder mehr. Eine Variable, für die dazu Interrupts gesperrt werden, nennt eine Warnung beim Kompilieren. Zwischen Lesen und Schreiben einer Aktualisierung (`(setf n (+ n 1))`) kann ein Interrupt kommen. Um eine Variable zu aktualisieren, die auch ein Handler schreibt, lesen Sie das Statusregister (Adresse `#x5F`) und merken es sich, schreiben 0 hinein, um Interrupts anzuhalten, und schreiben danach den gemerkten Wert zurück.
 - Ein Interrupt ohne Handler hält den Mikrocontroller an.
 
 ## 4. Dumps
