@@ -26,7 +26,7 @@ pub(super) fn settle(module: &Module<'static>, direct: &[String], has_runtime: b
         direct.iter().filter_map(|name| module.get_function(name)).filter(|f| f.count_basic_blocks() > 0).collect();
     for f in &functions {
         if !has_runtime {
-            faults_stop(module, *f)?;
+            never_unwinding(*f)?;
         }
         simplify(*f)?;
         volatile_accesses(*f)?;
@@ -41,7 +41,8 @@ pub(super) fn settle(module: &Module<'static>, direct: &[String], has_runtime: b
             drop_check(call);
         }
     }
-    let quiet = only_calling(&functions, |c| QUIET.contains(&c));
+    // Nothing is collected where there is no runtime.
+    let quiet = only_calling(&functions, |c| !has_runtime || QUIET.contains(&c));
     for f in functions.iter().filter(|f| quiet.contains(&name_of(**f))) {
         frame_on_the_stack(*f)?;
     }
@@ -56,7 +57,7 @@ const FRAME_CLOSE: &str = "rt_local_frame_close";
 
 /// What a function nothing can be collected under calls, besides others
 /// like it.
-const QUIET: [&str; 3] = [FRAME_OPEN, FRAME_CLOSE, super::avr::FAULT];
+const QUIET: [&str; 2] = [FRAME_OPEN, FRAME_CLOSE];
 
 /// What a function that allocates nothing calls, besides others like it. A
 /// raise does allocate, and leaves the loop.
@@ -111,32 +112,6 @@ fn only_calling(functions: &[FunctionValue<'static>], allowed: impl Fn(&str) -> 
     }
 }
 
-/// The runtime functions a division with no answer raises through.
-const DIVISION_FAULTS: [&str; 2] = ["rt_int_div_fault", "rt_int_mod_fault"];
-
-/// Makes each division in `f` with no answer stop the program
-/// (`avr::FAULT`) on a target that has no runtime to raise it.
-fn faults_stop(module: &Module<'static>, f: FunctionValue<'static>) -> Result<(), String> {
-    let ctx = crate::compile::llvm_context();
-    let calls: Vec<_> = instructions(f).into_iter().filter(|i| callee(*i).is_some_and(|c| DIVISION_FAULTS.contains(&name_of(c).as_str()))).collect();
-    for call in calls {
-        let fault = module.get_function(super::avr::FAULT).unwrap_or_else(|| {
-            let fault = module.add_function(super::avr::FAULT, ctx.void_type().fn_type(&[], false), None);
-            let kind = inkwell::attributes::Attribute::get_named_enum_kind_id("noreturn");
-            fault.add_attribute(inkwell::attributes::AttributeLoc::Function, ctx.create_enum_attribute(kind, 0));
-            fault
-        });
-        let b = ctx.create_builder();
-        b.position_before(&call);
-        b.build_call(fault, &[], "").map_err(|e| format!("a division in `{}`: {}", name_of(f), e))?;
-        drop_check(call);
-        let old: IntValue<'static> = call.try_into().map_err(|()| "internal error: a fault answers a word".to_string())?;
-        old.replace_all_uses_with(old.get_type().const_zero());
-        call.erase_from_basic_block();
-    }
-    Ok(())
-}
-
 /// Makes the frame `f` opens for the collector, if it opens one, a stack
 /// array.
 fn frame_on_the_stack(f: FunctionValue<'static>) -> Result<(), String> {
@@ -182,10 +157,10 @@ pub(super) fn settle_inits(module: &Module<'static>, inits: &[(String, String, b
         // It runs once, when there is nothing to collect yet.
         drop_safepoints(f);
         if !has_runtime {
-            faults_stop(module, f)?;
+            never_unwinding(f)?;
         }
         simplify(f)?;
-        if !only_calling(&[f], |c| QUIET.contains(&c)).is_empty() {
+        if !only_calling(&[f], |c| !has_runtime || QUIET.contains(&c)).is_empty() {
             frame_on_the_stack(f)?;
             simplify(f)?;
         }
@@ -235,12 +210,12 @@ fn simplify(f: FunctionValue<'static>) -> Result<(), String> {
     Err(format!("internal error: simplifying `{}` failed: {}", name_of(f), message))
 }
 
-fn name_of(f: FunctionValue<'static>) -> String {
+pub(super) fn name_of(f: FunctionValue<'static>) -> String {
     f.get_name().to_string_lossy().into_owned()
 }
 
 /// The function a call instruction calls by name.
-fn callee(i: InstructionValue<'static>) -> Option<FunctionValue<'static>> {
+pub(super) fn callee(i: InstructionValue<'static>) -> Option<FunctionValue<'static>> {
     use inkwell::llvm_sys::core::{LLVMGetCalledValue, LLVMIsAFunction};
     if i.get_opcode() != InstructionOpcode::Call {
         return None;
@@ -252,7 +227,7 @@ fn callee(i: InstructionValue<'static>) -> Option<FunctionValue<'static>> {
     }
 }
 
-fn instructions(f: FunctionValue<'static>) -> Vec<InstructionValue<'static>> {
+pub(super) fn instructions(f: FunctionValue<'static>) -> Vec<InstructionValue<'static>> {
     f.get_basic_blocks().into_iter().flat_map(|b| b.get_instructions().collect::<Vec<_>>()).collect()
 }
 
@@ -292,7 +267,7 @@ fn raising(functions: &[FunctionValue<'static>]) -> HashSet<String> {
             let raises = callees.iter().any(|c| match c.as_deref() {
                 None => true,
                 Some(c) if ours.contains(c) => raising.contains(c),
-                Some(c) => !c.starts_with("llvm.") && c != super::avr::FAULT && !crate::compile::externs::never_raises(c),
+                Some(c) => !c.starts_with("llvm.") && !crate::compile::externs::never_raises(c),
             });
             if raises {
                 raising.insert(f.clone());
@@ -302,6 +277,19 @@ fn raising(functions: &[FunctionValue<'static>]) -> HashSet<String> {
             return raising;
         }
     }
+}
+
+/// Takes away every check for a raise in `f`: where there is no runtime,
+/// nothing raises.
+fn never_unwinding(f: FunctionValue<'static>) -> Result<(), String> {
+    for i in instructions(f) {
+        if callee(i).is_some_and(|c| c.get_name().to_bytes() == crate::compile::raise_check::RT_UNWINDING.as_bytes()) {
+            let asked: IntValue<'static> = i.try_into().map_err(|()| "internal error: rt_unwinding answers a word".to_string())?;
+            asked.replace_all_uses_with(asked.get_type().const_zero());
+            i.erase_from_basic_block();
+        }
+    }
+    Ok(())
 }
 
 /// Takes away the check that follows `call` (`raise_check::after_call`),

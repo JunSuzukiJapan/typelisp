@@ -12,12 +12,12 @@
 //! One that is assigned is read and written as `volatile`: an interrupt
 //! handler or another task may be what the program waits for. On a machine
 //! whose tasks run on several threads (the 64-bit ones) an access is atomic
-//! too. On one whose instructions access a byte (an AVR), in a program with
-//! interrupt handlers, an access of more than a byte is made with interrupts
-//! disabled, so that no handler sees or leaves half a value.
+//! too. On one whose instructions access a byte, what an interrupt handler
+//! must not come between the bytes of is seen to once all of it is emitted
+//! (`aot::masking`).
 
-use std::cell::{Cell, RefCell};
-use std::collections::{BTreeMap, HashMap};
+use std::cell::RefCell;
+use std::collections::HashMap;
 
 use inkwell::builder::Builder;
 use inkwell::module::{Linkage, Module};
@@ -36,14 +36,6 @@ use crate::eval::interp::EvalError;
 thread_local! {
     /// The build's static globals by id, and whether each can be assigned.
     static STATIC: RefCell<HashMap<i64, bool>> = RefCell::new(HashMap::new());
-
-    /// Whether the build has interrupt handlers that come between a
-    /// program's bytes.
-    static MASKED: Cell<bool> = const { Cell::new(false) };
-
-    /// The globals an access of which disables interrupts, each with how
-    /// many bytes it is.
-    static MASKING: RefCell<BTreeMap<i64, u32>> = const { RefCell::new(BTreeMap::new()) };
 }
 
 /// The static globals of a build, in effect until dropped.
@@ -52,24 +44,14 @@ pub(crate) struct Producing(());
 impl Drop for Producing {
     fn drop(&mut self) {
         STATIC.with(|s| s.borrow_mut().clear());
-        MASKED.with(|m| m.set(false));
-        MASKING.with(|m| m.borrow_mut().clear());
     }
 }
 
 /// Makes the globals with the ids of `globals` static, each with whether it
-/// can be assigned, until the answer is dropped. `masked` is whether an
-/// access of more than a byte has to keep interrupts out.
-pub(crate) fn producing(globals: HashMap<i64, bool>, masked: bool) -> Producing {
-    MASKED.with(|m| m.set(masked));
+/// can be assigned, until the answer is dropped.
+pub(crate) fn producing(globals: HashMap<i64, bool>) -> Producing {
     STATIC.with(|s| *s.borrow_mut() = globals);
     Producing(())
-}
-
-/// The globals whose accesses, as emitted so far, disable interrupts, by id,
-/// each with how many bytes it is.
-pub(crate) fn masking() -> BTreeMap<i64, u32> {
-    MASKING.with(|m| m.borrow().clone())
 }
 
 fn assigned(id: i64) -> Option<bool> {
@@ -112,25 +94,6 @@ fn kept(i: InstructionValue<'static>, ty: BasicTypeEnum<'static>) -> Result<(), 
     Ok(())
 }
 
-/// Disables interrupts around an access of global `id` that has to keep them out, and
-/// answers what [`unmask`] puts back: the status register as it was.
-fn mask(b: &Builder<'static>, id: i64, ty: BasicTypeEnum<'static>, kept: bool) -> Result<Option<IntValue<'static>>, String> {
-    if !kept || carriers::bits_of(ty) <= 8 || !MASKED.with(|m| m.get()) {
-        return Ok(None);
-    }
-    MASKING.with(|m| m.borrow_mut().insert(id, carriers::bits_of(ty) / 8));
-    let status = crate::compile::aot::avr::status(b)?;
-    crate::compile::aot::avr::set_status(b, byte().const_zero())?;
-    Ok(Some(status))
-}
-
-fn unmask(b: &Builder<'static>, status: Option<IntValue<'static>>) -> Result<(), String> {
-    match status {
-        Some(status) => crate::compile::aot::avr::set_status(b, status),
-        None => Ok(()),
-    }
-}
-
 fn id_word(id: i64) -> IntValue<'static> {
     carriers::word().const_int(id as u64, false)
 }
@@ -156,7 +119,7 @@ pub(crate) fn global_get(args: &[Value]) -> Result<Value, EvalError> {
     };
     let b = builder.borrow();
     let (g, ty) = variable(&module.borrow(), id, kind).map_err(err)?;
-    let v = load(&b, id, g, ty, assigned).map_err(err)?;
+    let v = load(&b, g, ty, assigned).map_err(err)?;
     Ok(llvm_value_value(match Carrier::of_field_kind(kind).map_err(err)? {
         Carrier::Bool => b
             .build_int_compare(inkwell::IntPredicate::NE, v.into_int_value(), byte().const_zero(), "flag")
@@ -166,10 +129,8 @@ pub(crate) fn global_get(args: &[Value]) -> Result<Value, EvalError> {
     }))
 }
 
-fn load(b: &Builder<'static>, id: i64, g: GlobalValue<'static>, ty: BasicTypeEnum<'static>, assigned: bool) -> Result<BasicValueEnum<'static>, String> {
-    let masked = mask(b, id, ty, assigned)?;
+fn load(b: &Builder<'static>, g: GlobalValue<'static>, ty: BasicTypeEnum<'static>, assigned: bool) -> Result<BasicValueEnum<'static>, String> {
     let v = b.build_load(ty, g.as_pointer_value(), "global").map_err(|e| e.to_string())?;
-    unmask(b, masked)?;
     if assigned {
         kept(v.as_instruction_value().ok_or("a load is an instruction")?, ty)?;
     }
@@ -183,9 +144,7 @@ fn store(b: &Builder<'static>, m: &Module<'static>, id: i64, kind: i64, v: Basic
         Carrier::Bool => b.build_int_z_extend(v.into_int_value(), byte(), "flag").map_err(|e| e.to_string())?.into(),
         carrier => carrier.coerce(b, v)?,
     };
-    let masked = mask(b, id, ty, keep)?;
     let i = b.build_store(g.as_pointer_value(), v).map_err(|e| e.to_string())?;
-    unmask(b, masked)?;
     if keep { kept(i, ty) } else { Ok(()) }
 }
 

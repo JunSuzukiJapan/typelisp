@@ -18,7 +18,9 @@
 //!   offers the scheduler a turn;
 //! * a call that can come back to the function itself: a direct call uses
 //!   the machine stack, and how deep a recursion goes is limited by the
-//!   heap, not by the stack.
+//!   heap, not by the stack. Where there is no runtime there is only the
+//!   stack, and a function that calls itself is direct like any other
+//!   (`bare::check_stack`).
 //!
 //! The prelude's functions the program can reach are judged with its own:
 //! they are compiled into the same executable.
@@ -159,8 +161,8 @@ pub(crate) struct Direct {
 /// The direct functions of the program whose own functions are `bodies`,
 /// whose static globals' initializers are `static_inits`, each a function of
 /// its own, and whose other globals' initializers are `inits`. `handlers` are
-/// the functions a target with no runtime enters besides `entry`. `module` holds the FFI thunks,
-/// all of them coroutines; `prelude` translates the prelude function of a
+/// the functions a target with no runtime enters besides `entry`. `module` holds the FFI thunks
+/// that are coroutines, which is all of them where there is a runtime; `prelude` translates the prelude function of a
 /// symbol, if it is one.
 pub(crate) fn direct_functions(
     heap: &mut Heap,
@@ -171,6 +173,7 @@ pub(crate) fn direct_functions(
     pinned: &HashSet<String>,
     entry: &str,
     handlers: &[String],
+    has_runtime: bool,
     mut prelude: impl FnMut(&mut Heap, &str) -> Result<Option<Body>, String>,
 ) -> Result<Direct, String> {
     let mut known: HashMap<String, Facts> =
@@ -207,8 +210,10 @@ pub(crate) fn direct_functions(
         .filter(|(name, f)| !pinned.contains(*name) && f.stops.is_none() && !(f.loops && waits))
         .map(|(name, _)| name.as_str())
         .collect();
-    let cyclic: HashSet<&str> = direct.iter().copied().filter(|name| calls_itself(&known, name)).collect();
-    direct.retain(|name| !cyclic.contains(name));
+    if has_runtime {
+        let cyclic: HashSet<&str> = direct.iter().copied().filter(|name| calls_itself(&known, name)).collect();
+        direct.retain(|name| !cyclic.contains(name));
+    }
     // A callee that is not direct makes its caller a coroutine. A name that
     // is neither one of these nor in the module is no function at all: a
     // method the island computes in place.
@@ -289,9 +294,6 @@ fn why_not_direct(known: &HashMap<String, Facts>, module: &Module<'static>, wait
         }
         if f.loops && waits {
             because("a loop, in a program with tasks");
-        }
-        if calls_itself(known, at) {
-            because("a function that calls itself");
         }
         for callee in &f.callees {
             if seen.insert(callee) {

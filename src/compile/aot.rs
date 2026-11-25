@@ -70,9 +70,12 @@ use crate::CompileTarget;
 use crate::{Checker, Heap, Interp, Path, Reader, TopLevelForm, Value};
 use typelisp_mem::{wk, ConcreteNames};
 mod archive;
+mod bare;
 mod direct;
 mod settle;
+mod soft_float;
 mod made;
+mod masking;
 mod native;
 mod reach;
 pub(crate) mod avr;
@@ -619,7 +622,10 @@ pub fn compile_file_with(source_path: &str, output_path: &str, options: &BuildOp
         // function too; unlike the JIT path nothing maps an address here —
         // these resolve as ordinary linker symbols, which is what the `-l`
         // flags below are for.
-        for decl in &ffi_decls {
+        //
+        // Where there is no runtime they are direct functions, emitted once
+        // which functions are is known.
+        for decl in ffi_decls.iter().filter(|_| options.target.has_runtime()) {
             crate::compile::ffi::emit_thunk(&module, decl)?;
         }
         Rc::new(RefCell::new(module))
@@ -677,7 +683,9 @@ pub fn compile_file_with(source_path: &str, output_path: &str, options: &BuildOp
     // The functions whose address the executable hands the runtime, each
     // entered under the coroutine ABI.
     let mut pinned: std::collections::HashSet<String> = std::collections::HashSet::new();
-    pinned.insert(target_symbol_name(&CompileTarget::Fn(entry_path)));
+    if options.target.has_runtime() {
+        pinned.insert(target_symbol_name(&CompileTarget::Fn(entry_path)));
+    }
     pinned.extend(items.iter().chain(&prelude.items).filter(|i| print_object_receiver(i).is_some()).map(target_symbol_name));
     let handlers: Vec<(u16, String)> =
         chk.interrupt_handlers().into_iter().map(|(vector, path)| (vector, target_symbol_name(&CompileTarget::Fn(path)))).collect();
@@ -696,7 +704,7 @@ pub fn compile_file_with(source_path: &str, output_path: &str, options: &BuildOp
         pinned.extend(slots.iter().map(|(type_name, method)| ConcreteNames::method_symbol(type_name, method.name())));
     }
     let entry_symbol = target_symbol_name(&CompileTarget::Fn(entry_path));
-    let direct::Direct { sigs, emit, entry: direct_entry, called, interprets, why_not } = direct::direct_functions(&mut heap, &module.borrow(), &bodies, &static_inits, &other_inits, &pinned, &entry_symbol, &entered, |heap, symbol| {
+    let direct::Direct { sigs, emit, entry: direct_entry, called, interprets, why_not } = direct::direct_functions(&mut heap, &module.borrow(), &bodies, &static_inits, &other_inits, &pinned, &entry_symbol, &entered, options.target.has_runtime(), |heap, symbol| {
         prelude_items.get(symbol).map(|item| translated(heap, item)).transpose()
     })?;
     bodies.extend(emit);
@@ -717,12 +725,18 @@ pub fn compile_file_with(source_path: &str, output_path: &str, options: &BuildOp
         }
         bodies.retain(|b| called.contains(&b.symbol));
     }
+    let mut sigs = sigs;
+    if !options.target.has_runtime() {
+        for decl in &ffi_decls {
+            sigs.insert(ConcreteNames::symbol(&decl.path.to_string()), crate::compile::ffi::direct_sig(decl)?);
+            crate::compile::ffi::emit_direct_thunk(&module.borrow(), decl)?;
+        }
+    }
     let direct_names: Vec<String> = sigs.keys().cloned().collect();
     let producing_direct = crate::compile::direct::producing(sigs, options.target.has_runtime());
     let producing_static =
         crate::compile::llvm_builtins::globals::producing(
             statics.values().map(|(id, assigned)| (*id as i64, *assigned)).collect(),
-            !vectors.is_empty(),
         );
     // What runs at startup for each static global, its variable, and whether
     // that can be assigned.
@@ -848,20 +862,13 @@ pub fn compile_file_with(source_path: &str, output_path: &str, options: &BuildOp
     let skipped_safepoints = crate::compile::direct::skipped_safepoints();
     // Every body is emitted. What compiles from here on compiles for this
     // process (the `eval` environment's checking), and nothing there is direct.
-    let masking = crate::compile::llvm_builtins::globals::masking();
     drop(producing_direct);
     drop(producing_static);
-    for (i, (id, _)) in &statics {
-        if let Some(bytes) = masking.get(&(*id as i64)) {
-            eprintln!(
-                "warning: interrupts are disabled while the global variable `{}` is read or written: it is {} bytes, and an interrupt handler could come between them",
-                defvar_inits[*i].0, bytes
-            );
-        }
-    }
     let running_inits = settle::settle_inits(&module.borrow(), &static_globals, options.target.has_runtime())?;
     settle::settle(&module.borrow(), &direct_names, options.target.has_runtime())?;
     if !options.target.has_runtime() {
+        bare::check_stack(&module.borrow(), &direct_names)?;
+        bare::link_into(ctx, &module.borrow())?;
         let result = {
             let m = module.borrow();
             let entry = direct_entry.as_deref().and_then(|name| m.get_function(name)).ok_or("internal error: the entry point was not compiled")?;
@@ -874,9 +881,29 @@ pub fn compile_file_with(source_path: &str, output_path: &str, options: &BuildOp
                     f.map(|f| (*n, f)).ok_or_else(|| format!("internal error: the interrupt handler `{}` was not compiled", symbol))
                 })
                 .collect::<Result<Vec<_>, String>>()?;
+            let entered: Vec<_> = handlers.iter().map(|(_, f)| *f).collect();
+            let variables: Vec<String> = static_globals.iter().map(|(_, variable, _)| variable.clone()).collect();
+            let mask_globals = || -> Result<(), String> {
+                let masked = masking::mask(&m, &variables, entry, &entered)?;
+                for ((i, _), variable) in statics.iter().zip(&variables) {
+                    if let Some(masked) = masked.get(variable) {
+                        let accessed = match (masked.read, masked.written) {
+                            (true, true) => "read or written",
+                            (true, false) => "read",
+                            _ => "written",
+                        };
+                        eprintln!(
+                            "warning: interrupts are disabled while the global variable `{}` is {}: it is {} bytes, and an interrupt handler that uses it could come between them",
+                            defvar_inits[*i].0, accessed, masked.bytes
+                        );
+                    }
+                }
+                Ok(())
+            };
             let reached: Result<(), String> =
                 inits.iter().copied().chain([entry]).chain(handlers.iter().map(|(_, f)| *f)).try_for_each(|f| avr::check_reaches_no_runtime(&m, options.target, f));
             reached
+                .and_then(|()| mask_globals())
                 .and_then(|()| bare_main(ctx, &m, &inits, !handlers.is_empty(), entry, main_returns_int))
                 .and_then(|()| handlers.iter().try_for_each(|(n, f)| avr::vector(&m, *n, *f)))
                 .and_then(|()| crate::compile::type_table::settle_for_export(&m).map(|_| ()))

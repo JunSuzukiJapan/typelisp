@@ -51,6 +51,7 @@ use typelisp_front::Type;
 use typelisp_mem::{ConcreteNames, TypeId, TypeShape};
 
 use crate::compile::carriers::{self, Carrier};
+use crate::compile::direct::DirectSig;
 use crate::compile::llvm_builtins::{pending_words, store_words};
 use crate::compile::{llvm_context, CompiledFn, COMPILE_LOCK};
 
@@ -155,24 +156,75 @@ impl CType {
     }
 }
 
-/// Emit `decl`'s thunk into `module` and answer with it.
-///
-/// The C function is declared here too, by its own name and its own
-/// signature; who resolves that name to an address is the caller's business
-/// (the JIT maps it eagerly, an AOT build leaves it to the linker).
-pub(crate) fn emit_thunk(module: &Module<'static>, decl: &FfiDecl) -> Result<FunctionValue<'static>, String> {
-    let ctx = llvm_context();
-    let builder = ctx.create_builder();
+/// The signature of `decl`'s thunk where it is a direct function
+/// ([`emit_direct_thunk`]).
+pub(crate) fn direct_sig(decl: &FfiDecl) -> Result<DirectSig, String> {
+    let carrier = |c: CType| match c {
+        CType::Int { bits, signed } => Carrier::Int { bits, signed },
+        CType::F32 => Carrier::F32,
+        CType::F64 => Carrier::F64,
+        CType::Bool => Carrier::Bool,
+        CType::Void => Carrier::Unit,
+        CType::Str | CType::Ptr => Carrier::Word,
+    };
+    let ret = CType::from_type(decl.ret).ok_or_else(|| unspellable(decl.ret, "a return type", decl))?;
+    Ok(DirectSig { params: ctypes(&decl.params, decl)?.into_iter().map(carrier).collect(), ret: carrier(ret) })
+}
 
+/// Emit `decl`'s thunk into `module` as a direct function, for a target with
+/// no runtime: a call of the C function, at the C types of its values.
+pub(crate) fn emit_direct_thunk(module: &Module<'static>, decl: &FfiDecl) -> Result<(), String> {
+    let ctx = llvm_context();
+    let b = ctx.create_builder();
+    let e = |e: inkwell::builder::BuilderError| format!("ffi: the thunk of `{}`: {}", decl.path, e);
+    let (params, ret, c_fn) = c_function(module, decl)?;
+    let thunk = module.add_function(&thunk_name(module, decl)?, direct_sig(decl)?.fn_type(), None);
+    b.position_at_end(ctx.append_basic_block(thunk, "entry"));
+    let ptr = ctx.ptr_type(inkwell::AddressSpace::default());
+    let mut args: Vec<BasicMetadataValueEnum<'static>> = Vec::with_capacity(params.len());
+    for (c, v) in params.iter().zip(thunk.get_params()) {
+        args.push(match c {
+            CType::Str => b.build_int_to_ptr(call_shim(&b, module, "rt_ffi_cstring_new", &[v.into_int_value()])?, ptr, "cstr").map_err(e)?.into(),
+            CType::Ptr => b.build_int_to_ptr(v.into_int_value(), ptr, "ptr").map_err(e)?.into(),
+            _ => v.into(),
+        });
+    }
+    let call = b.build_call(c_fn, &args, "ffi_call").map_err(e)?;
+    match call.try_as_basic_value() {
+        inkwell::values::ValueKind::Instruction(_) => b.build_return(None).map_err(e)?,
+        inkwell::values::ValueKind::Basic(v) => {
+            let v: BasicValueEnum<'static> = match ret {
+                CType::Str | CType::Ptr => {
+                    let at = b.build_ptr_to_int(v.into_pointer_value(), carriers::word(), "address").map_err(e)?;
+                    if ret == CType::Str { call_shim(&b, module, "rt_ffi_string_from_cstr", &[at])? } else { at }.into()
+                }
+                _ => v,
+            };
+            b.build_return(Some(&v)).map_err(e)?
+        }
+    };
+    Ok(())
+}
+
+/// The name of `decl`'s thunk, which `module` must not have yet.
+fn thunk_name(module: &Module<'static>, decl: &FfiDecl) -> Result<String, String> {
+    let name = ConcreteNames::symbol(&decl.path.to_string());
+    if module.get_function(&name).is_some() {
+        return Err(format!("internal error: `{}` is already defined in this module", name));
+    }
+    Ok(name)
+}
+
+/// The C function `decl` names, declared in `module` under its real
+/// signature, with its C parameter and return types.
+fn c_function(module: &Module<'static>, decl: &FfiDecl) -> Result<(Vec<CType>, CType, FunctionValue<'static>), String> {
     let params = ctypes(&decl.params, decl)?;
     let ret = CType::from_type(decl.ret).ok_or_else(|| unspellable(decl.ret, "a return type", decl))?;
-
-    // ---- the C function, under its real signature ----
     let arg_tys: Vec<BasicMetadataTypeEnum<'static>> =
         params.iter().map(|c| c.llvm().expect("a parameter is never void").into()).collect();
     let c_fn_ty = match ret.llvm() {
         Some(t) => t.fn_type(&arg_tys, false),
-        None => ctx.void_type().fn_type(&arg_tys, false),
+        None => llvm_context().void_type().fn_type(&arg_tys, false),
     };
     // Reusing an existing declaration is right when two `defffi`s name the
     // same C function, and wrong when the name is already taken by something
@@ -200,12 +252,22 @@ pub(crate) fn emit_thunk(module: &Module<'static>, decl: &FfiDecl) -> Result<Fun
     if let Some(attr) = ret.extension_attribute() {
         add_attribute(c_fn, inkwell::attributes::AttributeLoc::Return, attr);
     }
+    Ok((params, ret, c_fn))
+}
+
+/// Emit `decl`'s thunk into `module` and answer with it.
+///
+/// The C function is declared here too, by its own name and its own
+/// signature; who resolves that name to an address is the caller's business
+/// (the JIT maps it eagerly, an AOT build leaves it to the linker).
+pub(crate) fn emit_thunk(module: &Module<'static>, decl: &FfiDecl) -> Result<FunctionValue<'static>, String> {
+    let ctx = llvm_context();
+    let builder = ctx.create_builder();
+
+    let (params, ret, c_fn) = c_function(module, decl)?;
 
     // ---- the thunk ----
-    let name = ConcreteNames::symbol(&decl.path.to_string());
-    if module.get_function(&name).is_some() {
-        return Err(format!("internal error: `{}` is already defined in this module", name));
-    }
+    let name = thunk_name(module, decl)?;
     // A coroutine-ABI function like any other compiled one, with no `pc`
     // dispatch and no resume block: it makes its frame, runs to completion and
     // answers in the frame's value slot. The frame is still required — the

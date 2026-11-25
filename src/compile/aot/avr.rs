@@ -19,6 +19,7 @@ use std::process::Command;
 use inkwell::module::Module;
 use inkwell::targets::{CodeModel, FileType, RelocMode, Target, TargetMachine, TargetTriple};
 use inkwell::builder::Builder;
+use inkwell::OptimizationLevel;
 use inkwell::values::{FunctionValue, IntValue, PointerValue};
 
 use super::embedded::{sections_of_their_own, Board, BOARD_MAIN};
@@ -75,7 +76,7 @@ SECTIONS
 }
 ";
 
-/// Where a program goes that an error ends: a division with no answer.
+/// Where a program goes that an error ends.
 pub(super) const FAULT: &str = "__typelisp_stop";
 
 /// How many entries the vector table has, the first of them reset's.
@@ -156,7 +157,7 @@ __typelisp_vectors:
 ",
     );
     for n in 1..VECTORS {
-        let to = if handled.contains(&n) { vector_symbol(n) } else { "__typelisp_stop".to_string() };
+        let to = if handled.contains(&n) { vector_symbol(n) } else { FAULT.to_string() };
         table.push_str(&format!("    jmp {}\n", to));
     }
     table
@@ -250,7 +251,7 @@ __do_clear_bss:
 /// two integers of each width (`__udivmodqi4`, `__udivmodhi4`,
 /// `__udivmodsi4`, and the signed ones). Each is linked only when it is
 /// called.
-/// Floating-point arithmetic is not here: `--link` a `libgcc.a` for it.
+/// Floating-point arithmetic is in [`super::soft_float`].
 const HELPERS: &str = "
     .section .text.__mulsi3,\"ax\",@progbits
     .globl __mulsi3
@@ -455,12 +456,12 @@ __typelisp_negate_low:
     ret
 ";
 
-fn target_machine(cpu: &str) -> Result<TargetMachine, String> {
+fn target_machine(cpu: &str, level: OptimizationLevel) -> Result<TargetMachine, String> {
     initialize();
     let triple = TargetTriple::create("avr-unknown-none");
     let target = Target::from_triple(&triple).map_err(|e| e.to_string())?;
     target
-        .create_target_machine(&triple, cpu, "", crate::compile::optimize::codegen_level(), RelocMode::Static, CodeModel::Default)
+        .create_target_machine(&triple, cpu, "", level, RelocMode::Static, CodeModel::Default)
         .ok_or_else(|| format!("failed to create a target machine for {}", cpu))
 }
 
@@ -479,7 +480,12 @@ pub(super) fn check_reaches_no_runtime(module: &Module<'static>, target: super::
     let uses = reach::uses(module, entry, |name| {
         match crate::compile::externs::BOARD_ONLY_SHIMS.iter().find(|(shim, _)| *shim == name) {
             Some((_, what)) => Some(format!("{}, which is for an interrupt controller the chip has not: the device's own register enables its interrupt", what)),
-            None => super::is_runtime(module, name).then(|| format!("the runtime function `{}`", name)),
+            None if super::is_runtime(module, name) => Some(format!("the runtime function `{}`", name)),
+            // LLVM's own, which it calls the C library for.
+            None => ["sin", "cos", "exp", "log", "pow"]
+                .iter()
+                .find(|f| name.strip_prefix("llvm.").and_then(|n| n.strip_prefix(**f)).is_some_and(|n| n.starts_with('.')))
+                .map(|f| format!("`{}` of a floating-point number", if *f == "pow" { "expt" } else { f })),
         }
     });
     if uses.is_empty() { Ok(()) } else { Err(reach::report(&needs_runtime_header(target), &uses)) }
@@ -520,7 +526,13 @@ pub(super) fn write_executable(
         Some(path) => fs::read_to_string(path).map_err(|e| format!("--linker-script: {}: {}", path.display(), e))?,
         None => board.qemu_memory.to_string(),
     };
-    let tm = target_machine(board.cpu)?;
+    // Never unoptimized: LLVM's AVR code generator then extends a sign into
+    // the wrong register (`ashr i32 %x, 31` and what is made of it).
+    let level = match crate::compile::optimize::codegen_level() {
+        OptimizationLevel::None => OptimizationLevel::Less,
+        level => level,
+    };
+    let tm = target_machine(board.cpu, level)?;
     module.set_triple(&tm.get_triple());
     module.set_data_layout(&tm.get_target_data().get_data_layout());
     module
@@ -547,10 +559,20 @@ pub(super) fn write_executable(
         for warning in crate::compile::codegen_prep::take_frame_warnings(items) {
             eprintln!("{}", warning);
         }
+        let floats = super::soft_float::module(crate::compile::llvm_context())?;
+        floats.set_triple(&module.get_triple());
+        floats.set_data_layout(&module.get_data_layout());
+        sections_of_their_own(&floats);
+        let floats_path = scratch.join("floats.o");
+        // A library, whatever the program is built for: unoptimized it would
+        // take most of the flash.
+        let tm = target_machine(board.cpu, OptimizationLevel::Default)?;
+        tm.write_to_file(&floats, FileType::Object, &floats_path).map_err(|e| format!("failed to emit object file: {}", e))?;
         let status = Command::new(&linker)
             .args(["-flavor", "gnu", "--gc-sections", "-T"])
             .arg(&script)
             .arg(&object_path)
+            .arg(&floats_path)
             .args(&options.link)
             .arg("-o")
             .arg(output_path)

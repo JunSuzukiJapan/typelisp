@@ -132,6 +132,23 @@ fn written(name: &str, source: &str) -> String {
     plain
 }
 
+/// `source` writes `wrote` to the serial port and nothing after it, at `-O0`
+/// and at `-O2`.
+fn assert_stops(name: &str, source: &str, wrote: &str) {
+    for level in ["-O0", "-O2"] {
+        let elf = built(&format!("{}{}", name, level), &format!("{}{}", SERIAL, source), &[level]);
+        // It, and time for anything after it to come.
+        let seen = std::cell::Cell::new(None::<Instant>);
+        let out = run_until(&elf, &["-serial", "stdio"], |text| {
+            if text.len() >= wrote.len() && seen.get().is_none() {
+                seen.set(Some(Instant::now()));
+            }
+            seen.get().is_some_and(|at| at.elapsed() > Duration::from_millis(500))
+        });
+        assert_eq!(out, wrote, "{}{}", name, level);
+    }
+}
+
 /// The bytes `elf` puts in flash: what its loaded segments have in the file.
 fn flash_bytes(elf: &Path) -> u32 {
     let bytes = std::fs::read(elf).unwrap();
@@ -295,9 +312,8 @@ fn a_division_with_no_answer_stops_the_program() {
             if name == "overflow" && op != "/" {
                 continue;
             }
-            for level in ["-O0", "-O2"] {
-                let source = format!(
-                    "{SERIAL}
+            let source = format!(
+                "
 (defvar (d {ty}) {divisor})
 #[interrupt(13)]
 (defun on-overflow () () (put 105) ())
@@ -308,19 +324,8 @@ fn a_division_with_no_answer_stops_the_program() {
   (when (= ({op} (the {ty} {dividend}) d) 1) (put 98))
   (put 99))
 "
-                );
-                let name = format!("avr_fault_{}_{}{}", name, match op { "/" => "div", o => o }, level);
-                let elf = built(&name, &source, &[level]);
-                // The `a`, and time for anything after it to come.
-                let seen = std::cell::Cell::new(None::<Instant>);
-                let out = run_until(&elf, &["-serial", "stdio"], |text| {
-                    if text.contains('a') && seen.get().is_none() {
-                        seen.set(Some(Instant::now()));
-                    }
-                    seen.get().is_some_and(|at| at.elapsed() > Duration::from_millis(500))
-                });
-                assert_eq!(out, "a", "{}", name);
-            }
+            );
+            assert_stops(&format!("avr_fault_{}_{}", name, match op { "/" => "div", o => o }), &source, "a");
         }
     }
 }
@@ -488,14 +493,24 @@ fn a_wide_global_is_whole() {
     assert_eq!(written("avr_whole_global", source), "Y.");
 }
 
-/// Each global an access of which disables interrupts is warned about, once.
+/// Each global an access of which disables interrupts is warned about, once:
+/// those a handler could come between the bytes of, and for what.
 #[test]
 fn disabling_interrupts_for_a_wide_global_is_warned_about() {
     let program = |attribute: &str| {
         format!(
-            "(defvar (wide u16) 0)\n(defvar (wider u32) 0)\n(defvar (small u8) 0)\n(defvar (unused u16) 0)\n(defconstant (fixed u16) 300)
-{}(defun f () () (setf wide (+ wide fixed)) (setf wider (+ wider 1)) (setf small (+ small 1)) ())
-(defun main () () (f) (while (= wide 0)))\n",
+            "(defvar (both u16) 0)\n(defvar (wider u32) 0)\n(defvar (handed u16) 0)\n(defvar (taken u32) 0)
+(defvar (kept u16) 0)\n(defvar (small u8) 0)\n(defvar (mine u32) 0)\n(defvar (unused u16) 0)\n(defconstant (fixed u16) 300)
+(defun bump () () (setf wider (+ wider 1)) ())
+{}(defun f () () (setf both (+ both fixed)) (bump) (setf small (+ small 1)) (setf kept (+ kept handed)) (setf taken 70000) ())
+(defun main () ()
+  (bump)
+  (setf both 1)
+  (while (= both 0))
+  (setf handed (+ handed 1))
+  (setf mine (+ mine taken))
+  (setf small (+ small 1))
+  ())\n",
             attribute
         )
     };
@@ -505,10 +520,13 @@ fn disabling_interrupts_for_a_wide_global_is_warned_about() {
         assert!(out.status.success(), "{}", err);
         err
     };
-    let one = |name: &str, bytes: u8| {
-        format!("warning: interrupts are disabled while the global variable `prog::{}` is read or written: it is {} bytes, and an interrupt handler could come between them\n", name, bytes)
+    let one = |name: &str, accessed: &str, bytes: u8| {
+        format!("warning: interrupts are disabled while the global variable `prog::{}` is {}: it is {} bytes, and an interrupt handler that uses it could come between them\n", name, accessed, bytes)
     };
-    assert_eq!(warnings("avr_warned", "#[interrupt(13)]\n"), one("wide", 2) + &one("wider", 4));
+    assert_eq!(
+        warnings("avr_warned", "#[interrupt(13)]\n"),
+        one("both", "read or written", 2) + &one("wider", "read or written", 4) + &one("handed", "written", 2) + &one("taken", "read", 4)
+    );
     assert_eq!(warnings("avr_not_warned", ""), "");
 }
 
@@ -566,11 +584,17 @@ fn a_program_that_needs_the_runtime_is_refused() {
         ("variable", "(defvar (s string) \"a\")\n(defun main () ())", "the runtime function `rt_str_new` (reached by $global_init$"),
         ("bignum", "(defun main () int 100000)", "the runtime function `rt_bignum_new` (reached by prog::main)"),
         (
-            "recursion",
-            "(defun f ((n u8)) u8 (if (= n 0) 0 (f (- n 1))))\n(defun main () () (f 3) ())",
-            "a function that calls itself (in prog::main -> prog::f)",
+            "c_string",
+            "(defffi c-go (string) ())\n(defun main () () (unsafe (c-go \"a\")))",
+            "the runtime function `rt_ffi_cstring_new` (reached by prog::main -> prog::c-go)",
         ),
-        ("c", "(defffi c-go () ())\n(defun main () () (unsafe (c-go)))", "a C function (in prog::main -> prog::c-go)"),
+        (
+            "c_callback",
+            "(defffi c-go ((fn (i16) i16)) ())\n(defun f ((n i16)) i16 n)\n(defun main () () (unsafe (c-go f)))",
+            "`prog::f`, given to C as a callback",
+        ),
+        ("sine", "(defvar (y f64) 2.5)\n(defun main () () (setf y (sin y)) ())", "`sin` of a floating-point number (reached by prog::main)"),
+        ("power", "(defvar (x f32) 2.5)\n(defun main () () (setf x (expt x x)) ())", "`expt` of a floating-point number (reached by prog::main)"),
         ("eval", "(defun main () () (eval '(+ 1 2)) ())", "the interpreter"),
         ("catch", "(defun main () () (catch 'a ()) ())", "`catch` (in prog::main)"),
     ] {
@@ -589,4 +613,266 @@ fn the_runtime_s_flags_are_refused() {
         let err = String::from_utf8_lossy(&out.stderr).into_owned();
         assert!(err.contains(&expected), "{}", err);
     }
+}
+
+/// `int` is the fixnums, whose operations past one stop the program.
+#[test]
+fn int_is_what_a_word_holds() {
+    let source = r#"
+(defvar (n int) 1000)
+(defvar (m int) -7)
+(defvar (i u8) 3)
+(defvar (j u16) 500)
+(defvar (k i32) -20000)
+(defvar (s8 i8) -7)
+(defvar (s16 i16) -300)
+(defun say ((ok bool)) () (put (if ok 89 78)))
+(defun main () ()
+  (start)
+  (say (= (+ n m) 993)) (say (= (- m n) -1007)) (say (= (* n m) -7000))
+  (say (= (truncate n m) -142)) (say (= (rem n m) 6)) (say (= (mod n m) -1)) (say (= (mod m n) 993))
+  (say (= (floor m 2) -4)) (say (= (abs m) 7)) (say (= (max n m) n))
+  (say (< m n)) (say (not (> m n))) (say (<= n 1000)) (say (/= n m))
+  (say (= (logand n 255) 232)) (say (= (logior m 1) -7)) (say (= (logxor n m) -1007)) (say (= (lognot m) 6))
+  (say (= (ash n 4) 16000)) (say (= (ash n -3) 125)) (say (= (ash m -100) -1)) (say (= (ash 0 100) 0))
+  (say (= (logcount n) 6)) (say (= (logcount m) 2)) (say (= (integer-length n) 10)) (say (= (integer-length m) 3))
+  (say (logbitp n 3)) (say (logbitp m 100)) (say (not (logbitp n 100)))
+  (say (= (as int s8) -7)) (say (= (as int s16) -300)) (say (= (ash k -31) -1)) (say (= (as i32 s8) -7))
+  (say (= (as int i) 3)) (say (= (as int j) n::j-half))
+  (say (= (as u8 n) 232)) (say (= (as i8 m) -7)) (say (= (as u16 m) 65529)) (say (= (as i32 m) -7))
+  (let ((sum 0)) (dotimes (q 100) (setf sum (+ sum q))) (say (= sum 4950)))
+  (put 46))
+"#
+    .replace("n::j-half", "(truncate n 2)");
+    let out = written("avr_int", &source);
+    assert!(!out.contains('N') && out.len() > 30, "{}", out);
+    for (name, stops) in [
+        ("add", "(setf n (+ n 16000))"),
+        ("sub", "(setf n (- -16000 n))"),
+        ("mul", "(setf n (* n n))"),
+        ("zero", "(setf n (truncate n (- n n)))"),
+        ("wide", "(setf n (as int k))"),
+        ("shift", "(setf n (ash n 5))"),
+        ("address", "(unsafe (volatile-write-u8 m 1))"),
+        ("aligned", "(unsafe (volatile-write-u16 (+ n 1) 1))"),
+    ] {
+        let source = format!(
+            "(defvar (n int) 1000)(defvar (m int) -7)(defvar (k i32) -20000)\n(defun main () () (start) (put 97) (put 46) {} (put 98) (put 46))",
+            stops
+        );
+        assert_stops(&format!("avr_int_{}", name), &source, "a.");
+    }
+}
+
+/// A recursion goes as deep as the stack, and past it the program stops.
+#[test]
+fn a_function_calls_itself() {
+    let source = r#"
+(defvar (depth u16) 0)
+(defun fib ((n u8)) u16 (if (< n (the u8 2)) (as u16 n) (+ (fib (- n 1)) (fib (- n 2)))))
+(defsignature even (u8) bool)
+(defun odd ((n u8)) bool (if (= n 0) false (even (- n 1))))
+(defun even ((n u8)) bool (if (= n 0) true (odd (- n 1))))
+(defun main () ()
+  (start)
+  (put (if (= (fib 15) 610) 89 78))
+  (put (if (even 40) 89 78))
+  (put (if (odd 40) 78 89))
+  (put 46))
+"#;
+    assert_eq!(written("avr_recursion", source), "YYY.");
+    let source = r#"
+(defvar (guarded u16) 4660)
+(defun down ((n u16)) u16 (if (= n 0) 7 (logxor (* (down (- n 1)) (the u16 3)) n)))
+(defun main () ()
+  (start)
+  (put (if (= (logand (down 51) (the u16 0)) 0) 89 78))
+  (put 46)
+  (put (if (= (down 60000) 1) 89 78))
+  (put 46))
+"#;
+    assert_stops("avr_recursion_stops", source, "Y.");
+}
+
+/// An address is an `int` a program computes.
+#[test]
+fn an_address_is_computed() {
+    let source = r#"
+(defvar (base int) 512)
+(defun at ((i u8)) int (+ base (as int i)))
+(defun main () ()
+  (start)
+  (let ((i (the u8 0)))
+    (while (< i (the u8 10))
+      (unsafe (volatile-write-u8 (at i) (+ i 48)))
+      (setf i (+ i 1)))
+    (setf i 0)
+    (while (< i (the u8 10))
+      (put (unsafe (volatile-read-u8 (at i))))
+      (setf i (+ i 1))))
+  (unsafe (volatile-write-u16 (+ base 2) 16961) (volatile-write-u32 (+ base 4) 1145258561))
+  (dotimes (k 6) (put (unsafe (volatile-read-u8 (+ base 2 k)))))
+  (put (if (= (unsafe (volatile-read-u16 (+ base 2))) 16961) 89 78))
+  (put (if (= (unsafe (volatile-read-u32 (+ base 4))) 1145258561) 89 78))
+  (put 46))
+"#;
+    assert_eq!(written("avr_address", source), "0123456789ABABCDYY.");
+}
+
+/// Functions under the calling convention `avr-gcc` gives a C function.
+const C_FUNCTIONS: &str = "
+    .section .text.c_sum,\"ax\",@progbits
+    .globl c_sum
+c_sum: ; uint32_t (uint8_t, uint16_t, uint32_t)
+    add r18, r22
+    adc r19, r23
+    adc r20, r1
+    adc r21, r1
+    add r18, r24
+    adc r19, r1
+    adc r20, r1
+    adc r21, r1
+    movw r22, r18
+    movw r24, r20
+    ret
+    .section .text.c_negate,\"ax\",@progbits
+    .globl c_negate
+c_negate: ; int8_t (int8_t)
+    neg r24
+    ret
+    .section .text.c_not,\"ax\",@progbits
+    .globl c_not
+c_not: ; bool (bool)
+    ldi r25, 1
+    eor r24, r25
+    ret
+    .section .text.c_twice,\"ax\",@progbits
+    .globl c_twice
+c_twice: ; long (long)
+    add r22, r22
+    adc r23, r23
+    adc r24, r24
+    adc r25, r25
+    ret
+    .section .text.c_minus,\"ax\",@progbits
+    .globl c_minus
+c_minus: ; float (float)
+    subi r25, 0x80
+    ret
+    .section .text.c_buffer,\"ax\",@progbits
+    .globl c_buffer
+c_buffer: ; uint8_t *(void)
+    ldi r24, 0
+    ldi r25, 2
+    ret
+    .section .text.c_poke,\"ax\",@progbits
+    .globl c_poke
+c_poke: ; void (uint8_t *, uint8_t)
+    movw r30, r24
+    st Z, r22
+    ret
+";
+
+/// `C_FUNCTIONS` as an object file.
+fn c_object(name: &str) -> PathBuf {
+    use inkwell::targets::{CodeModel, FileType, RelocMode, Target, TargetTriple};
+    extern "C" {
+        fn LLVMInitializeAVRTargetInfo();
+        fn LLVMInitializeAVRTarget();
+        fn LLVMInitializeAVRTargetMC();
+        fn LLVMInitializeAVRAsmPrinter();
+        fn LLVMInitializeAVRAsmParser();
+    }
+    // SAFETY: LLVM's own initializers, which may be called again.
+    unsafe {
+        LLVMInitializeAVRTargetInfo();
+        LLVMInitializeAVRTarget();
+        LLVMInitializeAVRTargetMC();
+        LLVMInitializeAVRAsmPrinter();
+        LLVMInitializeAVRAsmParser();
+    }
+    let triple = TargetTriple::create("avr-unknown-none");
+    let machine = Target::from_triple(&triple)
+        .unwrap()
+        .create_target_machine(&triple, "atmega328p", "", inkwell::OptimizationLevel::None, RelocMode::Static, CodeModel::Default)
+        .unwrap();
+    let context = inkwell::context::Context::create();
+    let module = context.create_module("c");
+    module.set_triple(&triple);
+    module.set_inline_assembly(C_FUNCTIONS);
+    let object = scratch(name).join("c.o");
+    machine.write_to_file(&module, FileType::Object, &object).unwrap();
+    object
+}
+
+#[test]
+fn a_c_function_is_called() {
+    let source = r#"
+(defffi (c-sum "c_sum") (u8 u16 u32) u32)
+(defffi (negated "c_negate") (i8) i8)
+(defffi (c-not "c_not") (bool) bool)
+(defffi (c-twice "c_twice") (c-long) c-long)
+(defffi (c-minus "c_minus") (f32) f32)
+(defffi (c-buffer "c_buffer") () ptr)
+(defffi (c-poke "c_poke") (ptr u8) ())
+(defvar (small i8) 100)
+(defvar (yes bool) true)
+(defvar (half f32) 0.5)
+(defvar (n int) 3000)
+(defun say ((ok bool)) () (put (if ok 89 78)))
+(defun main () ()
+  (start)
+  (unsafe
+    (say (= (c-sum 250 60000 4000000000) (the u32 4000060250)))
+    (say (= (negated small) -100))
+    (say (not (c-not yes)))
+    (say (c-not (c-not yes)))
+    (say (= (as int (c-twice (as c-long n))) 6000))
+    (say (= (negated (negated small)) small))
+    (setf half (c-minus half))
+    (say (= half -0.5))
+    (c-poke (c-buffer) 90)
+    (put (volatile-read-u8 #x200)))
+  (put 46))
+"#;
+    let object = c_object("avr_c");
+    for level in ["-O0", "-O2"] {
+        let elf = built(&format!("avr_c{}", level), &format!("{}{}", SERIAL, source), &[level, "--link", object.to_str().unwrap()]);
+        assert_eq!(run_until(&elf, &["-serial", "stdio"], |text| text.ends_with('.')), "YYYYYYYZ.");
+    }
+}
+
+/// Floating-point arithmetic at both widths. What each function answers is
+/// compared with the processor's beside them (`aot::soft_float`).
+#[test]
+fn floating_point_numbers_are_calculated_with() {
+    let source = r#"
+(defvar (x f32) 1.5)
+(defvar (y f64) 2.5)
+(defvar (i i16) -300)
+(defvar (u u32) 4000000000)
+(defvar (n int) 50)
+(defvar (b u8) 200)
+(defun say ((ok bool)) () (put (if ok 89 78)))
+(defun main () ()
+  (start)
+  (say (= (+ x 2.25) 3.75)) (say (= (- x 2.25) -0.75)) (say (= (* x 3.0) 4.5)) (say (= (/ x 4.0) 0.375))
+  (say (= (+ y 0.25) 2.75)) (say (= (- y 4.0) -1.5)) (say (= (* y 1.5) 3.75)) (say (= (/ y 8.0) 0.3125))
+  (say (= (/ y 3.0) 0.8333333333333334)) (say (/= (/ x 3.0) 0.25))
+  (say (< x 2.0)) (say (<= x 1.5)) (say (> x 1.0)) (say (>= x 1.5)) (say (not (< x 1.5))) (say (not (= x 1.0)))
+  (say (< y 3.0)) (say (> y -3.0)) (say (not (> y 2.5))) (say (>= y 2.5))
+  (say (= (as f32 i) -300.0)) (say (= (as f64 u) 4000000000.0)) (say (= (as f32 b) 200.0)) (say (= (as f64 n) 50.0))
+  (say (= (as i16 (* x 100.0)) 150)) (say (= (as u8 (* y 10.0)) 25)) (say (= (as int (- 0.0 y)) -2))
+  (say (= (as f64 x) 1.5)) (say (= (as f32 y) 2.5))
+  (say (= (sqrt (* y 6.4)) 4.0)) (say (= (sqrt (* x 1.5)) x))
+  (say (= (max x 2.0) 2.0)) (say (= (min y 2.0) 2.0)) (say (= (abs (- 0.0 y)) y))
+  (let ((nan (/ (- x x) (- x x)))) (say (/= nan nan)) (say (not (= nan nan))))
+  (let ((sum (the f32 0.0)) (k (the u8 0)))
+    (while (< k (the u8 100)) (setf sum (+ sum 0.25)) (setf k (+ k 1)))
+    (say (= sum 25.0)))
+  (put 46))
+"#;
+    let out = written("avr_float", source);
+    assert!(!out.contains('N') && out.len() > 30, "{}", out);
+    assert_stops("avr_float_wide", "(defvar (x f32) 20000.0)(defvar (i i16) 0)\n(defun main () () (start) (put 97) (setf i (as i16 x)) (put 98))", "a");
 }
