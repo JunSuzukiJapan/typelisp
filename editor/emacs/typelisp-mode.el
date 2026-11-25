@@ -111,7 +111,7 @@ stands for where it is written, as a variable's name stands for its value.")
     ;; other special forms (§7)
     "setf" "incf" "decf" "rotatef" "shiftf"
     "list" "tuple" "quote" "quasiquote" "unquote" "unquote-splicing"
-    "panic" "unreachable" "todo" "as" "try-as" "compile" "documentation"
+    "panic" "unreachable" "todo" "as" "try-as" "size-of" "size-of-val" "compile" "documentation"
     ;; the REPL tool layer (CLHS 25.2).  Special forms because each takes the
     ;; *name* of a definition rather than a value — `step' is the exception,
     ;; which takes a form.  `room'/`dribble' are ordinary functions and are

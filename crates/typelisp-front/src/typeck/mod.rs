@@ -107,6 +107,7 @@ pub(crate) mod resolve;
 pub(crate) mod scope;
 pub(crate) mod select;
 pub(crate) mod setf;
+pub(crate) mod size_of;
 pub(crate) mod spawn;
 pub(crate) mod sexpr_value;
 pub(crate) mod subst;

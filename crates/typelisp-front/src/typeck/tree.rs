@@ -299,6 +299,9 @@ pub(crate) enum Node {
     /// Where recover mode checked past an error (`Cx::recovered`): an
     /// expression of type `!`.
     Hole,
+    /// How many bytes a value of the type `ty` takes (`size_of`), which is
+    /// known once the tree is specialized.
+    SizeOf { ty: Type },
 }
 
 /// One arm of a `select`. Its channel and value are locals the `let`
@@ -472,6 +475,7 @@ impl Typed {
             | Node::FnRef { .. }
             | Node::MethodRef { .. }
             | Node::TypeValue { .. }
+            | Node::SizeOf { .. }
             | Node::Tool { .. } => {
                 Vec::new()
             }
@@ -520,6 +524,7 @@ impl Typed {
             | Node::FnRef { .. }
             | Node::MethodRef { .. }
             | Node::TypeValue { .. }
+            | Node::SizeOf { .. }
             | Node::Tool { .. } => {
                 Vec::new()
             }
@@ -579,7 +584,7 @@ impl Typed {
             match &mut t.node {
                 Node::Call { targs, .. } | Node::MethodCall { targs, .. } | Node::TraitCall { own: targs, .. } => targs.iter_mut().for_each(|ty| *ty = f(ty)),
                 Node::Construct { targs, field_tys, .. } => targs.iter_mut().chain(field_tys.iter_mut()).for_each(|ty| *ty = f(ty)),
-                Node::FieldSet { field_ty, .. } | Node::Catch { carried: field_ty, .. } | Node::TypeValue { ty: field_ty } | Node::Callback { fn_ty: field_ty, .. } => *field_ty = f(field_ty),
+                Node::FieldSet { field_ty, .. } | Node::Catch { carried: field_ty, .. } | Node::TypeValue { ty: field_ty } | Node::SizeOf { ty: field_ty } | Node::Callback { fn_ty: field_ty, .. } => *field_ty = f(field_ty),
                 Node::Lambda { params, ret, .. } => {
                     params.iter_mut().for_each(|(_, ty)| *ty = f(ty));
                     *ret = f(ret);

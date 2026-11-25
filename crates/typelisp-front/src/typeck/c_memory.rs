@@ -74,7 +74,7 @@ pub(crate) fn mentions_typed_ptr(ty: &Type) -> bool {
 // ---- types -------------------------------------------------------------------
 
 /// The `def-c-struct` the name `v` (a symbol or a `::` path) names here.
-fn c_struct_named<'r>(heap: &Heap, reg: &'r Registry, ns: typelisp_mem::NsId, v: Value) -> Option<&'r CStructDef> {
+pub(crate) fn c_struct_named<'r>(heap: &Heap, reg: &'r Registry, ns: typelisp_mem::NsId, v: Value) -> Option<&'r CStructDef> {
     let entry = match v {
         Value::Symbol(id) => find_named(reg, ns, id, |n, key| reg.types.get(&Path::of_symbol(n, key))).map(|(_, e)| e),
         Value::Path(_) => written_path(heap, ns, v).ok().and_then(|p| reg.types.get(&p)),
@@ -107,7 +107,7 @@ fn c_struct_def<'r>(reg: &'r Registry, path: &Path) -> Result<&'r CStructDef, Er
 }
 
 /// `(sizeof, _Alignof)` of a C type, by the target's data model.
-fn c_layout(reg: &Registry, ty: &Type) -> Result<(u64, u64), Error> {
+pub(crate) fn c_layout(reg: &Registry, ty: &Type) -> Result<(u64, u64), Error> {
     let model = typelisp_mem::target::DataModel::current();
     let scalar = |size: u64| (size, size.min(u64::from(model.max_align)));
     Ok(match ty {

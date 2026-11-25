@@ -314,6 +314,12 @@ fn lower_node(heap: &mut Heap, lw: &mut Lowering, t: &Typed) -> Result<Value, Er
             heap.push_root(form);
             core::tagged(heap, wk::TYPE_VALUE, &[form])
         }
+        Node::SizeOf { ty } => {
+            let size = super::size_of::size_of(lw.reg, &lw.settle(ty))?;
+            let literal = super::literal::literal(heap, Value::Int(size as i64), Some(&Type::Int))?.expect("a number is a literal");
+            let int = Node::Literal { tag: literal.tag, value: literal.value };
+            lower_node(heap, lw, &Typed { node: int, ty: Type::Int, loc: None })
+        }
         Node::UntagInt { value } => {
             let value = lower_rooted(heap, lw, value)?;
             crate::check::lower::untag_int_form(heap, value)

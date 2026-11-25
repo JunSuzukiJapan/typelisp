@@ -1027,4 +1027,7 @@ well_known_symbols! {
      which `most-positive-fixnum` is."
     F_LARGEST_FIXNUM => "largest-fixnum"
     F_C_ADDRESS => " c-address"
+    "Appended 2026-11-25. How many bytes a value takes."
+    SIZE_OF => "size-of"
+    SIZE_OF_VAL => "size-of-val"
 }

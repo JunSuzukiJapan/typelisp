@@ -15,6 +15,10 @@ use std::process::{Command, Output, Stdio};
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
+#[path = "common/widths.rs"]
+#[allow(dead_code)]
+mod widths;
+
 const TYPL: &str = env!("CARGO_BIN_EXE_typl");
 
 /// How long a program may run under QEMU before the test calls it hung.
@@ -275,6 +279,65 @@ fn globals_hold_their_values() {
   (put 46))
 "#;
     assert_eq!(written("avr_globals", source), "BYNYC.");
+}
+
+/// Every width on a 16-bit machine: how many bits each type has, where it
+/// wraps, what a cast to it keeps of each other type, and what it holds in a
+/// variable, a parameter and a global. What each should be is worked out
+/// here; the program writes a `y` or an `n` for each.
+#[test]
+fn every_width_is_its_own() {
+    for t in &widths::FIXED {
+        let (n, bytes) = (t.name, t.bits / 8);
+        let mut program = format!(
+            "(defvar (kept {n}) 0)
+(defun say ((b bool)) () (put (if b 121 110)) ())
+(defun handed ((x {n})) {n} x)
+(defun bits () u8
+  (let ((x (the {n} 1)) (count (the u8 0)))
+    (while (/= x 0) (setf x (ash x 1)) (setf count (+ count 1)))
+    count))
+(defun wrap ((x {n})) () (say (= (+ x 1) {min})) (say (= (- (+ x 1) 1) {max})) ())
+(defun hold ((x {n})) () (setf kept x) (say (= kept x)) (say (= (handed x) x)) (say (= (handed kept) (handed x)))
+  (unsafe (let ((c (as c-long x)) (u (as c-ulong x))) (say (= (as {n} c) x)) (say (= (as {n} u) x)) (say (= (as u32 c) (as u32 x))) (say (= (size-of-val c) 4))))
+  ())
+(defun sum ((a {n}) (b {n}) (want {n})) () (say (= (+ a b) want)) ())
+(defun product ((a {n}) (b {n}) (want {n})) () (say (= (* a b) want)) ())
+",
+            min = t.min(),
+            max = t.max()
+        );
+        let mut main = format!(
+            "  (start)
+  (say (= (size-of {n}) {bytes})) (say (= (size-of-val (handed 1)) {bytes})) (say (= (size-of-val (+ kept 1)) {bytes}))
+  (say (= (size-of c-long) 4)) (say (= (size-of ptr) 2)) (say (= (size-of int) 2))
+  (say (= (bits) {bits}))
+  (wrap {max})
+",
+            bits = t.bits,
+            max = t.max()
+        );
+        let wrapped = |v: i64, t: &widths::Fixed| {
+            let low = v.rem_euclid(1 << t.bits);
+            if t.signed && low >= 1 << (t.bits - 1) { low - (1 << t.bits) } else { low }
+        };
+        for v in t.values() {
+            main.push_str(&format!("  (hold {})\n", v));
+            main.push_str(&format!("  (sum {v} {max} {})\n", wrapped(v + t.max(), t), max = t.max()));
+            main.push_str(&format!("  (product {v} {max} {})\n", wrapped(v.wrapping_mul(t.max()), t), max = t.max()));
+        }
+        for to in &widths::FIXED {
+            program.push_str(&format!("(defun to-{0} ((x {n}) (want {0})) () (say (= (as {0} x) want)) (say (= (size-of-val (as {0} x)) {1})) ())\n", to.name, to.bits / 8));
+            for v in [t.min(), -1, 1, 128, 255, 256, 65535, t.max()] {
+                if (t.min()..=t.max()).contains(&v) {
+                    main.push_str(&format!("  (to-{} {} {})\n", to.name, v, wrapped(v, to)));
+                }
+            }
+        }
+        program.push_str(&format!("(defun main () ()\n{}  (put 46))\n", main));
+        let out = written(&format!("avr_widths_{}", n), &program);
+        assert!(!out.contains('n') && out.len() > 50, "{}: {}", n, out);
+    }
 }
 
 /// At `-O2` the `case` is a table, which is in RAM.

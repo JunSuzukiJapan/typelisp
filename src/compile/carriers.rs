@@ -352,6 +352,38 @@ mod tests {
         assert_eq!(i64::MAX >> 1, typelisp_mem::FIXNUM_MAX);
     }
 
+    /// A value is carried as wide as its type is, on every machine there is
+    /// code for: a `bool` is a bit of its byte, and a C word is as wide as C's.
+    #[test]
+    fn a_carrier_is_as_wide_as_its_type() {
+        use crate::Type;
+        use typelisp_mem::target::DataModel;
+        for model in [DataModel::HOST, DataModel::ILP32, DataModel::AVR] {
+            let _model = DataModel::producing(model);
+            let _word = word_of(model.pointer_bits());
+            for (ty, bits) in [
+                (Type::I8, 8),
+                (Type::U8, 8),
+                (Type::I16, 16),
+                (Type::U16, 16),
+                (Type::I32, 32),
+                (Type::U32, 32),
+                (Type::F32, 32),
+                (Type::F64, 64),
+                (Type::Char, 32),
+                (Type::Bool, 1),
+                (Type::CLong, model.c_long_bits()),
+                (Type::CULong, model.c_long_bits()),
+                (Type::Ptr, model.pointer_bits()),
+                (Type::Int, model.pointer_bits()),
+                (Type::Str, model.pointer_bits()),
+            ] {
+                let carrier = Carrier::of(&Repr::of_by(&ty, &|_| None));
+                assert_eq!(carrier.llvm().map(bits_of), Some(bits), "{} on {:?}", ty, model);
+            }
+        }
+    }
+
     /// A value wider than the part it is kept in comes back whole: a `f64`
     /// and an `i64` in 32-bit and 16-bit words.
     #[test]
