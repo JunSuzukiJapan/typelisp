@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/numbers.md @ e4290b2301ca3307be1903373bb46b8b2aea86cd -->
+<!-- translated-from: docs/ja/reference/functions/numbers.md @ 4da1b93779ddf5189b57a8cb0397636ee00f4b50 -->
 # Liczby
 
 Operacje na liczbach całkowitych, zmiennoprzecinkowych, wymiernych, zespolonych i wartościach logicznych oraz inne
@@ -332,7 +332,7 @@ Stałe graniczne liczb (CLHS 12.1.4.2 / 12.1.3):
 
 | Nazwa | Typ | Opis |
 |---|---|---|
-| `most-positive-fixnum` / `most-negative-fixnum` | `int` | Górna / dolna granica 63-bitowej wartości natychmiastowej (2^62-1 / -2^62). `int` poza nimi staje się bignum |
+| `most-positive-fixnum` / `most-negative-fixnum` | `int` | Górna / dolna granica 63-bitowej wartości natychmiastowej (2^62-1 / -2^62; na wasm32 i Cortex-M 31 bitów, 2^30-1 / -2^30). `int` poza nimi staje się bignum |
 | `most-positive-double-float` / `most-negative-double-float` | `f64` | Największa / najmniejsza wartość skończona |
 | `least-positive-double-float` / `least-negative-double-float` | `f64` | Najmniejszy niezerowy moduł, w tym liczby subnormalne |
 | `least-positive-normalized-double-float` / `least-negative-normalized-double-float` | `f64` | To samo, ograniczone do liczb znormalizowanych |

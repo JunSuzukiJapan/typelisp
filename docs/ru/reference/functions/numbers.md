@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/numbers.md @ e4290b2301ca3307be1903373bb46b8b2aea86cd -->
+<!-- translated-from: docs/ja/reference/functions/numbers.md @ 4da1b93779ddf5189b57a8cb0397636ee00f4b50 -->
 # Числа
 
 Операции над целыми, числами с плавающей точкой, рациональными, комплексными числами и логическими значениями, а
@@ -325,7 +325,7 @@ does not fit a fixnum»).
 
 | Имя | Тип | Описание |
 |---|---|---|
-| `most-positive-fixnum` / `most-negative-fixnum` | `int` | Верхний / нижний предел 63-битного непосредственного значения (2^62-1 / -2^62). `int` за их пределами становится bignum |
+| `most-positive-fixnum` / `most-negative-fixnum` | `int` | Верхний / нижний предел 63-битного непосредственного значения (2^62-1 / -2^62; на wasm32 и Cortex-M — 31 бит, 2^30-1 / -2^30). `int` за их пределами становится bignum |
 | `most-positive-double-float` / `most-negative-double-float` | `f64` | Наибольшее / наименьшее конечные значения |
 | `least-positive-double-float` / `least-negative-double-float` | `f64` | Наименьшая ненулевая величина, включая денормализованные |
 | `least-positive-normalized-double-float` / `least-negative-normalized-double-float` | `f64` | То же, но только среди нормализованных |

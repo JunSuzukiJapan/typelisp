@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/numbers.md @ e4290b2301ca3307be1903373bb46b8b2aea86cd -->
+<!-- translated-from: docs/ja/reference/functions/numbers.md @ 4da1b93779ddf5189b57a8cb0397636ee00f4b50 -->
 # Tal
 
 Operationer på heltal, flyttal, kvoter, komplexa tal och booleska värden, samt andra talrelaterade
@@ -331,7 +331,7 @@ Konstanter för numeriska gränser (CLHS 12.1.4.2 / 12.1.3):
 
 | Namn | Typ | Beskrivning |
 |---|---|---|
-| `most-positive-fixnum` / `most-negative-fixnum` | `int` | Övre / nedre gränsen för ett omedelbart 63-bitarsvärde (2^62-1 / -2^62). Ett `int` bortom dem blir ett bignum |
+| `most-positive-fixnum` / `most-negative-fixnum` | `int` | Övre / nedre gränsen för ett omedelbart 63-bitarsvärde (2^62-1 / -2^62; på wasm32 och Cortex-M 31 bitar, 2^30-1 / -2^30). Ett `int` bortom dem blir ett bignum |
 | `most-positive-double-float` / `most-negative-double-float` | `f64` | De största / minsta ändliga värdena |
 | `least-positive-double-float` / `least-negative-double-float` | `f64` | Den minsta storleken skild från noll, inklusive subnormala tal |
 | `least-positive-normalized-double-float` / `least-negative-normalized-double-float` | `f64` | Detsamma, begränsat till normaliserade tal |

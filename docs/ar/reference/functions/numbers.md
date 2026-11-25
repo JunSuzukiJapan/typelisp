@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/numbers.md @ e4290b2301ca3307be1903373bb46b8b2aea86cd -->
+<!-- translated-from: docs/ja/reference/functions/numbers.md @ 4da1b93779ddf5189b57a8cb0397636ee00f4b50 -->
 # الأعداد
 
 العمليات على الأعداد الصحيحة والأعداد ذات الفاصلة العائمة والأعداد الكسرية والمركبة والقيم المنطقية، ودوال
@@ -315,7 +315,7 @@
 
 | الاسم | النوع | الوصف |
 |---|---|---|
-| `most-positive-fixnum` / `most-negative-fixnum` | `int` | الحد الأعلى / الأدنى لقيمة فورية بـ 63 بتًا (2^62-1 / -2^62). و`int` الذي يتجاوزهما يصير bignum |
+| `most-positive-fixnum` / `most-negative-fixnum` | `int` | الحد الأعلى / الأدنى لقيمة فورية بـ 63 بتًا (2^62-1 / -2^62؛ وعلى wasm32 وCortex-M ‏31 بتًا، 2^30-1 / -2^30). و`int` الذي يتجاوزهما يصير bignum |
 | `most-positive-double-float` / `most-negative-double-float` | `f64` | أكبر / أصغر قيمة منتهية |
 | `least-positive-double-float` / `least-negative-double-float` | `f64` | أصغر مقدار غير صفري، بما في ذلك الأعداد دون الطبيعية (subnormal) |
 | `least-positive-normalized-double-float` / `least-negative-normalized-double-float` | `f64` | المثل، لكن مقيّدًا بالأعداد الطبيعية (normalized) |

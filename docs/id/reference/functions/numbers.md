@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/numbers.md @ e4290b2301ca3307be1903373bb46b8b2aea86cd -->
+<!-- translated-from: docs/ja/reference/functions/numbers.md @ 4da1b93779ddf5189b57a8cb0397636ee00f4b50 -->
 # Bilangan
 
 Operasi pada bilangan bulat, bilangan floating-point, rasional, bilangan kompleks, dan boolean, serta
@@ -334,7 +334,7 @@ Konstanta batas numerik (CLHS 12.1.4.2 / 12.1.3):
 
 | Nama | Tipe | Deskripsi |
 |---|---|---|
-| `most-positive-fixnum` / `most-negative-fixnum` | `int` | Batas atas / bawah nilai langsung 63 bit (2^62-1 / -2^62). `int` di luar batas itu menjadi bignum |
+| `most-positive-fixnum` / `most-negative-fixnum` | `int` | Batas atas / bawah nilai langsung 63 bit (2^62-1 / -2^62; di wasm32 dan Cortex-M 31 bit, 2^30-1 / -2^30). `int` di luar batas itu menjadi bignum |
 | `most-positive-double-float` / `most-negative-double-float` | `f64` | Nilai hingga terbesar / terkecil |
 | `least-positive-double-float` / `least-negative-double-float` | `f64` | Besaran bukan nol terkecil, termasuk subnormal |
 | `least-positive-normalized-double-float` / `least-negative-normalized-double-float` | `f64` | Sama, dibatasi pada bilangan ternormalisasi |

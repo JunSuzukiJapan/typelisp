@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/numbers.md @ e4290b2301ca3307be1903373bb46b8b2aea86cd -->
+<!-- translated-from: docs/ja/reference/functions/numbers.md @ 4da1b93779ddf5189b57a8cb0397636ee00f4b50 -->
 # Getallen
 
 Bewerkingen op gehele getallen, drijvendekommagetallen, rationale getallen, complexe getallen en
@@ -338,7 +338,7 @@ Constanten voor numerieke grenzen (CLHS 12.1.4.2 / 12.1.3):
 
 | Naam | Type | Beschrijving |
 |---|---|---|
-| `most-positive-fixnum` / `most-negative-fixnum` | `int` | De boven- / ondergrens van een directe waarde van 63 bits (2^62-1 / -2^62). Een `int` daarbuiten wordt een bignum |
+| `most-positive-fixnum` / `most-negative-fixnum` | `int` | De boven- / ondergrens van een directe waarde van 63 bits (2^62-1 / -2^62; op wasm32 en Cortex-M 31 bits, 2^30-1 / -2^30). Een `int` daarbuiten wordt een bignum |
 | `most-positive-double-float` / `most-negative-double-float` | `f64` | De grootste / kleinste eindige waarden |
 | `least-positive-double-float` / `least-negative-double-float` | `f64` | De kleinste grootte ongelijk aan nul, inclusief subnormale getallen |
 | `least-positive-normalized-double-float` / `least-negative-normalized-double-float` | `f64` | Hetzelfde, beperkt tot genormaliseerde getallen |

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/numbers.md @ e4290b2301ca3307be1903373bb46b8b2aea86cd -->
+<!-- translated-from: docs/ja/reference/functions/numbers.md @ 4da1b93779ddf5189b57a8cb0397636ee00f4b50 -->
 # ตัวเลข
 
 การดำเนินการกับจำนวนเต็ม จำนวนทศนิยม จำนวนตรรกยะ จำนวนเชิงซ้อน และบูลีน รวมถึงฟังก์ชันอื่นที่เกี่ยวกับ
@@ -324,7 +324,7 @@ struct (`defstruct`) ในไลบรารีมาตรฐาน
 
 | ชื่อ | ชนิด | คำอธิบาย |
 |---|---|---|
-| `most-positive-fixnum` / `most-negative-fixnum` | `int` | ขีดจำกัดบน / ล่างของค่า immediate 63 บิต (2^62-1 / -2^62) `int` ที่เกินนี้กลายเป็น bignum |
+| `most-positive-fixnum` / `most-negative-fixnum` | `int` | ขีดจำกัดบน / ล่างของค่า immediate 63 บิต (2^62-1 / -2^62 บน wasm32 และ Cortex-M เป็น 31 บิต คือ 2^30-1 / -2^30) `int` ที่เกินนี้กลายเป็น bignum |
 | `most-positive-double-float` / `most-negative-double-float` | `f64` | ค่าจำกัดที่ใหญ่ที่สุด / เล็กที่สุด |
 | `least-positive-double-float` / `least-negative-double-float` | `f64` | ขนาดที่ไม่เป็นศูนย์ที่เล็กที่สุด รวม subnormal |
 | `least-positive-normalized-double-float` / `least-negative-normalized-double-float` | `f64` | เหมือนกัน แต่จำกัดเฉพาะจำนวนที่ normalized |

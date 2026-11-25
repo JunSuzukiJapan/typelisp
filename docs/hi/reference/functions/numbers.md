@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/numbers.md @ e4290b2301ca3307be1903373bb46b8b2aea86cd -->
+<!-- translated-from: docs/ja/reference/functions/numbers.md @ 4da1b93779ddf5189b57a8cb0397636ee00f4b50 -->
 # संख्याएँ
 
 पूर्णांक, फ़्लोटिंग-पॉइंट संख्याओं, परिमेय संख्याओं, कॉम्प्लेक्स संख्याओं और बूलियन पर ऑपरेशन, और अन्य संख्या-संबंधित फ़ंक्शन। कॉल के रूप कैसे पढ़ें इसके लिए [बिल्ट-इन फ़ंक्शन](README.md) देखें।
@@ -274,7 +274,7 @@ CL के `numberp`/`integerp`/`floatp` जैसे **टाइप प्रे
 
 | नाम | टाइप | विवरण |
 |---|---|---|
-| `most-positive-fixnum` / `most-negative-fixnum` | `int` | 63-बिट तत्काल मान की ऊपरी / निचली सीमा (2^62-1 / -2^62)। उनसे आगे का `int` bignum बन जाता है |
+| `most-positive-fixnum` / `most-negative-fixnum` | `int` | 63-बिट तत्काल मान की ऊपरी / निचली सीमा (2^62-1 / -2^62; wasm32 और Cortex-M पर 31-बिट, 2^30-1 / -2^30)। उनसे आगे का `int` bignum बन जाता है |
 | `most-positive-double-float` / `most-negative-double-float` | `f64` | सबसे बड़ा / सबसे छोटा परिमित मान |
 | `least-positive-double-float` / `least-negative-double-float` | `f64` | उपसामान्य सहित सबसे छोटा गैर-शून्य परिमाण |
 | `least-positive-normalized-double-float` / `least-negative-normalized-double-float` | `f64` | वही, सामान्यीकृत संख्याओं तक सीमित |

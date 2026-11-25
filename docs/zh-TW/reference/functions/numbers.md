@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/numbers.md @ e4290b2301ca3307be1903373bb46b8b2aea86cd -->
+<!-- translated-from: docs/ja/reference/functions/numbers.md @ 4da1b93779ddf5189b57a8cb0397636ee00f4b50 -->
 # 數值
 
 整數、浮點數、有理數、複數、布林值的運算以及與數值相關的函式。呼叫形式的讀法見[內建函式](README.md)。
@@ -291,7 +291,7 @@ CL 的算術與比較是可變引數的，但方法只依接收者的型別解�
 
 | 名稱 | 型別 | 說明 |
 |---|---|---|
-| `most-positive-fixnum` / `most-negative-fixnum` | `int` | 63 位元立即值的上限／下限（2^62-1 / -2^62）。超過它們的 `int` 是多倍精度 |
+| `most-positive-fixnum` / `most-negative-fixnum` | `int` | 63 位元立即值的上限／下限（2^62-1 / -2^62；在 wasm32 和 Cortex-M 上是 31 位元，2^30-1 / -2^30）。超過它們的 `int` 是多倍精度 |
 | `most-positive-double-float` / `most-negative-double-float` | `f64` | 有限值中的最大／最小 |
 | `least-positive-double-float` / `least-negative-double-float` | `f64` | 包括非正規化數在內的非零最小絕對值 |
 | `least-positive-normalized-double-float` / `least-negative-normalized-double-float` | `f64` | 僅限正規化數的同一量 |

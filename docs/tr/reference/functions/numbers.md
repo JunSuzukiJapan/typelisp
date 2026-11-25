@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/numbers.md @ e4290b2301ca3307be1903373bb46b8b2aea86cd -->
+<!-- translated-from: docs/ja/reference/functions/numbers.md @ 4da1b93779ddf5189b57a8cb0397636ee00f4b50 -->
 # Sayılar
 
 Tamsayılar, kayan noktalı sayılar, rasyonel sayılar, karmaşık sayılar ve mantıksal değerler üzerindeki
@@ -332,7 +332,7 @@ Sayısal sınır sabitleri (CLHS 12.1.4.2 / 12.1.3):
 
 | Ad | Tür | Açıklama |
 |---|---|---|
-| `most-positive-fixnum` / `most-negative-fixnum` | `int` | 63 bitlik anlık değerin üst / alt sınırı (2^62-1 / -2^62). Bunları aşan bir `int` bignum olur |
+| `most-positive-fixnum` / `most-negative-fixnum` | `int` | 63 bitlik anlık değerin üst / alt sınırı (2^62-1 / -2^62; wasm32 ve Cortex-M üzerinde 31 bit, 2^30-1 / -2^30). Bunları aşan bir `int` bignum olur |
 | `most-positive-double-float` / `most-negative-double-float` | `f64` | En büyük / en küçük sonlu değerler |
 | `least-positive-double-float` / `least-negative-double-float` | `f64` | Alt normaller dahil en küçük sıfırdan farklı büyüklük |
 | `least-positive-normalized-double-float` / `least-negative-normalized-double-float` | `f64` | Aynısı, normalleştirilmiş sayılarla sınırlı |

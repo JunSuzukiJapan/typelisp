@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/numbers.md @ e4290b2301ca3307be1903373bb46b8b2aea86cd -->
+<!-- translated-from: docs/ja/reference/functions/numbers.md @ 4da1b93779ddf5189b57a8cb0397636ee00f4b50 -->
 # Numeri
 
 Operazioni su interi, numeri in virgola mobile, razionali, numeri complessi e booleani, e altre funzioni
@@ -333,7 +333,7 @@ Costanti dei limiti numerici (CLHS 12.1.4.2 / 12.1.3):
 
 | Nome | Tipo | Descrizione |
 |---|---|---|
-| `most-positive-fixnum` / `most-negative-fixnum` | `int` | Il limite superiore / inferiore di un valore immediato a 63 bit (2^62-1 / -2^62). Un `int` oltre di essi diventa un bignum |
+| `most-positive-fixnum` / `most-negative-fixnum` | `int` | Il limite superiore / inferiore di un valore immediato a 63 bit (2^62-1 / -2^62; 31 bit su wasm32 e Cortex-M, 2^30-1 / -2^30). Un `int` oltre di essi diventa un bignum |
 | `most-positive-double-float` / `most-negative-double-float` | `f64` | Il maggiore / minore valore finito |
 | `least-positive-double-float` / `least-negative-double-float` | `f64` | La più piccola grandezza non nulla, inclusi i subnormali |
 | `least-positive-normalized-double-float` / `least-negative-normalized-double-float` | `f64` | Lo stesso, limitato ai numeri normalizzati |

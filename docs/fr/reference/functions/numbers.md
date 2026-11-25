@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/numbers.md @ e4290b2301ca3307be1903373bb46b8b2aea86cd -->
+<!-- translated-from: docs/ja/reference/functions/numbers.md @ 4da1b93779ddf5189b57a8cb0397636ee00f4b50 -->
 # Nombres
 
 Les opérations sur les entiers, les nombres à virgule flottante, les rationnels, les nombres complexes et les
@@ -333,7 +333,7 @@ Constantes de limites numériques (CLHS 12.1.4.2 / 12.1.3) :
 
 | Nom | Type | Description |
 |---|---|---|
-| `most-positive-fixnum` / `most-negative-fixnum` | `int` | Les limites supérieure / inférieure d'une valeur immédiate sur 63 bits (2^62-1 / -2^62). Un `int` au-delà devient un bignum |
+| `most-positive-fixnum` / `most-negative-fixnum` | `int` | Les limites supérieure / inférieure d'une valeur immédiate sur 63 bits (2^62-1 / -2^62 ; 31 bits sur wasm32 et Cortex-M, 2^30-1 / -2^30). Un `int` au-delà devient un bignum |
 | `most-positive-double-float` / `most-negative-double-float` | `f64` | Les plus grande / plus petite valeurs finies |
 | `least-positive-double-float` / `least-negative-double-float` | `f64` | La plus petite grandeur non nulle, sous-normaux compris |
 | `least-positive-normalized-double-float` / `least-negative-normalized-double-float` | `f64` | Idem, limité aux nombres normalisés |

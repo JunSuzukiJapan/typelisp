@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/numbers.md @ e4290b2301ca3307be1903373bb46b8b2aea86cd -->
+<!-- translated-from: docs/ja/reference/functions/numbers.md @ 4da1b93779ddf5189b57a8cb0397636ee00f4b50 -->
 # Числа
 
 Операції над цілими числами, числами з рухомою комою, раціональними, комплексними числами та булевими
@@ -330,7 +330,7 @@
 
 | Назва | Тип | Опис |
 |---|---|---|
-| `most-positive-fixnum` / `most-negative-fixnum` | `int` | Верхня / нижня межа 63-бітного безпосереднього значення (2^62-1 / -2^62). `int` за ними стає bignum |
+| `most-positive-fixnum` / `most-negative-fixnum` | `int` | Верхня / нижня межа 63-бітного безпосереднього значення (2^62-1 / -2^62; на wasm32 і Cortex-M — 31 біт, 2^30-1 / -2^30). `int` за ними стає bignum |
 | `most-positive-double-float` / `most-negative-double-float` | `f64` | Найбільше / найменше скінченні значення |
 | `least-positive-double-float` / `least-negative-double-float` | `f64` | Найменша ненульова величина, включно з субнормальними |
 | `least-positive-normalized-double-float` / `least-negative-normalized-double-float` | `f64` | Те саме, обмежене нормалізованими числами |

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/numbers.md @ e4290b2301ca3307be1903373bb46b8b2aea86cd -->
+<!-- translated-from: docs/ja/reference/functions/numbers.md @ 4da1b93779ddf5189b57a8cb0397636ee00f4b50 -->
 # 수
 
 정수, 부동소수점 수, 유리수, 복소수, 진리값의 연산과 그 밖의 수 관련 함수. 호출 형식 읽는 법은
@@ -304,7 +304,7 @@ CL의 `numberp`/`integerp`/`floatp` 같은 **타입 술어는 없다**. 정적 �
 
 | 이름 | 타입 | 설명 |
 |---|---|---|
-| `most-positive-fixnum` / `most-negative-fixnum` | `int` | 63비트 즉시값의 상한 / 하한(2^62-1 / -2^62). 넘는 `int`는 다배정도가 된다 |
+| `most-positive-fixnum` / `most-negative-fixnum` | `int` | 63비트 즉시값의 상한 / 하한(2^62-1 / -2^62; wasm32와 Cortex-M에서는 31비트로 2^30-1 / -2^30). 넘는 `int`는 다배정도가 된다 |
 | `most-positive-double-float` / `most-negative-double-float` | `f64` | 가장 큰 / 가장 작은 유한값 |
 | `least-positive-double-float` / `least-negative-double-float` | `f64` | 비정규화 수를 포함한 0이 아닌 가장 작은 크기 |
 | `least-positive-normalized-double-float` / `least-negative-normalized-double-float` | `f64` | 같은 것을 정규화 수로 한정한 것 |

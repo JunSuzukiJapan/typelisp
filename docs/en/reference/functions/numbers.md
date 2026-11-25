@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/numbers.md @ e4290b2301ca3307be1903373bb46b8b2aea86cd -->
+<!-- translated-from: docs/ja/reference/functions/numbers.md @ 4da1b93779ddf5189b57a8cb0397636ee00f4b50 -->
 # Numbers
 
 Operations on integers, floating-point numbers, rationals, complex numbers and booleans, and other
@@ -333,7 +333,7 @@ Numeric limit constants (CLHS 12.1.4.2 / 12.1.3):
 
 | Name | Type | Description |
 |---|---|---|
-| `most-positive-fixnum` / `most-negative-fixnum` | `int` | The upper / lower limit of a 63-bit immediate value (2^62-1 / -2^62). An `int` beyond them becomes a bignum |
+| `most-positive-fixnum` / `most-negative-fixnum` | `int` | The upper / lower limit of a 63-bit immediate value (2^62-1 / -2^62; 31 bits, 2^30-1 / -2^30, on wasm32 and Cortex-M). An `int` beyond them becomes a bignum |
 | `most-positive-double-float` / `most-negative-double-float` | `f64` | The largest / smallest finite values |
 | `least-positive-double-float` / `least-negative-double-float` | `f64` | The smallest nonzero magnitude, including subnormals |
 | `least-positive-normalized-double-float` / `least-negative-normalized-double-float` | `f64` | The same, limited to normalized numbers |

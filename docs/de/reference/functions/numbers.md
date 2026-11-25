@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/numbers.md @ e4290b2301ca3307be1903373bb46b8b2aea86cd -->
+<!-- translated-from: docs/ja/reference/functions/numbers.md @ 4da1b93779ddf5189b57a8cb0397636ee00f4b50 -->
 # Zahlen
 
 Operationen auf Ganzzahlen, Gleitkommazahlen, rationalen Zahlen, komplexen Zahlen und Wahrheitswerten sowie
@@ -333,7 +333,7 @@ Konstanten für numerische Grenzen (CLHS 12.1.4.2 / 12.1.3):
 
 | Name | Typ | Beschreibung |
 |---|---|---|
-| `most-positive-fixnum` / `most-negative-fixnum` | `int` | Die obere / untere Grenze eines direkten 63-Bit-Wertes (2^62-1 / -2^62). Ein `int` darüber hinaus wird zur Bignum |
+| `most-positive-fixnum` / `most-negative-fixnum` | `int` | Die obere / untere Grenze eines direkten 63-Bit-Wertes (2^62-1 / -2^62; auf wasm32 und Cortex-M 31 Bit, 2^30-1 / -2^30). Ein `int` darüber hinaus wird zur Bignum |
 | `most-positive-double-float` / `most-negative-double-float` | `f64` | Der größte / kleinste endliche Wert |
 | `least-positive-double-float` / `least-negative-double-float` | `f64` | Der kleinste von null verschiedene Betrag, einschließlich subnormaler Zahlen |
 | `least-positive-normalized-double-float` / `least-negative-normalized-double-float` | `f64` | Dasselbe, beschränkt auf normalisierte Zahlen |

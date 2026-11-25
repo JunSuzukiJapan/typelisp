@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/numbers.md @ e4290b2301ca3307be1903373bb46b8b2aea86cd -->
+<!-- translated-from: docs/ja/reference/functions/numbers.md @ 4da1b93779ddf5189b57a8cb0397636ee00f4b50 -->
 # Số
 
 Các phép toán trên số nguyên, số dấu phẩy động, số hữu tỉ, số phức và boolean, cùng các hàm khác liên quan
@@ -323,7 +323,7 @@ Các hằng số giới hạn số (CLHS 12.1.4.2 / 12.1.3):
 
 | Tên | Kiểu | Mô tả |
 |---|---|---|
-| `most-positive-fixnum` / `most-negative-fixnum` | `int` | Giới hạn trên / dưới của một giá trị tức thời 63 bit (2^62-1 / -2^62). Một `int` vượt quá chúng trở thành bignum |
+| `most-positive-fixnum` / `most-negative-fixnum` | `int` | Giới hạn trên / dưới của một giá trị tức thời 63 bit (2^62-1 / -2^62; trên wasm32 và Cortex-M là 31 bit, 2^30-1 / -2^30). Một `int` vượt quá chúng trở thành bignum |
 | `most-positive-double-float` / `most-negative-double-float` | `f64` | Các giá trị hữu hạn lớn nhất / nhỏ nhất |
 | `least-positive-double-float` / `least-negative-double-float` | `f64` | Độ lớn khác không nhỏ nhất, gồm cả các số dưới chuẩn |
 | `least-positive-normalized-double-float` / `least-negative-normalized-double-float` | `f64` | Như trên, giới hạn ở các số chuẩn hóa |

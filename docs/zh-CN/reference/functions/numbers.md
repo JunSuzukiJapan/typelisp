@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/numbers.md @ e4290b2301ca3307be1903373bb46b8b2aea86cd -->
+<!-- translated-from: docs/ja/reference/functions/numbers.md @ 4da1b93779ddf5189b57a8cb0397636ee00f4b50 -->
 # 数值
 
 整数、浮点数、有理数、复数、布尔值的运算以及与数值相关的函数。调用形式的读法见[内置函数](README.md)。
@@ -295,7 +295,7 @@ CL 的算术和比较是可变参数的，但方法只按接收者的类型解�
 
 | 名称 | 类型 | 说明 |
 |---|---|---|
-| `most-positive-fixnum` / `most-negative-fixnum` | `int` | 63 位立即值的上限／下限（2^62-1 / -2^62）。超过它们的 `int` 是多精度 |
+| `most-positive-fixnum` / `most-negative-fixnum` | `int` | 63 位立即值的上限／下限（2^62-1 / -2^62；在 wasm32 和 Cortex-M 上是 31 位，2^30-1 / -2^30）。超过它们的 `int` 是多精度 |
 | `most-positive-double-float` / `most-negative-double-float` | `f64` | 有限值中的最大／最小 |
 | `least-positive-double-float` / `least-negative-double-float` | `f64` | 包括非规格化数在内的非零最小绝对值 |
 | `least-positive-normalized-double-float` / `least-negative-normalized-double-float` | `f64` | 仅限规格化数的同一量 |
