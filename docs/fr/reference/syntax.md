@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ dff3b51792f6d9c49bb8802bd3d3fb6e168edd92 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ ba21ba284539fe7ba86ea0a268b89d55a3e11b8b -->
 # Référence de la syntaxe de typelisp
 
 typelisp est un Lisp à typage statique, écrit en S-expressions. Pour la liste des fonctions et méthodes intégrées,
@@ -1820,6 +1820,8 @@ supérieur, etc.).
 (todo)                              ; s'expanse en (panic "todo"). defmacro
 (as Type expr)                      ; conversion de type numérique/caractère. les conversions qui peuvent échouer déclenchent alors un panic
 (try-as Type expr)                  ; comme as, mais renvoie le résultat sous forme d'Option<Type> (None en cas d'échec)
+(size-of Type)                      ; nombre d'octets d'une valeur de Type (int)
+(size-of-val expr)                  ; nombre d'octets d'une valeur du type de expr (int) ; expr n'est pas évalué
 (print control args...)             ; développe le format et écrit sur la sortie standard (sans saut de ligne)
 (println control args...)           ; idem (avec un saut de ligne à la fin)
 (format dest control args...)       ; le format de CL. renvoie la chaîne développée
@@ -1869,6 +1871,30 @@ appelé ensuite. C'est du sucre qui s'expanse vers les méthodes de conversion c
 
 Depuis `rational`, `as`/`try-as` convertissent vers `int` (`as` tronque, `try-as` ne réussit que pour
 un entier), `ratio` et `f64` ; depuis `int`/`ratio`, vers `rational`.
+
+`size-of`/`size-of-val` correspondent au `sizeof` de C. La réponse est une constante fixée à la compilation : la taille
+sur la cible où le code s'exécute :
+
+| Type | Octets |
+|---|---|
+| `i8` `u8` `bool` | 1 |
+| `i16` `u16` | 2 |
+| `i32` `u32` `f32` `char` | 4 |
+| `f64` | 8 |
+| `c-long` `c-ulong` | comme le `long` de C sur la cible |
+| `ptr` `(ptr T)` | comme un pointeur de la cible |
+| `def-c-struct` | comme la structure C (remplissage compris) |
+| `()` | 0 |
+| Tout le reste (`int`, `string`, un type `defstruct`, etc.) | un mot (comme un pointeur de la cible) : la valeur elle-même, ou l'endroit où elle se trouve |
+
+```lisp
+(size-of u16)                       ; => 2
+(size-of-val (as i8 5))             ; => 1
+(let ((x 1.0)) (size-of-val x))     ; => 8
+```
+
+On peut aussi écrire un paramètre de type d'une fonction générique ; il est fixé par le type de chaque appel. `!` n'a pas
+de valeur, c'est donc une erreur. Un type `def-c-struct` peut aussi s'écrire hors de `unsafe`.
 
 `documentation`, comme `quote`/`compile`, est une forme spéciale qui lit `name` sans l'évaluer, comme un symbole nu /
 chemin `::` non évalué. Contrairement au `(documentation 'name 'function)` de CL, elle ne prend pas d'argument de

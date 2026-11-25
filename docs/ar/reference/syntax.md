@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ dff3b51792f6d9c49bb8802bd3d3fb6e168edd92 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ ba21ba284539fe7ba86ea0a268b89d55a3e11b8b -->
 # مرجع صياغة typelisp
 
 typelisp لغة Lisp ذات أنواع ساكنة، تُكتب بتعبيرات رمزية (S-expressions). ولقائمة الدوال والتوابع المضمنة
@@ -1684,6 +1684,8 @@ Rust). ويمكن استدعاء القيمة لاحقًا من خارج `unsafe
 (todo)                              ; تتوسع إلى (panic "todo"). defmacro
 (as Type expr)                      ; تحويل نوع عددي/محرف. والتحويلات التي قد تفشل تحدث panic عند الفشل
 (try-as Type expr)                  ; مثل as، لكنها تعيد النتيجة Option<Type> (None عند الفشل)
+(size-of Type)                      ; عدد بايتات قيمة من النوع Type (int)
+(size-of-val expr)                  ; عدد بايتات قيمة من نوع expr (int)؛ ولا يُقيَّم expr
 (print control args...)             ; توسّع التنسيق وتكتب إلى الخرج القياسي (بلا سطر جديد)
 (println control args...)           ; المثل (مع سطر جديد في النهاية)
 (format dest control args...)       ; format في CL. تعيد السلسلة الموسَّعة
@@ -1728,6 +1730,29 @@ Rust). ويمكن استدعاء القيمة لاحقًا من خارج `unsafe
 
 من `rational` يحوّل `as`/`try-as` إلى `int` (`as` يقتطع، و`try-as` ينجح فقط مع العدد الصحيح) و`ratio`
 و`f64`؛ ومن `int`/`ratio` إلى `rational`.
+
+`size-of`/`size-of-val` هما مقابل `sizeof` في C. والجواب ثابت يتحدد وقت التصريف، وهو الحجم على الهدف الذي يعمل عليه الكود:
+
+| النوع | البايتات |
+|---|---|
+| `i8` `u8` `bool` | 1 |
+| `i16` `u16` | 2 |
+| `i32` `u32` `f32` `char` | 4 |
+| `f64` | 8 |
+| `c-long` `c-ulong` | مثل `long` في C على الهدف |
+| `ptr` `(ptr T)` | مثل مؤشر الهدف |
+| `def-c-struct` | مثل بنية C (مع الحشو) |
+| `()` | 0 |
+| كل ما عدا ذلك (`int` و`string` وأنواع `defstruct` وغيرها) | كلمة واحدة (مثل مؤشر الهدف): القيمة نفسها أو مكانها |
+
+```lisp
+(size-of u16)                       ; => 2
+(size-of-val (as i8 5))             ; => 1
+(let ((x 1.0)) (size-of-val x))     ; => 8
+```
+
+ويمكن أيضًا كتابة معامل نوع لدالة عامة، ويتحدد بالنوع في كل استدعاء. وليس لـ `!` قيمة، فهو خطأ. ويمكن كتابة نوع
+`def-c-struct` خارج `unsafe` أيضًا.
 
 مثل `quote`/`compile`، `documentation` صيغة خاصة تقرأ `name` دون تقييم، على أنه رمز مجرد غير مقيَّم / مسار
 `::`. وبخلاف `(documentation 'name 'function)` في CL فإنها لا تأخذ وسيط نوع: فهي تحلّ `name` بالترتيب متغير

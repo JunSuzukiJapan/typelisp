@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ dff3b51792f6d9c49bb8802bd3d3fb6e168edd92 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ ba21ba284539fe7ba86ea0a268b89d55a3e11b8b -->
 # typelisp Syntax Reference
 
 typelisp is a statically typed Lisp, written in S-expressions. For the list of built-in functions and
@@ -1800,6 +1800,8 @@ on).
 (todo)                              ; expands to (panic "todo"). defmacro
 (as Type expr)                      ; numeric/character type conversion. conversions that can fail panic on failure
 (try-as Type expr)                  ; like as, but returns the result as Option<Type> (None on failure)
+(size-of Type)                      ; the bytes a value of Type takes (int)
+(size-of-val expr)                  ; the bytes a value of expr's type takes (int); expr is not evaluated
 (print control args...)             ; expands the format and writes to standard output (no newline)
 (println control args...)           ; the same (with a newline at the end)
 (format dest control args...)       ; CL's format. returns the expanded string
@@ -1849,6 +1851,30 @@ succeeds. `float->int`/`ratio->int`/`char->int` land on `int`, and if a narrower
 
 From `rational`, `as`/`try-as` convert to `int` (`as` truncates, `try-as` succeeds only for an
 integer), `ratio` and `f64`; from `int`/`ratio`, to `rational`.
+
+`size-of`/`size-of-val` are what `sizeof` is in C. The answer is a constant decided at compile time, and is the size
+on the target the code runs on:
+
+| Type | Bytes |
+|---|---|
+| `i8` `u8` `bool` | 1 |
+| `i16` `u16` | 2 |
+| `i32` `u32` `f32` `char` | 4 |
+| `f64` | 8 |
+| `c-long` `c-ulong` | the same as the target's C `long` |
+| `ptr` `(ptr T)` | the same as a pointer of the target |
+| `def-c-struct` | the same as the C structure (padding included) |
+| `()` | 0 |
+| Everything else (`int`, `string`, a `defstruct` type and so on) | one word (the same as a pointer of the target): the value itself, or where the value is |
+
+```lisp
+(size-of u16)                       ; => 2
+(size-of-val (as i8 5))             ; => 1
+(let ((x 1.0)) (size-of-val x))     ; => 8
+```
+
+A type parameter of a generic function can be written too, and is decided by the type at each call. `!` has no value, so
+it is an error. A `def-c-struct` type can be written outside `unsafe` as well.
 
 `documentation`, like `quote`/`compile`, is a special form that reads `name` without evaluating it, as an
 unevaluated bare symbol / `::` path. Unlike CL's `(documentation 'name 'function)`, it takes no type

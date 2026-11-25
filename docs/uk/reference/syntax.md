@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ dff3b51792f6d9c49bb8802bd3d3fb6e168edd92 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ ba21ba284539fe7ba86ea0a268b89d55a3e11b8b -->
 # Довідник із синтаксису typelisp
 
 typelisp — це Лісп зі статичною типізацією, що записується S-виразами. Перелік вбудованих функцій і
@@ -1787,6 +1787,8 @@ CL пише слова-клаузи як голі символи (`(loop for i f
 (todo)                              ; expands to (panic "todo"). defmacro
 (as Type expr)                      ; numeric/character type conversion. conversions that can fail panic on failure
 (try-as Type expr)                  ; like as, but returns the result as Option<Type> (None on failure)
+(size-of Type)                      ; кількість байтів значення типу Type (int)
+(size-of-val expr)                  ; кількість байтів значення типу виразу expr (int); expr не обчислюється
 (print control args...)             ; expands the format and writes to standard output (no newline)
 (println control args...)           ; the same (with a newline at the end)
 (format dest control args...)       ; CL's format. returns the expanded string
@@ -1833,6 +1835,30 @@ CL пише слова-клаузи як голі символи (`(loop for i f
 
 З `rational` `as`/`try-as` перетворюють на `int` (`as` усікає, `try-as` успішний лише для цілого), на
 `ratio` і на `f64`; з `int`/`ratio` — на `rational`.
+
+`size-of`/`size-of-val` відповідають `sizeof` у C. Відповідь — константа, визначена під час компіляції: розмір на цільовій
+платформі, де працює код:
+
+| Тип | Байти |
+|---|---|
+| `i8` `u8` `bool` | 1 |
+| `i16` `u16` | 2 |
+| `i32` `u32` `f32` `char` | 4 |
+| `f64` | 8 |
+| `c-long` `c-ulong` | як `long` у C на цільовій платформі |
+| `ptr` `(ptr T)` | як вказівник цільової платформи |
+| `def-c-struct` | як структура C (разом із вирівнювальними байтами) |
+| `()` | 0 |
+| Усе інше (`int`, `string`, тип `defstruct` тощо) | одне слово (як вказівник цільової платформи): саме значення або місце, де воно розташоване |
+
+```lisp
+(size-of u16)                       ; => 2
+(size-of-val (as i8 5))             ; => 1
+(let ((x 1.0)) (size-of-val x))     ; => 8
+```
+
+Можна написати й параметр типу узагальненої функції; його визначає тип під час кожного виклику. `!` не має значення, тому
+це помилка. Тип `def-c-struct` можна писати й поза `unsafe`.
 
 `documentation`, як `quote`/`compile`, — це спеціальна форма, що читає `name` без обчислення, як
 необчислюваний голий символ / шлях `::`. На відміну від `(documentation 'name 'function)` з CL, вона не

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ dff3b51792f6d9c49bb8802bd3d3fb6e168edd92 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ ba21ba284539fe7ba86ea0a268b89d55a3e11b8b -->
 # typelisp 語法參考
 
 typelisp 是一種靜態型別的 Lisp，語法採用 S 運算式。內建函式與方法的一覽見[內建函式](functions/README.md)，型別一覽見 [types.md](types.md)，
@@ -1448,6 +1448,8 @@ CL 以裸符號書寫子句詞（`(loop for i from 1 to 3 collect i)`），但�
 (todo)                              ; 展開為 (panic "todo")。defmacro
 (as Type expr)                      ; 數值/字元的型別轉換。可能失敗的轉換失敗時 panic
 (try-as Type expr)                  ; 與 as 相同，但以 Option<Type> 回傳結果（失敗時為 None）
+(size-of Type)                      ; Type 的值的位元組數（int）
+(size-of-val expr)                  ; expr 的型別的值的位元組數（int）。不對 expr 求值
 (print control args...)             ; 展開格式寫到標準輸出（不換行）
 (println control args...)           ; 同上（最後換行）
 (format dest control args...)       ; CL 的 format。回傳展開結果的 string
@@ -1488,6 +1490,28 @@ CL 以裸符號書寫子句詞（`(loop for i from 1 to 3 collect i)`），但�
 
 從 `rational` 可以轉換為 `int`（`as` 截斷，`try-as` 僅在為整數時成功）、`ratio` 和 `f64`；從
 `int`/`ratio` 可以轉換為 `rational`。
+
+`size-of`/`size-of-val` 相當於 C 的 `sizeof`。答案是編譯時決定的常數，即程式碼執行的目標上的大小：
+
+| 型別 | 位元組數 |
+|---|---|
+| `i8` `u8` `bool` | 1 |
+| `i16` `u16` | 2 |
+| `i32` `u32` `f32` `char` | 4 |
+| `f64` | 8 |
+| `c-long` `c-ulong` | 與目標的 C `long` 相同 |
+| `ptr` `(ptr T)` | 與目標的指標相同 |
+| `def-c-struct` | 與 C 結構相同（含填補） |
+| `()` | 0 |
+| 其餘（`int`、`string`、`defstruct` 的型別等） | 一個字（與目標的指標相同）。是值本身，或表示值所在的位置 |
+
+```lisp
+(size-of u16)                       ; => 2
+(size-of-val (as i8 5))             ; => 1
+(let ((x 1.0)) (size-of-val x))     ; => 8
+```
+
+也可以寫泛型函式的型別參數，由每次呼叫的型別決定。`!` 沒有值，因此是錯誤。`def-c-struct` 的型別在 `unsafe` 之外也可以寫。
 
 `documentation` 與 `quote`/`compile` 一樣是不對 `name` 求值、以未求值的裸符號/`::` 路徑讀取的特殊形式。與 CL 的 `(documentation 'name 'function)`
 不同，不接受型別引數——依變數→函式→型別→trait→巨集的順序（與把裸識別字作為運算式求值時的優先順序相同）解析 `name`，回傳找到的定義的文件

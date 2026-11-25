@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ dff3b51792f6d9c49bb8802bd3d3fb6e168edd92 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ ba21ba284539fe7ba86ea0a268b89d55a3e11b8b -->
 # เอกสารอ้างอิงไวยากรณ์ typelisp
 
 typelisp เป็น Lisp ที่มีระบบชนิดแบบสถิต เขียนด้วย S-expression สำหรับรายการฟังก์ชันและเมทอดที่มีให้ในตัว
@@ -1705,6 +1705,8 @@ CL เขียนคำของอนุประโยคเป็นสั�
 (todo)                              ; expands to (panic "todo"). defmacro
 (as Type expr)                      ; numeric/character type conversion. conversions that can fail panic on failure
 (try-as Type expr)                  ; like as, but returns the result as Option<Type> (None on failure)
+(size-of Type)                      ; จำนวนไบต์ของค่าชนิด Type (int)
+(size-of-val expr)                  ; จำนวนไบต์ของค่าตามชนิดของ expr (int) โดยไม่ประเมินค่า expr
 (print control args...)             ; expands the format and writes to standard output (no newline)
 (println control args...)           ; the same (with a newline at the end)
 (format dest control args...)       ; CL's format. returns the expanded string
@@ -1751,6 +1753,29 @@ CL เขียนคำของอนุประโยคเป็นสั�
 
 จาก `rational` แปลงเป็น `int` (`as` ตัดทิ้ง `try-as` สำเร็จเฉพาะเมื่อเป็นจำนวนเต็ม) `ratio` และ `f64` ได้
 และจาก `int`/`ratio` แปลงเป็น `rational` ได้
+
+`size-of`/`size-of-val` เทียบได้กับ `sizeof` ของ C คำตอบเป็นค่าคงที่ที่กำหนดตอนคอมไพล์ คือขนาดบนเป้าหมายที่โค้ดทำงาน:
+
+| ชนิด | จำนวนไบต์ |
+|---|---|
+| `i8` `u8` `bool` | 1 |
+| `i16` `u16` | 2 |
+| `i32` `u32` `f32` `char` | 4 |
+| `f64` | 8 |
+| `c-long` `c-ulong` | เท่ากับ `long` ของ C บนเป้าหมาย |
+| `ptr` `(ptr T)` | เท่ากับพอยน์เตอร์ของเป้าหมาย |
+| `def-c-struct` | เท่ากับโครงสร้างของ C (รวมไบต์เติม) |
+| `()` | 0 |
+| ชนิดอื่นทั้งหมด (`int`, `string`, ชนิดของ `defstruct` เป็นต้น) | หนึ่งเวิร์ด (เท่ากับพอยน์เตอร์ของเป้าหมาย) คือตัวค่าเอง หรือตำแหน่งของค่า |
+
+```lisp
+(size-of u16)                       ; => 2
+(size-of-val (as i8 5))             ; => 1
+(let ((x 1.0)) (size-of-val x))     ; => 8
+```
+
+เขียนพารามิเตอร์ชนิดของฟังก์ชันเจเนริกได้ด้วย โดยกำหนดตามชนิดของการเรียกแต่ละครั้ง `!` ไม่มีค่าจึงเป็นข้อผิดพลาด
+ชนิดของ `def-c-struct` เขียนนอก `unsafe` ได้ด้วย
 
 `documentation` เหมือน `quote`/`compile` เป็นฟอร์มพิเศษที่อ่าน `name` โดยไม่ประเมินค่า เป็น
 สัญลักษณ์เปล่าที่ไม่ถูกประเมินค่า / พาธ `::` ต่างจาก `(documentation 'name 'function)` ของ CL ตรงที่ไม่รับอาร์กิวเมนต์

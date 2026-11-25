@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ dff3b51792f6d9c49bb8802bd3d3fb6e168edd92 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ ba21ba284539fe7ba86ea0a268b89d55a3e11b8b -->
 # typelisp 문법 레퍼런스
 
 typelisp는 S 식으로 쓰는 정적 타입 Lisp이다. 내장 함수와 메서드의 목록은 [내장 함수](functions/README.md), 타입 목록은
@@ -1577,6 +1577,8 @@ CL의 이름 없는 `loop`는 `block nil`을 세우지만, 여기에는 `nil`이
 (todo)                              ; (panic "todo")로 전개된다. defmacro
 (as Type expr)                      ; 수/문자의 타입 변환. 실패할 수 있는 변환은 실패하면 panic
 (try-as Type expr)                  ; as와 같지만 결과를 Option<Type>으로 반환한다(실패하면 None)
+(size-of Type)                      ; Type 값의 바이트 수(int)
+(size-of-val expr)                  ; expr의 타입 값의 바이트 수(int). expr은 평가하지 않는다
 (print control args...)             ; 서식을 전개해 표준 출력에 쓴다(줄바꿈 없음)
 (println control args...)           ; 같다(끝에 줄바꿈)
 (format dest control args...)       ; CL의 format. 전개한 string을 반환한다
@@ -1619,6 +1621,29 @@ CL의 이름 없는 `loop`는 `block nil`을 세우지만, 여기에는 `nil`이
 
 `rational`에서는 `int`(`as`는 버림, `try-as`는 정수일 때만 성공)·`ratio`·`f64`로, `int`/`ratio`에서는
 `rational`로 변환할 수 있다.
+
+`size-of`/`size-of-val`은 C의 `sizeof`에 해당한다. 답은 컴파일 시에 정해지는 상수이며, 코드가 동작하는 타깃에서의 크기이다:
+
+| 타입 | 바이트 수 |
+|---|---|
+| `i8` `u8` `bool` | 1 |
+| `i16` `u16` | 2 |
+| `i32` `u32` `f32` `char` | 4 |
+| `f64` | 8 |
+| `c-long` `c-ulong` | 타깃의 C `long`과 같음 |
+| `ptr` `(ptr T)` | 타깃의 포인터와 같음 |
+| `def-c-struct` | C 구조체와 같음(패딩 포함) |
+| `()` | 0 |
+| 그 밖의 것(`int`, `string`, `defstruct`의 타입 등) | 워드 하나(타깃의 포인터와 같음). 값 자체이거나 값이 있는 곳을 나타낸다 |
+
+```lisp
+(size-of u16)                       ; => 2
+(size-of-val (as i8 5))             ; => 1
+(let ((x 1.0)) (size-of-val x))     ; => 8
+```
+
+제네릭 함수의 타입 매개변수도 쓸 수 있으며, 호출마다의 타입으로 정해진다. `!`에는 값이 없으므로 에러이다.
+`def-c-struct`의 타입은 `unsafe` 밖에서도 쓸 수 있다.
 
 `documentation`은 `quote`/`compile`처럼 `name`을 평가하지 않고 평가되지 않은 맨 심볼 / `::` 경로로 읽는 특수 형식이다. CL의
 `(documentation 'name 'function)`과 달리 타입 인수를 받지 않는다. `name`을 변수 → 함수 → 타입 → 트레이트 → 매크로 순서로

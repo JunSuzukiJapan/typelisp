@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ dff3b51792f6d9c49bb8802bd3d3fb6e168edd92 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ ba21ba284539fe7ba86ea0a268b89d55a3e11b8b -->
 # Tham chiếu cú pháp typelisp
 
 typelisp là một ngôn ngữ Lisp có kiểu tĩnh, được viết bằng S-expression. Về danh sách các hàm và phương thức
@@ -1753,6 +1753,8 @@ Các hàm có tên cũng có thể được truyền như giá trị nguyên tr�
 (todo)                              ; khai triển thành (panic "todo"). defmacro
 (as Type expr)                      ; chuyển đổi kiểu số/ký tự. các chuyển đổi có thể thất bại thì panic khi thất bại
 (try-as Type expr)                  ; như as, nhưng trả về kết quả dưới dạng Option<Type> (None khi thất bại)
+(size-of Type)                      ; số byte của một giá trị kiểu Type (int)
+(size-of-val expr)                  ; số byte của một giá trị thuộc kiểu của expr (int); expr không được tính
 (print control args...)             ; khai triển định dạng và ghi ra đầu ra chuẩn (không có dòng mới)
 (println control args...)           ; giống vậy (với một dòng mới ở cuối)
 (format dest control args...)       ; format của CL. trả về chuỗi đã khai triển
@@ -1801,6 +1803,30 @@ trong [Số](functions/numbers.md)).
 
 Từ `rational`, `as`/`try-as` chuyển sang `int` (`as` cắt bớt, `try-as` chỉ thành công với số nguyên),
 `ratio` và `f64`; từ `int`/`ratio` sang `rational`.
+
+`size-of`/`size-of-val` tương ứng với `sizeof` của C. Câu trả lời là một hằng số được quyết định khi biên dịch: kích thước
+trên đích mà mã chạy:
+
+| Kiểu | Số byte |
+|---|---|
+| `i8` `u8` `bool` | 1 |
+| `i16` `u16` | 2 |
+| `i32` `u32` `f32` `char` | 4 |
+| `f64` | 8 |
+| `c-long` `c-ulong` | bằng `long` của C trên đích |
+| `ptr` `(ptr T)` | bằng con trỏ của đích |
+| `def-c-struct` | bằng cấu trúc C (kể cả phần đệm) |
+| `()` | 0 |
+| Mọi kiểu khác (`int`, `string`, kiểu `defstruct`, v.v.) | một từ (bằng con trỏ của đích): chính giá trị, hoặc nơi chứa giá trị |
+
+```lisp
+(size-of u16)                       ; => 2
+(size-of-val (as i8 5))             ; => 1
+(let ((x 1.0)) (size-of-val x))     ; => 8
+```
+
+Cũng có thể viết tham số kiểu của một hàm tổng quát; nó được quyết định theo kiểu ở mỗi lời gọi. `!` không có giá trị nên
+là lỗi. Kiểu `def-c-struct` cũng có thể viết bên ngoài `unsafe`.
 
 `documentation`, như `quote`/`compile`, là một dạng đặc biệt đọc `name` mà không đánh giá, như một symbol trần /
 đường dẫn `::` không được đánh giá. Khác `(documentation 'name 'function)` của CL, nó không nhận đối số kiểu: nó

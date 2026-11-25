@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ dff3b51792f6d9c49bb8802bd3d3fb6e168edd92 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ ba21ba284539fe7ba86ea0a268b89d55a3e11b8b -->
 # typelisp-syntaxisreferentie
 
 typelisp is een statisch getypeerde Lisp, geschreven in S-expressies. Voor de lijst met ingebouwde
@@ -1864,6 +1864,8 @@ hogere orde enzovoort).
 (todo)                              ; expands to (panic "todo"). defmacro
 (as Type expr)                      ; numeric/character type conversion. conversions that can fail panic on failure
 (try-as Type expr)                  ; like as, but returns the result as Option<Type> (None on failure)
+(size-of Type)                      ; aantal bytes van een waarde van Type (int)
+(size-of-val expr)                  ; aantal bytes van een waarde van het type van expr (int); expr wordt niet geëvalueerd
 (print control args...)             ; expands the format and writes to standard output (no newline)
 (println control args...)           ; the same (with a newline at the end)
 (format dest control args...)       ; CL's format. returns the expanded string
@@ -1915,6 +1917,30 @@ overeenkomstige conversiemethoden expandeert (`int->char`/`int->int`/`int->W` en
 
 Vanuit `rational` converteren `as`/`try-as` naar `int` (`as` kapt af, `try-as` slaagt alleen voor een
 geheel getal), `ratio` en `f64`; vanuit `int`/`ratio` naar `rational`.
+
+`size-of`/`size-of-val` zijn wat `sizeof` in C is. Het antwoord is een constante die bij het compileren vaststaat: de
+grootte op het doel waarop de code draait:
+
+| Type | Bytes |
+|---|---|
+| `i8` `u8` `bool` | 1 |
+| `i16` `u16` | 2 |
+| `i32` `u32` `f32` `char` | 4 |
+| `f64` | 8 |
+| `c-long` `c-ulong` | gelijk aan `long` in C op het doel |
+| `ptr` `(ptr T)` | gelijk aan een pointer van het doel |
+| `def-c-struct` | gelijk aan de C-structuur (opvulling inbegrepen) |
+| `()` | 0 |
+| Al het andere (`int`, `string`, een `defstruct`-type enz.) | één woord (gelijk aan een pointer van het doel): de waarde zelf, of de plaats van de waarde |
+
+```lisp
+(size-of u16)                       ; => 2
+(size-of-val (as i8 5))             ; => 1
+(let ((x 1.0)) (size-of-val x))     ; => 8
+```
+
+Een typeparameter van een generieke functie mag ook; het type bij elke aanroep beslist. `!` heeft geen waarde en is
+daarom een fout. Een `def-c-struct`-type mag ook buiten `unsafe` worden geschreven.
 
 `documentation` is, net als `quote`/`compile`, een speciale vorm die `name` zonder evaluatie leest, als een
 ongeëvalueerd kaal symbool / `::`-pad. Anders dan `(documentation 'name 'function)` van CL neemt het geen

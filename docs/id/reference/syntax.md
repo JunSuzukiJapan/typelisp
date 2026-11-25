@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ dff3b51792f6d9c49bb8802bd3d3fb6e168edd92 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ ba21ba284539fe7ba86ea0a268b89d55a3e11b8b -->
 # Referensi Sintaks typelisp
 
 typelisp adalah Lisp dengan tipe statis, ditulis dalam S-expression. Untuk daftar fungsi bawaan dan
@@ -1858,6 +1858,8 @@ dan sebagainya).
 (todo)                              ; expands to (panic "todo"). defmacro
 (as Type expr)                      ; numeric/character type conversion. conversions that can fail panic on failure
 (try-as Type expr)                  ; like as, but returns the result as Option<Type> (None on failure)
+(size-of Type)                      ; jumlah byte sebuah nilai Type (int)
+(size-of-val expr)                  ; jumlah byte sebuah nilai bertipe expr (int); expr tidak dievaluasi
 (print control args...)             ; expands the format and writes to standard output (no newline)
 (println control args...)           ; the same (with a newline at the end)
 (format dest control args...)       ; CL's format. returns the expanded string
@@ -1909,6 +1911,30 @@ setelahnya. Ini adalah gula sintaks yang diekspansi menjadi metode konversi yang
 
 Dari `rational`, `as`/`try-as` mengonversi ke `int` (`as` memotong, `try-as` hanya berhasil untuk
 bilangan bulat), `ratio`, dan `f64`; dari `int`/`ratio` ke `rational`.
+
+`size-of`/`size-of-val` sepadan dengan `sizeof` di C. Jawabannya adalah konstanta yang ditentukan saat kompilasi: ukuran
+pada target tempat kode berjalan:
+
+| Tipe | Byte |
+|---|---|
+| `i8` `u8` `bool` | 1 |
+| `i16` `u16` | 2 |
+| `i32` `u32` `f32` `char` | 4 |
+| `f64` | 8 |
+| `c-long` `c-ulong` | sama dengan `long` C pada target |
+| `ptr` `(ptr T)` | sama dengan pointer target |
+| `def-c-struct` | sama dengan struktur C (termasuk padding) |
+| `()` | 0 |
+| Selebihnya (`int`, `string`, tipe `defstruct`, dan sebagainya) | satu kata (sama dengan pointer target): nilai itu sendiri, atau tempat nilai itu berada |
+
+```lisp
+(size-of u16)                       ; => 2
+(size-of-val (as i8 5))             ; => 1
+(let ((x 1.0)) (size-of-val x))     ; => 8
+```
+
+Parameter tipe sebuah fungsi generik juga boleh ditulis; tipenya ditentukan pada setiap pemanggilan. `!` tidak punya nilai,
+jadi merupakan galat. Tipe `def-c-struct` juga boleh ditulis di luar `unsafe`.
 
 `documentation`, seperti `quote`/`compile`, adalah bentuk khusus yang membaca `name` tanpa
 mengevaluasinya, sebagai simbol polos / path `::` yang tidak dievaluasi. Tidak seperti

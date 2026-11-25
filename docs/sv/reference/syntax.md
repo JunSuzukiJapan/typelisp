@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ dff3b51792f6d9c49bb8802bd3d3fb6e168edd92 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ ba21ba284539fe7ba86ea0a268b89d55a3e11b8b -->
 # Syntaxreferens för typelisp
 
 typelisp är ett statiskt typat Lisp, skrivet med S-uttryck. För listan över inbyggda funktioner och
@@ -1798,6 +1798,8 @@ och så vidare).
 (todo)                              ; expanderar till (panic "todo"). defmacro
 (as Type expr)                      ; tal-/teckentypkonvertering. konverteringar som kan misslyckas ger panic vid misslyckande
 (try-as Type expr)                  ; som as, men returnerar resultatet som Option<Type> (None vid misslyckande)
+(size-of Type)                      ; antal byte för ett värde av Type (int)
+(size-of-val expr)                  ; antal byte för ett värde av expr:s typ (int); expr utvärderas inte
 (print control args...)             ; expanderar formatet och skriver till standard ut (inget radbyte)
 (println control args...)           ; samma (med ett radbyte på slutet)
 (format dest control args...)       ; CL:s format. returnerar den expanderade strängen
@@ -1844,6 +1846,30 @@ konverteringsmetoder (`int->char`/`int->int`/`int->W` och så vidare i [Tal](fun
 
 Från `rational` konverterar `as`/`try-as` till `int` (`as` avkortar, `try-as` lyckas bara för ett
 heltal), `ratio` och `f64`; från `int`/`ratio` till `rational`.
+
+`size-of`/`size-of-val` motsvarar `sizeof` i C. Svaret är en konstant som bestäms vid kompileringen: storleken på målet
+där koden körs:
+
+| Typ | Byte |
+|---|---|
+| `i8` `u8` `bool` | 1 |
+| `i16` `u16` | 2 |
+| `i32` `u32` `f32` `char` | 4 |
+| `f64` | 8 |
+| `c-long` `c-ulong` | samma som `long` i C på målet |
+| `ptr` `(ptr T)` | samma som en pekare på målet |
+| `def-c-struct` | samma som C-strukturen (inklusive utfyllnad) |
+| `()` | 0 |
+| Allt annat (`int`, `string`, en `defstruct`-typ osv.) | ett ord (samma som en pekare på målet): själva värdet, eller platsen där det finns |
+
+```lisp
+(size-of u16)                       ; => 2
+(size-of-val (as i8 5))             ; => 1
+(let ((x 1.0)) (size-of-val x))     ; => 8
+```
+
+Även en typparameter i en generisk funktion kan skrivas; typen vid varje anrop avgör. `!` har inget värde, så det är ett
+fel. En `def-c-struct`-typ kan skrivas även utanför `unsafe`.
 
 `documentation` är, liksom `quote`/`compile`, en specialform som läser `name` utan att utvärdera den, som
 en onekvaliserad bar symbol / `::`-sökväg. Till skillnad från CL:s `(documentation 'name 'function)` tar den

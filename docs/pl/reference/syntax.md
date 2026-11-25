@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ dff3b51792f6d9c49bb8802bd3d3fb6e168edd92 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ ba21ba284539fe7ba86ea0a268b89d55a3e11b8b -->
 # Referencja składni typelisp
 
 typelisp to statycznie typowany Lisp zapisywany w S-wyrażeniach. Listę funkcji wbudowanych i
@@ -1797,6 +1797,8 @@ dalej).
 (todo)                              ; rozwija się do (panic "todo"). defmacro
 (as Type expr)                      ; konwersja typu liczbowego/znakowego. konwersje, które mogą się nie powieść, powodują panic przy porażce
 (try-as Type expr)                  ; jak as, ale zwraca wynik jako Option<Type> (None przy porażce)
+(size-of Type)                      ; liczba bajtów wartości typu Type (int)
+(size-of-val expr)                  ; liczba bajtów wartości typu wyrażenia expr (int); expr nie jest obliczane
 (print control args...)             ; rozwija format i zapisuje na standardowe wyjście (bez nowej linii)
 (println control args...)           ; to samo (z nową linią na końcu)
 (format dest control args...)       ; format z CL. zwraca rozwinięty łańcuch
@@ -1844,6 +1846,30 @@ po nich wywoływane jest `int->W`. Jest to lukier rozwijający się do odpowiedn
 
 Z `rational` `as`/`try-as` konwertują do `int` (`as` obcina, `try-as` udaje się tylko dla liczby
 całkowitej), `ratio` i `f64`; z `int`/`ratio` do `rational`.
+
+`size-of`/`size-of-val` odpowiadają `sizeof` z C. Odpowiedź jest stałą ustalaną przy kompilacji: to rozmiar na platformie
+docelowej, na której działa kod:
+
+| Typ | Bajty |
+|---|---|
+| `i8` `u8` `bool` | 1 |
+| `i16` `u16` | 2 |
+| `i32` `u32` `f32` `char` | 4 |
+| `f64` | 8 |
+| `c-long` `c-ulong` | tyle co `long` w C na platformie docelowej |
+| `ptr` `(ptr T)` | tyle co wskaźnik platformy docelowej |
+| `def-c-struct` | tyle co struktura C (z wypełnieniem) |
+| `()` | 0 |
+| Wszystko inne (`int`, `string`, typ `defstruct` itd.) | jedno słowo (tyle co wskaźnik platformy docelowej): sama wartość albo miejsce, w którym się znajduje |
+
+```lisp
+(size-of u16)                       ; => 2
+(size-of-val (as i8 5))             ; => 1
+(let ((x 1.0)) (size-of-val x))     ; => 8
+```
+
+Można też napisać parametr typu funkcji generycznej; ustala go typ przy każdym wywołaniu. `!` nie ma wartości, więc jest
+błędem. Typ `def-c-struct` można napisać także poza `unsafe`.
 
 `documentation`, jak `quote`/`compile`, jest formą specjalną, która czyta `name` bez obliczania, jako
 nieobliczony goły symbol / ścieżkę `::`. W przeciwieństwie do `(documentation 'name 'function)` z CL nie przyjmuje argumentu

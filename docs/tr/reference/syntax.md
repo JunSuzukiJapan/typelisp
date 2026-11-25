@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ dff3b51792f6d9c49bb8802bd3d3fb6e168edd92 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ ba21ba284539fe7ba86ea0a268b89d55a3e11b8b -->
 # typelisp Sözdizimi Başvurusu
 
 typelisp, S-ifadelerle yazılan, statik tür denetimli bir Lisp'tir. Yerleşik fonksiyonların ve metotların
@@ -1795,6 +1795,8 @@ bağımsız değişken olarak vb.).
 (todo)                              ; expands to (panic "todo"). defmacro
 (as Type expr)                      ; numeric/character type conversion. conversions that can fail panic on failure
 (try-as Type expr)                  ; like as, but returns the result as Option<Type> (None on failure)
+(size-of Type)                      ; Type türünden bir değerin bayt sayısı (int)
+(size-of-val expr)                  ; expr'nin türünden bir değerin bayt sayısı (int); expr değerlendirilmez
 (print control args...)             ; expands the format and writes to standard output (no newline)
 (println control args...)           ; the same (with a newline at the end)
 (format dest control args...)       ; CL's format. returns the expanded string
@@ -1844,6 +1846,30 @@ dönüşüm metotlarına açılan bir şekerdir ([Sayılar](functions/numbers.md
 
 `rational`'dan `as`/`try-as`, `int`'e (`as` kırpar, `try-as` yalnızca tam sayıda başarılı olur), `ratio`'ya
 ve `f64`'e dönüştürür; `int`/`ratio`'dan `rational`'a dönüştürür.
+
+`size-of`/`size-of-val`, C'deki `sizeof`'un karşılığıdır. Yanıt, derleme sırasında belirlenen bir sabittir: kodun
+çalıştığı hedefteki boyuttur:
+
+| Tür | Bayt |
+|---|---|
+| `i8` `u8` `bool` | 1 |
+| `i16` `u16` | 2 |
+| `i32` `u32` `f32` `char` | 4 |
+| `f64` | 8 |
+| `c-long` `c-ulong` | hedefteki C `long` ile aynı |
+| `ptr` `(ptr T)` | hedefin işaretçisiyle aynı |
+| `def-c-struct` | C yapısıyla aynı (dolgu dahil) |
+| `()` | 0 |
+| Diğer her şey (`int`, `string`, bir `defstruct` türü vb.) | bir sözcük (hedefin işaretçisiyle aynı): değerin kendisi ya da değerin bulunduğu yer |
+
+```lisp
+(size-of u16)                       ; => 2
+(size-of-val (as i8 5))             ; => 1
+(let ((x 1.0)) (size-of-val x))     ; => 8
+```
+
+Jenerik bir fonksiyonun tür parametresi de yazılabilir; her çağrıdaki türle belirlenir. `!` türünün değeri yoktur, bu
+yüzden hatadır. Bir `def-c-struct` türü `unsafe` dışında da yazılabilir.
 
 `documentation`, `quote`/`compile` gibi, `name`'i değerlendirmeden, değerlendirilmemiş çıplak bir sembol /
 `::` yolu olarak okuyan bir özel formdur. CL'nin `(documentation 'name 'function)`'ından farklı olarak bir
