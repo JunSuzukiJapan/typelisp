@@ -2174,9 +2174,11 @@ fn translate_labels(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Erro
     };
     f.push(defs_out);
 
-    // The trailing body binds no parameters of its own, but a `let` inside it
-    // can still be captured by something nested further in.
-    let mut trailing_cells = captured_cells.clone();
+    // The trailing body is the enclosing function's: what is a cell there is
+    // one here, whether or not a def of this block captures it. It binds no
+    // parameters of its own, but a `let` inside it can still be captured by
+    // something nested further in.
+    let mut trailing_cells = captured_cells.union(cx.cell_names).copied().collect::<HashSet<SymRef>>();
     trailing_cells.extend(names_captured_by_nested(f.heap(), &body)?);
     let trailing = Ctx { cell_names: &trailing_cells, ..base };
     let body_v = body_form(f.heap(), &body, trailing)?;

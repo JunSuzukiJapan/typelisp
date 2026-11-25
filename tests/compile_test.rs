@@ -7,6 +7,7 @@
 //! exercises `HashTable<K,V>`.
 
 extern crate typelisp;
+mod common;
 use typelisp::compile::orc::JitCode;
 use inkwell::module::Module;
 use std::cell::RefCell;
@@ -7129,3 +7130,18 @@ fn a_compiled_recursion_runs_two_hundred_thousand_frames_deep() {
     assert_eq!(stack.depth(), 0, "and every frame was popped");
 }
 
+
+/// A variable a `lambda` captures is in a cell, and what a `labels` block's
+/// body hands one of its functions is what the cell holds — also when no
+/// function of the block captures it.
+#[test]
+fn a_captured_variable_is_handed_to_a_labels_function() {
+    let src = r#"
+        (defun f ((v string)) string
+          (let ((k (lambda () string v)))
+            (append (k) (labels ((inner ((x string)) string x)) (inner v)))))
+        (compile f)
+        (f "ab")
+    "#;
+    assert_eq!(common::eval_string_compiled(src), "abab");
+}
