@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ c4e9ddb5a894a69547e3fb5c7aa3d030e8a82821 -->
+<!-- translated-from: docs/ja/guide/compile.md @ 3a77c293e452d2d74bccfa67efd8af1f6f650f7d -->
 # Compilation
 
 Sauf indication contraire, les programmes typelisp s'exécutent dans l'interpréteur. Il existe en outre deux façons
@@ -302,9 +302,9 @@ $ qemu-system-arm -M mps2-an505 -nographic \
 Avec `--target avr-atmega328p`, on crée un exécutable (ELF) pour le microcontrôleur de l'Arduino Uno (ATmega328P). Le programme suivant fait clignoter la LED de la carte.
 
 ```lisp
-(define-symbol-macro PINB #x23)
-(define-symbol-macro DDRB #x24)
-(define-symbol-macro LED (the u8 32))             ; PB5
+(defconstant (PINB int) #x23)
+(defconstant (DDRB int) #x24)
+(defconstant (LED u8) 32)                         ; PB5
 
 (defun wait-a-bit () ()
   (let ((i (the u32 0)))
@@ -325,8 +325,8 @@ $ typl -c blink.typl --target avr-atmega328p -O2   # crée blink.elf
 $ qemu-system-avr -M uno -display none -serial stdio -bios blink.elf   # exécuter dans QEMU
 ```
 
-- Il n'y a pas de runtime : un programme qui l'utilise est une **erreur de compilation**. L'erreur indique ce qui est nécessaire et par quelles fonctions on y arrive. On peut utiliser : les calculs sur les entiers de largeur fixe (de `i8` à `u32`), `bool` et `char`, les appels de fonctions, les conditions, les boucles, ainsi que `volatile-read-u8` et les autres avec l'adresse écrite comme un nombre.
-- On ne peut pas utiliser : les valeurs placées dans le tas, comme les chaînes, les listes et les structures ; les calculs sur `int` ; `defvar` et `defconstant` (pour une constante nommée, utilisez `define-symbol-macro`) ; la récursion, `catch` et les appels de valeurs de fonction ; les appels de fonctions C ; les gestionnaires d'interruption ; la division par une variable (la division par un nombre est utilisable) ; les accès `volatile` dont l'adresse est calculée.
+- Il n'y a pas de runtime : un programme qui l'utilise est une **erreur de compilation**. L'erreur indique ce qui est nécessaire et par quelles fonctions on y arrive. On peut utiliser : les calculs sur les entiers de largeur fixe (de `i8` à `u32`), `bool` et `char`, les appels de fonctions, les conditions, les boucles, `defvar` et `defconstant` contenant ces valeurs, ainsi que `volatile-read-u8` et les autres avec l'adresse écrite comme un nombre ou une constante.
+- On ne peut pas utiliser : les valeurs placées dans le tas, comme les chaînes, les listes et les structures ; les calculs sur `int` ; la récursion, `catch` et les appels de valeurs de fonction ; les appels de fonctions C ; les gestionnaires d'interruption ; la division par une variable (la division par un nombre est utilisable) ; les accès `volatile` dont l'adresse est calculée.
 - Une boucle qui ne fait rien disparaît à partir de `-O1`. Dans une boucle d'attente, lisez par exemple un registre.
 - Quand `main` se termine, le microcontrôleur s'arrête.
 - `--linker-script FILE` change la disposition de la mémoire. Sans cette option, ce sont 32 Kio de flash moins les 512 derniers octets, ceux du chargeur d'amorçage, et 2 Kio de RAM. Les adresses de RAM s'écrivent en ajoutant `0x800000`, comme `0x800100`.

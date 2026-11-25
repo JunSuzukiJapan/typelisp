@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ c4e9ddb5a894a69547e3fb5c7aa3d030e8a82821 -->
+<!-- translated-from: docs/ja/guide/compile.md @ 3a77c293e452d2d74bccfa67efd8af1f6f650f7d -->
 # Kompilacja
 
 O ile nie zrobisz nic więcej, programy typelisp działają w interpreterze. Ponadto istnieją dwa
@@ -298,9 +298,9 @@ $ qemu-system-arm -M mps2-an505 -nographic \
 Z opcją `--target avr-atmega328p` powstaje plik wykonywalny (ELF) dla mikrokontrolera Arduino Uno (ATmega328P). Poniższy program miga diodą LED na płytce.
 
 ```lisp
-(define-symbol-macro PINB #x23)
-(define-symbol-macro DDRB #x24)
-(define-symbol-macro LED (the u8 32))             ; PB5
+(defconstant (PINB int) #x23)
+(defconstant (DDRB int) #x24)
+(defconstant (LED u8) 32)                         ; PB5
 
 (defun wait-a-bit () ()
   (let ((i (the u32 0)))
@@ -321,8 +321,8 @@ $ typl -c blink.typl --target avr-atmega328p -O2   # tworzy blink.elf
 $ qemu-system-avr -M uno -display none -serial stdio -bios blink.elf   # uruchom w QEMU
 ```
 
-- Nie ma środowiska uruchomieniowego, więc program, który go używa, to **błąd kompilacji**. Błąd podaje, co jest potrzebne i przez które funkcje się do tego dochodzi. Można używać: obliczeń na liczbach całkowitych o stałej szerokości (od `i8` do `u32`), `bool` i `char`, wywołań funkcji, warunków, pętli oraz `volatile-read-u8` i podobnych z adresem zapisanym jako liczba.
-- Nie można używać: wartości na stercie, takich jak napisy, listy i struktury; obliczeń na `int`; `defvar` i `defconstant` (dla nazwanej stałej należy użyć `define-symbol-macro`); rekurencji, `catch` i wywołań wartości funkcyjnych; wywołań funkcji C; procedur obsługi przerwań; dzielenia przez zmienną (dzielenie przez liczbę jest możliwe); dostępów `volatile` z obliczanym adresem.
+- Nie ma środowiska uruchomieniowego, więc program, który go używa, to **błąd kompilacji**. Błąd podaje, co jest potrzebne i przez które funkcje się do tego dochodzi. Można używać: obliczeń na liczbach całkowitych o stałej szerokości (od `i8` do `u32`), `bool` i `char`, wywołań funkcji, warunków, pętli, `defvar` i `defconstant` z takimi wartościami oraz `volatile-read-u8` i podobnych z adresem zapisanym jako liczba lub stała.
+- Nie można używać: wartości na stercie, takich jak napisy, listy i struktury; obliczeń na `int`; rekurencji, `catch` i wywołań wartości funkcyjnych; wywołań funkcji C; procedur obsługi przerwań; dzielenia przez zmienną (dzielenie przez liczbę jest możliwe); dostępów `volatile` z obliczanym adresem.
 - Pętla, która nic nie robi, znika od `-O1` wzwyż. W pętli oczekującej należy na przykład odczytywać rejestr.
 - Gdy `main` się kończy, mikrokontroler się zatrzymuje.
 - Układ pamięci zmienia `--linker-script FILE`. Bez tej opcji jest to 32 KiB pamięci flash bez ostatnich 512 bajtów programu rozruchowego oraz 2 KiB RAM. Adresy RAM zapisuje się z dodanym `0x800000`, na przykład `0x800100`.

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ c4e9ddb5a894a69547e3fb5c7aa3d030e8a82821 -->
+<!-- translated-from: docs/ja/guide/compile.md @ 3a77c293e452d2d74bccfa67efd8af1f6f650f7d -->
 # Kompilierung
 
 Ohne weiteres Zutun laufen typelisp-Programme im Interpreter. Darüber hinaus gibt es zwei Wege, in nativen
@@ -304,9 +304,9 @@ $ qemu-system-arm -M mps2-an505 -nographic \
 Mit `--target avr-atmega328p` erzeugt `typl` eine ausführbare Datei (ELF) für den Mikrocontroller des Arduino Uno (ATmega328P). Das folgende Programm lässt die LED des Boards blinken.
 
 ```lisp
-(define-symbol-macro PINB #x23)
-(define-symbol-macro DDRB #x24)
-(define-symbol-macro LED (the u8 32))             ; PB5
+(defconstant (PINB int) #x23)
+(defconstant (DDRB int) #x24)
+(defconstant (LED u8) 32)                         ; PB5
 
 (defun wait-a-bit () ()
   (let ((i (the u32 0)))
@@ -327,8 +327,8 @@ $ typl -c blink.typl --target avr-atmega328p -O2   # erzeugt blink.elf
 $ qemu-system-avr -M uno -display none -serial stdio -bios blink.elf   # in QEMU ausführen
 ```
 
-- Es gibt keine Laufzeitumgebung, daher ist ein Programm, das sie benutzt, ein **Kompilierfehler**. Die Meldung nennt, was benötigt wird und über welche Funktionen es erreicht wird. Verwendbar sind: Rechnen mit Ganzzahlen fester Breite (`i8` bis `u32`), `bool` und `char`, Funktionsaufrufe, Verzweigungen, Schleifen sowie `volatile-read-u8` und Ähnliches mit als Zahl geschriebener Adresse.
-- Nicht verwendbar sind: Werte im Heap wie Zeichenketten, Listen und Strukturen; Rechnen mit `int`; `defvar` und `defconstant` (für benannte Konstanten dient `define-symbol-macro`); Rekursion, `catch` und Aufrufe von Funktionswerten; Aufrufe von C-Funktionen; Interrupt-Handler; Division durch eine Variable (Division durch eine Zahl ist möglich); `volatile`-Zugriffe mit berechneter Adresse.
+- Es gibt keine Laufzeitumgebung, daher ist ein Programm, das sie benutzt, ein **Kompilierfehler**. Die Meldung nennt, was benötigt wird und über welche Funktionen es erreicht wird. Verwendbar sind: Rechnen mit Ganzzahlen fester Breite (`i8` bis `u32`), `bool` und `char`, Funktionsaufrufe, Verzweigungen, Schleifen, `defvar` und `defconstant` mit solchen Werten sowie `volatile-read-u8` und Ähnliches mit als Zahl oder Konstante geschriebener Adresse.
+- Nicht verwendbar sind: Werte im Heap wie Zeichenketten, Listen und Strukturen; Rechnen mit `int`; Rekursion, `catch` und Aufrufe von Funktionswerten; Aufrufe von C-Funktionen; Interrupt-Handler; Division durch eine Variable (Division durch eine Zahl ist möglich); `volatile`-Zugriffe mit berechneter Adresse.
 - Eine Schleife, die nichts tut, wird ab `-O1` entfernt. Lesen Sie in einer Warteschleife zum Beispiel ein Register.
 - Wenn `main` endet, hält der Mikrocontroller an.
 - Mit `--linker-script FILE` lässt sich die Speicheraufteilung ändern. Ohne Angabe sind es 32 KiB Flash abzüglich der letzten 512 Bytes des Bootloaders und 2 KiB RAM. RAM-Adressen werden mit addiertem `0x800000` geschrieben, etwa `0x800100`.

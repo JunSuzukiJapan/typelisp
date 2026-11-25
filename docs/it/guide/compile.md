@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ c4e9ddb5a894a69547e3fb5c7aa3d030e8a82821 -->
+<!-- translated-from: docs/ja/guide/compile.md @ 3a77c293e452d2d74bccfa67efd8af1f6f650f7d -->
 # Compilazione
 
 Se non fai altro, i programmi typelisp vengono eseguiti nell'interprete. Inoltre esistono due modi per
@@ -302,9 +302,9 @@ $ qemu-system-arm -M mps2-an505 -nographic \
 Con `--target avr-atmega328p` si crea un eseguibile (ELF) per il microcontrollore di Arduino Uno (ATmega328P). Il programma seguente fa lampeggiare il LED della scheda.
 
 ```lisp
-(define-symbol-macro PINB #x23)
-(define-symbol-macro DDRB #x24)
-(define-symbol-macro LED (the u8 32))             ; PB5
+(defconstant (PINB int) #x23)
+(defconstant (DDRB int) #x24)
+(defconstant (LED u8) 32)                         ; PB5
 
 (defun wait-a-bit () ()
   (let ((i (the u32 0)))
@@ -325,8 +325,8 @@ $ typl -c blink.typl --target avr-atmega328p -O2   # crea blink.elf
 $ qemu-system-avr -M uno -display none -serial stdio -bios blink.elf   # esegue in QEMU
 ```
 
-- Non c'è un runtime, quindi un programma che lo usa è un **errore di compilazione**. L'errore indica che cosa serve e attraverso quali funzioni ci si arriva. Si possono usare: i calcoli sugli interi a larghezza fissa (da `i8` a `u32`), `bool` e `char`, le chiamate di funzione, le condizioni, i cicli, e `volatile-read-u8` e simili con l'indirizzo scritto come numero.
-- Non si possono usare: i valori che stanno nello heap, come stringhe, liste e strutture; i calcoli su `int`; `defvar` e `defconstant` (per una costante con nome si usa `define-symbol-macro`); la ricorsione, `catch` e le chiamate di valori funzione; le chiamate di funzioni C; i gestori di interrupt; la divisione per una variabile (la divisione per un numero si può usare); gli accessi `volatile` con indirizzo calcolato.
+- Non c'è un runtime, quindi un programma che lo usa è un **errore di compilazione**. L'errore indica che cosa serve e attraverso quali funzioni ci si arriva. Si possono usare: i calcoli sugli interi a larghezza fissa (da `i8` a `u32`), `bool` e `char`, le chiamate di funzione, le condizioni, i cicli, `defvar` e `defconstant` con questi valori, e `volatile-read-u8` e simili con l'indirizzo scritto come numero o costante.
+- Non si possono usare: i valori che stanno nello heap, come stringhe, liste e strutture; i calcoli su `int`; la ricorsione, `catch` e le chiamate di valori funzione; le chiamate di funzioni C; i gestori di interrupt; la divisione per una variabile (la divisione per un numero si può usare); gli accessi `volatile` con indirizzo calcolato.
 - Un ciclo che non fa nulla scompare da `-O1` in su. In un ciclo di attesa, per esempio, si legga un registro.
 - Quando `main` termina, il microcontrollore si ferma.
 - La disposizione della memoria si cambia con `--linker-script FILE`. Se omesso, sono 32 KiB di flash meno gli ultimi 512 byte del bootloader, e 2 KiB di RAM. Gli indirizzi di RAM si scrivono sommando `0x800000`, come `0x800100`.

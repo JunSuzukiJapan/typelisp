@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ c4e9ddb5a894a69547e3fb5c7aa3d030e8a82821 -->
+<!-- translated-from: docs/ja/guide/compile.md @ 3a77c293e452d2d74bccfa67efd8af1f6f650f7d -->
 # 编译
 
 如果不做任何处理，typelisp 程序由解释器执行。除此之外，还有两种编译为本机代码的方法，以及一种保存环境的方法。
@@ -287,9 +287,9 @@ $ qemu-system-arm -M mps2-an505 -nographic \
 加上 `--target avr-atmega328p`，会生成面向 Arduino Uno 的微控制器（ATmega328P）的可执行文件（ELF）。下面的程序让开发板上的 LED 闪烁。
 
 ```lisp
-(define-symbol-macro PINB #x23)
-(define-symbol-macro DDRB #x24)
-(define-symbol-macro LED (the u8 32))             ; PB5
+(defconstant (PINB int) #x23)
+(defconstant (DDRB int) #x24)
+(defconstant (LED u8) 32)                         ; PB5
 
 (defun wait-a-bit () ()
   (let ((i (the u32 0)))
@@ -310,8 +310,8 @@ $ typl -c blink.typl --target avr-atmega328p -O2   # 生成 blink.elf
 $ qemu-system-avr -M uno -display none -serial stdio -bios blink.elf   # 在 QEMU 中运行
 ```
 
-- 由于没有运行时，使用运行时的程序会成为**编译错误**。错误会指出需要什么，以及经由哪些函数到达。可以使用的有：固定宽度整数（`i8` 到 `u32`）、`bool`、`char` 的计算，函数调用，条件分支，循环，以及地址写成数字的 `volatile-read-u8` 等。
-- 不能使用的有：字符串、列表、结构体等放在堆上的值；`int` 的计算；`defvar` 和 `defconstant`（具名常量请使用 `define-symbol-macro`）；递归、`catch`、函数值的调用；C 函数的调用；中断处理函数；除以变量的除法（除以数字的除法可以使用）；地址由计算得出的 `volatile`。
+- 由于没有运行时，使用运行时的程序会成为**编译错误**。错误会指出需要什么，以及经由哪些函数到达。可以使用的有：固定宽度整数（`i8` 到 `u32`）、`bool`、`char` 的计算，函数调用，条件分支，循环，保存这些值的 `defvar` 和 `defconstant`，以及地址写成数字或常量的 `volatile-read-u8` 等。
+- 不能使用的有：字符串、列表、结构体等放在堆上的值；`int` 的计算；递归、`catch`、函数值的调用；C 函数的调用；中断处理函数；除以变量的除法（除以数字的除法可以使用）；地址由计算得出的 `volatile`。
 - 什么都不做的循环在 `-O1` 及以上会被删除。在等待的循环中，请读取寄存器等。
 - `main` 结束后，微控制器停止。
 - 内存布局可以用 `--linker-script FILE` 更改。省略时为 32KiB 闪存去掉末尾 512 字节的引导程序后的部分，以及 2KiB RAM。RAM 的地址要加上 `0x800000` 来写，例如 `0x800100`。
