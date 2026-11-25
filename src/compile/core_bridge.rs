@@ -1593,12 +1593,8 @@ pub fn function_parts(
     Ok((param_list, body_v))
 }
 
-/// `(defvar PATH R MUTABLE E)` -> `(global-init kind value)`, the node
+/// `(defvar PATH R MUTABLE E)` -> `(global-init id kind value)`, the node
 /// the ahead-of-time compiler's synthesized initializer sequence runs.
-///
-/// There is no id to look up for the global being defined — the runtime
-/// assigns one by call order as the sequence runs — though the initializer may
-/// well refer to *other* globals, which is what `Ctx::globals` is still for.
 ///
 /// `None` for anything that is not a `defvar`.
 pub fn global_init(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Option<Value>, Error> {
@@ -1610,18 +1606,17 @@ pub fn global_init(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Option<Value
     // (`typeck::defvar`). An initializer built here runs exactly once,
     // when the storage is created, so there is never an earlier binding for
     // the two to differ over.
-    let (repr, value) = match parts[..] {
-        [_, repr, _, value] | [_, repr, _, value, Value::Bool(_)] => (repr, value),
+    let value = match parts[..] {
+        [_, _, _, value] | [_, _, _, value, Value::Bool(_)] => value,
         _ => return Err(malformed(heap, form)),
     };
-    let repr = Repr::read(heap, repr).ok_or_else(|| malformed(heap, form))?;
+    let (id, kind) = global_id_and_kind(heap, form, cx)?;
     let cells = names_captured_by_nested(heap, std::slice::from_ref(&value))?;
     let inner = cx.with_cell_names(&cells);
 
     let mut f = Items::new(heap);
-    // A global's storage always holds a properly tagged value, so this is the
-    // field classification — the same one a `global` read untags with.
-    f.push(Value::Int(repr.field_kind()));
+    f.push(Value::Int(id));
+    f.push(Value::Int(kind));
     let v = to_island(f.heap(), value, inner)?;
     f.push(v);
     Ok(Some(f.finish(wk::GLOBAL_INIT)?))
@@ -4003,7 +3998,7 @@ mod tests {
         let form = read_core(&mut h, "(defvar ::m::total sexpr true (quote ()))").expect("read failed")[0];
         h.push_root(form);
         let node = global_init(&mut h, form, cx).expect("translation failed").expect("a defvar has one");
-        assert_eq!(core::print(&h, node), "(global-init 6 (construct true false () 0))");
+        assert_eq!(core::print(&h, node), "(global-init 7 6 (construct true false () 0))");
         // Nothing else is one.
         let other = read_core(&mut h, "(defun ::f () unit (unit))").expect("read failed")[0];
         assert!(global_init(&mut h, other, cx).expect("translation failed").is_none());

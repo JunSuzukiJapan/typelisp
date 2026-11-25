@@ -1,11 +1,11 @@
-# ABI バージョン 0.3.84
+# ABI バージョン 0.3.85
 
 `scripts/regen-abi-version.sh` が生成した文書。手で編集しない。
 
-コンパイラが生成するコードが、ABI バージョン 0.3.84 のランタイムライブラリについて仮定していることの一覧。
+コンパイラが生成するコードが、ABI バージョン 0.3.85 のランタイムライブラリについて仮定していることの一覧。
 ここに書かれていない前提(シムが引数をどう扱うか、生成コードがヒープを直接読む箇所など)は含まない。
 
-内容ハッシュ (FNV-1a 64): `318b83282adf5d7a`
+内容ハッシュ (FNV-1a 64): `c20f6ee9093613ff`
 
 ## 呼び出し規約 (typelisp_abi)
 
@@ -467,357 +467,360 @@
 | 343 | `coerce` |
 | 344 | `tag-field` |
 | 345 | `untag-field` |
-| 346 | `build-cond-br` |
-| 347 | `build-fixed-binop` |
-| 348 | `build-fixed-div-check` |
-| 349 | `build-fixed-unary` |
-| 350 | `build-float-binop` |
-| 351 | `build-float-unary` |
-| 352 | `build-fn-address` |
-| 353 | `add-frame-slot` |
-| 354 | `build-icmp-eq` |
-| 355 | `build-icmp-ge` |
-| 356 | `build-icmp-gt` |
-| 357 | `build-icmp-le` |
-| 358 | `build-icmp-lt` |
-| 359 | `build-icmp-ne` |
-| 360 | `add-frame-slot-rooted` |
-| 361 | `build-lshr` |
-| 362 | `build-make-closure` |
-| 363 | `frame-slots` |
-| 364 | `build-mul` |
-| 365 | `build-or` |
-| 366 | `build-not` |
-| 367 | `build-ret` |
-| 368 | `build-sadd-overflow` |
-| 369 | `build-select` |
-| 370 | `build-shl` |
-| 371 | `temp-slot` |
-| 372 | `build-smul-overflow` |
-| 373 | `build-ssub-overflow` |
-| 374 | `build-sub` |
-| 375 | `build-xor` |
-| 376 | `cap` |
-| 377 | `ceiling` |
-| 378 | `char->int` |
-| 379 | `char->string` |
-| 380 | `clear` |
-| 381 | `clone-frames` |
-| 382 | `close` |
-| 383 | `const-word` |
-| 384 | `coroutine-apply` |
-| 385 | `coroutine-begin` |
-| 386 | `coroutine-call` |
-| 387 | `coroutine-call-env` |
-| 388 | `coroutine-dyn-call` |
-| 389 | `coroutine-end` |
-| 390 | `coroutine-suspend` |
-| 391 | `coroutine-unwind` |
-| 392 | `cos` |
-| 393 | `cosh` |
-| 394 | `count` |
-| 395 | `create` |
-| 396 | `current-id` |
-| 397 | `c-long-bits` |
-| 398 | `denominator` |
-| 399 | `digitp` |
-| 400 | `downcase` |
-| 401 | `entries` |
-| 402 | `entry-value` |
-| 403 | `eq` |
-| 404 | `eql` |
-| 405 | `equal` |
-| 406 | `equalp` |
-| 407 | `exp` |
-| 408 | `expt` |
-| 409 | `float->f32` |
-| 410 | `float->f64` |
-| 411 | `float->int` |
-| 412 | `float->ratio` |
-| 413 | `floor` |
-| 414 | `frame-clear-handler` |
-| 415 | `frame-set-handler` |
-| 416 | `frame-slot` |
-| 417 | `frame-slot-rooted` |
-| 418 | `function-param` |
-| 419 | `get` |
-| 420 | `get-function` |
-| 421 | `int->c-long` |
-| 422 | `int->c-ulong` |
-| 423 | `int->char` |
-| 424 | `int->float` |
-| 425 | `int->i16` |
-| 426 | `int->i32` |
-| 427 | `int->i8` |
-| 428 | `int->int` |
-| 429 | `int->ratio` |
-| 430 | `int->u16` |
-| 431 | `int->u32` |
-| 432 | `int->u8` |
-| 433 | `integer-length` |
-| 434 | `join` |
-| 435 | `keys` |
-| 436 | `len` |
-| 437 | `length` |
-| 438 | `load-arg` |
-| 439 | `load-env` |
-| 440 | `slot-get` |
-| 441 | `load-type` |
-| 442 | `loop-safepoint` |
-| 443 | `log` |
-| 444 | `logand` |
-| 445 | `logbitp` |
-| 446 | `logcount` |
-| 447 | `logior` |
-| 448 | `lognot` |
-| 449 | `logtest` |
-| 450 | `logxor` |
-| 451 | `lt` |
-| 452 | `max` |
-| 453 | `min` |
-| 454 | `mod` |
-| 455 | `new` |
-| 456 | `numerator` |
-| 457 | `pop` |
-| 458 | `pop-frame` |
-| 459 | `position-at-end` |
-| 460 | `push` |
-| 461 | `push-frame` |
-| 462 | `ratio->float` |
-| 463 | `ratio->int` |
-| 464 | `ratio->rational` |
-| 465 | `rational->float` |
-| 466 | `rational->int` |
-| 467 | `rational->ratio` |
-| 468 | `ref` |
-| 469 | `rem` |
-| 470 | `round` |
-| 471 | `scratch-slot` |
-| 472 | `sin` |
-| 473 | `sinh` |
-| 474 | `sqrt` |
-| 475 | `slot-set` |
-| 476 | `substring` |
-| 477 | `tan` |
-| 478 | `tanh` |
-| 479 | `to-string` |
-| 480 | `truncate` |
-| 481 | `try-float->f32` |
-| 482 | `try-float->f64` |
-| 483 | `try-int->char` |
-| 484 | `try-int->i16` |
-| 485 | `try-int->i32` |
-| 486 | `try-int->i8` |
-| 487 | `try-int->u16` |
-| 488 | `try-int->u32` |
-| 489 | `try-int->u8` |
-| 490 | `try-rational->int` |
-| 491 | `upcase` |
-| 492 | `values` |
-| 493 | `verify` |
-| 494 | `wait` |
-| 495 | `compile-file` |
-| 496 | `dump` |
-| 497 | `dribble-start` |
-| 498 | `dribble-stop` |
-| 499 | `ed-open` |
-| 500 | `file-create-directories` |
-| 501 | `file-delete` |
-| 502 | `file-directory-p` |
-| 503 | `file-exists-p` |
-| 504 | `file-list-directory` |
-| 505 | `file-modified-date` |
-| 506 | `file-owner-name` |
-| 507 | `file-rename` |
-| 508 | `file-truename` |
-| 509 | `make-random-state-fresh` |
-| 510 | `net-accept` |
-| 511 | `net-buffered-p` |
-| 512 | `net-connect-begin` |
-| 513 | `net-connect-finish` |
-| 514 | `net-fill` |
-| 515 | `net-flush` |
-| 516 | `net-listen` |
-| 517 | `net-local-address` |
-| 518 | `net-peer-address` |
-| 519 | `net-peer-subject` |
-| 520 | `net-pop-byte` |
-| 521 | `net-pop-char` |
-| 522 | `net-push-byte` |
-| 523 | `net-push-string` |
-| 524 | `net-resolve-begin` |
-| 525 | `net-resolve-finish` |
-| 526 | `net-server-name` |
-| 527 | `net-set-keepalive` |
-| 528 | `net-set-keepalive-period` |
-| 529 | `net-set-nodelay` |
-| 530 | `net-shutdown-write` |
-| 531 | `net-socket-error` |
-| 532 | `net-tls-add-certificate` |
-| 533 | `net-tls-handshake` |
-| 534 | `net-tls-listen` |
-| 535 | `net-tls-start` |
-| 536 | `net-udp-bind` |
-| 537 | `net-udp-last-sender` |
-| 538 | `net-udp-recv` |
-| 539 | `net-udp-send-to` |
-| 540 | `net-unix-connect` |
-| 541 | `net-unix-listen` |
-| 542 | `net-wait` |
-| 543 | `net-wait-for` |
-| 544 | `random-state-copy` |
-| 545 | `random-state-next` |
-| 546 | `read-datum-at` |
-| 547 | `stream-at-line-start` |
-| 548 | `stream-close` |
-| 549 | `stream-describe` |
-| 550 | `stream-finish-output` |
-| 551 | `stream-input-p` |
-| 552 | `stream-listen` |
-| 553 | `stream-open-file` |
-| 554 | `stream-open-p` |
-| 555 | `stream-output-p` |
-| 556 | `stream-position` |
-| 557 | `stream-read-byte` |
-| 558 | `stream-read-char` |
-| 559 | `stream-stderr` |
-| 560 | `stream-stdin` |
-| 561 | `stream-stdout` |
-| 562 | `stream-string-input` |
-| 563 | `stream-string-output` |
-| 564 | `stream-take-output-string` |
-| 565 | `stream-unread-char` |
-| 566 | `stream-write-byte` |
-| 567 | `stream-write-string` |
-| 568 | `command-line-args` |
-| 569 | `getenv` |
-| 570 | `home-directory` |
-| 571 | `lisp-implementation-version` |
-| 572 | `machine-instance` |
-| 573 | `machine-type` |
-| 574 | `machine-version` |
-| 575 | `software-type` |
-| 576 | `software-version` |
-| 577 | `eval` |
-| 578 | `macroexpand` |
-| 579 | `macroexpand-1` |
-| 580 | `pprint-indent` |
-| 581 | `pprint-list-exhausted` |
-| 582 | `pprint-newline` |
-| 583 | `pprint-pop` |
-| 584 | `pprint-tab` |
-| 585 | `parse-float` |
-| 586 | `exit` |
-| 587 | `seed-random-state` |
-| 588 | `get-dispatch-macro-character` |
-| 589 | `get-macro-character` |
-| 590 | `read` |
-| 591 | `set-dispatch-macro-character` |
-| 592 | `set-macro-character` |
-| 593 | `heap-info` |
-| 594 | `sexpr-atom` |
-| 595 | `sexpr-bool` |
-| 596 | `sexpr-car` |
-| 597 | `sexpr-cdr` |
-| 598 | `sexpr-char` |
-| 599 | `sexpr-cons` |
-| 600 | `sexpr-consp` |
-| 601 | `sexpr-f32` |
-| 602 | `sexpr-f64` |
-| 603 | `sexpr-i16` |
-| 604 | `sexpr-i32` |
-| 605 | `sexpr-i8` |
-| 606 | `sexpr-int` |
-| 607 | `sexpr-null` |
-| 608 | `sexpr-str` |
-| 609 | `sexpr-sym-name` |
-| 610 | `sexpr-symp` |
-| 611 | `sexpr-u16` |
-| 612 | `sexpr-u32` |
-| 613 | `sexpr-u8` |
-| 614 | `keywordp` |
-| 615 | `symbol->string` |
-| 616 | `sleep` |
-| 617 | `yield` |
-| 618 | `get-internal-real-time` |
-| 619 | `get-internal-run-time` |
-| 620 | `get-universal-time` |
-| 621 | `timezone-daylight-p` |
-| 622 | `timezone-offset-seconds` |
-| 623 | `format-rt` |
-| 624 | `print-rt` |
-| 625 | `println-rt` |
-| 626 | `pprint-rt` |
-| 627 | `pprint-block-start-rt` |
-| 628 | `pprint-block-end-rt` |
-| 629 | ` c-arena-open` |
-| 630 | ` c-arena-close` |
-| 631 | ` c-alloc` |
-| 632 | ` c-ptr-check` |
-| 633 | ` c-index` |
-| 634 | ` c-offset` |
-| 635 | ` c-load` |
-| 636 | ` c-store` |
-| 637 | ` ffi-callback-address` |
-| 638 | `pat-dyn` |
-| 639 | `hash-function` |
-| 640 | `test-function` |
-| 641 | `sxhash-eq` |
-| 642 | `sxhash-eql` |
-| 643 | `sxhash-equalp` |
-| 644 | `&environment` |
-| 645 | `define-symbol-macro` |
-| 646 | `format-out` |
-| 647 | ` fmt-open` |
-| 648 | ` fmt-text` |
-| 649 | ` fmt-fresh-line` |
-| 650 | ` fmt-a` |
-| 651 | ` fmt-string` |
-| 652 | ` fmt-number` |
-| 653 | ` fmt-value` |
-| 654 | ` fmt-d` |
-| 655 | ` fmt-integer` |
-| 656 | ` fmt-integer-any` |
-| 657 | ` fmt-words` |
-| 658 | ` fmt-plural` |
-| 659 | ` fmt-char` |
-| 660 | ` fmt-fixed` |
-| 661 | ` fmt-exponent` |
-| 662 | ` fmt-general` |
-| 663 | ` fmt-dollars` |
-| 664 | ` fmt-tab` |
-| 665 | ` fmt-newline` |
-| 666 | ` fmt-indent` |
-| 667 | ` fmt-case-open` |
-| 668 | ` fmt-case-close` |
-| 669 | ` fmt-just-open` |
-| 670 | ` fmt-just-segment` |
-| 671 | ` fmt-just-close` |
-| 672 | ` fmt-block-open` |
-| 673 | ` fmt-block-close` |
-| 674 | ` fmt-result` |
-| 675 | ` fmt-emit` |
-| 676 | ` fmt-first` |
-| 677 | ` fmt-rest` |
-| 678 | ` fmt-empty` |
-| 679 | ` fmt-length` |
-| 680 | ` fmt-goto` |
-| 681 | ` fmt-as-list` |
-| 682 | ` fmt-param` |
-| 683 | ` fmt-select` |
-| 684 | ` fmt-bool` |
-| 685 | `volatile-read-u8` |
-| 686 | `volatile-read-u16` |
-| 687 | `volatile-read-u32` |
-| 688 | `volatile-write-u8` |
-| 689 | `volatile-write-u16` |
-| 690 | `volatile-write-u32` |
-| 691 | ` c-volatile-load` |
-| 692 | ` c-volatile-store` |
-| 693 | `enable-interrupt` |
-| 694 | `disable-interrupt` |
-| 695 | `largest-fixnum` |
-| 696 | ` c-address` |
+| 346 | `global-get` |
+| 347 | `global-put` |
+| 348 | `global-new` |
+| 349 | `build-cond-br` |
+| 350 | `build-fixed-binop` |
+| 351 | `build-fixed-div-check` |
+| 352 | `build-fixed-unary` |
+| 353 | `build-float-binop` |
+| 354 | `build-float-unary` |
+| 355 | `build-fn-address` |
+| 356 | `add-frame-slot` |
+| 357 | `build-icmp-eq` |
+| 358 | `build-icmp-ge` |
+| 359 | `build-icmp-gt` |
+| 360 | `build-icmp-le` |
+| 361 | `build-icmp-lt` |
+| 362 | `build-icmp-ne` |
+| 363 | `add-frame-slot-rooted` |
+| 364 | `build-lshr` |
+| 365 | `build-make-closure` |
+| 366 | `frame-slots` |
+| 367 | `build-mul` |
+| 368 | `build-or` |
+| 369 | `build-not` |
+| 370 | `build-ret` |
+| 371 | `build-sadd-overflow` |
+| 372 | `build-select` |
+| 373 | `build-shl` |
+| 374 | `temp-slot` |
+| 375 | `build-smul-overflow` |
+| 376 | `build-ssub-overflow` |
+| 377 | `build-sub` |
+| 378 | `build-xor` |
+| 379 | `cap` |
+| 380 | `ceiling` |
+| 381 | `char->int` |
+| 382 | `char->string` |
+| 383 | `clear` |
+| 384 | `clone-frames` |
+| 385 | `close` |
+| 386 | `const-word` |
+| 387 | `coroutine-apply` |
+| 388 | `coroutine-begin` |
+| 389 | `coroutine-call` |
+| 390 | `coroutine-call-env` |
+| 391 | `coroutine-dyn-call` |
+| 392 | `coroutine-end` |
+| 393 | `coroutine-suspend` |
+| 394 | `coroutine-unwind` |
+| 395 | `cos` |
+| 396 | `cosh` |
+| 397 | `count` |
+| 398 | `create` |
+| 399 | `current-id` |
+| 400 | `c-long-bits` |
+| 401 | `denominator` |
+| 402 | `digitp` |
+| 403 | `downcase` |
+| 404 | `entries` |
+| 405 | `entry-value` |
+| 406 | `eq` |
+| 407 | `eql` |
+| 408 | `equal` |
+| 409 | `equalp` |
+| 410 | `exp` |
+| 411 | `expt` |
+| 412 | `float->f32` |
+| 413 | `float->f64` |
+| 414 | `float->int` |
+| 415 | `float->ratio` |
+| 416 | `floor` |
+| 417 | `frame-clear-handler` |
+| 418 | `frame-set-handler` |
+| 419 | `frame-slot` |
+| 420 | `frame-slot-rooted` |
+| 421 | `function-param` |
+| 422 | `get` |
+| 423 | `get-function` |
+| 424 | `int->c-long` |
+| 425 | `int->c-ulong` |
+| 426 | `int->char` |
+| 427 | `int->float` |
+| 428 | `int->i16` |
+| 429 | `int->i32` |
+| 430 | `int->i8` |
+| 431 | `int->int` |
+| 432 | `int->ratio` |
+| 433 | `int->u16` |
+| 434 | `int->u32` |
+| 435 | `int->u8` |
+| 436 | `integer-length` |
+| 437 | `join` |
+| 438 | `keys` |
+| 439 | `len` |
+| 440 | `length` |
+| 441 | `load-arg` |
+| 442 | `load-env` |
+| 443 | `slot-get` |
+| 444 | `load-type` |
+| 445 | `loop-safepoint` |
+| 446 | `log` |
+| 447 | `logand` |
+| 448 | `logbitp` |
+| 449 | `logcount` |
+| 450 | `logior` |
+| 451 | `lognot` |
+| 452 | `logtest` |
+| 453 | `logxor` |
+| 454 | `lt` |
+| 455 | `max` |
+| 456 | `min` |
+| 457 | `mod` |
+| 458 | `new` |
+| 459 | `numerator` |
+| 460 | `pop` |
+| 461 | `pop-frame` |
+| 462 | `position-at-end` |
+| 463 | `push` |
+| 464 | `push-frame` |
+| 465 | `ratio->float` |
+| 466 | `ratio->int` |
+| 467 | `ratio->rational` |
+| 468 | `rational->float` |
+| 469 | `rational->int` |
+| 470 | `rational->ratio` |
+| 471 | `ref` |
+| 472 | `rem` |
+| 473 | `round` |
+| 474 | `scratch-slot` |
+| 475 | `sin` |
+| 476 | `sinh` |
+| 477 | `sqrt` |
+| 478 | `slot-set` |
+| 479 | `substring` |
+| 480 | `tan` |
+| 481 | `tanh` |
+| 482 | `to-string` |
+| 483 | `truncate` |
+| 484 | `try-float->f32` |
+| 485 | `try-float->f64` |
+| 486 | `try-int->char` |
+| 487 | `try-int->i16` |
+| 488 | `try-int->i32` |
+| 489 | `try-int->i8` |
+| 490 | `try-int->u16` |
+| 491 | `try-int->u32` |
+| 492 | `try-int->u8` |
+| 493 | `try-rational->int` |
+| 494 | `upcase` |
+| 495 | `values` |
+| 496 | `verify` |
+| 497 | `wait` |
+| 498 | `compile-file` |
+| 499 | `dump` |
+| 500 | `dribble-start` |
+| 501 | `dribble-stop` |
+| 502 | `ed-open` |
+| 503 | `file-create-directories` |
+| 504 | `file-delete` |
+| 505 | `file-directory-p` |
+| 506 | `file-exists-p` |
+| 507 | `file-list-directory` |
+| 508 | `file-modified-date` |
+| 509 | `file-owner-name` |
+| 510 | `file-rename` |
+| 511 | `file-truename` |
+| 512 | `make-random-state-fresh` |
+| 513 | `net-accept` |
+| 514 | `net-buffered-p` |
+| 515 | `net-connect-begin` |
+| 516 | `net-connect-finish` |
+| 517 | `net-fill` |
+| 518 | `net-flush` |
+| 519 | `net-listen` |
+| 520 | `net-local-address` |
+| 521 | `net-peer-address` |
+| 522 | `net-peer-subject` |
+| 523 | `net-pop-byte` |
+| 524 | `net-pop-char` |
+| 525 | `net-push-byte` |
+| 526 | `net-push-string` |
+| 527 | `net-resolve-begin` |
+| 528 | `net-resolve-finish` |
+| 529 | `net-server-name` |
+| 530 | `net-set-keepalive` |
+| 531 | `net-set-keepalive-period` |
+| 532 | `net-set-nodelay` |
+| 533 | `net-shutdown-write` |
+| 534 | `net-socket-error` |
+| 535 | `net-tls-add-certificate` |
+| 536 | `net-tls-handshake` |
+| 537 | `net-tls-listen` |
+| 538 | `net-tls-start` |
+| 539 | `net-udp-bind` |
+| 540 | `net-udp-last-sender` |
+| 541 | `net-udp-recv` |
+| 542 | `net-udp-send-to` |
+| 543 | `net-unix-connect` |
+| 544 | `net-unix-listen` |
+| 545 | `net-wait` |
+| 546 | `net-wait-for` |
+| 547 | `random-state-copy` |
+| 548 | `random-state-next` |
+| 549 | `read-datum-at` |
+| 550 | `stream-at-line-start` |
+| 551 | `stream-close` |
+| 552 | `stream-describe` |
+| 553 | `stream-finish-output` |
+| 554 | `stream-input-p` |
+| 555 | `stream-listen` |
+| 556 | `stream-open-file` |
+| 557 | `stream-open-p` |
+| 558 | `stream-output-p` |
+| 559 | `stream-position` |
+| 560 | `stream-read-byte` |
+| 561 | `stream-read-char` |
+| 562 | `stream-stderr` |
+| 563 | `stream-stdin` |
+| 564 | `stream-stdout` |
+| 565 | `stream-string-input` |
+| 566 | `stream-string-output` |
+| 567 | `stream-take-output-string` |
+| 568 | `stream-unread-char` |
+| 569 | `stream-write-byte` |
+| 570 | `stream-write-string` |
+| 571 | `command-line-args` |
+| 572 | `getenv` |
+| 573 | `home-directory` |
+| 574 | `lisp-implementation-version` |
+| 575 | `machine-instance` |
+| 576 | `machine-type` |
+| 577 | `machine-version` |
+| 578 | `software-type` |
+| 579 | `software-version` |
+| 580 | `eval` |
+| 581 | `macroexpand` |
+| 582 | `macroexpand-1` |
+| 583 | `pprint-indent` |
+| 584 | `pprint-list-exhausted` |
+| 585 | `pprint-newline` |
+| 586 | `pprint-pop` |
+| 587 | `pprint-tab` |
+| 588 | `parse-float` |
+| 589 | `exit` |
+| 590 | `seed-random-state` |
+| 591 | `get-dispatch-macro-character` |
+| 592 | `get-macro-character` |
+| 593 | `read` |
+| 594 | `set-dispatch-macro-character` |
+| 595 | `set-macro-character` |
+| 596 | `heap-info` |
+| 597 | `sexpr-atom` |
+| 598 | `sexpr-bool` |
+| 599 | `sexpr-car` |
+| 600 | `sexpr-cdr` |
+| 601 | `sexpr-char` |
+| 602 | `sexpr-cons` |
+| 603 | `sexpr-consp` |
+| 604 | `sexpr-f32` |
+| 605 | `sexpr-f64` |
+| 606 | `sexpr-i16` |
+| 607 | `sexpr-i32` |
+| 608 | `sexpr-i8` |
+| 609 | `sexpr-int` |
+| 610 | `sexpr-null` |
+| 611 | `sexpr-str` |
+| 612 | `sexpr-sym-name` |
+| 613 | `sexpr-symp` |
+| 614 | `sexpr-u16` |
+| 615 | `sexpr-u32` |
+| 616 | `sexpr-u8` |
+| 617 | `keywordp` |
+| 618 | `symbol->string` |
+| 619 | `sleep` |
+| 620 | `yield` |
+| 621 | `get-internal-real-time` |
+| 622 | `get-internal-run-time` |
+| 623 | `get-universal-time` |
+| 624 | `timezone-daylight-p` |
+| 625 | `timezone-offset-seconds` |
+| 626 | `format-rt` |
+| 627 | `print-rt` |
+| 628 | `println-rt` |
+| 629 | `pprint-rt` |
+| 630 | `pprint-block-start-rt` |
+| 631 | `pprint-block-end-rt` |
+| 632 | ` c-arena-open` |
+| 633 | ` c-arena-close` |
+| 634 | ` c-alloc` |
+| 635 | ` c-ptr-check` |
+| 636 | ` c-index` |
+| 637 | ` c-offset` |
+| 638 | ` c-load` |
+| 639 | ` c-store` |
+| 640 | ` ffi-callback-address` |
+| 641 | `pat-dyn` |
+| 642 | `hash-function` |
+| 643 | `test-function` |
+| 644 | `sxhash-eq` |
+| 645 | `sxhash-eql` |
+| 646 | `sxhash-equalp` |
+| 647 | `&environment` |
+| 648 | `define-symbol-macro` |
+| 649 | `format-out` |
+| 650 | ` fmt-open` |
+| 651 | ` fmt-text` |
+| 652 | ` fmt-fresh-line` |
+| 653 | ` fmt-a` |
+| 654 | ` fmt-string` |
+| 655 | ` fmt-number` |
+| 656 | ` fmt-value` |
+| 657 | ` fmt-d` |
+| 658 | ` fmt-integer` |
+| 659 | ` fmt-integer-any` |
+| 660 | ` fmt-words` |
+| 661 | ` fmt-plural` |
+| 662 | ` fmt-char` |
+| 663 | ` fmt-fixed` |
+| 664 | ` fmt-exponent` |
+| 665 | ` fmt-general` |
+| 666 | ` fmt-dollars` |
+| 667 | ` fmt-tab` |
+| 668 | ` fmt-newline` |
+| 669 | ` fmt-indent` |
+| 670 | ` fmt-case-open` |
+| 671 | ` fmt-case-close` |
+| 672 | ` fmt-just-open` |
+| 673 | ` fmt-just-segment` |
+| 674 | ` fmt-just-close` |
+| 675 | ` fmt-block-open` |
+| 676 | ` fmt-block-close` |
+| 677 | ` fmt-result` |
+| 678 | ` fmt-emit` |
+| 679 | ` fmt-first` |
+| 680 | ` fmt-rest` |
+| 681 | ` fmt-empty` |
+| 682 | ` fmt-length` |
+| 683 | ` fmt-goto` |
+| 684 | ` fmt-as-list` |
+| 685 | ` fmt-param` |
+| 686 | ` fmt-select` |
+| 687 | ` fmt-bool` |
+| 688 | `volatile-read-u8` |
+| 689 | `volatile-read-u16` |
+| 690 | `volatile-read-u32` |
+| 691 | `volatile-write-u8` |
+| 692 | `volatile-write-u16` |
+| 693 | `volatile-write-u32` |
+| 694 | ` c-volatile-load` |
+| 695 | ` c-volatile-store` |
+| 696 | `enable-interrupt` |
+| 697 | `disable-interrupt` |
+| 698 | `largest-fixnum` |
+| 699 | ` c-address` |
 
 ## 組み込み型 (typelisp_mem::BUILTIN_TYPES)
 
@@ -1519,6 +1522,9 @@
 - インスタンス `frame-slot`: `(%core::llvm-builder) -> %core::llvm-value`
 - インスタンス `frame-slot-rooted`: `(%core::llvm-builder) -> %core::llvm-value`
 - インスタンス `frame-slots`: `(%core::llvm-builder) -> %core::llvm-value`
+- インスタンス `global-get`: `(%core::llvm-builder, %core::llvm-module, int, int) -> %core::llvm-value`
+- インスタンス `global-new`: `(%core::llvm-builder, %core::llvm-module, int, int, %core::llvm-value) -> %core::llvm-value`
+- インスタンス `global-put`: `(%core::llvm-builder, %core::llvm-module, int, int, %core::llvm-value) -> %core::llvm-value`
 - インスタンス `load-arg`: `(%core::llvm-builder, %core::llvm-function, int) -> %core::llvm-value`
 - インスタンス `load-env`: `(%core::llvm-builder, %core::llvm-function, int) -> %core::llvm-value`
 - インスタンス `load-type`: `(%core::llvm-builder, %core::llvm-module, int) -> %core::llvm-value`

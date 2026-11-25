@@ -888,3 +888,62 @@ fn a_narrow_word_answers_as_a_wide_one() {
         assert_eq!(code, Some(0));
     }
 }
+
+/// A global of every type that is kept outside the runtime's table, and some
+/// that are not.
+const GLOBALS: &str = r#"
+(defconstant (K int) 7)
+(defvar (n u8) 250)
+(defvar (f f32) 1.5)
+(defvar (g f64) 2.25)
+(defvar (c char) #\a)
+(defvar (b bool) true)
+(defvar (w u32) 4000000000)
+(defvar (neg i16) -3)
+(defvar (from-n u8) (+ n 1))
+(defvar (acc int) 10)
+(defvar (text string) "abc")
+(defun advance () ()
+  (setf n (+ n 10)) (setf f (* f 2.0)) (setf g (+ g 0.5)) (setf c #\z) (setf b (not b))
+  (setf w (+ w 1)) (setf neg (- neg 1)) (setf acc (+ acc K)) ())
+(defun main () ()
+  (advance)
+  (println "~a ~a ~a ~a ~a ~a ~a ~a ~a ~a ~a" n f g c b w neg from-n acc K text))
+"#;
+
+#[test]
+fn globals_hold_their_values() {
+    for level in ["-O0", "-O2"] {
+        let (stdout, _, _) = same_as_native(&format!("board_globals{}", level), GLOBALS, &[level]);
+        assert_eq!(stdout, "4 3.0 2.75 z false 4000000001 -4 251 17 7 abc\n");
+    }
+}
+
+/// The program waits for what a handler assigns, at every level.
+#[test]
+fn the_program_sees_what_a_handler_assigns() {
+    for level in ["-O0", "-O2"] {
+        let elf = built(
+            &format!("board_flag{}", level),
+            r#"
+(use std::board::enable-interrupt)
+(defvar (*ticks* u32) 0)
+(defconstant (CONTROL int) #xE000E010)
+
+#[exception(SysTick)]
+(defun on-tick () () (setf *ticks* (+ *ticks* 1)) ())
+
+(defun main () int
+  (unsafe
+    (volatile-write-u32 #xE000E014 (as u32 25000))
+    (volatile-write-u32 #xE000E018 (as u32 0))
+    (volatile-write-u32 CONTROL (as u32 7)))
+  (while (< *ticks* 5))
+  7)
+"#,
+            "prog.elf",
+            &board_flags(&[level]),
+        );
+        assert_eq!(run_board(&elf).status.code(), Some(7), "{}", level);
+    }
+}

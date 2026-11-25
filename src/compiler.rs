@@ -4981,84 +4981,27 @@ const SOURCE_TEMPLATE: &str = r#"
                        (push-permanent-sexpr-root builder m result)
                        result))))))))
 
-;; `(global id kind)` — `id` is `path`'s already-
-;; promoted compiled-global slot
-;; (`compile::driver::prepare_targets`'s
-;; `collect_targets`/`promote_global` step,
-;; `typelisp_rt::global_new`) — a permanent GC root, so
-;; unlike `compile-var`'s locally-bound name this needs
-;; no `env`/`fn-env` lookup at all, just a direct
-;; `rt_global_get` call by id. The permanent root
-;; always holds a properly *tagged* `Sexpr` (whatever
-;; `Interp::promote_global` produced), so `kind`
-;; (`Repr::field_kind`'s numbering — the
-;; same one `compile-field-get` already uses) untags
-;; it back to the global's own declared representation
-;; via `compile-sexpr-field` (this function's own
-;; decode step, shared with `compile-field-get`). An
-;; enum-typed global (`kind = 6`, since the enum-
-;; representation unification retired the old
-;; shift-tagged `kind = 10` special case) is just
-;; another passthrough value here, no different from
-;; a boxed struct or `Str` global.
+;; `(global id kind)` — `id` is the global's compiled
+;; id (`Interp::promote_global`) and `kind` the field kind
+;; (`Repr::field_kind`) its value is kept under. Where a
+;; global is kept is the builders' business
+;; (`compile::globals`).
 (defun compile-global ((m llvm-module) (fn-name string) (builder llvm-builder) (e Option<Sexpr>))llvm-value
-    (let* ((id (sexpr-int (sexpr-car (sexpr-cdr e))))
-           (kind (sexpr-int (sexpr-car (sexpr-cdr (sexpr-cdr e)))))
-           (args-ptr (arg-list builder 1)))
-      (slot-set builder args-ptr 0 (const-word builder id))
-      (let ((raw (build-call builder (get-function m "rt_global_get") args-ptr)))
-        (compile-sexpr-field builder m raw kind 0))))
+    (global-get builder m (sexpr-int (sexpr-car (sexpr-cdr e))) (sexpr-int (sexpr-car (sexpr-cdr (sexpr-cdr e))))))
 
-;; `(set-global id kind value-form)` — `rt_global_set`
-;; overwrites the global's permanent root in place, so
-;; (unlike `compile-set`'s local-binding case) there is
-;; no separate GC root to keep in sync. `kind` (see
-;; `compile-global`'s doc comment) tags `value-form`'s
-;; own compiled result via `compile-tag-struct-field`
-;; (`compile-sexpr-field`'s encode-side mirror, shared
-;; with `compile-field-set`) before it's stored — a
-;; `Fn`-typed `value-form` isn't representable this
-;; way yet (`compile-tag-struct-field`'s own `kind = 0`
-;; case), so it panics clearly here rather than
-;; storing something `compile-global`'s own decode
-;; couldn't read back correctly. Evaluates to `v`
-;; itself (the newly stored value in its own,
-;; already-untagged compiled representation),
-;; matching `Expr::SetGlobal`'s own checked type.
+;; `(set-global id kind value-form)` — assigns the global
+;; and answers the value assigned.
 (defun compile-set-global ((m llvm-module) (fn-name string) (builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Option<Sexpr>) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (block-names string) (block-exits Scope<llvm-basic-block>) (block-slots Scope<llvm-value>) (protect Option<llvm-basic-block>) (exit-cleanup Option<llvm-basic-block>) (e Option<Sexpr>))llvm-value
-    (let* ((id (sexpr-int (sexpr-car (sexpr-cdr e))))
-           (kind (sexpr-int (sexpr-car (sexpr-cdr (sexpr-cdr e)))))
-           (value-form (sexpr-car (sexpr-cdr (sexpr-cdr (sexpr-cdr e)))))
-           (v (compile-value m fn-name builder env fn-env captured cur-fn loop-exit loop-slot block-names block-exits block-slots protect exit-cleanup value-form))
-           (tagged-v (compile-tag-struct-field builder m v kind))
-           (args-ptr (arg-list builder 2)))
-      (slot-set builder args-ptr 0 (const-word builder id))
-      (slot-set builder args-ptr 1 tagged-v)
-      (let ((ignored (build-call builder (get-function m "rt_global_set") args-ptr)))
-        v)))
+    (global-put builder m (sexpr-int (sexpr-car (sexpr-cdr e))) (sexpr-int (sexpr-car (sexpr-cdr (sexpr-cdr e))))
+                (compile-value m fn-name builder env fn-env captured cur-fn loop-exit loop-slot block-names block-exits block-slots protect exit-cleanup (sexpr-car (sexpr-cdr (sexpr-cdr (sexpr-cdr e)))))))
 
-;; `(global-init kind value-form)` — AOT's synthesized
-;; startup sequence's own step, one per promoted global
-;; (`compile::driver::add_compiled_global_init`,
-;; `compile::aot`): unlike `compile-set-global`, there
-;; is no existing slot to overwrite yet, so this calls
-;; `rt_global_new` (one argument, no `id`) instead of
-;; `rt_global_set` — the id it allocates is implicit in
-;; call order (see `typelisp_rt::rt_global_new`'s doc
-;; comment), which is exactly why `compile::aot` must
-;; emit these calls, from the generated `main`, in the
-;; same order `Interp::promote_global` assigned
-;; compile-time ids in. The allocated id itself is
-;; discarded here (nothing at this call site needs it);
-;; this tag exists purely for its side effect.
+;; `(global-init id kind value-form)` — makes the global:
+;; one step of an executable's startup
+;; (`compile::driver::add_compiled_global_init`), run in
+;; the order the ids were given out in. For its effect.
 (defun compile-global-init ((m llvm-module) (fn-name string) (builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Option<Sexpr>) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (block-names string) (block-exits Scope<llvm-basic-block>) (block-slots Scope<llvm-value>) (protect Option<llvm-basic-block>) (exit-cleanup Option<llvm-basic-block>) (e Option<Sexpr>))llvm-value
-    (let* ((kind (sexpr-int (sexpr-car (sexpr-cdr e))))
-           (value-form (sexpr-car (sexpr-cdr (sexpr-cdr e))))
-           (v (compile-value m fn-name builder env fn-env captured cur-fn loop-exit loop-slot block-names block-exits block-slots protect exit-cleanup value-form))
-           (tagged-v (compile-tag-struct-field builder m v kind))
-           (args-ptr (arg-list builder 1)))
-      (slot-set builder args-ptr 0 tagged-v)
-      (build-call builder (get-function m "rt_global_new") args-ptr)))
+    (global-new builder m (sexpr-int (sexpr-car (sexpr-cdr e))) (sexpr-int (sexpr-car (sexpr-cdr (sexpr-cdr e))))
+                (compile-value m fn-name builder env fn-env captured cur-fn loop-exit loop-slot block-names block-exits block-slots protect exit-cleanup (sexpr-car (sexpr-cdr (sexpr-cdr (sexpr-cdr e)))))))
 
 ;; `(catch tag-form kind body)` — run `body`, and if a `(throw 'tag v)` fired
 ;; anywhere it reached, produce `v` here instead.

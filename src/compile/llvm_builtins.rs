@@ -49,6 +49,7 @@ use crate::eval::interp::{expect_str, str_rt, EvalError};
 use crate::types::Path;
 
 mod coroutine;
+pub(crate) mod globals;
 mod handles;
 mod numeric;
 mod slots;
@@ -123,6 +124,9 @@ pub(crate) fn eval_llvm_builtin_method(heap: &mut Heap, type_name: &Path, method
             wk::M_BUILD_NOT => Some(values::build_not(args)),
             wk::M_TAG_FIELD => Some(values::tag_field(args)),
             wk::M_UNTAG_FIELD => Some(values::untag_field(args)),
+            wk::M_GLOBAL_GET => Some(globals::global_get(args)),
+            wk::M_GLOBAL_PUT => Some(globals::global_put(args)),
+            wk::M_GLOBAL_NEW => Some(globals::global_new(args)),
             wk::M_ARG_LIST => Some(slots::arg_list(args)),
             wk::M_TEMP_SLOT => Some(slots::temp_slot()),
             wk::M_SCRATCH_SLOT => Some(slots::scratch_slot(args)),

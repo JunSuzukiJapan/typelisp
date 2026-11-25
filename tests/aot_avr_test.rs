@@ -250,6 +250,33 @@ fn arithmetic_is_at_the_type_s_width() {
     assert_eq!(values, expected);
 }
 
+/// Globals are in RAM, constants nowhere, and an initial value that is not a
+/// constant is worked out at the start.
+#[test]
+fn globals_hold_their_values() {
+    let source = r#"
+(defconstant (PINB int) #x23)
+(defconstant (LED u8) 32)
+(defvar (n u8) 65)
+(defvar (wide u32) 70000)
+(defvar (flag bool) false)
+(defvar (late u8) (+ n 2))
+(defun bump () () (setf n (+ n 1)) (setf wide (+ wide 5)) (setf flag (not flag)) ())
+(defun main () ()
+  (start)
+  (unsafe (volatile-write-u8 PINB LED))
+  (bump)
+  (put n)
+  (put (if flag 89 78))
+  (bump)
+  (put (if flag 89 78))
+  (put (if (= wide 70010) 89 78))
+  (put late)
+  (put 46))
+"#;
+    assert_eq!(written("avr_globals", source), "BYNYC.");
+}
+
 /// At `-O2` the `case` is a table, which is in RAM.
 #[test]
 fn a_table_is_readied_in_ram() {
@@ -282,7 +309,7 @@ fn the_linker_script_says_where_memory_is() {
 fn a_program_that_needs_the_runtime_is_refused() {
     for (name, source, why) in [
         ("string", r#"(defun main () () (println "hi"))"#, "the runtime function `rt_str_new` (reached by prog::main)"),
-        ("variable", "(defvar (n u8) 1)\n(defun main () () (setf n 2) ())", "the global variable `prog::n`"),
+        ("variable", "(defvar (s string) \"a\")\n(defun main () ())", "the runtime function `rt_str_new` (reached by $global_init$"),
         ("bignum", "(defun main () int 100000)", "the runtime function `rt_bignum_new` (reached by prog::main)"),
         (
             "recursion",

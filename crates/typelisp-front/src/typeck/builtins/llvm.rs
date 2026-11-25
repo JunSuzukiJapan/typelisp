@@ -206,6 +206,10 @@ fn builder(reg: &mut Registry) {
     def.instance("build-not", vec![builder_ty(), value_ty()], value_ty());
     def.instance("tag-field", vec![builder_ty(), module_ty(), value_ty(), Type::Int], value_ty());
     def.instance("untag-field", vec![builder_ty(), module_ty(), value_ty(), Type::Int], value_ty());
+    // A global variable, by its id and its field kind (`compile::globals`).
+    def.instance("global-get", vec![builder_ty(), module_ty(), Type::Int, Type::Int], value_ty());
+    def.instance("global-put", vec![builder_ty(), module_ty(), Type::Int, Type::Int, value_ty()], value_ty());
+    def.instance("global-new", vec![builder_ty(), module_ty(), Type::Int, Type::Int, value_ty()], value_ty());
     // Calls: what is called, the slots its arguments are in, and, where the
     // answer comes back in a word, how it is carried.
     def.instance("build-call", vec![builder_ty(), function_ty(), value_ty()], value_ty());

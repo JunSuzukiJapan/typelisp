@@ -17,7 +17,7 @@ use typelisp_rt::c_mem;
 
 /// Turns a function's stack slots into values and folds what that makes
 /// constant.
-const PASSES: &std::ffi::CStr = c"sroa,early-cse,simplifycfg";
+const PASSES: &std::ffi::CStr = c"sroa,early-cse<memssa>,simplifycfg";
 
 /// Settles the direct functions `direct` of `module`.
 pub(super) fn settle(module: &Module<'static>, direct: &[String]) -> Result<(), String> {
@@ -102,6 +102,47 @@ fn frame_on_the_stack(f: FunctionValue<'static>) -> Result<(), String> {
     }
     open.erase_from_basic_block();
     Ok(())
+}
+
+/// Settles the static globals' initializers `inits`, each with its global's
+/// LLVM variable and whether that can be assigned, in the order they run: one
+/// that stores a constant becomes the variable's initial value. Answers the
+/// names of those left to run.
+pub(super) fn settle_inits(module: &Module<'static>, inits: &[(String, String, bool)]) -> Result<Vec<String>, String> {
+    let mut left = Vec::new();
+    for (name, variable, assigned) in inits {
+        let f = module.get_function(name).ok_or_else(|| format!("internal error: `{}` was not compiled", name))?;
+        let g = module.get_global(variable).ok_or_else(|| format!("internal error: `{}` sets no global", name))?;
+        simplify(f)?;
+        if !quiet(&[f]).is_empty() {
+            frame_on_the_stack(f)?;
+            simplify(f)?;
+        }
+        let constant = match instructions(f)[..] {
+            [store, ret] if store.get_opcode() == InstructionOpcode::Store && ret.get_opcode() == InstructionOpcode::Return => match store.get_operand(0) {
+                Some(Operand::Value(v)) if is_constant(v) => Some(v),
+                _ => None,
+            },
+            _ => None,
+        };
+        let Some(value) = constant else {
+            left.push(name.clone());
+            continue;
+        };
+        g.set_initializer(&value);
+        g.set_constant(!assigned);
+        // SAFETY: nothing calls an initializer but the `main` yet to be built.
+        unsafe { f.delete() };
+    }
+    Ok(left)
+}
+
+fn is_constant(v: BasicValueEnum<'static>) -> bool {
+    match v {
+        BasicValueEnum::IntValue(v) => v.is_constant_int(),
+        BasicValueEnum::FloatValue(v) => v.is_const(),
+        _ => false,
+    }
 }
 
 fn simplify(f: FunctionValue<'static>) -> Result<(), String> {
@@ -219,7 +260,10 @@ fn volatile_accesses(f: FunctionValue<'static>) -> Result<(), String> {
     let b = ctx.create_builder();
     let failed = |e: inkwell::builder::BuilderError| format!("a volatile access in `{}`: {}", name_of(f), e);
     // The addresses computed from an `int` that is a constant by now: `n << 1`.
-    for call in instructions(f).into_iter().filter(|i| callee(*i).is_some_and(|f| f.get_name().to_bytes() == b"rt_c_address")) {
+    // All found first: taking one away takes away the check after it too.
+    let addresses: Vec<_> =
+        instructions(f).into_iter().filter(|i| callee(*i).is_some_and(|f| f.get_name().to_bytes() == b"rt_c_address")).collect();
+    for call in addresses {
         let Some(Operand::Value(BasicValueEnum::IntValue(n))) = call.get_operand(0) else { continue };
         let Some(n) = n.get_sign_extended_constant().filter(|n| *n >= 0 && n & 1 == 0) else { continue };
         drop_check(call);
@@ -227,6 +271,8 @@ fn volatile_accesses(f: FunctionValue<'static>) -> Result<(), String> {
         old.replace_all_uses_with(word_ty.const_int(n as u64 >> 1, false));
         call.erase_from_basic_block();
     }
+    // An address may be on its way through a slot.
+    simplify(f)?;
     let accesses: Vec<(InstructionValue<'static>, bool)> = instructions(f)
         .into_iter()
         .filter_map(|i| match callee(i)?.get_name().to_bytes() {

@@ -651,11 +651,29 @@ pub fn compile_file_with(source_path: &str, output_path: &str, options: &BuildOp
         bodies.push(body);
     }
     let mut init_bodies: Vec<Value> = Vec::with_capacity(defvar_inits.len());
-    for (_, form) in &defvar_inits {
+    // The program's own globals that can be static (`llvm_builtins::globals`),
+    // by place in `defvar_inits`, each with its id and whether it can be
+    // assigned.
+    let mut statics: std::collections::BTreeMap<usize, (usize, bool)> = Default::default();
+    let mut static_inits: Vec<direct::Body> = Vec::new();
+    for (i, (path, form)) in defvar_inits.iter().enumerate() {
         let body = crate::compile::driver::translate_global_init(&interp, &mut heap, *form).map_err(|e| e.to_string())?;
         heap.push_root(body);
         init_bodies.push(body);
+        let assigned = !matches!(core::field(&heap, *form, 2), Some(Value::Bool(false)));
+        if static_global(&heap, body, assigned, options.target) {
+            let id = interp.compiled_global_id(path).ok_or_else(|| format!("internal error: global `{}` was never promoted", path))?;
+            statics.insert(i, (id, assigned));
+            static_inits.push(direct::Body {
+                symbol: format!("$global_init${}", prelude.global_inits.len() + i),
+                params: Vec::new(),
+                ret: crate::check::repr::Repr::Unit,
+                param_list: Value::Empty,
+                body,
+            });
+        }
     }
+    let other_inits: Vec<Value> = init_bodies.iter().enumerate().filter(|(i, _)| !statics.contains_key(i)).map(|(_, b)| *b).collect();
     // The functions whose address the executable hands the runtime, each
     // entered under the coroutine ABI.
     let mut pinned: std::collections::HashSet<String> = std::collections::HashSet::new();
@@ -667,16 +685,21 @@ pub fn compile_file_with(source_path: &str, output_path: &str, options: &BuildOp
         pinned.extend(slots.iter().map(|(type_name, method)| ConcreteNames::method_symbol(type_name, method.name())));
     }
     let entry_symbol = target_symbol_name(&CompileTarget::Fn(entry_path));
-    let direct::Direct { sigs, emit, entry: direct_entry, called, why_not } = direct::direct_functions(&mut heap, &module.borrow(), &bodies, &init_bodies, &pinned, &entry_symbol, |heap, symbol| {
+    let direct::Direct { sigs, emit, entry: direct_entry, called, interprets, why_not } = direct::direct_functions(&mut heap, &module.borrow(), &bodies, &static_inits, &other_inits, &pinned, &entry_symbol, |heap, symbol| {
         prelude_items.get(symbol).map(|item| translated(heap, item)).transpose()
     })?;
     bodies.extend(emit);
+    if interprets {
+        statics.clear();
+    }
     if !options.target.has_runtime() {
         // What a program cannot do without the runtime is told from what it
         // is made of; what is left is emitted as far as the entry calls it,
         // and whether that calls the runtime is seen once it is (`avr`).
         let mut whys = why_not;
-        whys.extend(defvar_inits.iter().map(|(path, _)| format!("the global variable `{}`", path)));
+        whys.extend(
+            defvar_inits.iter().enumerate().filter(|(i, _)| !statics.contains_key(i)).map(|(_, (path, _))| format!("the global variable `{}`", path)),
+        );
         whys.extend(chk.ffi_callbacks().iter().map(|sig| format!("`{}`, given to C as a callback", sig.function)));
         whys.extend(chk.interrupt_handlers().iter().map(|(_, path)| format!("the interrupt handler `{}`", path)));
         if !whys.is_empty() {
@@ -686,6 +709,16 @@ pub fn compile_file_with(source_path: &str, output_path: &str, options: &BuildOp
     }
     let direct_names: Vec<String> = sigs.keys().cloned().collect();
     let producing_direct = crate::compile::direct::producing(sigs);
+    let producing_static =
+        crate::compile::llvm_builtins::globals::producing(statics.values().map(|(id, assigned)| (*id as i64, *assigned)).collect());
+    // What runs at startup for each static global, its variable, and whether
+    // that can be assigned.
+    let static_globals: Vec<(String, String, bool)> = statics
+        .iter()
+        .map(|(i, (id, assigned))| {
+            (format!("$global_init${}", prelude.global_inits.len() + i), crate::compile::llvm_builtins::globals::symbol(*id), *assigned)
+        })
+        .collect();
 
     {
         // Every body this file will emit, declared before any of them is
@@ -753,9 +786,11 @@ pub fn compile_file_with(source_path: &str, output_path: &str, options: &BuildOp
         crate::compile::driver::add_compiled_global_init(&interp, &mut heap, module.clone(), &internal_name, *form).map_err(|e| e.to_string())?;
         global_init_names.push(internal_name);
     }
-    for body in &init_bodies {
+    for (i, body) in init_bodies.iter().enumerate() {
         let internal_name = format!("$global_init${}", global_init_names.len());
-        crate::compile::driver::run_compile_function(&interp, &mut heap, module.clone(), &internal_name, Value::Empty, *body).map_err(|e| e.to_string())?;
+        if !statics.contains_key(&i) {
+            crate::compile::driver::run_compile_function(&interp, &mut heap, module.clone(), &internal_name, Value::Empty, *body).map_err(|e| e.to_string())?;
+        }
         global_init_names.push(internal_name);
     }
     let all_inits: Vec<(Path, Value)> =
@@ -801,14 +836,19 @@ pub fn compile_file_with(source_path: &str, output_path: &str, options: &BuildOp
     // Every body is emitted. What compiles from here on compiles for this
     // process (the `eval` environment's checking), and nothing there is direct.
     drop(producing_direct);
+    drop(producing_static);
+    let running_inits = settle::settle_inits(&module.borrow(), &static_globals)?;
     settle::settle(&module.borrow(), &direct_names)?;
     if !options.target.has_runtime() {
         let result = {
             let m = module.borrow();
             let entry = direct_entry.as_deref().and_then(|name| m.get_function(name)).ok_or("internal error: the entry point was not compiled")?;
             let main_returns_int = chk.fn_ret(&entry_path).is_some_and(|ret| ret == crate::Type::Int);
-            avr::check_reaches_no_runtime(&m, options.target, entry)
-                .and_then(|()| bare_main(ctx, &m, entry, main_returns_int))
+            let inits: Vec<_> = running_inits.iter().filter_map(|name| m.get_function(name)).collect();
+            let reached: Result<(), String> =
+                inits.iter().copied().chain([entry]).try_for_each(|f| avr::check_reaches_no_runtime(&m, options.target, f));
+            reached
+                .and_then(|()| bare_main(ctx, &m, &inits, entry, main_returns_int))
                 .and_then(|()| crate::compile::type_table::settle_for_export(&m).map(|_| ()))
                 .and_then(|()| m.verify().map_err(|e| format!("module failed verification: {}", e)))
                 .and_then(|()| direct::check_only_called(&m, &direct_names))
@@ -818,6 +858,9 @@ pub fn compile_file_with(source_path: &str, output_path: &str, options: &BuildOp
         // Under the guard, as at the end of this function.
         drop(module);
         return result;
+    }
+    if !running_inits.is_empty() {
+        return Err(format!("internal error: a static global's initial value is not a constant ({})", running_inits.join(", ")));
     }
 
     // Which types have a compiled `print-object`, for the printer's AOT
@@ -890,13 +933,14 @@ pub fn compile_file_with(source_path: &str, output_path: &str, options: &BuildOp
         }
         body_globals.insert(symbol, read);
     }
+    let is_static = |i: usize| i.checked_sub(prelude.global_inits.len()).is_some_and(|i| statics.contains_key(&i));
     let globals = Globals {
         inits: all_inits
             .iter()
             .zip(&eval_globals)
             .enumerate()
             .map(|(i, ((_, form), (_, id)))| {
-                Ok(GlobalInit { id: *id, reads: globals_read(&heap, std::slice::from_ref(form))?, always: i >= prelude.global_inits.len() })
+                Ok(GlobalInit { id: *id, reads: globals_read(&heap, std::slice::from_ref(form))?, always: i >= prelude.global_inits.len() && !is_static(i), is_static: is_static(i) })
             })
             .collect::<Result<_, String>>()?,
         bodies: body_globals,
@@ -1402,7 +1446,11 @@ fn build_main_wrapper(
     let coroutine_fn_ty = crate::compile::llvm_builtins::coroutine_fn_type();
     let word_ty = crate::compile::carriers::word();
     let mut init_addrs: Vec<inkwell::values::IntValue<'static>> = Vec::with_capacity(global_init_names.len());
-    for name in global_init_names {
+    for (name, init) in global_init_names.iter().zip(&globals.inits) {
+        if init.is_static {
+            init_addrs.push(word_ty.const_zero());
+            continue;
+        }
         let f = module
             .get_function(name)
             .ok_or_else(|| format!("internal error: global-init function \"{}\" not found in module", name))?;
@@ -1593,12 +1641,43 @@ fn write_ir(module: &Module<'static>) -> Result<(), String> {
     Ok(())
 }
 
+/// Whether the global `body` (`core_bridge::global_init`) makes can be static
+/// (`llvm_builtins::globals`), `assigned` being whether it can be assigned.
+///
+/// Without a runtime there is no heap, and any can. With one, what is kept
+/// must be nothing the collector has to see — a number, a character or a
+/// `bool`, or a fixnum that stays — and its initial value a literal, so that
+/// nothing has to run to make it.
+fn static_global(heap: &Heap, body: Value, assigned: bool, target: Target) -> bool {
+    use crate::compile::llvm_builtins::globals::kept_in;
+    use typelisp_front::sexpr_variant::field_kind as k;
+    let Ok(parts) = core::fields(heap, body) else { return false };
+    let [_, Value::Int(kind), value] = parts[..] else { return false };
+    if kept_in(kind).is_none() {
+        return false;
+    }
+    if !target.has_runtime() {
+        return true;
+    }
+    let scalar = usize::try_from(kind).is_ok_and(|kind| kind >= k::FIXED || [k::F64, k::F32, k::CHAR, k::BOOL].contains(&kind));
+    let literal = core::op_wk(heap, value).unwrap_or(typelisp_mem::NOT_WELL_KNOWN);
+    match literal {
+        // An `int` that is not a fixnum is no literal (`core_bridge`).
+        wk::INT => !assigned,
+        wk::INT_ANY_WIDTH | wk::FLOAT_ANY_WIDTH | wk::CHAR | wk::BOOL => scalar,
+        _ => false,
+    }
+}
+
 /// `main` of a program nothing of which calls the runtime: a call of its
-/// direct entry point.
-fn bare_main(ctx: &'static Context, module: &Module<'static>, entry: inkwell::values::FunctionValue<'static>, main_returns_int: bool) -> Result<(), String> {
+/// static globals' initializers, and of its direct entry point.
+fn bare_main(ctx: &'static Context, module: &Module<'static>, inits: &[inkwell::values::FunctionValue<'static>], entry: inkwell::values::FunctionValue<'static>, main_returns_int: bool) -> Result<(), String> {
     let main_fn = module.add_function(ENTRY_POINT_NAME, ctx.i32_type().fn_type(&[], false), None);
     let builder = ctx.create_builder();
     builder.position_at_end(ctx.append_basic_block(main_fn, "entry"));
+    for init in inits {
+        builder.build_call(*init, &[], "").map_err(|e| format!("failed to call a global's initializer: {}", e))?;
+    }
     run_bare_entry(ctx, &builder, entry, main_returns_int)
 }
 
@@ -1657,6 +1736,8 @@ struct GlobalInit {
     /// A `defvar` of the program's own, which runs whether or not anything
     /// reads it.
     always: bool,
+    /// A static global: it has no initialiser to run.
+    is_static: bool,
 }
 
 /// Replaces, in `main`'s initialiser array (`tl_global_inits`), the
@@ -1675,10 +1756,14 @@ fn leave_out_unread_globals(
     printer_globals: &[(&str, usize)],
 ) -> Result<(), String> {
     let Some(array) = module.get_global("tl_global_inits") else { return Ok(()) };
-    let init_fns: Vec<inkwell::values::FunctionValue<'static>> = (0..globals.inits.len())
+    let init_fns: Vec<Option<inkwell::values::FunctionValue<'static>>> = (0..globals.inits.len())
         .map(|i| {
+            if globals.inits[i].is_static {
+                return Ok(None);
+            }
             module
                 .get_function(&format!("$global_init${}", i))
+                .map(Some)
                 .ok_or_else(|| format!("internal error: global initialiser {} is not in the module", i))
         })
         .collect::<Result<_, String>>()?;
@@ -1688,8 +1773,8 @@ fn leave_out_unread_globals(
         let mut roots = vec![main_fn];
         let mut now = read.clone();
         for (init, f) in globals.inits.iter().zip(&init_fns) {
-            if runs(init) {
-                roots.push(*f);
+            if let Some(f) = f.filter(|_| runs(init)) {
+                roots.push(f);
                 now.extend(&init.reads);
             }
         }
@@ -1709,10 +1794,9 @@ fn leave_out_unread_globals(
         .iter()
         .zip(&init_fns)
         .map(|(init, f)| {
-            if init.always || read.contains(&init.id) {
-                f.as_global_value().as_pointer_value().const_to_int(word_ty)
-            } else {
-                word_ty.const_zero()
+            match f.filter(|_| init.always || read.contains(&init.id)) {
+                Some(f) => f.as_global_value().as_pointer_value().const_to_int(word_ty),
+                None => word_ty.const_zero(),
             }
         })
         .collect();

@@ -142,27 +142,35 @@ pub(crate) struct Direct {
     pub emit: Vec<Body>,
     /// The entry point's direct copy, when it has one.
     pub entry: Option<String>,
-    /// What that copy can call, itself included. Empty when there is none.
+    /// What that copy and the static globals' initializers can call,
+    /// themselves included. Empty when there is no such copy.
     pub called: HashSet<String>,
+    /// The program reaches the interpreter, which looks globals up in the
+    /// runtime's table: none of them is static, and the initializers given as
+    /// static ones are not emitted.
+    pub interprets: bool,
     /// Why it has none, each with the functions from the entry to the one
     /// that is the reason. Empty when it has one.
     pub why_not: Vec<String>,
 }
 
-/// The direct functions of the program whose own functions are `bodies` and
-/// whose `defvar`s' initializers are `inits`. `module` holds the FFI thunks,
+/// The direct functions of the program whose own functions are `bodies`,
+/// whose static globals' initializers are `static_inits`, each a function of
+/// its own, and whose other globals' initializers are `inits`. `module` holds the FFI thunks,
 /// all of them coroutines; `prelude` translates the prelude function of a
 /// symbol, if it is one.
 pub(crate) fn direct_functions(
     heap: &mut Heap,
     module: &Module<'static>,
     bodies: &[Body],
+    static_inits: &[Body],
     inits: &[Value],
     pinned: &HashSet<String>,
     entry: &str,
     mut prelude: impl FnMut(&mut Heap, &str) -> Result<Option<Body>, String>,
 ) -> Result<Direct, String> {
-    let mut known: HashMap<String, Facts> = bodies.iter().map(|b| (b.symbol.clone(), facts(heap, b.body))).collect();
+    let mut known: HashMap<String, Facts> =
+        bodies.iter().chain(static_inits).map(|b| (b.symbol.clone(), facts(heap, b.body))).collect();
     let init_facts: Vec<Facts> = inits.iter().map(|f| facts(heap, *f)).collect();
 
     // The prelude functions the program refers to, and those those refer to.
@@ -184,6 +192,7 @@ pub(crate) fn direct_functions(
     // What the program does, with what it reaches.
     let all = || known.values().chain(&init_facts);
     if all().any(|f| f.interprets) {
+        answer.interprets = true;
         answer.why_not.push("`eval` and the like, which need the interpreter".to_string());
         return Ok(answer);
     }
@@ -218,6 +227,10 @@ pub(crate) fn direct_functions(
         let body = bodies.iter().find(|b| b.symbol == entry).expect("the entry is one of the program's functions");
         let copy = format!("{}{}", entry, COPY_SUFFIX);
         let mut pending = vec![entry];
+        for init in static_inits.iter().map(|b| b.symbol.as_str()).filter(|s| direct.contains(s)) {
+            answer.called.insert(init.to_string());
+            pending.push(init);
+        }
         while let Some(at) = pending.pop() {
             for callee in known.get(at).into_iter().flat_map(|f| &f.callees) {
                 if direct.contains(callee.as_str()) && answer.called.insert(callee.clone()) {
@@ -232,6 +245,10 @@ pub(crate) fn direct_functions(
     } else {
         answer.why_not = why_not_direct(&known, module, waits, entry);
     }
+    for init in static_inits.iter().map(|b| b.symbol.as_str()).filter(|s| !direct.contains(s)) {
+        answer.why_not.extend(why_not_direct(&known, module, waits, init));
+    }
+    answer.emit.extend(static_inits.iter().cloned());
     let sigs: Vec<(String, DirectSig)> = bodies
         .iter()
         .chain(&answer.emit)

@@ -482,8 +482,7 @@ fn optimize_ir(interp: &Interp, heap: &mut Heap, body_sexpr: Value) -> Result<Va
 /// AOT-only counterpart of [`crate::compile::driver::add_compiled_function`]: compiles a
 /// `defvar`'s initializer expression `value` into a zero-argument LLVM
 /// function `internal_name` in `module` that, when called, evaluates it
-/// and calls `rt_global_new` to establish that global's *runtime*
-/// storage — one entry in the startup sequence `compile::aot::
+/// and makes the global (`global-new`) — one entry in the startup sequence `compile::aot::
 /// compile_file` generates and wires into `main` (via
 /// `compile::aot::build_main_wrapper`) so a standalone executable
 /// allocates each of its own promoted globals before `tl_main` (the
@@ -493,9 +492,8 @@ fn optimize_ir(interp: &Interp, heap: &mut Heap, body_sexpr: Value) -> Result<Va
 ///
 /// Mirrors `add_compiled_function`'s own translate-then-`compile-
 /// function` shape almost exactly, just with no parameters and a body
-/// wrapped as `(global-init kind value-form)`
-/// ([`crate::compile::symbols::ast_to_sexpr_for_global_init`],
-/// `compiler.rs`'s `compile-global-init`) instead of an ordinary
+/// wrapped as `(global-init id kind value-form)`
+/// ([`crate::compile::core_bridge::global_init`], `compiler.rs`'s `compile-global-init`) instead of an ordinary
 /// translated function body — `value` may itself reference other
 /// globals (an earlier `defvar`'s value), so the same promotion pass
 /// applies here too.
