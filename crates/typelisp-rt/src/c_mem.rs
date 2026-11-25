@@ -236,20 +236,33 @@ pub unsafe fn store(addr: usize, kind: i64, word: i64) {
     }
 }
 
+/// The address the `int` `n` is, if this machine has it.
+pub fn address(heap: &typelisp_mem::Heap, n: typelisp_mem::Value) -> Result<usize, String> {
+    use typelisp_mem::Value;
+    let at = match n {
+        Value::Int(n) => usize::try_from(n).ok(),
+        Value::Boxed(id) if heap.is_bignum(id) => usize::try_from(&*heap.bignum_value(id)).ok(),
+        other => fatal(&format!("an address that is no int: {:?}", other)),
+    };
+    at.ok_or_else(|| match n {
+        Value::Boxed(id) => format!("{:#x} is not an address on this machine", &*heap.bignum_value(id)),
+        Value::Int(n) => format!("{:#x} is not an address on this machine", n),
+        _ => unreachable!("checked above"),
+    })
+}
+
 /// The address `addr` of a `kind` register (`u8`, `u16` or `u32`), once it
-/// is one this machine has and is aligned for the width: a volatile access
-/// of a misaligned address is undefined, where a hardware register never is
-/// one.
-fn register(addr: i64, kind: i64, who: &str) -> Result<usize, String> {
+/// is aligned for the width: a volatile access of a misaligned address is
+/// undefined, where a hardware register never is one.
+fn register(at: usize, kind: i64, who: &str) -> Result<usize, String> {
     let width = match kind {
         KIND_U8 => 1,
         KIND_U16 => 2,
         KIND_U32 => 4,
         k => fatal(&format!("{}: unknown kind {}", who, k)),
     };
-    let at = usize::try_from(addr).map_err(|_| format!("{}: {:#x} is not an address on this machine", who, addr))?;
     if !at.is_multiple_of(width) {
-        return Err(format!("{}: {:#x} is not aligned to {} bytes", who, addr, width));
+        return Err(format!("{}: {:#x} is not aligned to {} bytes", who, at, width));
     }
     Ok(at)
 }
@@ -262,7 +275,7 @@ fn register(addr: i64, kind: i64, who: &str) -> Result<usize, String> {
 ///
 /// `addr`, once [`register`] accepts it, must be readable — the program
 /// takes that on in the `unsafe` around the read.
-pub unsafe fn volatile_load(addr: i64, kind: i64) -> Result<i64, String> {
+pub unsafe fn volatile_load(addr: usize, kind: i64) -> Result<i64, String> {
     let at = register(addr, kind, "volatile-read")?;
     Ok(match kind {
         KIND_U8 => (at as *const u8).read_volatile() as i64,
@@ -276,7 +289,7 @@ pub unsafe fn volatile_load(addr: i64, kind: i64) -> Result<i64, String> {
 /// # Safety
 ///
 /// As [`volatile_load`], for a writable register.
-pub unsafe fn volatile_store(addr: i64, kind: i64, word: i64) -> Result<(), String> {
+pub unsafe fn volatile_store(addr: usize, kind: i64, word: i64) -> Result<(), String> {
     let at = register(addr, kind, "volatile-write")?;
     match kind {
         KIND_U8 => (at as *mut u8).write_volatile(word as u8),
@@ -374,6 +387,20 @@ pub unsafe extern "C" fn rt_c_offset(addr: Word, offset: Word) -> Word {
     addr.wrapping_add(offset)
 }
 
+/// `(" c-address" INT)`: the address the tagged `int` is.
+///
+/// # Safety
+///
+/// The word must be an `int`'s, and a `Heap` must be registered on this
+/// thread.
+#[no_mangle]
+pub unsafe extern "C-unwind" fn rt_c_address(n: Word) -> Word {
+    match address(typelisp_abi::active_heap(), typelisp_abi::decode(n)) {
+        Ok(at) => at as Word,
+        Err(msg) => raise(msg).into_word(),
+    }
+}
+
 /// `(" c-load" ADDR OFFSET KIND)`.
 ///
 /// # Safety
@@ -402,7 +429,7 @@ pub unsafe extern "C" fn rt_c_store(addr: Word, offset: Word, kind: Word, word: 
 /// The words must name a readable register.
 #[no_mangle]
 pub unsafe extern "C-unwind" fn rt_c_volatile_load(addr: Word, kind: Word) -> u32 {
-    match volatile_load(addr as i64, kind as i64) {
+    match volatile_load(addr as usize, kind as i64) {
         Ok(word) => word as u32,
         Err(msg) => raise(msg).into_zero(),
     }
@@ -415,7 +442,7 @@ pub unsafe extern "C-unwind" fn rt_c_volatile_load(addr: Word, kind: Word) -> u3
 /// The words must name a writable register.
 #[no_mangle]
 pub unsafe extern "C-unwind" fn rt_c_volatile_store(addr: Word, kind: Word, word: u32) -> Word {
-    match volatile_store(addr as i64, kind as i64, i64::from(word)) {
+    match volatile_store(addr as usize, kind as i64, i64::from(word)) {
         Ok(()) => 0,
         Err(msg) => raise(msg).into_word(),
     }

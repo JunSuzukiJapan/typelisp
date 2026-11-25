@@ -2530,7 +2530,9 @@ const SOURCE_TEMPLATE: &str = r#"
               (build-try-option builder m cur-fn
                 (call-1 builder m "rt_integer_fits_char" a) (convert builder #%carrier-word #%carrier-char (untag-fixnum builder a)) #%kind-char))
              (("int->i8" "int->i16" "int->i32" "int->u8" "int->u16" "int->u32" "int->c-long" "int->c-ulong")
-              (call-1 builder m (integer-cast-shim "rt_integer_to_" method) a))
+              ;; A C integer's shim answers 64 bits whatever its width.
+              (coerce builder (int-wsig m (width-cast-target method))
+                      (call-1 builder m (integer-cast-shim "rt_integer_to_" method) a)))
              (("try-int->i8" "try-int->i16" "try-int->i32" "try-int->u8" "try-int->u16" "try-int->u32")
               (build-try-option builder m cur-fn
                 (call-1 builder m (integer-cast-shim "rt_integer_fits_" method) a)

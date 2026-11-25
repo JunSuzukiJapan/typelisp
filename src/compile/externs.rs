@@ -947,9 +947,9 @@ pub(crate) fn runtime_addresses() -> impl Iterator<Item = (&'static str, usize)>
 
 /// The shims every target has: `typelisp-rt`'s, the printer's, the reader's
 /// and `rt_llvm_call`.
-fn rt_shims() -> [(&'static str, Shim); 354] {
+fn rt_shims() -> [(&'static str, Shim); 355] {
     use typelisp_rt::c_mem::{
-        rt_c_alloc, rt_c_arena_close, rt_c_arena_open, rt_c_index, rt_c_load, rt_c_offset, rt_c_ptr_check, rt_c_store,
+        rt_c_alloc, rt_c_arena_close, rt_c_arena_open, rt_c_index, rt_c_load, rt_c_offset, rt_c_address, rt_c_ptr_check, rt_c_store,
         rt_c_volatile_load, rt_c_volatile_store,
     };
     use typelisp_rt::interrupt::{rt_interrupt_disable, rt_interrupt_enable, rt_interrupt_register};
@@ -1219,6 +1219,7 @@ fn rt_shims() -> [(&'static str, Shim); 354] {
         ("rt_c_alloc", shim(rt_c_alloc as unsafe extern "C-unwind" fn(*const Word, u32) -> Word)),
         ("rt_c_ptr_check", shim(rt_c_ptr_check as unsafe extern "C-unwind" fn(Word, Word) -> Word)),
         ("rt_c_index", shim(rt_c_index as unsafe extern "C-unwind" fn(Word, Word, Word, Word) -> Word)),
+        ("rt_c_address", shim(rt_c_address as unsafe extern "C-unwind" fn(Word) -> Word)),
         ("rt_c_offset", shim(rt_c_offset as unsafe extern "C" fn(Word, Word) -> Word)),
         ("rt_c_load", shim(rt_c_load as unsafe extern "C" fn(Word, Word, Word) -> i64)),
         ("rt_c_store", shim(rt_c_store as unsafe extern "C" fn(Word, Word, Word, i64) -> Word)),

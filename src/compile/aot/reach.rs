@@ -278,12 +278,13 @@ impl TypeReach {
                         .collect::<Option<_>>()
                         .ok_or_else(|| format!("internal error: a type table is indexed by a non-constant in `{}`", value_name(v)))?;
                     let source = LLVMGetGEPSourceElementType(v);
+                    let word_bits = crate::compile::carriers::word().get_bit_width();
                     let place = match (inkwell::llvm_sys::core::LLVMGetTypeKind(source), &indices[..]) {
                         (inkwell::llvm_sys::LLVMTypeKind::LLVMArrayTypeKind, [0, place]) => *place,
                         (inkwell::llvm_sys::LLVMTypeKind::LLVMIntegerTypeKind, [offset]) => {
                             match inkwell::llvm_sys::core::LLVMGetIntTypeWidth(source) {
-                                64 => *offset,
-                                8 if offset % 8 == 0 => offset / 8,
+                                bits if bits == word_bits => *offset,
+                                8 if offset % (i64::from(word_bits) / 8) == 0 => offset / (i64::from(word_bits) / 8),
                                 width => return Err(format!("internal error: a type table is addressed in {}-bit units", width)),
                             }
                         }

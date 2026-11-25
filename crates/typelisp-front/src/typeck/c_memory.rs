@@ -304,6 +304,12 @@ fn int_arg(cx: &Cx, heap: &mut Heap, locals: &Locals, (v, loc): &(Value, Option<
     Ok(Typed { node: Node::UntagInt { value: Box::new(n) }, ty: Type::I32, loc: None })
 }
 
+/// An `int` argument that is an address.
+fn address_arg(cx: &Cx, heap: &mut Heap, locals: &Locals, (v, loc): &(Value, Option<Loc>)) -> Result<Typed, Error> {
+    let n = check_expr(cx, heap, locals, *v, Some(&Type::Int), loc.clone())?;
+    Ok(builtin(b::ADDRESS, vec![n], Type::Ptr))
+}
+
 /// A typed pointer argument, and what it points at.
 fn ptr_arg(cx: &Cx, heap: &mut Heap, locals: &Locals, (v, loc): &(Value, Option<Loc>), who: &str) -> Result<(Typed, Type), Error> {
     let p = check_expr(cx, heap, locals, *v, None, loc.clone())?;
@@ -422,7 +428,7 @@ pub(crate) fn check_volatile_read(cx: &Cx, heap: &mut Heap, locals: &Locals, hea
         return Err(Error::TypeError(format!("{}: ({} address)", who, who)));
     };
     require_unsafe(cx, who)?;
-    let addr = int_arg(cx, heap, locals, addr)?;
+    let addr = address_arg(cx, heap, locals, addr)?;
     let kind = c_kind(&ty).expect("a register is a C scalar");
     let mut t = builtin(b::VOLATILE_LOAD, vec![addr, word(heap, kind as u64)?], ty);
     t.loc = loc;
@@ -438,7 +444,7 @@ pub(crate) fn check_volatile_write(cx: &Cx, heap: &mut Heap, locals: &Locals, he
         return Err(Error::TypeError(format!("{}: ({} address value)", who, who)));
     };
     require_unsafe(cx, who)?;
-    let addr = int_arg(cx, heap, locals, addr)?;
+    let addr = address_arg(cx, heap, locals, addr)?;
     let value = check_expr(cx, heap, locals, *value, Some(&ty), value_loc.clone())?;
     let kind = c_kind(&ty).expect("a register is a C scalar");
     let mut t = builtin(b::VOLATILE_STORE, vec![addr, word(heap, kind as u64)?, value], Type::Unit);

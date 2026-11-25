@@ -418,14 +418,8 @@ fn llvm_builder_position_at_end(args: &[Value]) -> Result<Value, EvalError> {
     Ok(Value::Empty)
 }
 
-/// `(const-word builder n)`: an LLVM 64-bit integer constant.
-///
-/// The *generated* code's word is 64 bits whatever the source language's
-/// integer types are, which is why this outlived `i64` (the source type it
-/// used to be named for). `n` is an `i32` and is sign-extended, so a caller
-/// passing `-1` gets the all-ones word it means; the two places that need a
-/// constant wider than `i32` (`compile-int`/`compile-float`) shift two halves
-/// together in IR rather than asking for one here.
+/// `(const-word builder n)`: the word `n`, sign-extended, so a caller
+/// passing `-1` gets the all-ones word it means.
 fn llvm_builder_const_word(args: &[Value]) -> Result<Value, EvalError> {
     let _builder = expect_llvm_builder(&args[0])?;
     let n = expect_int(&args[1])?;
@@ -718,7 +712,7 @@ fn llvm_builder_build_make_closure(args: &[Value]) -> Result<Value, EvalError> {
     let address = b
         .build_ptr_to_int(target.as_global_value().as_pointer_value(), word_ty, "closure_fn_ptr")
         .map_err(|e| err(e.to_string()))?;
-    let mut given: Vec<BasicValueEnum<'static>> = vec![address.into(), word_ty.const_int(sexpr_mask, false).into()];
+    let mut given: Vec<BasicValueEnum<'static>> = vec![address.into(), crate::compile::carriers::int(64).const_int(sexpr_mask, false).into()];
     given.extend(all_of(&b, &env)?.into_iter().map(|v| v.unwrap_or_else(|| word_ty.const_zero().into())));
     match emit_rt_call(&b, ctor, &given, "closure_new", "build-make-closure")? {
         Some(v) => Ok(llvm_value_value(v)),

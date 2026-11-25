@@ -34,7 +34,7 @@ pub mod dribble;
 // `concat!` takes literals only. `scripts/regen-abi-version.sh` is what
 // rewrites them, and only when that description changed or the typelisp
 // version's MAJOR.MINOR did.
-macro_rules! with_abi_version { ($then:ident) => { $then!(0, 3, 83) }; }
+macro_rules! with_abi_version { ($then:ident) => { $then!(0, 3, 84) }; }
 
 macro_rules! dotted { ($major:literal, $minor:literal, $patch:literal) => { concat!($major, ".", $minor, ".", $patch) }; }
 
@@ -779,5 +779,20 @@ pub mod call_state {
 /// compiled-CPS work: a compiled frame holds tagged *words* rather than
 /// `Value`s, so the collector — which lives in `typelisp-mem`, below this
 /// crate — has to be able to decode them.
-pub use typelisp_mem::tagged::{decode, encode, Word};
+pub use typelisp_mem::tagged::{decode, Word};
+
+/// The word of `v` (`typelisp_mem::tagged::encode`). A fixed-width integer
+/// the interpreter holds (`Value::Int`) can be wider than a fixnum where a
+/// word is 32 bits: its word is the `int`'s it is worth, as compiled code
+/// holds it in a field.
+#[cfg(target_pointer_width = "64")]
+pub use typelisp_mem::tagged::encode;
+#[cfg(not(target_pointer_width = "64"))]
+pub fn encode(v: typelisp_mem::Value) -> Word {
+    match typelisp_mem::try_encode(v) {
+        Ok(w) => w,
+        // SAFETY: a program has a heap by the time it has a value.
+        Err(n) => typelisp_mem::encode(unsafe { active_heap() }.canonical_int(i128::from(n))),
+    }
+}
 

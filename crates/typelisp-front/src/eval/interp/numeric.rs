@@ -19,6 +19,16 @@ pub(super) fn eval_fixed_builtin(heap: &mut Heap, method: SymRef, args: &[Value]
 }
 
 fn fixed_builtin<T: Fixed>(heap: &mut Heap, method: SymRef, args: &[Value], ret_type: TypeId) -> Result<Option<Value>, EvalError> {
+    // A compiled field holds one past the fixnum range as the `int` it is
+    // worth.
+    let args: Vec<Value> = args
+        .iter()
+        .map(|v| match v {
+            Value::Boxed(id) if heap.is_bignum(*id) => i64::try_from(&*heap.bignum_value(*id)).map_or(*v, Value::Int),
+            _ => *v,
+        })
+        .collect();
+    let args = &args[..];
     let arg = |i: usize| rt_i64(&args[i]).map(T::from_word);
     let num = |v: T| Value::Int(v.to_word());
     let fault = |f: Fault| EvalError::Panic(f.message());

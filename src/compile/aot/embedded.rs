@@ -2,10 +2,9 @@
 //! `thumbv8m.main-none-eabihf`): emitting the module as an ARM object and
 //! linking it with `ld.lld` into an ELF executable.
 //!
-//! The module is the one a native executable is made from, given the
-//! target's data layout before the passes run, as for WebAssembly (see
-//! `wasm.rs`): a word is an `i64` everywhere, and the tables whose words
-//! hold an address are rewritten the same way ([`super::wasm::split_address_words`]).
+//! The module is the one a native executable is made from, emitted with the
+//! target's word and given the target's data layout before the passes run, as
+//! for WebAssembly (see `wasm.rs`).
 //!
 //! The runtime (`crates/typelisp-rt-embedded`) starts the program: its
 //! `cortex-m-rt` vector table and `Reset` ready RAM and call the runtime's
@@ -218,7 +217,6 @@ pub(super) fn write_executable(
         .ok_or("internal error: the module has no `main`")?
         .as_global_value()
         .set_name(BOARD_MAIN);
-    super::wasm::split_address_words(module)?;
     crate::compile::codegen_prep::prepare(module)?;
     busy_around_runtime_calls(module)?;
     crate::compile::optimize::run_llvm_passes(module, &tm)?;

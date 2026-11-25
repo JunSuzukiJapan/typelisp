@@ -22,7 +22,8 @@ use typelisp_mem::Value;
 /// the *raw* capture mask (bit `i` set ⇒ `args[2+i]` is a tagged `Sexpr`,
 /// stored decoded; clear ⇒ raw native bits, stored verbatim behind an
 /// immediate `Value::Int` — see `BoxedObj::CompiledClosure`), and
-/// `args[2..argc]` are the captured slots. At most 64 slots — the same
+/// the words after the mask (64 bits, in as many
+/// words as that takes) are the captured slots. At most 64 slots — the same
 /// limit the replaced `ClosureBox` fn-mask had. Allocation never triggers a
 /// collection (the box store grows on demand), so the slot values may be
 /// un-rooted at the moment of the call.
@@ -55,18 +56,19 @@ pub unsafe extern "C" fn rt_coroutine_closure_new(args: *const Word, argc: u32) 
 }
 
 unsafe fn closure_new(args: *const Word, argc: u32, body_abi: u8, what: &str) -> Word {
-    if argc < 2 {
-        fatal(&format!("{}: expected at least 2 arguments (fn ptr, sexpr mask)", what));
+    let head = 1 + typelisp_mem::VALUE_WORDS;
+    if (argc as usize) < head {
+        fatal(&format!("{}: expected a fn ptr and a sexpr mask", what));
     }
-    let env_len = argc as usize - 2;
+    let env_len = argc as usize - head;
     if env_len > 64 {
         fatal(&format!("{}: more than 64 captured slots", what));
     }
     let fn_ptr = *args as usize;
-    let sexpr_mask = *args.add(1) as u64;
+    let sexpr_mask = typelisp_mem::raw_value(core::slice::from_raw_parts(args.add(1), typelisp_mem::VALUE_WORDS)) as u64;
     let mut env = Vec::with_capacity(env_len);
     for i in 0..env_len {
-        let raw = *args.add(2 + i);
+        let raw = *args.add(head + i);
         if sexpr_mask & (1 << i) != 0 {
             env.push(decode(raw));
         } else {
@@ -138,7 +140,7 @@ pub unsafe extern "C" fn rt_closure_env_get(id: Word, idx: Word) -> Word {
     }
     let heap = active_heap();
     let v = heap.compiled_closure_env_get(id, idx as usize);
-    if heap.compiled_closure_mask(id) & (1 << idx) != 0 {
+    if heap.compiled_closure_mask(id) & (1u64 << idx) != 0 {
         encode(v)
     } else {
         match v {

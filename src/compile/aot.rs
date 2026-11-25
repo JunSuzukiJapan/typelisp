@@ -582,6 +582,10 @@ pub fn compile_file_with(source_path: &str, output_path: &str, options: &BuildOp
     // `COMPILE_LOCK`); the non-LLVM work in between (the `eval` environment)
     // runs under it too, which only costs other threads' wait.
     let _guard = crate::compile::COMPILE_LOCK.lock().unwrap();
+    // From here on everything emitted is the executable's, but for the
+    // `eval` environment's checking.
+    let emitting = || crate::compile::carriers::word_of(options.target.data_model().pointer_bits());
+    let word_width = emitting();
     let module = {
         let module = ctx.create_module("compiled_file");
         // Forward-declares every `rt_*` shim (no body) so `compile-call`'s
@@ -883,12 +887,15 @@ pub fn compile_file_with(source_path: &str, output_path: &str, options: &BuildOp
     // Nothing below consults it — `build_main_wrapper` emits ids as constants
     // and `write_executable` links — and `compile_file` already reset it once
     // at the top for its own `interp`.
+    drop(word_width);
     let eval_env: Option<Vec<u8>> = if calls_eval {
         let mut env_heap = Heap::with_capacity(EVAL_HEAP_CAPACITY);
         Some(crate::compile::dump::capture_program_dump(&mut env_heap, &source, &src_root, &entry_segs, &eval_globals)?)
     } else {
         None
     };
+
+    let _word_width = emitting();
 
     // What `main` answers with decides how the exit code is read off it: an
     // `int` is a tagged word (a fixnum's payload is the code; a bignum has

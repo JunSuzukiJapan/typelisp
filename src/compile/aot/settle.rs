@@ -152,7 +152,15 @@ fn volatile_accesses(f: FunctionValue<'static>) -> Result<(), String> {
     let word_ty = crate::compile::carriers::word();
     let b = ctx.create_builder();
     let failed = |e: inkwell::builder::BuilderError| format!("a volatile access in `{}`: {}", name_of(f), e);
-    let pointer_bytes = typelisp_mem::target::DataModel::current().pointer_bytes;
+    // The addresses computed from an `int` that is a constant by now: `n << 1`.
+    for call in instructions(f).into_iter().filter(|i| callee(*i).is_some_and(|f| f.get_name().to_bytes() == b"rt_c_address")) {
+        let Some(Operand::Value(BasicValueEnum::IntValue(n))) = call.get_operand(0) else { continue };
+        let Some(n) = n.get_sign_extended_constant().filter(|n| *n >= 0 && n & 1 == 0) else { continue };
+        drop_check(call);
+        let old: IntValue<'static> = call.try_into().map_err(|()| "internal error: an address is a word".to_string())?;
+        old.replace_all_uses_with(word_ty.const_int(n as u64 >> 1, false));
+        call.erase_from_basic_block();
+    }
     let accesses: Vec<(InstructionValue<'static>, bool)> = instructions(f)
         .into_iter()
         .filter_map(|i| match callee(i)?.get_name().to_bytes() {
@@ -166,20 +174,22 @@ fn volatile_accesses(f: FunctionValue<'static>) -> Result<(), String> {
             Some(Operand::Value(BasicValueEnum::IntValue(v))) => Some(v),
             _ => None,
         };
-        let constant = |k: u32| word(k).and_then(|v| v.get_sign_extended_constant());
-        let (Some(addr), Some(kind)) = (constant(0), constant(1)) else { continue };
+        let (Some(addr), Some(kind)) =
+            (word(0).and_then(|v| v.get_zero_extended_constant()), word(1).and_then(|v| v.get_sign_extended_constant()))
+        else {
+            continue;
+        };
         let bits = match kind {
             c_mem::KIND_U8 => 8,
             c_mem::KIND_U16 => 16,
             c_mem::KIND_U32 => 32,
             _ => continue,
         };
-        let on_the_machine = addr >= 0 && (pointer_bytes >= 8 || (addr as u64) >> (8 * pointer_bytes) == 0);
-        if !on_the_machine || addr % i64::from(bits / 8) != 0 {
+        if addr % u64::from(bits / 8) != 0 {
             continue;
         }
         b.position_before(&call);
-        let ptr = word_ty.const_int(addr as u64, false).const_to_pointer(ctx.ptr_type(inkwell::AddressSpace::default()));
+        let ptr = word_ty.const_int(addr, false).const_to_pointer(ctx.ptr_type(inkwell::AddressSpace::default()));
         let ty = crate::compile::carriers::int(bits);
         let answer = if store {
             let value = word(2).ok_or("internal error: a volatile write of no word")?;

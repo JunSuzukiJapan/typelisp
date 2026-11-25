@@ -878,3 +878,13 @@ fn an_os_thread_is_refused_at_compile_time() {
     );
     assert!(err.contains("an OS thread (`thread`)"), "{}", err);
 }
+
+/// A word is 32 bits there, and the answers are the same.
+#[test]
+fn a_narrow_word_answers_as_a_wide_one() {
+    for level in ["-O0", "-O2"] {
+        let (out, _, code) = same_as_native("board_word_width", include_str!("programs/word_width.typl"), &[level]);
+        assert!(out.starts_with("1073741823\n1073741824\n"), "{}", out);
+        assert_eq!(code, Some(0));
+    }
+}

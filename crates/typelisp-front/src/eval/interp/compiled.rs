@@ -203,6 +203,9 @@ pub(crate) fn encode_crossing_value(heap: &Heap, v: &Value, repr: &Repr) -> Resu
         // internally.
         Repr::Narrow(_) => match v {
             Value::Int(n) => Ok(*n),
+            // A compiled field's, past the fixnum range.
+            Value::Boxed(id) if heap.is_bignum(*id) => i64::try_from(&*heap.bignum_value(*id))
+                .map_err(|_| EvalError::Internal("compiled call: an integer argument past 64 bits".into())),
             other => Err(EvalError::Internal(format!("compiled call: expected an integer argument, got {:?}", other))),
         },
         // An `int` crosses as the tagged word it is — the catch-all's

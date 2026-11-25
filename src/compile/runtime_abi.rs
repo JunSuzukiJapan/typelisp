@@ -236,6 +236,11 @@ fn argument(
         (BasicValueEnum::IntValue(w), BasicTypeEnum::IntType(t)) if w.get_type().get_bit_width() > t.get_bit_width() => {
             b.build_int_truncate(w, t, "arg").map_err(e)?.into()
         }
+        // A word is signed; what the other integers narrower than their
+        // parameter are extended with does not matter.
+        (BasicValueEnum::IntValue(w), BasicTypeEnum::IntType(t)) if w.get_type() == crate::compile::carriers::word() && matches!(ty, RtTy::Value(Carrier::Int { signed: true, .. })) => {
+            b.build_int_s_extend(w, t, "arg").map_err(e)?.into()
+        }
         (BasicValueEnum::IntValue(w), BasicTypeEnum::IntType(t)) => b.build_int_z_extend(w, t, "arg").map_err(e)?.into(),
         (BasicValueEnum::IntValue(_), BasicTypeEnum::FloatType(t)) => {
             let c = if t == ctx.f32_type() { Carrier::F32 } else { Carrier::F64 };

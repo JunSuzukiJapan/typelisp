@@ -1023,4 +1023,5 @@ well_known_symbols! {
     "Appended 2026-11-25. The largest fixnum of the machine the code runs on,
      which `most-positive-fixnum` is."
     F_LARGEST_FIXNUM => "largest-fixnum"
+    F_C_ADDRESS => " c-address"
 }

@@ -54,16 +54,8 @@ use crate::prelude::*;
 use crate::value::{BoxId, PathId, StrId, Value};
 use crate::{ConsRef, SymRef};
 
-/// A tagged word. Signed, because a fixnum is.
-///
-/// `isize` where it can be, so that a word is a type of its own to the table
-/// of the runtime's signatures (`typelisp::compile::runtime_abi`), which a
-/// 64-bit host builds.
-#[cfg(target_pointer_width = "64")]
+/// A tagged word, as wide as an address. Signed, because a fixnum is.
 pub type Word = isize;
-/// Compiled code carries 64-bit words on every target.
-#[cfg(not(target_pointer_width = "64"))]
-pub type Word = i64;
 
 /// How many words the widest value (an `f64`, a 64-bit C integer) takes.
 pub const VALUE_WORDS: usize = i64::BITS.div_ceil(Word::BITS) as usize;

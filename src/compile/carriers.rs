@@ -16,10 +16,35 @@ use crate::check::repr::Repr;
 use typelisp_front::sexpr_variant::carrier as c;
 use typelisp_mem::fixed::FixedType;
 
+thread_local! {
+    /// How wide the word of the code being produced on this thread is.
+    static WORD_BITS: std::cell::Cell<u32> = const { std::cell::Cell::new(usize::BITS) };
+}
+
 /// The word: what a compiled function takes, answers and keeps in its frame,
-/// and the width of an address held as an integer.
+/// and the width of an address held as an integer. As wide as a pointer of
+/// the machine the code is for: this one's, except while an executable for
+/// another is emitted ([`word_of`]).
 pub(crate) fn word() -> IntType<'static> {
-    super::llvm_context().i64_type()
+    int(WORD_BITS.with(|w| w.get()))
+}
+
+/// While the answer lives, code emitted on this thread is for a machine whose
+/// pointers are `bits` wide. Nothing emitted meanwhile can run in this
+/// process.
+pub(crate) fn word_of(bits: u32) -> WordWidth {
+    WordWidth { before: WORD_BITS.with(|w| w.replace(bits)) }
+}
+
+/// [`word_of`]'s guard: puts back the width it replaced.
+pub(crate) struct WordWidth {
+    before: u32,
+}
+
+impl Drop for WordWidth {
+    fn drop(&mut self) {
+        WORD_BITS.with(|w| w.set(self.before));
+    }
 }
 
 /// The integer type `bits` wide: one of the widths a fixed-width integer or
@@ -190,6 +215,11 @@ pub(crate) fn bits_of(ty: BasicTypeEnum<'static>) -> u32 {
 /// How many words a value of `ty` takes.
 pub(crate) fn words_of(ty: BasicTypeEnum<'static>) -> usize {
     bits_of(ty).div_ceil(word().get_bit_width()) as usize
+}
+
+/// Whether the machine the code is for has the address `n`.
+pub(crate) fn is_address(n: u64) -> bool {
+    n >> (word().get_bit_width() - 1) <= 1
 }
 
 /// Whether the `int` `n` is a fixnum in the code being produced.

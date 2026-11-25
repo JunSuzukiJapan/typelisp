@@ -1,11 +1,11 @@
-# ABI バージョン 0.3.83
+# ABI バージョン 0.3.84
 
 `scripts/regen-abi-version.sh` が生成した文書。手で編集しない。
 
-コンパイラが生成するコードが、ABI バージョン 0.3.83 のランタイムライブラリについて仮定していることの一覧。
+コンパイラが生成するコードが、ABI バージョン 0.3.84 のランタイムライブラリについて仮定していることの一覧。
 ここに書かれていない前提(シムが引数をどう扱うか、生成コードがヒープを直接読む箇所など)は含まない。
 
-内容ハッシュ (FNV-1a 64): `f927162995ce7259`
+内容ハッシュ (FNV-1a 64): `318b83282adf5d7a`
 
 ## 呼び出し規約 (typelisp_abi)
 
@@ -817,6 +817,7 @@
 | 693 | `enable-interrupt` |
 | 694 | `disable-interrupt` |
 | 695 | `largest-fixnum` |
+| 696 | ` c-address` |
 
 ## 組み込み型 (typelisp_mem::BUILTIN_TYPES)
 
@@ -1031,6 +1032,7 @@
 | `rt_atom` | `bool (word)` |
 | `rt_bignum_new` | `word (ptr, u32)` |
 | `rt_box_kind` | `word (word)` |
+| `rt_c_address` | `word (word)` |
 | `rt_c_alloc` | `word (ptr, u32)` |
 | `rt_c_arena_close` | `word (word)` |
 | `rt_c_arena_open` | `word ()` |

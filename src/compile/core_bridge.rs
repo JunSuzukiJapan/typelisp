@@ -1120,6 +1120,20 @@ fn translate_call(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Error>
     let args = parts[3..].to_vec();
 
     let name = callee_symbol_name(&path);
+    // An address written as a number is the number, however wide an `int`
+    // a word holds.
+    if name == "rt_c_address" {
+        if let [arg] = &args[..] {
+            let literal = match (core::op_wk(heap, *arg), core::field(heap, *arg, 0)) {
+                (Some(wk::INT), Some(Value::Int(n))) => u64::try_from(n).ok(),
+                (Some(wk::BIGNUM), Some(Value::Boxed(id))) if heap.is_bignum(id) => u64::try_from(&*heap.bignum_value(id)).ok(),
+                _ => None,
+            };
+            if let Some(n) = literal.filter(|n| crate::compile::carriers::is_address(*n)) {
+                return int_node(heap, n as i64, Carrier::Word);
+            }
+        }
+    }
     // A builtin that **puts the task down** is not a call, and the island must
     // not emit one: the shim only records what is being waited for, and the
     // activation has to end with `STATUS_SUSPEND` so the driver can come back
