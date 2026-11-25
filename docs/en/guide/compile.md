@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ 3a77c293e452d2d74bccfa67efd8af1f6f650f7d -->
+<!-- translated-from: docs/ja/guide/compile.md @ 4963ba6fc48045aeec32b258cf56b8c1af7acc94 -->
 # Compiling
 
 Unless you do anything else, typelisp programs run in the interpreter. In addition there are two
@@ -331,12 +331,42 @@ $ qemu-system-avr -M uno -display none -serial stdio -bios blink.elf   # run it 
 ```
 
 - There is no runtime, so a program that uses the runtime is a **compile error**. The error says what is needed and through which functions it is reached. What can be used: arithmetic on fixed-width integers (`i8` to `u32`), `bool` and `char`, function calls, conditionals, loops, `defvar` and `defconstant` holding those values, and `volatile-read-u8` and the like with the address written as a number or a constant.
-- What cannot be used: values that live in the heap, such as strings, lists and structs; `int` arithmetic; recursion, `catch`, and calls of function values; calls of C functions; interrupt handlers; division by a variable (division by a number can be used); `volatile` accesses whose address is computed.
+- What cannot be used: values that live in the heap, such as strings, lists and structs; `int` arithmetic; recursion, `catch`, and calls of function values; calls of C functions; division by a variable (division by a number can be used); `volatile` accesses whose address is computed.
+- An interrupt handler is written `#[interrupt(N)]` ([Syntax](../reference/syntax.md), section 3.17). `N` is the ATmega328P's number of the interrupt, 1 to 25 counting reset as 0 (timer 1 overflowing is 13). See the example below.
 - A loop that does nothing is removed at `-O1` and above. In a loop that waits, read a register, for example.
 - When `main` ends, the microcontroller stops.
 - `--linker-script FILE` changes where memory is. Without it, memory is 32 KiB of flash less the last 512 bytes, which are the boot loader's, and 2 KiB of RAM. Write a RAM address with `0x800000` added, as in `0x800100`.
 - `f32` and `f64` arithmetic is a link error, because there are no helper functions for AVR.
 - Linking uses the linker of the rustup toolchain, as in section 3.8.
+
+An example that blinks the LED by a timer's interrupt. An interrupt is enabled in the device's own register.
+
+```lisp
+(defconstant (PINB int) #x23)
+(defconstant (DDRB int) #x24)
+(defconstant (LED u8) 32)
+(defconstant (TIMSK1 int) #x6F)
+(defconstant (TCCR1B int) #x81)
+(defvar (ticks u16) 0)
+
+#[interrupt(13)]                                  ; timer 1 overflowing
+(defun on-overflow () ()
+  (unsafe (volatile-write-u8 PINB LED))           ; turn it over
+  (setf ticks (+ ticks 1))
+  ())
+
+(defun main () ()
+  (unsafe (volatile-write-u8 DDRB LED)
+          (volatile-write-u8 TIMSK1 1)            ; enable the overflow interrupt
+          (volatile-write-u8 TCCR1B 3))           ; count at 1/64 of the clock
+  (while true))
+```
+
+- A program with a handler lets interrupts come once its global variables are initialized. Set the devices up at the start of `main`.
+- `enable-interrupt` and `#[exception(NAME)]` cannot be used (a compile error).
+- While a handler runs, other interrupts wait. Like any other function, a handler cannot use the runtime.
+- One read or write of a global variable is not broken into by a handler, even of a value of two bytes or more. An interrupt can come between the read and the write of an update (`(setf n (+ n 1))`). To update a variable a handler also writes, read the status register (address `#x5F`) and keep it, write 0 to it to stop interrupts, and write the kept value back afterwards.
+- An interrupt with no handler stops the microcontroller.
 
 ## 4. Dumps
 

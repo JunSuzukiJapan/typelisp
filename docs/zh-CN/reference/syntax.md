@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ ba21ba284539fe7ba86ea0a268b89d55a3e11b8b -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 4963ba6fc48045aeec32b258cf56b8c1af7acc94 -->
 # typelisp 语法参考
 
 typelisp 是一种静态类型的 Lisp，语法采用 S 表达式。内置函数和方法的一览见[内置函数](functions/README.md)，类型一览见
@@ -1075,6 +1075,7 @@ test result: FAILED. 1 passed; 1 failed; 0 filtered out
 
 在为微控制器编译的程序中（[编译](../guide/compile.md) 的 3.8 节），这里写的是中断到来时被调用的函数。`#[interrupt(N)]` 使函数成为外设中断 `N`（0～239）的处理程序，`#[exception(NAME)]` 使其成为内核异常 `NAME` 的处理程序，`NAME` 是 `NonMaskableInt`, `MemoryManagement`, `BusFault`, `UsageFault`, `SVCall`, `DebugMonitor`, `PendSV`, `SysTick` 之一（`HardFault` 由运行时负责，会结束程序）。
 
+- 面向 Arduino Uno 时，编号方式和启用方法不同，且不能使用 `#[exception(NAME)]` 和 `enable-interrupt`（[编译](../guide/compile.md) 3.9 节）。下面说明中涉及运行时的内容是针对 Cortex-M 的。
 - 附在不接受参数并返回 `()` 的顶层 `defun` 上（也不能有类型参数）。一个中断只有一个处理程序，一个函数也只处理一个中断。
 - 外设中断在用 `(enable-interrupt N)` 启用之前不会到来（用 `(disable-interrupt N)` 停止。参见 [系统](functions/system.md)）。SysTick 等异常只要把寄存器设为引发它就会到来。
 - 处理程序在中断到来的地方立即执行。但若在运行时的处理（分配、GC、输出、任务切换等）途中到来，则等该处理结束后再执行。处理程序之间不会互相打断。

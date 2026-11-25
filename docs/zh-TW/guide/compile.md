@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ 3a77c293e452d2d74bccfa67efd8af1f6f650f7d -->
+<!-- translated-from: docs/ja/guide/compile.md @ 4963ba6fc48045aeec32b258cf56b8c1af7acc94 -->
 # 編譯
 
 不做任何處理的話，typelisp 程式由直譯器執行。此外還有兩種編譯為原生碼的方法，以及一種保存環境的方法。規格的詳情見
@@ -308,12 +308,42 @@ $ qemu-system-avr -M uno -display none -serial stdio -bios blink.elf   # 在 QEM
 ```
 
 - 由於沒有執行階段，使用執行階段的程式會成為**編譯錯誤**。錯誤會指出需要什麼，以及經由哪些函式到達。可以使用的有：固定寬度整數（`i8` 到 `u32`）、`bool`、`char` 的計算，函式呼叫，條件分支，迴圈，保存這些值的 `defvar` 和 `defconstant`，以及位址寫成數字或常數的 `volatile-read-u8` 等。
-- 不能使用的有：字串、串列、結構等放在堆積上的值；`int` 的計算；遞迴、`catch`、函式值的呼叫；C 函式的呼叫；中斷處理函式；除以變數的除法（除以數字的除法可以使用）；位址由計算得出的 `volatile`。
+- 不能使用的有：字串、串列、結構等放在堆積上的值；`int` 的計算；遞迴、`catch`、函式值的呼叫；C 函式的呼叫；除以變數的除法（除以數字的除法可以使用）；位址由計算得出的 `volatile`。
+- 中斷處理函式用 `#[interrupt(N)]` 撰寫（[語法](../reference/syntax.md) 3.17 節）。`N` 是 ATmega328P 的中斷編號，以重設為 0 計，從 1 到 25（計時器 1 溢位是 13）。請看下面的例子。
 - 什麼都不做的迴圈在 `-O1` 以上會被移除。在等待的迴圈中，請讀取暫存器等。
 - `main` 結束後，微控制器停止。
 - 記憶體配置可以用 `--linker-script FILE` 更改。省略時為 32KiB 快閃記憶體去掉末尾 512 位元組的開機載入程式後的部分，以及 2KiB RAM。RAM 的位址要加上 `0x800000` 來寫，例如 `0x800100`。
 - `f32` 和 `f64` 的計算會成為連結錯誤，因為沒有 AVR 用的輔助函式。
 - 連結與 3.8 節一樣，使用 rustup 工具鏈的連結器。
+
+用計時器中斷讓 LED 閃爍的例子。中斷在周邊裝置自己的暫存器中啟用。
+
+```lisp
+(defconstant (PINB int) #x23)
+(defconstant (DDRB int) #x24)
+(defconstant (LED u8) 32)
+(defconstant (TIMSK1 int) #x6F)
+(defconstant (TCCR1B int) #x81)
+(defvar (ticks u16) 0)
+
+#[interrupt(13)]                                  ; 計時器 1 溢位
+(defun on-overflow () ()
+  (unsafe (volatile-write-u8 PINB LED))           ; 反轉
+  (setf ticks (+ ticks 1))
+  ())
+
+(defun main () ()
+  (unsafe (volatile-write-u8 DDRB LED)
+          (volatile-write-u8 TIMSK1 1)            ; 啟用溢位中斷
+          (volatile-write-u8 TCCR1B 3))           ; 以時脈的 1/64 計數
+  (while true))
+```
+
+- 有處理函式的程式在全域變數初始化完成後接受中斷。請在 `main` 的開頭設定周邊裝置。
+- 不能使用 `enable-interrupt` 和 `#[exception(NAME)]`（編譯錯誤）。
+- 處理函式執行期間，其他中斷等待。處理函式與其他函式一樣，不能使用執行階段。
+- 全域變數的一次讀取或寫入，即使是兩個位元組以上的值，也不會被處理函式打斷。先讀後寫的更新（`(setf n (+ n 1))`）之間會有中斷到來。要更新處理函式也寫入的變數時，請讀取並保存狀態暫存器（位址 `#x5F`），寫入 0 以停止中斷，完成後寫回保存的值。
+- 沒有處理函式的中斷到來時，微控制器會停止。
 
 ## 4. 傾印
 

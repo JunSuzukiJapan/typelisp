@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ 3a77c293e452d2d74bccfa67efd8af1f6f650f7d -->
+<!-- translated-from: docs/ja/guide/compile.md @ 4963ba6fc48045aeec32b258cf56b8c1af7acc94 -->
 # Derleme
 
 Başka bir şey yapmazsanız typelisp programları yorumlayıcıda çalışır. Buna ek olarak yerel koda
@@ -324,12 +324,42 @@ $ qemu-system-avr -M uno -display none -serial stdio -bios blink.elf   # QEMU'da
 ```
 
 - Çalışma zamanı yoktur; bu yüzden çalışma zamanını kullanan bir program **derleme hatasıdır**. Hata, neyin gerektiğini ve ona hangi fonksiyonlardan ulaşıldığını söyler. Kullanılabilenler: sabit genişlikli tam sayılar (`i8` ile `u32` arası), `bool` ve `char` hesapları, fonksiyon çağrıları, koşullar, döngüler, bu değerleri tutan `defvar` ve `defconstant` ile adresi sayı veya sabit olarak yazılmış `volatile-read-u8` gibi işlemler.
-- Kullanılamayanlar: dizgi, liste ve yapı gibi heap'te duran değerler; `int` hesapları; özyineleme, `catch` ve fonksiyon değerlerinin çağrılması; C fonksiyonlarının çağrılması; kesme işleyicileri; bir değişkene bölme (bir sayıya bölme kullanılabilir); adresi hesaplanan `volatile` erişimleri.
+- Kullanılamayanlar: dizgi, liste ve yapı gibi heap'te duran değerler; `int` hesapları; özyineleme, `catch` ve fonksiyon değerlerinin çağrılması; C fonksiyonlarının çağrılması; bir değişkene bölme (bir sayıya bölme kullanılabilir); adresi hesaplanan `volatile` erişimleri.
+- Kesme işleyicisi `#[interrupt(N)]` ile yazılır ([Sözdizimi](../reference/syntax.md), bölüm 3.17). `N`, ATmega328P'nin kesme numarasıdır; sıfırlama 0 sayılarak 1 ile 25 arasındadır (zamanlayıcı 1 taşması 13'tür). Aşağıdaki örneğe bakın.
 - Hiçbir şey yapmayan bir döngü `-O1` ve üstünde kaldırılır. Bekleme döngüsünde örneğin bir yazmaç okuyun.
 - `main` bittiğinde mikrodenetleyici durur.
 - Bellek yerleşimi `--linker-script FILE` ile değiştirilir. Verilmezse, sondaki 512 baytlık önyükleyici dışında 32 KiB flash ve 2 KiB RAM'dir. RAM adresleri `0x800100` gibi `0x800000` eklenerek yazılır.
 - `f32` ve `f64` hesapları, AVR için yardımcı fonksiyonlar olmadığından bağlama hatasıdır.
 - Bağlama için 3.8 bölümündeki gibi rustup araç zincirinin bağlayıcısı kullanılır.
+
+LED'i zamanlayıcı kesmesiyle yakıp söndüren bir örnek. Bir kesme, aygıtın kendi yazmacında etkinleştirilir.
+
+```lisp
+(defconstant (PINB int) #x23)
+(defconstant (DDRB int) #x24)
+(defconstant (LED u8) 32)
+(defconstant (TIMSK1 int) #x6F)
+(defconstant (TCCR1B int) #x81)
+(defvar (ticks u16) 0)
+
+#[interrupt(13)]                                  ; zamanlayıcı 1 taşması
+(defun on-overflow () ()
+  (unsafe (volatile-write-u8 PINB LED))           ; tersine çevir
+  (setf ticks (+ ticks 1))
+  ())
+
+(defun main () ()
+  (unsafe (volatile-write-u8 DDRB LED)
+          (volatile-write-u8 TIMSK1 1)            ; taşma kesmesini etkinleştir
+          (volatile-write-u8 TCCR1B 3))           ; saatin 1/64'üyle say
+  (while true))
+```
+
+- İşleyicisi olan bir program, global değişkenleri ilklendirilir ilklendirilmez kesmeleri kabul eder. Aygıtları `main`'in başında ayarlayın.
+- `enable-interrupt` ve `#[exception(NAME)]` kullanılamaz (derleme hatası).
+- Bir işleyici çalışırken diğer kesmeler bekler. Her fonksiyon gibi işleyici de çalışma zamanını kullanamaz.
+- Bir global değişkenin tek bir okunması ya da yazılması, iki bayt veya daha büyük değerlerde bile bir işleyiciyle bölünmez. Bir güncellemenin (`(setf n (+ n 1))`) okuması ile yazması arasında kesme gelebilir. Bir işleyicinin de yazdığı değişkeni güncellemek için durum yazmacını (adres `#x5F`) okuyup saklayın, kesmeleri durdurmak için ona 0 yazın, sonra sakladığınız değeri geri yazın.
+- İşleyicisi olmayan bir kesme mikrodenetleyiciyi durdurur.
 
 ## 4. Dump'lar
 

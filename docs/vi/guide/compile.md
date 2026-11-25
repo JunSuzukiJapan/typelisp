@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ 3a77c293e452d2d74bccfa67efd8af1f6f650f7d -->
+<!-- translated-from: docs/ja/guide/compile.md @ 4963ba6fc48045aeec32b258cf56b8c1af7acc94 -->
 # Biên dịch
 
 Nếu bạn không làm gì thêm, chương trình typelisp chạy trong trình thông dịch. Ngoài ra còn có hai
@@ -321,12 +321,42 @@ $ qemu-system-avr -M uno -display none -serial stdio -bios blink.elf   # chạy 
 ```
 
 - Không có runtime, nên chương trình dùng runtime là **lỗi biên dịch**. Lỗi cho biết cần gì và đi tới đó qua những hàm nào. Những thứ dùng được: phép tính trên số nguyên có độ rộng cố định (từ `i8` đến `u32`), `bool` và `char`, lời gọi hàm, rẽ nhánh, vòng lặp, `defvar` và `defconstant` chứa các giá trị đó, và `volatile-read-u8` cùng các hàm tương tự với địa chỉ viết bằng số hoặc hằng.
-- Những thứ không dùng được: giá trị nằm trên heap như chuỗi, danh sách và struct; phép tính trên `int`; đệ quy, `catch` và lời gọi giá trị hàm; lời gọi hàm C; trình xử lý ngắt; phép chia cho một biến (chia cho một số thì dùng được); truy cập `volatile` có địa chỉ được tính ra.
+- Những thứ không dùng được: giá trị nằm trên heap như chuỗi, danh sách và struct; phép tính trên `int`; đệ quy, `catch` và lời gọi giá trị hàm; lời gọi hàm C; phép chia cho một biến (chia cho một số thì dùng được); truy cập `volatile` có địa chỉ được tính ra.
+- Trình xử lý ngắt được viết bằng `#[interrupt(N)]` ([Cú pháp](../reference/syntax.md), mục 3.17). `N` là số hiệu ngắt của ATmega328P, từ 1 đến 25 với reset tính là 0 (tràn bộ định thời 1 là 13). Xem ví dụ bên dưới.
 - Vòng lặp không làm gì sẽ bị xóa từ `-O1` trở lên. Trong vòng lặp chờ, hãy đọc một thanh ghi chẳng hạn.
 - Khi `main` kết thúc, vi điều khiển dừng lại.
 - Bố trí bộ nhớ được thay đổi bằng `--linker-script FILE`. Nếu bỏ qua, đó là 32 KiB flash trừ 512 byte cuối của bộ nạp khởi động, và 2 KiB RAM. Địa chỉ RAM được viết cộng thêm `0x800000`, ví dụ `0x800100`.
 - Phép tính trên `f32` và `f64` là lỗi liên kết, vì không có hàm hỗ trợ cho AVR.
 - Việc liên kết dùng trình liên kết của toolchain rustup như ở mục 3.8.
+
+Ví dụ nháy LED bằng ngắt của bộ định thời. Ngắt được bật trong thanh ghi của chính thiết bị.
+
+```lisp
+(defconstant (PINB int) #x23)
+(defconstant (DDRB int) #x24)
+(defconstant (LED u8) 32)
+(defconstant (TIMSK1 int) #x6F)
+(defconstant (TCCR1B int) #x81)
+(defvar (ticks u16) 0)
+
+#[interrupt(13)]                                  ; tràn bộ định thời 1
+(defun on-overflow () ()
+  (unsafe (volatile-write-u8 PINB LED))           ; đảo trạng thái
+  (setf ticks (+ ticks 1))
+  ())
+
+(defun main () ()
+  (unsafe (volatile-write-u8 DDRB LED)
+          (volatile-write-u8 TIMSK1 1)            ; bật ngắt tràn
+          (volatile-write-u8 TCCR1B 3))           ; đếm ở 1/64 xung nhịp
+  (while true))
+```
+
+- Chương trình có trình xử lý sẽ nhận ngắt ngay khi các biến toàn cục được khởi tạo xong. Hãy thiết lập thiết bị ở đầu `main`.
+- Không dùng được `enable-interrupt` và `#[exception(NAME)]` (lỗi biên dịch).
+- Trong lúc một trình xử lý chạy, các ngắt khác phải chờ. Như mọi hàm khác, trình xử lý không dùng được runtime.
+- Một lần đọc hoặc ghi biến toàn cục không bị trình xử lý xen vào giữa, kể cả với giá trị từ hai byte trở lên. Giữa lúc đọc và lúc ghi của một phép cập nhật (`(setf n (+ n 1))`) thì ngắt có thể đến. Để cập nhật biến mà trình xử lý cũng ghi, hãy đọc và giữ lại thanh ghi trạng thái (địa chỉ `#x5F`), ghi 0 vào đó để dừng ngắt, rồi ghi lại giá trị đã giữ.
+- Ngắt không có trình xử lý sẽ làm vi điều khiển dừng.
 
 ## 4. Dump
 

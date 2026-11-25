@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ ba21ba284539fe7ba86ea0a268b89d55a3e11b8b -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 4963ba6fc48045aeec32b258cf56b8c1af7acc94 -->
 # typelisp Syntax Reference
 
 typelisp is a statically typed Lisp, written in S-expressions. For the list of built-in functions and
@@ -1339,6 +1339,7 @@ What a test `print`s goes straight to standard output (it is not captured). For 
 
 In a program compiled for a microcontroller (section 3.8 of [Compiling](../guide/compile.md)), these are the functions called when an interrupt comes. `#[interrupt(N)]` makes one the handler of the peripheral interrupt `N` (0 to 239), and `#[exception(NAME)]` of the core exception `NAME`, one of `NonMaskableInt`, `MemoryManagement`, `BusFault`, `UsageFault`, `SVCall`, `DebugMonitor`, `PendSV`, `SysTick` (`HardFault` is the runtime's, and ends the program).
 
+- For the Arduino Uno the numbering and the way of enabling differ, and `#[exception(NAME)]` and `enable-interrupt` cannot be used ([Compiling](../guide/compile.md), section 3.9). What is said of the runtime below is about the Cortex-M.
 - They go on a top-level `defun` that takes nothing and returns `()` (no type parameters either). One interrupt has one handler, and one function handles one interrupt.
 - A peripheral interrupt does not come until `(enable-interrupt N)` enables it (`(disable-interrupt N)` stops it; see [System](functions/system.md)). An exception such as SysTick comes once the registers are set to raise it.
 - A handler runs at once, where the interrupt came. If it comes in the middle of the runtime's work (allocating, collecting, output, switching tasks and so on), the handler runs as soon as that work is done. Handlers do not interrupt each other.

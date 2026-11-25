@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ ba21ba284539fe7ba86ea0a268b89d55a3e11b8b -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 4963ba6fc48045aeec32b258cf56b8c1af7acc94 -->
 # Tham chiếu cú pháp typelisp
 
 typelisp là một ngôn ngữ Lisp có kiểu tĩnh, được viết bằng S-expression. Về danh sách các hàm và phương thức
@@ -1304,6 +1304,7 @@ Những gì kiểm thử in ra bằng `print` đi thẳng ra đầu ra chuẩn (
 
 Trong chương trình biên dịch cho vi điều khiển (mục 3.8 của [Biên dịch](../guide/compile.md)), đây là các hàm được gọi khi có ngắt đến. `#[interrupt(N)]` biến một hàm thành trình xử lý ngắt ngoại vi `N` (từ 0 đến 239), và `#[exception(NAME)]` thành trình xử lý ngoại lệ lõi `NAME`, một trong `NonMaskableInt`, `MemoryManagement`, `BusFault`, `UsageFault`, `SVCall`, `DebugMonitor`, `PendSV`, `SysTick` (`HardFault` thuộc về runtime, và kết thúc chương trình).
 
+- Với Arduino Uno, cách đánh số và cách bật khác đi, và không dùng được `#[exception(NAME)]` cùng `enable-interrupt` ([Biên dịch](../guide/compile.md), mục 3.9). Những gì nói về runtime bên dưới là của Cortex-M.
 - Chúng gắn vào một `defun` cấp cao nhất không nhận gì và trả về `()` (cũng không có tham số kiểu). Một ngắt có một trình xử lý, và một hàm xử lý một ngắt.
 - Ngắt ngoại vi không đến cho tới khi `(enable-interrupt N)` bật nó (`(disable-interrupt N)` dừng nó; xem [Hệ thống](functions/system.md)). Ngoại lệ như SysTick đến ngay khi các thanh ghi được đặt để gây ra nó.
 - Trình xử lý chạy ngay, tại nơi ngắt đến. Nếu ngắt đến giữa lúc runtime đang làm việc (cấp phát, thu gom rác, xuất, chuyển tác vụ, v.v.), trình xử lý chạy ngay khi công việc đó xong. Các trình xử lý không ngắt lẫn nhau.

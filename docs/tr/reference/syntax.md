@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ ba21ba284539fe7ba86ea0a268b89d55a3e11b8b -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 4963ba6fc48045aeec32b258cf56b8c1af7acc94 -->
 # typelisp Sözdizimi Başvurusu
 
 typelisp, S-ifadelerle yazılan, statik tür denetimli bir Lisp'tir. Yerleşik fonksiyonların ve metotların
@@ -1331,6 +1331,7 @@ Bir testin `print` ile yazdıkları doğrudan standart çıktıya gider (yakalan
 
 Bir mikrodenetleyici için derlenen programda ([Derleme](../guide/compile.md) bölüm 3.8), bunlar bir kesme geldiğinde çağrılan fonksiyonlardır. `#[interrupt(N)]` bir fonksiyonu çevre birimi kesmesi `N`'nin (0 ile 239 arası), `#[exception(NAME)]` ise `NonMaskableInt`, `MemoryManagement`, `BusFault`, `UsageFault`, `SVCall`, `DebugMonitor`, `PendSV`, `SysTick` arasından çekirdek istisnası `NAME`'in işleyicisi yapar (`HardFault` çalışma zamanınındır ve programı bitirir).
 
+- Arduino Uno'da numaralama ve etkinleştirme farklıdır; `#[exception(NAME)]` ve `enable-interrupt` kullanılamaz ([Derleme](../guide/compile.md), bölüm 3.9). Aşağıda çalışma zamanı hakkında söylenenler Cortex-M içindir.
 - Hiçbir şey almayan ve `()` döndüren üst düzey bir `defun` üzerine konur (tür parametresi de olmaz). Bir kesmenin bir işleyicisi vardır ve bir fonksiyon bir kesmeyi işler.
 - Bir çevre birimi kesmesi, `(enable-interrupt N)` onu etkinleştirene kadar gelmez (`(disable-interrupt N)` onu durdurur; bkz. [Sistem](functions/system.md)). SysTick gibi bir istisna, yazmaçlar onu tetikleyecek biçimde ayarlanınca gelir.
 - Bir işleyici hemen, kesmenin geldiği yerde çalışır. Kesme çalışma zamanının işinin ortasında gelirse (bellek ayırma, çöp toplama, çıktı, görev değiştirme vb.), işleyici o iş biter bitmez çalışır. İşleyiciler birbirini kesmez.

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ 3a77c293e452d2d74bccfa67efd8af1f6f650f7d -->
+<!-- translated-from: docs/ja/guide/compile.md @ 4963ba6fc48045aeec32b258cf56b8c1af7acc94 -->
 # Kompilacja
 
 O ile nie zrobisz nic więcej, programy typelisp działają w interpreterze. Ponadto istnieją dwa
@@ -322,12 +322,42 @@ $ qemu-system-avr -M uno -display none -serial stdio -bios blink.elf   # uruchom
 ```
 
 - Nie ma środowiska uruchomieniowego, więc program, który go używa, to **błąd kompilacji**. Błąd podaje, co jest potrzebne i przez które funkcje się do tego dochodzi. Można używać: obliczeń na liczbach całkowitych o stałej szerokości (od `i8` do `u32`), `bool` i `char`, wywołań funkcji, warunków, pętli, `defvar` i `defconstant` z takimi wartościami oraz `volatile-read-u8` i podobnych z adresem zapisanym jako liczba lub stała.
-- Nie można używać: wartości na stercie, takich jak napisy, listy i struktury; obliczeń na `int`; rekurencji, `catch` i wywołań wartości funkcyjnych; wywołań funkcji C; procedur obsługi przerwań; dzielenia przez zmienną (dzielenie przez liczbę jest możliwe); dostępów `volatile` z obliczanym adresem.
+- Nie można używać: wartości na stercie, takich jak napisy, listy i struktury; obliczeń na `int`; rekurencji, `catch` i wywołań wartości funkcyjnych; wywołań funkcji C; dzielenia przez zmienną (dzielenie przez liczbę jest możliwe); dostępów `volatile` z obliczanym adresem.
+- Procedurę obsługi przerwania zapisuje się jako `#[interrupt(N)]` ([Składnia](../reference/syntax.md), rozdział 3.17). `N` to numer przerwania ATmega328P, od 1 do 25, licząc reset jako 0 (przepełnienie licznika 1 to 13). Zobacz przykład poniżej.
 - Pętla, która nic nie robi, znika od `-O1` wzwyż. W pętli oczekującej należy na przykład odczytywać rejestr.
 - Gdy `main` się kończy, mikrokontroler się zatrzymuje.
 - Układ pamięci zmienia `--linker-script FILE`. Bez tej opcji jest to 32 KiB pamięci flash bez ostatnich 512 bajtów programu rozruchowego oraz 2 KiB RAM. Adresy RAM zapisuje się z dodanym `0x800000`, na przykład `0x800100`.
 - Obliczenia na `f32` i `f64` to błąd konsolidacji, ponieważ nie ma funkcji pomocniczych dla AVR.
 - Do konsolidacji używany jest linker z zestawu narzędzi rustup, jak w punkcie 3.8.
+
+Przykład, który miga diodą LED za pomocą przerwania licznika. Przerwanie włącza się w rejestrze danego urządzenia.
+
+```lisp
+(defconstant (PINB int) #x23)
+(defconstant (DDRB int) #x24)
+(defconstant (LED u8) 32)
+(defconstant (TIMSK1 int) #x6F)
+(defconstant (TCCR1B int) #x81)
+(defvar (ticks u16) 0)
+
+#[interrupt(13)]                                  ; przepełnienie licznika 1
+(defun on-overflow () ()
+  (unsafe (volatile-write-u8 PINB LED))           ; odwróć
+  (setf ticks (+ ticks 1))
+  ())
+
+(defun main () ()
+  (unsafe (volatile-write-u8 DDRB LED)
+          (volatile-write-u8 TIMSK1 1)            ; włącz przerwanie przepełnienia
+          (volatile-write-u8 TCCR1B 3))           ; licz z 1/64 zegara
+  (while true))
+```
+
+- Program z procedurą obsługi dopuszcza przerwania, gdy tylko zmienne globalne zostaną zainicjowane. Urządzenia należy skonfigurować na początku `main`.
+- Nie można używać `enable-interrupt` ani `#[exception(NAME)]` (błąd kompilacji).
+- Gdy działa procedura obsługi, inne przerwania czekają. Jak każda inna funkcja, procedura obsługi nie może używać środowiska uruchomieniowego.
+- Pojedynczego odczytu ani zapisu zmiennej globalnej procedura obsługi nie przerywa, nawet dla wartości dwubajtowych i większych. Między odczytem a zapisem przy aktualizacji (`(setf n (+ n 1))`) przerwanie może nadejść. Aby zaktualizować zmienną, którą zapisuje też procedura obsługi, należy odczytać i zachować rejestr stanu (adres `#x5F`), zapisać do niego 0, by zatrzymać przerwania, a potem zapisać z powrotem zachowaną wartość.
+- Przerwanie bez procedury obsługi zatrzymuje mikrokontroler.
 
 ## 4. Zrzuty (dumps)
 

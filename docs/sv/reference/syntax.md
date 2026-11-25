@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ ba21ba284539fe7ba86ea0a268b89d55a3e11b8b -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 4963ba6fc48045aeec32b258cf56b8c1af7acc94 -->
 # Syntaxreferens för typelisp
 
 typelisp är ett statiskt typat Lisp, skrivet med S-uttryck. För listan över inbyggda funktioner och
@@ -1336,6 +1336,7 @@ Det ett test skriver ut med `print` går direkt till standard ut (det fångas in
 
 I ett program kompilerat för en mikrokontroller (avsnitt 3.8 i [Kompilera](../guide/compile.md)) är detta de funktioner som anropas när ett avbrott kommer. `#[interrupt(N)]` gör en funktion till hanterare för kringutrustningsavbrottet `N` (0 till 239), och `#[exception(NAME)]` för kärnans undantag `NAME`, ett av `NonMaskableInt`, `MemoryManagement`, `BusFault`, `UsageFault`, `SVCall`, `DebugMonitor`, `PendSV`, `SysTick` (`HardFault` tillhör körtidsmiljön och avslutar programmet).
 
+- För Arduino Uno är numreringen och sättet att slå på annorlunda, och `#[exception(NAME)]` och `enable-interrupt` kan inte användas ([Kompilera](../guide/compile.md), avsnitt 3.9). Det som sägs om körtidsmiljön nedan gäller Cortex-M.
 - De sitter på en `defun` på toppnivå som inte tar något och returnerar `()` (inga typparametrar heller). Ett avbrott har en hanterare, och en funktion hanterar ett avbrott.
 - Ett kringutrustningsavbrott kommer inte förrän `(enable-interrupt N)` slår på det (`(disable-interrupt N)` stoppar det; se [System](functions/system.md)). Ett undantag som SysTick kommer så snart registren är inställda för att utlösa det.
 - En hanterare körs genast, där avbrottet kom. Kommer det mitt i körtidsmiljöns arbete (allokering, skräpsamling, utmatning, byte av uppgift och så vidare) körs hanteraren så snart det arbetet är klart. Hanterare avbryter inte varandra.

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ 3a77c293e452d2d74bccfa67efd8af1f6f650f7d -->
+<!-- translated-from: docs/ja/guide/compile.md @ 4963ba6fc48045aeec32b258cf56b8c1af7acc94 -->
 # Compilazione
 
 Se non fai altro, i programmi typelisp vengono eseguiti nell'interprete. Inoltre esistono due modi per
@@ -326,12 +326,42 @@ $ qemu-system-avr -M uno -display none -serial stdio -bios blink.elf   # esegue 
 ```
 
 - Non c'è un runtime, quindi un programma che lo usa è un **errore di compilazione**. L'errore indica che cosa serve e attraverso quali funzioni ci si arriva. Si possono usare: i calcoli sugli interi a larghezza fissa (da `i8` a `u32`), `bool` e `char`, le chiamate di funzione, le condizioni, i cicli, `defvar` e `defconstant` con questi valori, e `volatile-read-u8` e simili con l'indirizzo scritto come numero o costante.
-- Non si possono usare: i valori che stanno nello heap, come stringhe, liste e strutture; i calcoli su `int`; la ricorsione, `catch` e le chiamate di valori funzione; le chiamate di funzioni C; i gestori di interrupt; la divisione per una variabile (la divisione per un numero si può usare); gli accessi `volatile` con indirizzo calcolato.
+- Non si possono usare: i valori che stanno nello heap, come stringhe, liste e strutture; i calcoli su `int`; la ricorsione, `catch` e le chiamate di valori funzione; le chiamate di funzioni C; la divisione per una variabile (la divisione per un numero si può usare); gli accessi `volatile` con indirizzo calcolato.
+- Un gestore di interrupt si scrive `#[interrupt(N)]` ([Sintassi](../reference/syntax.md), sezione 3.17). `N` è il numero dell'interrupt dell'ATmega328P, da 1 a 25 contando il reset come 0 (l'overflow del timer 1 è 13). Vedi l'esempio sotto.
 - Un ciclo che non fa nulla scompare da `-O1` in su. In un ciclo di attesa, per esempio, si legga un registro.
 - Quando `main` termina, il microcontrollore si ferma.
 - La disposizione della memoria si cambia con `--linker-script FILE`. Se omesso, sono 32 KiB di flash meno gli ultimi 512 byte del bootloader, e 2 KiB di RAM. Gli indirizzi di RAM si scrivono sommando `0x800000`, come `0x800100`.
 - I calcoli su `f32` e `f64` sono un errore di link, perché non ci sono funzioni ausiliarie per AVR.
 - Il link usa il linker della toolchain di rustup, come nella sezione 3.8.
+
+Un esempio che fa lampeggiare il LED con l'interrupt di un timer. Un interrupt si abilita nel registro della periferica.
+
+```lisp
+(defconstant (PINB int) #x23)
+(defconstant (DDRB int) #x24)
+(defconstant (LED u8) 32)
+(defconstant (TIMSK1 int) #x6F)
+(defconstant (TCCR1B int) #x81)
+(defvar (ticks u16) 0)
+
+#[interrupt(13)]                                  ; overflow del timer 1
+(defun on-overflow () ()
+  (unsafe (volatile-write-u8 PINB LED))           ; inverte
+  (setf ticks (+ ticks 1))
+  ())
+
+(defun main () ()
+  (unsafe (volatile-write-u8 DDRB LED)
+          (volatile-write-u8 TIMSK1 1)            ; abilita l'interrupt di overflow
+          (volatile-write-u8 TCCR1B 3))           ; conta a 1/64 del clock
+  (while true))
+```
+
+- Un programma con un gestore accetta gli interrupt appena le variabili globali sono inizializzate. Configurare le periferiche all'inizio di `main`.
+- `enable-interrupt` e `#[exception(NAME)]` non si possono usare (errore di compilazione).
+- Mentre un gestore è in esecuzione, gli altri interrupt attendono. Come ogni altra funzione, un gestore non può usare il runtime.
+- Una singola lettura o scrittura di una variabile globale non viene interrotta da un gestore, anche per valori di due byte o più. Tra la lettura e la scrittura di un aggiornamento (`(setf n (+ n 1))`) può arrivare un interrupt. Per aggiornare una variabile scritta anche da un gestore, leggere e conservare il registro di stato (indirizzo `#x5F`), scriverci 0 per fermare gli interrupt e poi riscrivere il valore conservato.
+- Un interrupt senza gestore ferma il microcontrollore.
 
 ## 4. Dump
 

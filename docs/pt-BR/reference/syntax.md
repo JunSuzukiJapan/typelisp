@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ ba21ba284539fe7ba86ea0a268b89d55a3e11b8b -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 4963ba6fc48045aeec32b258cf56b8c1af7acc94 -->
 # Referência de sintaxe do typelisp
 
 typelisp é um Lisp com tipagem estática, escrito em expressões S. Para a lista de funções e métodos embutidos,
@@ -1332,6 +1332,7 @@ O que um teste imprime com `print` vai direto para a saída padrão (não é cap
 
 Em um programa compilado para um microcontrolador (seção 3.8 de [Compilar](../guide/compile.md)), são as funções chamadas quando chega uma interrupção. `#[interrupt(N)]` faz de uma função o tratador da interrupção de periférico `N` (de 0 a 239), e `#[exception(NAME)]` o da exceção do núcleo `NAME`, uma de `NonMaskableInt`, `MemoryManagement`, `BusFault`, `UsageFault`, `SVCall`, `DebugMonitor`, `PendSV`, `SysTick` (`HardFault` é do runtime, e encerra o programa).
 
+- Para o Arduino Uno a numeração e a forma de habilitar são diferentes, e `#[exception(NAME)]` e `enable-interrupt` não podem ser usados ([Compilar](../guide/compile.md), seção 3.9). O que se diz abaixo do runtime vale para o Cortex-M.
 - Vão em um `defun` de nível superior que não recebe nada e retorna `()` (nem parâmetros de tipo). Uma interrupção tem um tratador, e uma função trata uma interrupção.
 - Uma interrupção de periférico não chega até que `(enable-interrupt N)` a habilite (`(disable-interrupt N)` a interrompe; veja [Sistema](functions/system.md)). Uma exceção como SysTick chega assim que os registradores são configurados para gerá-la.
 - Um tratador roda na hora, onde a interrupção chegou. Se ela chegar no meio do trabalho do runtime (alocação, coleta de lixo, saída, troca de tarefa etc.), o tratador roda assim que esse trabalho termina. Os tratadores não interrompem uns aos outros.

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ 3a77c293e452d2d74bccfa67efd8af1f6f650f7d -->
+<!-- translated-from: docs/ja/guide/compile.md @ 4963ba6fc48045aeec32b258cf56b8c1af7acc94 -->
 # Compilación
 
 Si no se hace nada más, los programas de typelisp se ejecutan en el intérprete. Además hay dos formas de
@@ -323,12 +323,42 @@ $ qemu-system-avr -M uno -display none -serial stdio -bios blink.elf   # ejecuta
 ```
 
 - No hay runtime, así que un programa que lo use es un **error de compilación**. El error indica qué se necesita y a través de qué funciones se llega a ello. Se pueden usar: cálculos con enteros de ancho fijo (de `i8` a `u32`), `bool` y `char`, llamadas a funciones, condicionales, bucles, `defvar` y `defconstant` con esos valores, y `volatile-read-u8` y similares con la dirección escrita como número o constante.
-- No se pueden usar: valores que viven en el heap, como cadenas, listas y estructuras; cálculos con `int`; la recursión, `catch` y las llamadas a valores de función; las llamadas a funciones de C; los manejadores de interrupciones; la división por una variable (la división por un número sí se puede usar); los accesos `volatile` cuya dirección se calcula.
+- No se pueden usar: valores que viven en el heap, como cadenas, listas y estructuras; cálculos con `int`; la recursión, `catch` y las llamadas a valores de función; las llamadas a funciones de C; la división por una variable (la división por un número sí se puede usar); los accesos `volatile` cuya dirección se calcula.
+- Un manejador de interrupción se escribe `#[interrupt(N)]` ([Sintaxis](../reference/syntax.md), sección 3.17). `N` es el número de la interrupción del ATmega328P, de 1 a 25 contando el reinicio como 0 (el desbordamiento del temporizador 1 es 13). Vea el ejemplo de abajo.
 - Un bucle que no hace nada desaparece con `-O1` o superior. En un bucle de espera, lea por ejemplo un registro.
 - Cuando `main` termina, el microcontrolador se detiene.
 - La disposición de la memoria se cambia con `--linker-script FILE`. Si se omite, son 32 KiB de flash menos los últimos 512 bytes del cargador de arranque, y 2 KiB de RAM. Las direcciones de RAM se escriben sumando `0x800000`, como `0x800100`.
 - Los cálculos con `f32` y `f64` son un error de enlace, porque no hay funciones auxiliares para AVR.
 - El enlace usa el enlazador de la toolchain de rustup, como en la sección 3.8.
+
+Un ejemplo que hace parpadear el LED con la interrupción de un temporizador. Una interrupción se habilita en el registro del propio periférico.
+
+```lisp
+(defconstant (PINB int) #x23)
+(defconstant (DDRB int) #x24)
+(defconstant (LED u8) 32)
+(defconstant (TIMSK1 int) #x6F)
+(defconstant (TCCR1B int) #x81)
+(defvar (ticks u16) 0)
+
+#[interrupt(13)]                                  ; desbordamiento del temporizador 1
+(defun on-overflow () ()
+  (unsafe (volatile-write-u8 PINB LED))           ; invertir
+  (setf ticks (+ ticks 1))
+  ())
+
+(defun main () ()
+  (unsafe (volatile-write-u8 DDRB LED)
+          (volatile-write-u8 TIMSK1 1)            ; habilitar la interrupción de desbordamiento
+          (volatile-write-u8 TCCR1B 3))           ; contar a 1/64 del reloj
+  (while true))
+```
+
+- Un programa con un manejador admite interrupciones en cuanto se inicializan sus variables globales. Configure los periféricos al comienzo de `main`.
+- No se pueden usar `enable-interrupt` ni `#[exception(NAME)]` (error de compilación).
+- Mientras se ejecuta un manejador, las demás interrupciones esperan. Como cualquier otra función, un manejador no puede usar el runtime.
+- Una lectura o escritura de una variable global no la interrumpe un manejador, aunque el valor sea de dos bytes o más. Entre la lectura y la escritura de una actualización (`(setf n (+ n 1))`) sí puede llegar una interrupción. Para actualizar una variable que también escribe un manejador, lea y guarde el registro de estado (dirección `#x5F`), escriba 0 en él para detener las interrupciones y después vuelva a escribir el valor guardado.
+- Una interrupción sin manejador detiene el microcontrolador.
 
 ## 4. Volcados
 

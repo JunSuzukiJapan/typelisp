@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ 3a77c293e452d2d74bccfa67efd8af1f6f650f7d -->
+<!-- translated-from: docs/ja/guide/compile.md @ 4963ba6fc48045aeec32b258cf56b8c1af7acc94 -->
 # Kompilierung
 
 Ohne weiteres Zutun laufen typelisp-Programme im Interpreter. Darüber hinaus gibt es zwei Wege, in nativen
@@ -328,12 +328,42 @@ $ qemu-system-avr -M uno -display none -serial stdio -bios blink.elf   # in QEMU
 ```
 
 - Es gibt keine Laufzeitumgebung, daher ist ein Programm, das sie benutzt, ein **Kompilierfehler**. Die Meldung nennt, was benötigt wird und über welche Funktionen es erreicht wird. Verwendbar sind: Rechnen mit Ganzzahlen fester Breite (`i8` bis `u32`), `bool` und `char`, Funktionsaufrufe, Verzweigungen, Schleifen, `defvar` und `defconstant` mit solchen Werten sowie `volatile-read-u8` und Ähnliches mit als Zahl oder Konstante geschriebener Adresse.
-- Nicht verwendbar sind: Werte im Heap wie Zeichenketten, Listen und Strukturen; Rechnen mit `int`; Rekursion, `catch` und Aufrufe von Funktionswerten; Aufrufe von C-Funktionen; Interrupt-Handler; Division durch eine Variable (Division durch eine Zahl ist möglich); `volatile`-Zugriffe mit berechneter Adresse.
+- Nicht verwendbar sind: Werte im Heap wie Zeichenketten, Listen und Strukturen; Rechnen mit `int`; Rekursion, `catch` und Aufrufe von Funktionswerten; Aufrufe von C-Funktionen; Division durch eine Variable (Division durch eine Zahl ist möglich); `volatile`-Zugriffe mit berechneter Adresse.
+- Ein Interrupt-Handler wird als `#[interrupt(N)]` geschrieben ([Syntax](../reference/syntax.md), Abschnitt 3.17). `N` ist die Interrupt-Nummer des ATmega328P, 1 bis 25, wobei Reset als 0 zählt (der Überlauf von Timer 1 ist 13). Siehe das Beispiel unten.
 - Eine Schleife, die nichts tut, wird ab `-O1` entfernt. Lesen Sie in einer Warteschleife zum Beispiel ein Register.
 - Wenn `main` endet, hält der Mikrocontroller an.
 - Mit `--linker-script FILE` lässt sich die Speicheraufteilung ändern. Ohne Angabe sind es 32 KiB Flash abzüglich der letzten 512 Bytes des Bootloaders und 2 KiB RAM. RAM-Adressen werden mit addiertem `0x800000` geschrieben, etwa `0x800100`.
 - Rechnen mit `f32` und `f64` führt zu einem Linkerfehler, weil es keine Hilfsfunktionen für AVR gibt.
 - Gelinkt wird wie in Abschnitt 3.8 mit dem Linker der rustup-Toolchain.
+
+Ein Beispiel, das die LED mit einem Timer-Interrupt blinken lässt. Ein Interrupt wird im Register des jeweiligen Geräts eingeschaltet.
+
+```lisp
+(defconstant (PINB int) #x23)
+(defconstant (DDRB int) #x24)
+(defconstant (LED u8) 32)
+(defconstant (TIMSK1 int) #x6F)
+(defconstant (TCCR1B int) #x81)
+(defvar (ticks u16) 0)
+
+#[interrupt(13)]                                  ; Überlauf von Timer 1
+(defun on-overflow () ()
+  (unsafe (volatile-write-u8 PINB LED))           ; umschalten
+  (setf ticks (+ ticks 1))
+  ())
+
+(defun main () ()
+  (unsafe (volatile-write-u8 DDRB LED)
+          (volatile-write-u8 TIMSK1 1)            ; Überlauf-Interrupt einschalten
+          (volatile-write-u8 TCCR1B 3))           ; mit 1/64 des Takts zählen
+  (while true))
+```
+
+- Ein Programm mit einem Handler lässt Interrupts zu, sobald die globalen Variablen initialisiert sind. Richten Sie die Geräte am Anfang von `main` ein.
+- `enable-interrupt` und `#[exception(NAME)]` sind nicht verwendbar (Übersetzungsfehler).
+- Während ein Handler läuft, warten andere Interrupts. Wie jede andere Funktion kann ein Handler die Laufzeit nicht verwenden.
+- Ein einzelnes Lesen oder Schreiben einer globalen Variable wird nicht von einem Handler unterbrochen, auch nicht bei Werten von zwei Byte oder mehr. Zwischen Lesen und Schreiben einer Aktualisierung (`(setf n (+ n 1))`) kann ein Interrupt kommen. Um eine Variable zu aktualisieren, die auch ein Handler schreibt, lesen Sie das Statusregister (Adresse `#x5F`) und merken es sich, schreiben 0 hinein, um Interrupts anzuhalten, und schreiben danach den gemerkten Wert zurück.
+- Ein Interrupt ohne Handler hält den Mikrocontroller an.
 
 ## 4. Dumps
 

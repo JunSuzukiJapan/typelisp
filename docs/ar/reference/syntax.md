@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ ba21ba284539fe7ba86ea0a268b89d55a3e11b8b -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 4963ba6fc48045aeec32b258cf56b8c1af7acc94 -->
 # مرجع صياغة typelisp
 
 typelisp لغة Lisp ذات أنواع ساكنة، تُكتب بتعبيرات رمزية (S-expressions). ولقائمة الدوال والتوابع المضمنة
@@ -1243,6 +1243,7 @@ test result: FAILED. 1 passed; 1 failed; 0 filtered out
 
 في برنامج مترجم لمتحكم دقيق (القسم 3.8 من [الترجمة](../guide/compile.md))، هذه هي الدوال التي تُستدعى عند وصول مقاطعة. تجعل `#[interrupt(N)]` الدالة معالجًا لمقاطعة الطرفية `N` (من 0 إلى 239)، و`#[exception(NAME)]` معالجًا لاستثناء النواة `NAME`، وهو أحد `NonMaskableInt`, `MemoryManagement`, `BusFault`, `UsageFault`, `SVCall`, `DebugMonitor`, `PendSV`, `SysTick` (`HardFault` لبيئة التشغيل، وينهي البرنامج).
 
+- في Arduino Uno يختلف الترقيم وطريقة التفعيل، ولا يمكن استخدام `#[exception(NAME)]` و`enable-interrupt` ([التصريف](../guide/compile.md)، القسم 3.9). وما يُذكر أدناه عن بيئة التشغيل يخص Cortex-M.
 - توضع على `defun` في المستوى الأعلى لا يأخذ شيئًا ويعيد `()` (ولا معاملات نوع). للمقاطعة الواحدة معالج واحد، والدالة الواحدة تعالج مقاطعة واحدة.
 - لا تصل مقاطعة الطرفية حتى يفعّلها `(enable-interrupt N)` (و`(disable-interrupt N)` يوقفها؛ انظر [النظام](functions/system.md)). يصل استثناء مثل SysTick بمجرد ضبط السجلات لإحداثه.
 - يعمل المعالج فورًا، حيث وصلت المقاطعة. إن وصلت في منتصف عمل بيئة التشغيل (حجز الذاكرة، جمع المهملات، الإخراج، تبديل المهام وما إلى ذلك)، يعمل المعالج بمجرد انتهاء ذلك العمل. لا يقاطع المعالجون بعضهم بعضًا.

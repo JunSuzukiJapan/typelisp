@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ 3a77c293e452d2d74bccfa67efd8af1f6f650f7d -->
+<!-- translated-from: docs/ja/guide/compile.md @ 4963ba6fc48045aeec32b258cf56b8c1af7acc94 -->
 # Compilação
 
 Se você não fizer nada além disso, os programas typelisp são executados no interpretador. Além disso há duas
@@ -323,12 +323,42 @@ $ qemu-system-avr -M uno -display none -serial stdio -bios blink.elf   # executa
 ```
 
 - Não há runtime, portanto um programa que o usa é um **erro de compilação**. O erro diz o que é necessário e por quais funções se chega a isso. Podem ser usados: cálculos com inteiros de largura fixa (de `i8` a `u32`), `bool` e `char`, chamadas de função, condicionais, laços, `defvar` e `defconstant` com esses valores, e `volatile-read-u8` e similares com o endereço escrito como número ou constante.
-- Não podem ser usados: valores que ficam no heap, como strings, listas e estruturas; cálculos com `int`; recursão, `catch` e chamadas de valores de função; chamadas de funções C; tratadores de interrupção; divisão por uma variável (a divisão por um número pode ser usada); acessos `volatile` cujo endereço é calculado.
+- Não podem ser usados: valores que ficam no heap, como strings, listas e estruturas; cálculos com `int`; recursão, `catch` e chamadas de valores de função; chamadas de funções C; divisão por uma variável (a divisão por um número pode ser usada); acessos `volatile` cujo endereço é calculado.
+- Um tratador de interrupção se escreve `#[interrupt(N)]` ([Sintaxe](../reference/syntax.md), seção 3.17). `N` é o número da interrupção do ATmega328P, de 1 a 25 contando o reset como 0 (o estouro do timer 1 é 13). Veja o exemplo abaixo.
 - Um laço que não faz nada é removido em `-O1` ou acima. Em um laço de espera, leia um registrador, por exemplo.
 - Quando `main` termina, o microcontrolador para.
 - A disposição da memória é alterada com `--linker-script FILE`. Sem ele, são 32 KiB de flash menos os últimos 512 bytes do bootloader, e 2 KiB de RAM. Os endereços de RAM são escritos somando `0x800000`, como `0x800100`.
 - Cálculos com `f32` e `f64` são um erro de ligação, porque não há funções auxiliares para AVR.
 - A ligação usa o linker da toolchain do rustup, como na seção 3.8.
+
+Um exemplo que pisca o LED com a interrupção de um timer. Uma interrupção é habilitada no registrador do próprio periférico.
+
+```lisp
+(defconstant (PINB int) #x23)
+(defconstant (DDRB int) #x24)
+(defconstant (LED u8) 32)
+(defconstant (TIMSK1 int) #x6F)
+(defconstant (TCCR1B int) #x81)
+(defvar (ticks u16) 0)
+
+#[interrupt(13)]                                  ; estouro do timer 1
+(defun on-overflow () ()
+  (unsafe (volatile-write-u8 PINB LED))           ; inverte
+  (setf ticks (+ ticks 1))
+  ())
+
+(defun main () ()
+  (unsafe (volatile-write-u8 DDRB LED)
+          (volatile-write-u8 TIMSK1 1)            ; habilita a interrupção de estouro
+          (volatile-write-u8 TCCR1B 3))           ; conta a 1/64 do clock
+  (while true))
+```
+
+- Um programa com um tratador aceita interrupções assim que suas variáveis globais são inicializadas. Configure os periféricos no início de `main`.
+- `enable-interrupt` e `#[exception(NAME)]` não podem ser usados (erro de compilação).
+- Enquanto um tratador executa, as outras interrupções esperam. Como qualquer outra função, um tratador não pode usar o runtime.
+- Uma leitura ou escrita de uma variável global não é interrompida por um tratador, mesmo para valores de dois bytes ou mais. Entre a leitura e a escrita de uma atualização (`(setf n (+ n 1))`) pode chegar uma interrupção. Para atualizar uma variável que um tratador também escreve, leia e guarde o registrador de status (endereço `#x5F`), escreva 0 nele para parar as interrupções e depois escreva de volta o valor guardado.
+- Uma interrupção sem tratador para o microcontrolador.
 
 ## 4. Dumps
 

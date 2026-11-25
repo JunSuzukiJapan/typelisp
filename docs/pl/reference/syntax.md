@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ ba21ba284539fe7ba86ea0a268b89d55a3e11b8b -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 4963ba6fc48045aeec32b258cf56b8c1af7acc94 -->
 # Referencja składni typelisp
 
 typelisp to statycznie typowany Lisp zapisywany w S-wyrażeniach. Listę funkcji wbudowanych i
@@ -1336,6 +1336,7 @@ To, co test wypisuje przez `print`, trafia prosto na standardowe wyjście (nie j
 
 W programie skompilowanym na mikrokontroler (sekcja 3.8 w [Kompilacji](../guide/compile.md)) są to funkcje wywoływane, gdy nadchodzi przerwanie. `#[interrupt(N)]` czyni funkcję procedurą obsługi przerwania peryferyjnego `N` (od 0 do 239), a `#[exception(NAME)]` wyjątku rdzenia `NAME`, jednego z `NonMaskableInt`, `MemoryManagement`, `BusFault`, `UsageFault`, `SVCall`, `DebugMonitor`, `PendSV`, `SysTick` (`HardFault` należy do środowiska uruchomieniowego i kończy program).
 
+- Dla Arduino Uno numeracja i sposób włączania są inne, a `#[exception(NAME)]` i `enable-interrupt` nie można używać ([Kompilacja](../guide/compile.md), rozdział 3.9). To, co niżej dotyczy środowiska uruchomieniowego, odnosi się do Cortex-M.
 - Umieszcza się je na `defun` najwyższego poziomu, które nic nie przyjmuje i zwraca `()` (bez parametrów typu). Jedno przerwanie ma jedną procedurę obsługi, a jedna funkcja obsługuje jedno przerwanie.
 - Przerwanie peryferyjne nie nadchodzi, dopóki `(enable-interrupt N)` go nie włączy (`(disable-interrupt N)` je zatrzymuje; zob. [System](functions/system.md)). Wyjątek taki jak SysTick nadchodzi, gdy rejestry zostaną ustawione tak, by go wywołać.
 - Procedura obsługi uruchamia się od razu, tam, gdzie nadeszło przerwanie. Jeśli przyjdzie w trakcie pracy środowiska uruchomieniowego (alokacji, odśmiecania, wyjścia, przełączania zadań itd.), procedura uruchamia się, gdy tylko ta praca się skończy. Procedury obsługi nie przerywają się nawzajem.

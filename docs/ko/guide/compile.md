@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ 3a77c293e452d2d74bccfa67efd8af1f6f650f7d -->
+<!-- translated-from: docs/ja/guide/compile.md @ 4963ba6fc48045aeec32b258cf56b8c1af7acc94 -->
 # 컴파일
 
 아무것도 하지 않으면 typelisp 프로그램은 인터프리터에서 실행된다. 그 밖에 네이티브 코드로 컴파일하는 방법이 두 가지,
@@ -316,12 +316,42 @@ $ qemu-system-avr -M uno -display none -serial stdio -bios blink.elf   # QEMU에
 ```
 
 - 런타임이 없으므로 런타임을 사용하는 프로그램은 **컴파일 오류**가 됩니다. 오류에는 무엇이 필요하고 어떤 함수를 거쳐 도달하는지가 나옵니다. 사용할 수 있는 것은 고정 폭 정수(`i8`부터 `u32`까지), `bool`, `char`의 계산, 함수 호출, 조건 분기, 반복문, 그 값들을 담는 `defvar`와 `defconstant`, 주소를 숫자나 상수로 쓴 `volatile-read-u8` 등입니다.
-- 사용할 수 없는 것: 문자열·리스트·구조체처럼 힙에 놓이는 값. `int` 계산. 재귀, `catch`, 함수 값 호출. C 함수 호출. 인터럽트 핸들러. 변수로 나누는 나눗셈(숫자로 나누는 것은 가능합니다). 주소를 계산해서 구하는 `volatile`.
+- 사용할 수 없는 것: 문자열·리스트·구조체처럼 힙에 놓이는 값. `int` 계산. 재귀, `catch`, 함수 값 호출. C 함수 호출. 변수로 나누는 나눗셈(숫자로 나누는 것은 가능합니다). 주소를 계산해서 구하는 `volatile`.
+- 인터럽트 핸들러는 `#[interrupt(N)]`로 씁니다([구문](../reference/syntax.md) 3.17절). `N`은 ATmega328P의 인터럽트 번호로, 리셋을 0으로 센 1~25입니다(타이머 1 오버플로는 13). 아래 예를 보십시오.
 - 아무것도 하지 않는 반복문은 `-O1` 이상에서 제거됩니다. 기다리는 반복문 안에서는 레지스터를 읽는 등의 작업을 하십시오.
 - `main`이 끝나면 마이크로컨트롤러가 멈춥니다.
 - 메모리 배치는 `--linker-script FILE`로 바꿀 수 있습니다. 생략하면 플래시 32KiB에서 끝부분의 부트로더 512바이트를 뺀 영역과 RAM 2KiB입니다. RAM 주소는 `0x800100`처럼 `0x800000`을 더해서 씁니다.
 - `f32`와 `f64`의 계산은 AVR용 보조 함수가 없으므로 링크 오류가 됩니다.
 - 링크에는 3.8절과 같이 rustup 툴체인의 링커를 사용합니다.
+
+타이머 인터럽트로 LED를 깜빡이는 예입니다. 인터럽트는 주변 장치의 레지스터에서 활성화합니다.
+
+```lisp
+(defconstant (PINB int) #x23)
+(defconstant (DDRB int) #x24)
+(defconstant (LED u8) 32)
+(defconstant (TIMSK1 int) #x6F)
+(defconstant (TCCR1B int) #x81)
+(defvar (ticks u16) 0)
+
+#[interrupt(13)]                                  ; 타이머 1 오버플로
+(defun on-overflow () ()
+  (unsafe (volatile-write-u8 PINB LED))           ; 반전
+  (setf ticks (+ ticks 1))
+  ())
+
+(defun main () ()
+  (unsafe (volatile-write-u8 DDRB LED)
+          (volatile-write-u8 TIMSK1 1)            ; 오버플로 인터럽트를 활성화
+          (volatile-write-u8 TCCR1B 3))           ; 클록의 1/64로 세기 시작
+  (while true))
+```
+
+- 핸들러가 있는 프로그램은 전역 변수의 초기화가 끝나면 인터럽트를 받습니다. `main`의 처음에 주변 장치를 설정하십시오.
+- `enable-interrupt`와 `#[exception(NAME)]`은 쓸 수 없습니다(컴파일 에러).
+- 핸들러가 실행되는 동안 다른 인터럽트는 기다립니다. 핸들러도 다른 함수처럼 런타임을 쓸 수 없습니다.
+- 전역 변수를 한 번 읽거나 쓰는 동작은 2바이트 이상의 값이라도 도중에 핸들러가 끼어들지 않습니다. 읽고 나서 쓰는 갱신(`(setf n (+ n 1))`) 사이에는 인터럽트가 올 수 있습니다. 핸들러도 쓰는 변수를 갱신할 때는 상태 레지스터(`#x5F` 번지)를 읽어 보관하고, 0을 써서 인터럽트를 멈춘 다음, 끝나면 보관한 값을 다시 쓰십시오.
+- 핸들러가 없는 인터럽트가 오면 마이크로컨트롤러는 멈춥니다.
 
 ## 4. 덤프
 

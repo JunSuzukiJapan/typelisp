@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ 3a77c293e452d2d74bccfa67efd8af1f6f650f7d -->
+<!-- translated-from: docs/ja/guide/compile.md @ 4963ba6fc48045aeec32b258cf56b8c1af7acc94 -->
 # Compilation
 
 Sauf indication contraire, les programmes typelisp s'exécutent dans l'interpréteur. Il existe en outre deux façons
@@ -326,12 +326,42 @@ $ qemu-system-avr -M uno -display none -serial stdio -bios blink.elf   # exécut
 ```
 
 - Il n'y a pas de runtime : un programme qui l'utilise est une **erreur de compilation**. L'erreur indique ce qui est nécessaire et par quelles fonctions on y arrive. On peut utiliser : les calculs sur les entiers de largeur fixe (de `i8` à `u32`), `bool` et `char`, les appels de fonctions, les conditions, les boucles, `defvar` et `defconstant` contenant ces valeurs, ainsi que `volatile-read-u8` et les autres avec l'adresse écrite comme un nombre ou une constante.
-- On ne peut pas utiliser : les valeurs placées dans le tas, comme les chaînes, les listes et les structures ; les calculs sur `int` ; la récursion, `catch` et les appels de valeurs de fonction ; les appels de fonctions C ; les gestionnaires d'interruption ; la division par une variable (la division par un nombre est utilisable) ; les accès `volatile` dont l'adresse est calculée.
+- On ne peut pas utiliser : les valeurs placées dans le tas, comme les chaînes, les listes et les structures ; les calculs sur `int` ; la récursion, `catch` et les appels de valeurs de fonction ; les appels de fonctions C ; la division par une variable (la division par un nombre est utilisable) ; les accès `volatile` dont l'adresse est calculée.
+- Un gestionnaire d'interruption s'écrit `#[interrupt(N)]` ([Syntaxe](../reference/syntax.md), section 3.17). `N` est le numéro de l'interruption de l'ATmega328P, de 1 à 25 en comptant la réinitialisation comme 0 (le débordement du timer 1 est 13). Voir l'exemple ci-dessous.
 - Une boucle qui ne fait rien disparaît à partir de `-O1`. Dans une boucle d'attente, lisez par exemple un registre.
 - Quand `main` se termine, le microcontrôleur s'arrête.
 - `--linker-script FILE` change la disposition de la mémoire. Sans cette option, ce sont 32 Kio de flash moins les 512 derniers octets, ceux du chargeur d'amorçage, et 2 Kio de RAM. Les adresses de RAM s'écrivent en ajoutant `0x800000`, comme `0x800100`.
 - Les calculs sur `f32` et `f64` sont une erreur d'édition de liens, car il n'y a pas de fonctions auxiliaires pour AVR.
 - L'édition de liens utilise l'éditeur de liens de la toolchain rustup, comme à la section 3.8.
+
+Un exemple qui fait clignoter la LED par l'interruption d'un timer. Une interruption s'active dans le registre du périphérique.
+
+```lisp
+(defconstant (PINB int) #x23)
+(defconstant (DDRB int) #x24)
+(defconstant (LED u8) 32)
+(defconstant (TIMSK1 int) #x6F)
+(defconstant (TCCR1B int) #x81)
+(defvar (ticks u16) 0)
+
+#[interrupt(13)]                                  ; débordement du timer 1
+(defun on-overflow () ()
+  (unsafe (volatile-write-u8 PINB LED))           ; inverser
+  (setf ticks (+ ticks 1))
+  ())
+
+(defun main () ()
+  (unsafe (volatile-write-u8 DDRB LED)
+          (volatile-write-u8 TIMSK1 1)            ; activer l'interruption de débordement
+          (volatile-write-u8 TCCR1B 3))           ; compter à 1/64 de l'horloge
+  (while true))
+```
+
+- Un programme qui a un gestionnaire accepte les interruptions dès que ses variables globales sont initialisées. Réglez les périphériques au début de `main`.
+- `enable-interrupt` et `#[exception(NAME)]` ne sont pas utilisables (erreur de compilation).
+- Pendant qu'un gestionnaire s'exécute, les autres interruptions attendent. Comme toute autre fonction, un gestionnaire ne peut pas utiliser le runtime.
+- Une lecture ou une écriture d'une variable globale n'est pas interrompue par un gestionnaire, même pour une valeur de deux octets ou plus. Une interruption peut survenir entre la lecture et l'écriture d'une mise à jour (`(setf n (+ n 1))`). Pour mettre à jour une variable qu'un gestionnaire écrit aussi, lisez et gardez le registre d'état (adresse `#x5F`), écrivez-y 0 pour arrêter les interruptions, puis remettez la valeur gardée.
+- Une interruption sans gestionnaire arrête le microcontrôleur.
 
 ## 4. Dumps
 

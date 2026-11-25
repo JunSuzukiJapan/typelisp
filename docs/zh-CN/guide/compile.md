@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ 3a77c293e452d2d74bccfa67efd8af1f6f650f7d -->
+<!-- translated-from: docs/ja/guide/compile.md @ 4963ba6fc48045aeec32b258cf56b8c1af7acc94 -->
 # 编译
 
 如果不做任何处理，typelisp 程序由解释器执行。除此之外，还有两种编译为本机代码的方法，以及一种保存环境的方法。
@@ -311,12 +311,42 @@ $ qemu-system-avr -M uno -display none -serial stdio -bios blink.elf   # 在 QEM
 ```
 
 - 由于没有运行时，使用运行时的程序会成为**编译错误**。错误会指出需要什么，以及经由哪些函数到达。可以使用的有：固定宽度整数（`i8` 到 `u32`）、`bool`、`char` 的计算，函数调用，条件分支，循环，保存这些值的 `defvar` 和 `defconstant`，以及地址写成数字或常量的 `volatile-read-u8` 等。
-- 不能使用的有：字符串、列表、结构体等放在堆上的值；`int` 的计算；递归、`catch`、函数值的调用；C 函数的调用；中断处理函数；除以变量的除法（除以数字的除法可以使用）；地址由计算得出的 `volatile`。
+- 不能使用的有：字符串、列表、结构体等放在堆上的值；`int` 的计算；递归、`catch`、函数值的调用；C 函数的调用；除以变量的除法（除以数字的除法可以使用）；地址由计算得出的 `volatile`。
+- 中断处理函数用 `#[interrupt(N)]` 书写（[语法](../reference/syntax.md) 3.17 节）。`N` 是 ATmega328P 的中断编号，以复位为 0 计，从 1 到 25（定时器 1 溢出是 13）。请看下面的例子。
 - 什么都不做的循环在 `-O1` 及以上会被删除。在等待的循环中，请读取寄存器等。
 - `main` 结束后，微控制器停止。
 - 内存布局可以用 `--linker-script FILE` 更改。省略时为 32KiB 闪存去掉末尾 512 字节的引导程序后的部分，以及 2KiB RAM。RAM 的地址要加上 `0x800000` 来写，例如 `0x800100`。
 - `f32` 和 `f64` 的计算会成为链接错误，因为没有 AVR 用的辅助函数。
 - 链接与 3.8 节一样，使用 rustup 工具链的链接器。
+
+用定时器中断让 LED 闪烁的例子。中断在外设自己的寄存器中启用。
+
+```lisp
+(defconstant (PINB int) #x23)
+(defconstant (DDRB int) #x24)
+(defconstant (LED u8) 32)
+(defconstant (TIMSK1 int) #x6F)
+(defconstant (TCCR1B int) #x81)
+(defvar (ticks u16) 0)
+
+#[interrupt(13)]                                  ; 定时器 1 溢出
+(defun on-overflow () ()
+  (unsafe (volatile-write-u8 PINB LED))           ; 翻转
+  (setf ticks (+ ticks 1))
+  ())
+
+(defun main () ()
+  (unsafe (volatile-write-u8 DDRB LED)
+          (volatile-write-u8 TIMSK1 1)            ; 启用溢出中断
+          (volatile-write-u8 TCCR1B 3))           ; 以时钟的 1/64 计数
+  (while true))
+```
+
+- 有处理函数的程序在全局变量初始化完成后接受中断。请在 `main` 的开头设置外设。
+- 不能使用 `enable-interrupt` 和 `#[exception(NAME)]`（编译错误）。
+- 处理函数执行期间，其他中断等待。处理函数与其他函数一样，不能使用运行时。
+- 全局变量的一次读取或写入，即使是两字节以上的值，也不会被处理函数打断。先读后写的更新（`(setf n (+ n 1))`）之间会有中断到来。要更新处理函数也写入的变量时，请读取并保存状态寄存器（地址 `#x5F`），写入 0 以停止中断，完成后写回保存的值。
+- 没有处理函数的中断到来时，微控制器会停止。
 
 ## 4. 转储
 
