@@ -1550,6 +1550,9 @@ impl Interp {
             }
             // The identity: an `int` value is what it is on this side; the
             // tag is compiled code's concern.
+            Op::LlvmSizeOfValue => Err(EvalError::Panic(
+                "std::dbg::llvm-size-of: interpreted code holds no value in an LLVM type; compile the function that asks".to_string(),
+            )),
             Op::TagInt => {
                 let inner = core::field(heap, form, 0)
                     .ok_or_else(|| EvalError::Internal("eval: (tag-int ..) has no operand".to_string()))?;

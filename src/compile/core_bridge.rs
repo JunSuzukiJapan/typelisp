@@ -729,8 +729,9 @@ fn to_island_here(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Error>
         }
         // The `int` boundary's two sides (`check::lower::int_boundary_raw`): the
         // operand translated like any other, the tag kept, and the island
-        // does the shift.
-        wk::UNTAG_INT | wk::TAG_INT => {
+        // does the shift. `std::dbg::llvm-size-of`'s node the same way: the
+        // island asks LLVM the size of the operand's type.
+        wk::UNTAG_INT | wk::TAG_INT | wk::LLVM_SIZE_OF_VALUE => {
             let inner = core::field(heap, form, 0).ok_or_else(|| malformed(heap, form))?;
             let mut f = Items::new(heap);
             let v = to_island(f.heap(), inner, cx)?;

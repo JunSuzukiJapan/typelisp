@@ -98,6 +98,10 @@ pub(super) enum Op {
     UntagInt,
     /// `(tag-int E)` — the boundary's other side; the identity here.
     TagInt,
+    /// `(llvm-size-of-value E)` — `std::dbg::llvm-size-of`: the size of the
+    /// LLVM type compiled code holds `E` in, which interpreted code has none
+    /// of.
+    LlvmSizeOfValue,
     /// `(some-of REPR E)` — a niched `Option`'s `Some`: `E`'s value, which
     /// already is the word the `Option` is represented by. The identity
     /// here; compiled code tags by `REPR`.
@@ -173,6 +177,7 @@ impl Op {
             wk::DYN_VALUE => Op::DynValue,
             wk::UNTAG_INT => Op::UntagInt,
             wk::TAG_INT => Op::TagInt,
+            wk::LLVM_SIZE_OF_VALUE => Op::LlvmSizeOfValue,
             wk::SOME_OF => Op::SomeOf,
             wk::BOX_OPTION => Op::BoxOption,
             wk::TYPE_VALUE => Op::TypeValue,

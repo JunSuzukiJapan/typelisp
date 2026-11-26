@@ -2,7 +2,7 @@
 //! carried in, and the one place that tags a value for a field and takes it
 //! back out.
 
-use inkwell::types::BasicTypeEnum;
+use inkwell::types::{BasicType, BasicTypeEnum};
 use inkwell::values::{BasicValueEnum, IntValue};
 use inkwell::IntPredicate;
 
@@ -82,6 +82,21 @@ pub(super) fn build_not(args: &[Value]) -> Result<Value, EvalError> {
     let builder = expect_llvm_builder(&args[0])?;
     let v = value_or_return!(&args[1]).into_int_value();
     let r = builder.borrow().build_not(v, "not").map_err(|e| EvalError::Internal(format!("build-not: {}", e)))?;
+    Ok(llvm_value_value(r.into()))
+}
+
+/// `(build-size-of builder v)` — how many bytes a value of `v`'s LLVM type
+/// takes, as a `u32`. The answer is LLVM's `sizeof` of the type, a constant
+/// whose number LLVM works out from the module's data layout: a module gets
+/// the layout of the machine it is for when it is made into code, after the
+/// island has built it.
+pub(super) fn build_size_of(args: &[Value]) -> Result<Value, EvalError> {
+    let builder = expect_llvm_builder(&args[0])?;
+    let v = value_or_return!(&args[1]);
+    let err = |e: String| EvalError::Internal(format!("build-size-of: {}", e));
+    let size = v.get_type().size_of().ok_or_else(|| err(format!("the type of {} has no size", v)))?;
+    let u32_ty = crate::compile::llvm_context().i32_type();
+    let r = builder.borrow().build_int_truncate(size, u32_ty, "size").map_err(|e| err(e.to_string()))?;
     Ok(llvm_value_value(r.into()))
 }
 

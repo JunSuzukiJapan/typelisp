@@ -204,6 +204,10 @@ fn builder(reg: &mut Registry) {
     def.instance("convert", vec![builder_ty(), Type::Int, Type::Int, value_ty()], value_ty());
     def.instance("coerce", vec![builder_ty(), Type::Int, value_ty()], value_ty());
     def.instance("build-not", vec![builder_ty(), value_ty()], value_ty());
+    // `build-size-of`: how many bytes a value of `v`'s LLVM type takes, as a
+    // `u32` — LLVM's own `sizeof`, which it works out for the machine the
+    // module is for once it knows that machine.
+    def.instance("build-size-of", vec![builder_ty(), value_ty()], value_ty());
     def.instance("tag-field", vec![builder_ty(), module_ty(), value_ty(), Type::Int], value_ty());
     def.instance("untag-field", vec![builder_ty(), module_ty(), value_ty(), Type::Int], value_ty());
     // A global variable, by its id and its field kind (`compile::globals`).

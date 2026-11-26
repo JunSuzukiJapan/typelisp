@@ -1,11 +1,11 @@
-# ABI バージョン 0.3.89
+# ABI バージョン 0.3.90
 
 `scripts/regen-abi-version.sh` が生成した文書。手で編集しない。
 
-コンパイラが生成するコードが、ABI バージョン 0.3.89 のランタイムライブラリについて仮定していることの一覧。
+コンパイラが生成するコードが、ABI バージョン 0.3.90 のランタイムライブラリについて仮定していることの一覧。
 ここに書かれていない前提(シムが引数をどう扱うか、生成コードがヒープを直接読む箇所など)は含まない。
 
-内容ハッシュ (FNV-1a 64): `46bea35c07b76cf3`
+内容ハッシュ (FNV-1a 64): `329748c8ec618934`
 
 ## 呼び出し規約 (typelisp_abi)
 
@@ -830,6 +830,9 @@
 | 706 | `float->u8` |
 | 707 | `float->u16` |
 | 708 | `float->u32` |
+| 709 | `llvm-size-of` |
+| 710 | `llvm-size-of-value` |
+| 711 | `build-size-of` |
 
 ## 組み込み型 (typelisp_mem::BUILTIN_TYPES)
 
@@ -956,6 +959,7 @@
 | `(fn (K K) bool)` | `(fn (K,K) std::primitive::bool)` | fn | 6 | 2 |
 | `(fn (K) int)` | `(fn (K) std::primitive::int)` | fn | 6 | 2 |
 | `(fn (std::io::string-input-stream char) std::option::Option<std::sexpr::Sexpr>)` | `(fn (std::io::string-input-stream,std::primitive::char) std::option::Option<std::sexpr::Sexpr>)` | fn | 6 | 2 |
+| `A` | `A` | none | 0 | 0 |
 | `E` | `E` | none | 0 | 0 |
 | `K` | `K` | none | 0 | 0 |
 | `T` | `T` | none | 0 | 0 |
@@ -1508,6 +1512,7 @@
 - インスタンス `build-sadd-overflow`: `(%core::llvm-builder, %core::llvm-module, %core::llvm-value, %core::llvm-value, %core::llvm-value) -> %core::llvm-value`
 - インスタンス `build-select`: `(%core::llvm-builder, %core::llvm-value, %core::llvm-value, %core::llvm-value) -> %core::llvm-value`
 - インスタンス `build-shl`: `(%core::llvm-builder, %core::llvm-value, %core::llvm-value) -> %core::llvm-value`
+- インスタンス `build-size-of`: `(%core::llvm-builder, %core::llvm-value) -> %core::llvm-value`
 - インスタンス `build-smul-overflow`: `(%core::llvm-builder, %core::llvm-module, %core::llvm-value, %core::llvm-value, %core::llvm-value) -> %core::llvm-value`
 - インスタンス `build-ssub-overflow`: `(%core::llvm-builder, %core::llvm-module, %core::llvm-value, %core::llvm-value, %core::llvm-value) -> %core::llvm-value`
 - インスタンス `build-sub`: `(%core::llvm-builder, %core::llvm-value, %core::llvm-value) -> %core::llvm-value`
@@ -2351,6 +2356,7 @@
 | `std::cmp::eql` | `rt_sexpr_eql` | `<T> (T, T) -> bool` |
 | `std::cmp::equalp` | `rt_sexpr_equalp` | `<T> (T, T) -> bool` |
 | `std::compile-file` |  | `(string, string) -> bool` |
+| `std::dbg::llvm-size-of` |  | `<A> (A) -> u32` |
 | `std::dump` |  | `(string) -> bool` |
 | `std::env::command-line-args` | `rt_command_line_args` | `() -> std::vec::Vector<string>` |
 | `std::env::getenv` | `rt_getenv` | `(string) -> std::option::Option<string>` |

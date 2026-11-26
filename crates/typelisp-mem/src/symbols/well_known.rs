@@ -1041,4 +1041,10 @@ well_known_symbols! {
     M_FLOAT_TO_U8 => "float->u8"
     M_FLOAT_TO_U16 => "float->u16"
     M_FLOAT_TO_U32 => "float->u32"
+    "Appended 2026-11-26. How many bytes compiled code holds a value in, as
+     the LLVM type it gives the value says: the function in `std::dbg`, and
+     the IR node it lowers to."
+    F_LLVM_SIZE_OF => "llvm-size-of"
+    LLVM_SIZE_OF_VALUE => "llvm-size-of-value"
+    M_BUILD_SIZE_OF => "build-size-of"
 }

@@ -86,6 +86,10 @@ fn lower_node(heap: &mut Heap, lw: &mut Lowering, t: &Typed) -> Result<Value, Er
             let lowered: Vec<Arg> = lowered.iter().map(|(ty, form)| Arg { ty, form: *form }).collect();
             lw.reg.call_form(heap, &path, &lw.settle(&t.ty), &lowered)
         }
+        Node::Call { path, targs: _, args } if *path == Path::builtin(wk::F_LLVM_SIZE_OF) => {
+            let value = lower_rooted(heap, lw, &args[0])?;
+            core::tagged(heap, wk::LLVM_SIZE_OF_VALUE, &[value])
+        }
         Node::Call { path, targs, args } => {
             let path = if targs.is_empty() {
                 *path

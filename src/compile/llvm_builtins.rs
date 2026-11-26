@@ -122,6 +122,7 @@ pub(crate) fn eval_llvm_builtin_method(heap: &mut Heap, type_name: &Path, method
             wk::M_CONVERT => Some(values::convert(args)),
             wk::M_COERCE => Some(values::coerce(args)),
             wk::M_BUILD_NOT => Some(values::build_not(args)),
+            wk::M_BUILD_SIZE_OF => Some(values::build_size_of(args)),
             wk::M_TAG_FIELD => Some(values::tag_field(args)),
             wk::M_UNTAG_FIELD => Some(values::untag_field(args)),
             wk::M_GLOBAL_GET => Some(globals::global_get(args)),

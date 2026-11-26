@@ -1814,6 +1814,9 @@ const SOURCE_TEMPLATE: &str = r#"
       (int-any-width (compile-int-any-width m fn-name builder e))
       (int (compile-int-literal m fn-name builder e))
       (untag-int (compile-untag-int m fn-name builder env fn-env captured cur-fn loop-exit loop-slot block-names block-exits block-slots protect exit-cleanup e))
+      ;; `(llvm-size-of-value E)` -- `std::dbg::llvm-size-of`: how many bytes
+      ;; `E`'s value is held in, LLVM's size of the type it has here.
+      (llvm-size-of-value (build-size-of builder (compile-value m fn-name builder env fn-env captured cur-fn loop-exit loop-slot block-names block-exits block-slots protect exit-cleanup (sexpr-car (sexpr-cdr e)))))
       (tag-int (tag-fixnum builder (compile-value m fn-name builder env fn-env captured cur-fn loop-exit loop-slot block-names block-exits block-slots protect exit-cleanup (sexpr-car (sexpr-cdr e)))))
       ;; `(some-of KIND E)` -- a niched `Option`'s `Some`: `E`'s register
       ;; value tagged into its field word by `KIND`, and that word is the

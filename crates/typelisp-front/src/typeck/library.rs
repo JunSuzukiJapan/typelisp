@@ -16,7 +16,7 @@ use super::registry::{Registry, Since, ValueDef};
 /// every module can draw on: `std` imports each of their definitions, no two
 /// of them define one name, and `std::prelude` re-exports from them what
 /// [`prelude_offers`] says ([`reexport`]).
-pub(crate) const PRELUDE_MODULES: &[&str] = &["random", "time", "repl", "env", "net", "thread", "board", "sync", "symbol", "process", "hash", "error", "cmp", "ops", "reader", "eval", "num", "char", "string", "control", "iter", "seq", "fmt", "path", "io", "fs", "collections", "array", "option", "result", "vec", "sexpr", "primitive"];
+pub(crate) const PRELUDE_MODULES: &[&str] = &["random", "time", "repl", "env", "net", "thread", "board", "dbg", "sync", "symbol", "process", "hash", "error", "cmp", "ops", "reader", "eval", "num", "char", "string", "control", "iter", "seq", "fmt", "path", "io", "fs", "collections", "array", "option", "result", "vec", "sexpr", "primitive"];
 
 /// The modules of [`PRELUDE_MODULES`] `std::prelude` offers whole: the
 /// primitive types, `Option`, `Result`, `Vector`, iteration, S-expressions

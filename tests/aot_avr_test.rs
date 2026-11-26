@@ -18,6 +18,9 @@ use std::time::{Duration, Instant};
 #[path = "common/widths.rs"]
 #[allow(dead_code)]
 mod widths;
+#[path = "common/llvm_sizes.rs"]
+#[allow(dead_code)]
+mod llvm_sizes;
 
 const TYPL: &str = env!("CARGO_BIN_EXE_typl");
 
@@ -414,6 +417,16 @@ fn every_width_is_its_own() {
         let out = written(&format!("avr_widths_{}", n), &program);
         assert!(!out.contains('n') && out.len() > 50, "{}: {}", n, out);
     }
+}
+
+/// How many bytes compiled code holds each kind of value in, as LLVM's type
+/// of it says, on a machine of 16-bit words (`common::llvm_sizes`).
+#[test]
+fn every_width_has_its_llvm_size() {
+    let program = llvm_sizes::program(&llvm_sizes::AVR);
+    let source = format!("(defun say ((b bool)) () (put (if b 121 110)) ())\n{}(defun main () () (start) (run-checks) (put 46))\n", program.source);
+    let failed = program.failures(&written("avr_llvm_sizes", &source));
+    assert!(failed.is_empty(), "{}", failed.join("\n"));
 }
 
 /// Timer 1 overflowing (vector 13) and the serial port ready for a byte

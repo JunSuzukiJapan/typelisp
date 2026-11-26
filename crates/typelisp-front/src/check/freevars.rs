@@ -339,7 +339,7 @@ fn plain_sub_forms(heap: &Heap, form: Value, tag: SymRef) -> Result<Vec<Value>, 
         // are refused a lowering by the bridge; walking them correctly is what
         // lets that refusal be the error a user sees.
         wk::STEP => from(0),
-        wk::RETURN | wk::PANIC | wk::DYN_VALUE | wk::UNTAG_INT | wk::TAG_INT => from(0),
+        wk::RETURN | wk::PANIC | wk::DYN_VALUE | wk::UNTAG_INT | wk::TAG_INT | wk::LLVM_SIZE_OF_VALUE => from(0),
         // `(some-of REPR E)` / `(box-option TYPE E)` — the operand only;
         // neither the representation nor the type is a form (each is a list
         // headed by a symbol, `field-get`'s trap below).
