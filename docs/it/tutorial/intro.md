@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/intro.md @ 398532233e28225bb121ed5b18609d41ea1bf813 -->
+<!-- translated-from: docs/ja/tutorial/intro.md @ fddb236d8b1f4c292e9e126057ed7732aa8259a8 -->
 # Primi passi
 
 Partendo dalla valutazione di espressioni nel REPL, questo capitolo tratta nell'ordine funzioni,
@@ -19,7 +19,7 @@ int
 typl> :quit
 ```
 
-D'ora in avanti, l'input e i risultati del REPL sono mostrati in questa forma.
+D'ora in avanti, l'input e i risultati del REPL sono mostrati in questa forma. I comandi del REPL, il completamento e il resto sono descritti nella [guida al REPL](../guide/repl.md).
 
 ## 2. Valutare espressioni
 

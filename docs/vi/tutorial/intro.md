@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/intro.md @ 398532233e28225bb121ed5b18609d41ea1bf813 -->
+<!-- translated-from: docs/ja/tutorial/intro.md @ fddb236d8b1f4c292e9e126057ed7732aa8259a8 -->
 # Bắt đầu
 
 Bắt đầu từ việc đánh giá biểu thức trong REPL, chương này lần lượt trình bày hàm, biến, rẽ nhánh,
@@ -18,7 +18,7 @@ int
 typl> :quit
 ```
 
-Từ đây trở đi, dữ liệu nhập và kết quả trong REPL được trình bày theo dạng này.
+Từ đây trở đi, dữ liệu nhập và kết quả trong REPL được trình bày theo dạng này. Các lệnh của REPL, tự hoàn thành và những thứ khác được giải thích trong [hướng dẫn REPL](../guide/repl.md).
 
 ## 2. Đánh giá biểu thức
 

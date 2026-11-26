@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/README.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
+<!-- translated-from: docs/ja/README.md @ fddb236d8b1f4c292e9e126057ed7732aa8259a8 -->
 # Documentazione di typelisp (Italiano)
 
 typelisp è un Lisp a tipizzazione statica. Per l'installazione e la compilazione si veda il
@@ -156,6 +156,7 @@ Se è la prima volta che usi typelisp, leggi questi documenti nell'ordine indica
 
 ## Guide
 
+- [Il REPL](guide/repl.md): comandi del REPL, completamento, risultati precedenti, interruzione con `Ctrl+C`, indagine dopo un errore
 - [Moduli e organizzazione dei file](guide/modules.md): `use`, `pub`, come i file corrispondono ai moduli
 - [Compilazione](guide/compile.md): il JIT, la creazione di eseguibili con la compilazione AOT, i dump
 - [I/O su file, stream e rete](guide/io.md): file, pathname, TCP / TLS / UDP, risoluzione dei nomi

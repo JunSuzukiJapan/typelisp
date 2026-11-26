@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/README.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
+<!-- translated-from: docs/ja/README.md @ fddb236d8b1f4c292e9e126057ed7732aa8259a8 -->
 # typelisp 문서 (한국어)
 
 typelisp는 정적 타입 Lisp이다. 설치와 빌드 방법은 저장소 최상위의 [README.md](../../README.md)(영어)를
@@ -144,6 +144,7 @@ typelisp를 처음 접한다면 순서대로 읽는다.
 
 ## 가이드
 
+- [REPL](guide/repl.md): REPL 명령, 자동 완성, 직전 결과, `Ctrl+C`로 중단, 오류 후 조사
 - [모듈과 파일 구성](guide/modules.md): `use`, `pub`, 파일과 모듈의 대응
 - [컴파일](guide/compile.md): JIT, AOT 컴파일로 실행 파일 만들기, 덤프
 - [파일 입출력, 스트림, 네트워크](guide/io.md): 파일, 경로명, TCP / TLS / UDP, 이름 해석

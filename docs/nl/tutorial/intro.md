@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/intro.md @ 398532233e28225bb121ed5b18609d41ea1bf813 -->
+<!-- translated-from: docs/ja/tutorial/intro.md @ fddb236d8b1f4c292e9e126057ed7732aa8259a8 -->
 # Aan de slag
 
 Beginnend met het evalueren van expressies in de REPL behandelt dit hoofdstuk achtereenvolgens
@@ -19,7 +19,7 @@ int
 typl> :quit
 ```
 
-Vanaf hier worden REPL-invoer en -resultaten in deze vorm getoond.
+Vanaf hier worden REPL-invoer en -resultaten in deze vorm getoond. De opdrachten van de REPL, aanvulling en meer worden beschreven in de [REPL-gids](../guide/repl.md).
 
 ## 2. Expressies evalueren
 

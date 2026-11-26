@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/README.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
+<!-- translated-from: docs/ja/README.md @ fddb236d8b1f4c292e9e126057ed7732aa8259a8 -->
 # typelisp-documentatie (Nederlands)
 
 typelisp is een statisch getypeerde Lisp. Voor het installeren en bouwen zie de
@@ -157,6 +157,7 @@ Ben je nieuw met typelisp, lees deze documenten dan in volgorde.
 
 ## Handleidingen
 
+- [De REPL](guide/repl.md): REPL-opdrachten, aanvulling, vorige resultaten, stoppen met `Ctrl+C`, onderzoeken na een fout
 - [Modules en bestandsindeling](guide/modules.md): `use`, `pub`, hoe bestanden op modules worden afgebeeld
 - [Compileren](guide/compile.md): de JIT, uitvoerbare bestanden bouwen met AOT-compilatie, dumps
 - [Bestands-I/O, streams en netwerk](guide/io.md): bestanden, padnamen, TCP / TLS / UDP, naamresolutie

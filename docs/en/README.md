@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/README.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
+<!-- translated-from: docs/ja/README.md @ fddb236d8b1f4c292e9e126057ed7732aa8259a8 -->
 # typelisp Documentation (English)
 
 typelisp is a statically typed Lisp. For installing and building it, see [README.md](../../README.md)
@@ -155,6 +155,7 @@ If you are new to typelisp, read these in order.
 
 ## Guides
 
+- [The REPL](guide/repl.md): REPL commands, completion, previous results, stopping with `Ctrl+C`, investigating after an error
 - [Modules and File Layout](guide/modules.md): `use`, `pub`, how files map to modules
 - [Compiling](guide/compile.md): the JIT, building executables with AOT compilation, dumps
 - [File I/O, Streams and Networking](guide/io.md): files, pathnames, TCP / TLS / UDP, name resolution

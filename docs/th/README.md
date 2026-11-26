@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/README.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
+<!-- translated-from: docs/ja/README.md @ fddb236d8b1f4c292e9e126057ed7732aa8259a8 -->
 # เอกสารประกอบ typelisp (ภาษาไทย)
 
 typelisp คือภาษา Lisp ที่มีระบบชนิดแบบสถิต (statically typed) สำหรับการติดตั้งและการบิลด์ ดู
@@ -144,6 +144,7 @@ typelisp คือภาษา Lisp ที่มีระบบชนิดแ�
 
 ## คู่มือ
 
+- [REPL](guide/repl.md): คำสั่งของ REPL การเติมคำ ผลลัพธ์ก่อนหน้า การหยุดด้วย `Ctrl+C` การตรวจสอบหลังเกิดข้อผิดพลาด
 - [โมดูลและการจัดวางไฟล์](guide/modules.md): `use`, `pub`, การที่ไฟล์สอดคล้องกับโมดูล
 - [การคอมไพล์](guide/compile.md): JIT, การสร้างไฟล์ปฏิบัติการด้วย AOT, dump
 - [I/O ของไฟล์ สตรีม และเครือข่าย](guide/io.md): ไฟล์, pathname, TCP / TLS / UDP, การแปลงชื่อ (name resolution)

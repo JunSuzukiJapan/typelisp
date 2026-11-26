@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/README.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
+<!-- translated-from: docs/ja/README.md @ fddb236d8b1f4c292e9e126057ed7732aa8259a8 -->
 # typelisp 文档（简体中文）
 
 typelisp 是一种静态类型的 Lisp。安装和构建方法请参阅仓库根目录的 [README.md](../../README.md)（英文）。
@@ -143,6 +143,7 @@ typelisp 是一种静态类型的 Lisp。安装和构建方法请参阅仓库根
 
 ## 指南
 
+- [REPL](guide/repl.md)：REPL 命令、补全、之前的结果、用 `Ctrl+C` 中断、出错后的排查
 - [模块与文件结构](guide/modules.md)：`use`、`pub`、文件与模块的对应关系
 - [编译](guide/compile.md)：JIT、用 AOT 编译生成可执行文件、转储
 - [文件 I/O、流与网络](guide/io.md)：文件、路径名、TCP / TLS / UDP、名称解析

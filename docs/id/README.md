@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/README.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
+<!-- translated-from: docs/ja/README.md @ fddb236d8b1f4c292e9e126057ed7732aa8259a8 -->
 # Dokumentasi typelisp (Bahasa Indonesia)
 
 typelisp adalah Lisp dengan tipe statis. Untuk cara memasang dan membangunnya, lihat
@@ -156,6 +156,7 @@ Jika Anda baru mengenal typelisp, bacalah berurutan.
 
 ## Panduan
 
+- [REPL](guide/repl.md): perintah REPL, pelengkapan, hasil sebelumnya, menghentikan dengan `Ctrl+C`, menyelidiki setelah galat
 - [Modul dan Tata Letak Berkas](guide/modules.md): `use`, `pub`, cara berkas dipetakan ke modul
 - [Kompilasi](guide/compile.md): JIT, membangun berkas eksekusi dengan kompilasi AOT, dump
 - [I/O Berkas, Stream, dan Jaringan](guide/io.md): berkas, pathname, TCP / TLS / UDP, resolusi nama
