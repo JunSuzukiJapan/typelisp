@@ -360,3 +360,25 @@ CL にあってここに無いもの: `eval-when`（`:compile-toplevel`/`:load-t
 |---|---|---|---|
 | `enable-interrupt` | `(enable-interrupt n)` | `int→()` | 周辺機器の割り込み `n`（0〜239）が来るようにする。マイコンの外では実行時エラー（`typl -c` ではコンパイルエラー） |
 | `disable-interrupt` | `(disable-interrupt n)` | `int→()` | 割り込み `n` が来ないようにする。マイコンの外での扱いは `enable-interrupt` と同じ |
+
+## 12. デバッグ（`std::dbg`）
+
+`(use std::dbg::llvm-size-of)` のように取り込んで使う。
+
+| 名前 | 形式 | 型 | 説明 |
+|---|---|---|---|
+| `llvm-size-of` | `(llvm-size-of expr)` | `A→u32` | コンパイルしたコードが `expr` の値を何バイトで持つか。コンパイラが値に付けた LLVM の型の大きさを、コードが動くターゲットについて LLVM が数える。`expr` は評価する。インタプリタで実行すると実行時エラー |
+
+`size-of-val` は型から決まる大きさを答え、`llvm-size-of` はコンパイルしたコードが実際に使う大きさを
+答える。2 つが食い違えば、コンパイラが値の幅を取り違えている。
+
+```lisp
+(use std::dbg::llvm-size-of)
+(defun widths ((x i8)) ()
+  (println "~a ~a ~a" (llvm-size-of x) (llvm-size-of (as u32 x)) (llvm-size-of (< x 0))))
+(compile widths)
+(widths 1)                          ; 1 4 1 と印字する
+```
+
+ヒープにある値（`string`、`defstruct` の型など）と `int` は、値の場所か値そのものを表す語 1 つの
+大きさになる。

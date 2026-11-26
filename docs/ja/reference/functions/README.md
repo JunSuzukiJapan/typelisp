@@ -33,6 +33,7 @@
 | `std::board` | `disable-interrupt`、`enable-interrupt` |
 | `std::char` | `digit->char`、`digit-weight`、`name->char` |
 | `std::collections` | `Deque`、`HashSet`、`Scope`、`SortedTable`、`hashtable-iter` |
+| `std::dbg` | `llvm-size-of` |
 | `std::env` | `command-line-args`、`getenv`、`home-directory` |
 | `std::error` | `WrappedError`、`as-dyn-error`、`assert-equal`、`describe-error`、`wrap-error` |
 | `std::eval` | `Environment` |
