@@ -25,6 +25,7 @@
 extern crate alloc;
 
 pub mod dribble;
+pub mod interrupt;
 
 // The ABI version: which `docs/dev/api_version/history/api_<VERSION>.md`
 // describes everything compiled code assumes about the archive it links.

@@ -976,7 +976,7 @@ impl Interp {
 
     /// [`Self::render_readably`] for a trace line, which reports the value it
     /// could not render rather than abandoning the trace.
-    fn trace_render(&self, heap: &mut Heap, v: Value, repr: Option<&Repr>) -> String {
+    pub(super) fn trace_render(&self, heap: &mut Heap, v: Value, repr: Option<&Repr>) -> String {
         self.render_readably(heap, v, repr).unwrap_or_else(|e| format!("#<unprintable: {}>", e))
     }
 
@@ -1681,7 +1681,7 @@ pub(super) fn env_lookup(heap: &Heap, env: Value, name: SymRef) -> Option<Value>
 }
 
 /// Read a binding cell.
-fn cell_value(heap: &Heap, cell: Value) -> Result<Value, EvalError> {
+pub(super) fn cell_value(heap: &Heap, cell: Value) -> Result<Value, EvalError> {
     match cell {
         Value::Boxed(id) if heap.is_cell(id) => Ok(heap.cell_get(id)),
         other => Err(EvalError::Internal(format!("eval: binding does not hold a cell: {:?}", other))),

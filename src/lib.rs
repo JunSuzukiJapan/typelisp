@@ -10,6 +10,7 @@
 
 pub mod compile;
 pub mod compiler;
+pub mod repl;
 pub mod testing;
 
 pub use typelisp_front::{builtins, check, dump, errors, eval, mem, opt_level, owned_form, prelude, project, read, release, sexpr_variant, type_key, types};

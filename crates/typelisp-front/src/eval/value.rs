@@ -103,6 +103,10 @@ pub enum EvalError {
     /// control-flow signals (they must stay pattern-matchable by the loop that
     /// catches them) nor double-wraps an already-located error.
     At(Loc, Box<EvalError>),
+    /// The REPL's Ctrl-C stopped the evaluation (`typelisp_abi::interrupt`).
+    /// Not an error of the program's, and nothing in it claims one: it
+    /// unwinds to the REPL, running `unwind-protect` cleanups on the way.
+    Interrupted,
 }
 
 impl EvalError {
@@ -169,6 +173,7 @@ impl fmt::Display for EvalError {
             }
             EvalError::Throw(tag, _) => write!(f, "throw: no enclosing (catch '{}) for this throw", tag.spelling()),
             EvalError::At(loc, inner) => write!(f, "{}: {}", loc, inner),
+            EvalError::Interrupted => write!(f, "interrupted"),
         }
     }
 }

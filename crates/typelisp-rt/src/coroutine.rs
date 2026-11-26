@@ -387,6 +387,7 @@ impl FrameStack {
     fn raise_scheduler_error(&mut self, heap: &mut Heap, base: usize, e: crate::sched::SchedError) -> Result<i64, Paused> {
         let message = match e {
             crate::sched::SchedError::Panic(m) | crate::sched::SchedError::Internal(m) => m,
+            crate::sched::SchedError::Interrupted => "interrupted".to_string(),
         };
         // SAFETY: a `Heap` is registered on this thread — the chain just ran on it.
         unsafe { crate::park_activation_unwind(Box::new(typelisp_abi::CompiledPanic { message })) };

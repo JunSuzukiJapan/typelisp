@@ -241,6 +241,33 @@ pub struct EnumDef {
 /// the whole program. See `eval::scope`'s module doc comment for why, and
 /// for how a reference re-resolves against this tree instead of trusting a
 /// checker-baked [`Path`] as a lookup key.
+/// One call that was open when an evaluation failed: what a backtrace line
+/// says about it. Rendered when the failure passed it, while the values were
+/// still rooted, so it holds no heap value.
+#[derive(Clone, Debug)]
+pub struct BacktraceFrame {
+    /// The function, by the name `trace` gives it.
+    pub name: String,
+    /// Each parameter and its value as `~s` prints it, rendered by the
+    /// parameter's declared representation.
+    pub args: Vec<(String, String)>,
+    /// Where the call was made; `None` for a call in a form with no location.
+    pub called_at: Option<crate::Loc>,
+}
+
+impl BacktraceFrame {
+    /// The call as `trace` writes it: `(fact 3)`.
+    pub fn call_text(&self) -> String {
+        let mut text = format!("({}", self.name);
+        for (_, v) in &self.args {
+            text.push(' ');
+            text.push_str(v);
+        }
+        text.push(')');
+        text
+    }
+}
+
 pub struct Interp {
     /// The runtime module tree. Behind a `RefCell` so the `eval` builtin
     /// (`Self::eval_form`, reached through the `&self` evaluation path) can
@@ -340,6 +367,10 @@ pub struct Interp {
     /// [`Self::enter`] is a load and not a `RefCell` borrow. Every write to
     /// `traced` updates it.
     pub(crate) trace_armed: Cell<bool>,
+    /// The calls that were open when the last drive's main task failed,
+    /// innermost first — what the REPL's `:bt` prints. Replaced by each
+    /// failure; see [`Self::take_backtrace`].
+    pub(crate) last_backtrace: RefCell<Vec<BacktraceFrame>>,
     /// How many traced (or stepped) frames are open — the indentation depth
     /// in a trace report, and CL's own `0:`/`1:`/`2:` prefix.
     pub(crate) trace_depth: Cell<usize>,
@@ -540,6 +571,7 @@ impl Interp {
             printing: RefCell::new(Vec::new()),
             traced: RefCell::new(HashSet::new()),
             trace_armed: Cell::new(false),
+            last_backtrace: RefCell::new(Vec::new()),
             trace_depth: Cell::new(0),
             stepping: Cell::new(false),
             step_quiet_depth: Cell::new(usize::MAX),
@@ -624,6 +656,13 @@ impl Interp {
     /// right after construction; contexts that never run user `eval` (AOT
     /// compilation, the compiler-island bootstrap, most tests) skip it and
     /// leave the handle `None`. See the `checker` field's doc comment.
+    /// The calls that were open when the last drive's main task failed,
+    /// innermost first, leaving none behind. Empty after a drive that did
+    /// not fail, or one whose failure left from no call.
+    pub fn take_backtrace(&self) -> Vec<BacktraceFrame> {
+        std::mem::take(&mut *self.last_backtrace.borrow_mut())
+    }
+
     pub fn set_checker(&mut self, checker: Rc<RefCell<crate::typeck::checker::Checker>>) {
         self.checker = Some(checker);
     }

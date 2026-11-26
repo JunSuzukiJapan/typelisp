@@ -40,11 +40,11 @@ use crate::check::repr::Repr;
 use crate::eval::value::EvalError;
 
 use super::core_eval::{
-    bool_field, construct_sexpr_core, env_lookup, extend_env, heap_err, int_field, match_core_pattern, param_names,
+    bool_field, cell_value, construct_sexpr_core, env_lookup, extend_env, heap_err, int_field, match_core_pattern, param_names,
     definition_field, param_reprs, repr_list, sym_field, type_field, tail_after, tail_after_value, Op,
 };
 use super::task_body::{TyplBody, TyplCx};
-use super::{FnDef, Interp};
+use super::{BacktraceFrame, FnDef, Interp};
 
 use std::rc::Rc;
 
@@ -344,6 +344,20 @@ enum Frame {
     /// error raised inside the library is reported (see [`Interp::enter_fn`]
     /// and the `State::Unwind` step). A value passes straight through.
     LibraryCall,
+    /// A named function's body is running: what a backtrace names. The
+    /// location the stack records with it is the call site.
+    ///
+    /// Also the body's sequence: `rest` is what is left of it, run in `env`
+    /// as each form before it finishes, so entering a body pushes this and
+    /// nothing else. While the last form runs `rest` is empty, and a call
+    /// made from there is a tail call: [`CpsStack::push`] puts the callee's
+    /// frame in this one's place, so a loop written as tail recursion keeps
+    /// one frame however long it runs.
+    ///
+    /// `argv` is the arguments as a heap list for a compiled body, which
+    /// binds no environment here; an interpreted body's are read out of
+    /// `env`, and `argv` is empty.
+    Call { f: Rc<FnDef>, env: Value, rest: Value, argv: Value },
     /// A compiled chain is standing and this task was put down waiting for
     /// something. When the value arrives, put it in the chain's value slot and
     /// keep driving.
@@ -444,7 +458,17 @@ impl CpsStack {
     }
 
     /// Pushes `frame`, rooting the values it holds.
+    ///
+    /// A body entered from the last form of another takes that one's place
+    /// (see [`Frame::Call`]): nothing above it is waiting for the value, so
+    /// the caller's frame has nothing left to do but pass it on.
     fn push(&mut self, heap: &mut Heap, frame: Frame, loc: Option<crate::Loc>) {
+        if let (Frame::Call { .. }, Some((Frame::Call { rest: Value::Empty, .. }, top_base, _))) = (&frame, self.frames.last()) {
+            // The callee's values are in Rust locals until they are rooted
+            // below, and truncating does not allocate.
+            heap.truncate_roots(*top_base);
+            self.frames.pop();
+        }
         let base = heap.root_count();
         match &frame {
             Frame::If { form, env } => {
@@ -493,6 +517,11 @@ impl CpsStack {
             // Names and tags are `String`s, and an exit carries its value in
             // the state slots rather than here. So do the stepping flags.
             Frame::Step { .. } | Frame::TracedCall { .. } | Frame::DriveCompiled { .. } | Frame::LibraryCall => {}
+            Frame::Call { env, rest, argv, .. } => {
+                heap.push_root(*env);
+                heap.push_root(*rest);
+                heap.push_root(*argv);
+            }
             Frame::Block { .. } | Frame::Catch { .. } | Frame::Return | Frame::ReturnFrom { .. } | Frame::Throw { .. } => {}
             Frame::Args { form, done, env, .. } => {
                 heap.push_root(*form);
@@ -530,6 +559,11 @@ impl CpsStack {
     /// allocation between that truncation and re-rooting the next state.
     fn pop(&mut self) -> Option<(Frame, usize, Option<crate::Loc>)> {
         self.frames.pop()
+    }
+
+    /// The top frame and the location it was pushed with.
+    fn top(&self) -> Option<(&Frame, Option<&crate::Loc>)> {
+        self.frames.last().map(|(f, _, loc)| (f, loc.as_ref()))
     }
 }
 
@@ -572,6 +606,15 @@ pub(crate) struct Task {
     /// friends), which parks a throw's tag/caught-unwind through the same
     /// thread-locals a `CompiledTask` does.
     parked_unwind: typelisp_rt::ParkedUnwind,
+    /// Whether this is the task a drive was started for: the one the REPL's
+    /// Ctrl-C stops (`typelisp_abi::interrupt`), and whose failure leaves a
+    /// backtrace. The tasks it starts go on until the drive ends, as they
+    /// do when it fails.
+    drive_main: bool,
+    /// The calls a failure has unwound past so far, innermost first. Handed
+    /// to the interpreter when the drive's main task fails
+    /// (`Interp::take_backtrace`).
+    backtrace: Vec<BacktraceFrame>,
 }
 
 /// What the interpreter's task body ([`super::task_body::TyplBody`]) asks of
@@ -584,12 +627,34 @@ impl Task {
 
     /// Runs this task one step, on the thread that owns `interp`.
     pub(crate) fn step(&mut self, heap: &mut Heap, interp: &Interp) -> Progress<EvalError> {
-        interp.step_task_isolated(heap, self)
+        if self.drive_main && typelisp_abi::interrupt::pending() {
+            // Only between two interpreted steps: in the middle of a compiled
+            // drive the state stands for frames that have to be gone back
+            // into, and the drive's own stop (a safepoint's turn, a wait)
+            // comes back through `deliver`.
+            if let State::Eval(..) | State::Apply(_) | State::Enter { .. } = self.state {
+                typelisp_abi::interrupt::clear();
+                self.state = State::Unwind(EvalError::Interrupted);
+            }
+        }
+        let progress = interp.step_task_isolated(heap, self);
+        if self.drive_main && matches!(progress, Progress::Done(Err(_))) {
+            *interp.last_backtrace.borrow_mut() = std::mem::take(&mut self.backtrace);
+        }
+        progress
     }
 
     /// Gives this task the state it will resume into, rooting what that
     /// state carries in the task's own stack (the caller made it current).
     pub(crate) fn deliver(&mut self, heap: &mut Heap, answer: Result<Value, SchedError>) {
+        // Whatever it was waiting for — a loop's turn, a message — the stop
+        // asked for is the answer instead.
+        let answer = if self.drive_main && typelisp_abi::interrupt::pending() {
+            typelisp_abi::interrupt::clear();
+            Err(SchedError::Interrupted)
+        } else {
+            answer
+        };
         let state = answer_state(answer);
         set_state(heap, self.sbase, &state);
         self.state = state;
@@ -617,7 +682,7 @@ impl Task {
             }
             pending => State::Adopted { drive, pending },
         };
-        Task { sbase, stack: CpsStack::new(), state, compiled: chain, parked_unwind }
+        Task { sbase, stack: CpsStack::new(), state, compiled: chain, parked_unwind, drive_main: false, backtrace: Vec::new() }
     }
 }
 
@@ -626,11 +691,18 @@ impl From<SchedError> for EvalError {
         match e {
             SchedError::Panic(m) => EvalError::Panic(m),
             SchedError::Internal(m) => EvalError::Internal(m),
+            SchedError::Interrupted => EvalError::Interrupted,
         }
     }
 }
 
 /// The state a task resumes into, given what the scheduler answered it with.
+/// Whether `e` is a failure rather than one of the exits a frame claims
+/// (`break`, `return`, `return-from`, `throw`).
+fn is_failure(e: &EvalError) -> bool {
+    !matches!(e.kind(), EvalError::Break | EvalError::Return(_) | EvalError::ReturnFrom(..) | EvalError::Throw(..))
+}
+
 fn answer_state(answer: Result<Value, SchedError>) -> State {
     match answer {
         Ok(v) => State::Apply(v),
@@ -660,6 +732,8 @@ impl Task {
             state: State::Eval(form, env),
             compiled: typelisp_rt::coroutine::FrameStack::new(),
             parked_unwind: typelisp_rt::ParkedUnwind::default(),
+            drive_main: false,
+            backtrace: Vec::new(),
         }
     }
 
@@ -675,6 +749,8 @@ impl Task {
             state: State::Enter { form, argv, kind },
             compiled: typelisp_rt::coroutine::FrameStack::new(),
             parked_unwind: typelisp_rt::ParkedUnwind::default(),
+            drive_main: false,
+            backtrace: Vec::new(),
         }
     }
 
@@ -692,6 +768,8 @@ impl Task {
             state: State::CompiledEnter { argv: Value::Empty, start },
             compiled: typelisp_rt::coroutine::FrameStack::new(),
             parked_unwind: typelisp_rt::ParkedUnwind::default(),
+            drive_main: false,
+            backtrace: Vec::new(),
         }
     }
 }
@@ -889,7 +967,11 @@ impl Interp {
     fn drive_one(&self, heap: &mut Heap, make: impl FnOnce(&mut Heap) -> Task) -> Result<Value, EvalError> {
         self.install_crew(heap)?;
         self.refresh_print_snapshot();
-        let main = self.scheduler.lock(heap).admit(heap, |heap| TyplBody::interpreted(make(heap)));
+        let main = self.scheduler.lock(heap).admit(heap, |heap| {
+            let mut task = make(heap);
+            task.drive_main = true;
+            TyplBody::interpreted(task)
+        });
         self.driving.set(true);
         let out = sched::drive_main(&self.scheduler, heap, &TyplCx::of(self), main);
         self.driving.set(false);
@@ -1130,7 +1212,17 @@ impl Interp {
                 };
                 self.after_drive(heap, task, outcome, drive)
             }
-            State::Unwind(e) => match task.stack.pop() {
+            State::Unwind(e) => {
+                // A failure passing a call notes it, while its values are
+                // still rooted by the frame. Only a failure: the other exits
+                // are claimed before they leave the task.
+                if task.drive_main && is_failure(&e) {
+                    if let Some((Frame::Call { f, env, argv, .. }, called_at)) = task.stack.top() {
+                        let frame = self.backtrace_frame(heap, f, *env, *argv, called_at.cloned());
+                        task.backtrace.push(frame);
+                    }
+                }
+                match task.stack.pop() {
                 None => return Progress::Done(Err(e)),
                 Some((frame, fbase, loc)) => {
                     // An error raised inside the standard library is reported
@@ -1150,7 +1242,8 @@ impl Interp {
                     }
                     next
                 }
-            },
+                }
+            }
             State::Apply(v) => match task.stack.pop() {
                 None => return Progress::Done(Ok(v)),
                 Some((frame, fbase, loc)) => {
@@ -2209,7 +2302,8 @@ impl Interp {
                 // the truncate that releases this call's own frame, and only
                 // the state slots can root it (`set_state`).
                 let argv = core::list(heap, &argv).map_err(heap_err)?;
-                return Ok((State::CompiledEnter { argv, start }, None));
+                let call = Frame::Call { f: Rc::clone(f), env: Value::Empty, rest: Value::Empty, argv };
+                return Ok((State::CompiledEnter { argv, start }, Some(call)));
             }
             // A *classic* body runs on the Rust stack: the boundary is one
             // frame from the machine's point of view, and nothing can suspend
@@ -2270,8 +2364,39 @@ impl Interp {
         let body =
             core::list(heap, &f.body).map_err(|e| EvalError::Internal(format!("eval: call body: {}", e)))?;
         heap.truncate_roots(base);
-        // Nothing allocates from here: `sequence_state` only walks conses.
-        sequence_state(heap, body, env)
+        // Nothing allocates from here: the body is only walked.
+        let (first, rest) = match body {
+            Value::Empty => return Ok((State::Apply(Value::Empty), None)),
+            body => (heap.car(body).map_err(heap_err)?, heap.cdr(body).map_err(heap_err)?),
+        };
+        Ok((State::Eval(first, env), Some(Frame::Call { f: Rc::clone(f), env, rest, argv: Value::Empty })))
+    }
+
+    /// What a backtrace says about the call `f` that a failure is passing:
+    /// its arguments rendered by their declared representations, read out of
+    /// `env` for an interpreted body and out of `argv` for a compiled one.
+    /// The frame still roots both.
+    fn backtrace_frame(&self, heap: &mut Heap, f: &FnDef, env: Value, argv: Value, called_at: Option<crate::Loc>) -> BacktraceFrame {
+        let reprs = f.sig.as_ref().map(|s| &s.0);
+        let values: Vec<Value> = match argv {
+            Value::Empty => f
+                .params
+                .iter()
+                .map(|p| {
+                    let cell = env_lookup(heap, env, *p).expect("a parameter is bound in its body's environment");
+                    cell_value(heap, cell).expect("a parameter's binding is a cell")
+                })
+                .collect(),
+            list => heap.list_to_vec(list).expect("a compiled call's arguments are a list"),
+        };
+        let args = f
+            .params
+            .iter()
+            .zip(values)
+            .enumerate()
+            .map(|(i, (p, v))| (p.name().to_string(), self.trace_render(heap, v, reprs.and_then(|r| r.get(i)))))
+            .collect();
+        BacktraceFrame { name: f.target.link_name(), args, called_at }
     }
 
     /// Whether calling `f` from `call_form` crosses from the program into the
@@ -2801,6 +2926,12 @@ impl Interp {
             }
 
             Frame::LibraryCall => Ok((State::Apply(v), None)),
+            Frame::Call { rest: Value::Empty, .. } => Ok((State::Apply(v), None)),
+            Frame::Call { f, env, rest, argv } => {
+                let next = heap.car(rest).map_err(heap_err)?;
+                let rest = heap.cdr(rest).map_err(heap_err)?;
+                Ok((State::Eval(next, env), Some(Frame::Call { f, env, rest, argv })))
+            }
 
             // Boxing is where the concrete type is still known, so it is
             // where every vtable this value could be viewed through gets
@@ -3019,7 +3150,7 @@ impl Interp {
                 Ok((State::Unwind(exit), None))
             }
 
-            Frame::LibraryCall => Ok((State::Unwind(exit), None)),
+            Frame::LibraryCall | Frame::Call { .. } => Ok((State::Unwind(exit), None)),
 
             // The cleanup runs on *every* way out, with the exit parked in a
             // frame until it is done.

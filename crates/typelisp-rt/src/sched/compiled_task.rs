@@ -26,6 +26,7 @@ impl From<SchedError> for TaskFailure {
         match e {
             SchedError::Panic(m) => TaskFailure::Panic(m),
             SchedError::Internal(m) => TaskFailure::Internal(m),
+            SchedError::Interrupted => TaskFailure::Panic("interrupted".to_string()),
         }
     }
 }
@@ -432,6 +433,7 @@ impl TaskBody for CompiledTask {
             Err(e) => {
                 let message = match e {
                     SchedError::Panic(m) | SchedError::Internal(m) => m,
+                    SchedError::Interrupted => "interrupted".to_string(),
                 };
                 // Parked on the task directly rather than through
                 // `park_activation_unwind`'s live thread-locals: `deliver`

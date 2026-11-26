@@ -977,6 +977,7 @@ name = "typelisp"
 version = "0.3.7"
 dependencies = [
  "inkwell",
+ "libc",
  "lsp-server",
  "lsp-types",
  "num-bigint",

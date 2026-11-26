@@ -71,12 +71,16 @@ pub use compiled_task::*;
 pub enum SchedError {
     Panic(String),
     Internal(String),
+    /// The REPL's Ctrl-C reached the main task while it waited
+    /// (`typelisp_abi::interrupt`).
+    Interrupted,
 }
 
 impl core::fmt::Display for SchedError {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
             SchedError::Panic(m) | SchedError::Internal(m) => f.write_str(m),
+            SchedError::Interrupted => f.write_str("interrupted"),
         }
     }
 }
@@ -1066,6 +1070,25 @@ impl<B: TaskBody> Scheduler<B> {
         deliver_to(heap, &mut slot, answer);
         self.slots[i] = Slot::Parked(slot);
         self.make_ready(TaskId(i));
+    }
+
+    /// Wakes task `id` with the REPL's stop (`typelisp_abi::interrupt`) if it
+    /// is waiting; a task that is not is stopped by its next step instead.
+    fn interrupt_waiting(&mut self, heap: &mut Heap, id: TaskId) {
+        let Some(Slot::Blocked(_, w)) = self.slots.get(id.0) else { return };
+        match w {
+            Waiting::Until(_) => self.sleeping -= 1,
+            Waiting::Io { .. } => self.io_waiting -= 1,
+            Waiting::Yield
+            | Waiting::Task(_)
+            | Waiting::Chan(_)
+            | Waiting::Select { .. }
+            | Waiting::Spawn(..)
+            | Waiting::SpawnThread(..)
+            | Waiting::Main => {}
+        }
+        self.dirty = true;
+        self.wake(heap, id.0, Err(SchedError::Interrupted));
     }
 
     /// Wakes a receiver with `v` (or the end of a closed channel), answering
