@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/system.md @ 0af7d052ede61d9b74e6590bb00955c0c9c3b9a4 -->
+<!-- translated-from: docs/ja/reference/functions/system.md @ b01477a6134617bbcef066ff2065d17245132754 -->
 # Thời gian, môi trường và triển khai
 
 Các hàm về thời gian, truy vấn môi trường chạy, công cụ triển khai, phân tích và đánh giá văn bản, docstring
@@ -370,3 +370,23 @@ lúc chạy: thứ được biên dịch là dạng đã khai triển của thâ
 |---|---|---|---|
 | `enable-interrupt` | `(enable-interrupt n)` | `int→()` | Cho ngắt ngoại vi `n` (từ 0 đến 239) đến. Ngoài vi điều khiển là lỗi thời gian chạy (lỗi biên dịch khi dùng `typl -c`) |
 | `disable-interrupt` | `(disable-interrupt n)` | `int→()` | Khiến ngắt `n` không còn đến. Ngoài vi điều khiển giống `enable-interrupt` |
+
+## 12. Gỡ lỗi (`std::dbg`)
+
+Đưa vào bằng `use`, như `(use std::dbg::llvm-size-of)`.
+
+| Tên | Dạng | Kiểu | Mô tả |
+|---|---|---|---|
+| `llvm-size-of` | `(llvm-size-of expr)` | `A→u32` | Mã đã biên dịch giữ giá trị của `expr` trong bao nhiêu byte. LLVM đếm kích thước của kiểu LLVM mà trình biên dịch gán cho giá trị, cho đích mà mã chạy trên đó. `expr` được tính. Chạy bằng trình thông dịch thì là lỗi lúc chạy |
+
+`size-of-val` trả lời kích thước do kiểu quyết định, còn `llvm-size-of` trả lời kích thước mà mã đã biên dịch thực sự dùng. Nếu hai số khác nhau, trình biên dịch đã hiểu sai độ rộng của giá trị.
+
+```lisp
+(use std::dbg::llvm-size-of)
+(defun widths ((x i8)) ()
+  (println "~a ~a ~a" (llvm-size-of x) (llvm-size-of (as u32 x)) (llvm-size-of (< x 0))))
+(compile widths)
+(widths 1)                          ; in ra 1 4 1
+```
+
+Giá trị trong heap (`string`, kiểu `defstruct`, v.v.) và `int` chiếm một word, biểu thị nơi giá trị nằm hoặc chính giá trị.

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/system.md @ 0af7d052ede61d9b74e6590bb00955c0c9c3b9a4 -->
+<!-- translated-from: docs/ja/reference/functions/system.md @ b01477a6134617bbcef066ff2065d17245132754 -->
 # Time, Environment and Implementation
 
 Functions for time, queries about the runtime environment, implementation tools, parsing and
@@ -377,3 +377,23 @@ Bring them in with a `use`, as in `(use std::board::enable-interrupt)`. How to w
 |---|---|---|---|
 | `enable-interrupt` | `(enable-interrupt n)` | `int→()` | Makes the peripheral interrupt `n` (0 to 239) come. Off a microcontroller, a runtime error (a compile error under `typl -c`) |
 | `disable-interrupt` | `(disable-interrupt n)` | `int→()` | Makes interrupt `n` stop coming. Off a microcontroller, as for `enable-interrupt` |
+
+## 12. Debugging (`std::dbg`)
+
+Bring it in with a `use`, as in `(use std::dbg::llvm-size-of)`.
+
+| Name | Form | Type | Description |
+|---|---|---|---|
+| `llvm-size-of` | `(llvm-size-of expr)` | `A→u32` | How many bytes compiled code holds the value of `expr` in. LLVM counts the size of the LLVM type the compiler gave the value, for the target the code runs on. `expr` is evaluated. Run by the interpreter, a runtime error |
+
+`size-of-val` answers the size the type decides, and `llvm-size-of` the size compiled code actually uses. When the two differ, the compiler has the value's width wrong.
+
+```lisp
+(use std::dbg::llvm-size-of)
+(defun widths ((x i8)) ()
+  (println "~a ~a ~a" (llvm-size-of x) (llvm-size-of (as u32 x)) (llvm-size-of (< x 0))))
+(compile widths)
+(widths 1)                          ; prints 1 4 1
+```
+
+A value in the heap (a `string`, a `defstruct` type and so on) and an `int` take one word, which stands for where the value is or for the value itself.

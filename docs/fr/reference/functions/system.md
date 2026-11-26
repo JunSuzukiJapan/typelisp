@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/system.md @ 0af7d052ede61d9b74e6590bb00955c0c9c3b9a4 -->
+<!-- translated-from: docs/ja/reference/functions/system.md @ b01477a6134617bbcef066ff2065d17245132754 -->
 # Temps, environnement et implémentation
 
 Les fonctions de temps, les questions sur l'environnement d'exécution, les outils de l'implémentation, l'analyse et
@@ -378,3 +378,23 @@ l'exécution : ce qui est compilé, c'est la forme développée du corps.
 |---|---|---|---|
 | `enable-interrupt` | `(enable-interrupt n)` | `int→()` | Fait arriver l'interruption de périphérique `n` (de 0 à 239). Hors d'un microcontrôleur, une erreur à l'exécution (une erreur de compilation sous `typl -c`) |
 | `disable-interrupt` | `(disable-interrupt n)` | `int→()` | Fait cesser l'arrivée de l'interruption `n`. Hors d'un microcontrôleur, comme `enable-interrupt` |
+
+## 12. Débogage (`std::dbg`)
+
+S'importe avec un `use`, comme dans `(use std::dbg::llvm-size-of)`.
+
+| Nom | Forme | Type | Description |
+|---|---|---|---|
+| `llvm-size-of` | `(llvm-size-of expr)` | `A→u32` | En combien d'octets le code compilé garde la valeur de `expr`. LLVM compte la taille du type LLVM que le compilateur a donné à la valeur, pour la cible où le code s'exécute. `expr` est évalué. Exécuté par l'interpréteur, une erreur d'exécution |
+
+`size-of-val` répond la taille que décide le type, et `llvm-size-of` la taille que le code compilé utilise réellement. Si les deux diffèrent, le compilateur se trompe sur la largeur de la valeur.
+
+```lisp
+(use std::dbg::llvm-size-of)
+(defun widths ((x i8)) ()
+  (println "~a ~a ~a" (llvm-size-of x) (llvm-size-of (as u32 x)) (llvm-size-of (< x 0))))
+(compile widths)
+(widths 1)                          ; affiche 1 4 1
+```
+
+Une valeur dans le tas (un `string`, un type `defstruct`, etc.) et un `int` occupent un mot, qui représente l'endroit où est la valeur ou la valeur elle-même.

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/README.md @ 0af7d052ede61d9b74e6590bb00955c0c9c3b9a4 -->
+<!-- translated-from: docs/ja/reference/functions/README.md @ b01477a6134617bbcef066ff2065d17245132754 -->
 # Hàm dựng sẵn
 
 Danh sách các hàm dựng sẵn, phương thức và thư viện chuẩn. Về cú pháp (các dạng đặc biệt và cách định
@@ -35,6 +35,7 @@ Mọi tên khác được đưa vào bằng `use`, như `(use std::net::tcp-conn
 | `std::board` | `disable-interrupt`, `enable-interrupt` |
 | `std::char` | `digit->char`, `digit-weight`, `name->char` |
 | `std::collections` | `Deque`, `HashSet`, `Scope`, `SortedTable`, `hashtable-iter` |
+| `std::dbg` | `llvm-size-of` |
 | `std::env` | `command-line-args`, `getenv`, `home-directory` |
 | `std::error` | `WrappedError`, `as-dyn-error`, `assert-equal`, `describe-error`, `wrap-error` |
 | `std::eval` | `Environment` |

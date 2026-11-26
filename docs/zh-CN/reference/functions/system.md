@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/system.md @ 0af7d052ede61d9b74e6590bb00955c0c9c3b9a4 -->
+<!-- translated-from: docs/ja/reference/functions/system.md @ b01477a6134617bbcef066ff2065d17245132754 -->
 # 时间、运行环境与实现
 
 时间、运行环境的查询、实现工具、文本的解析与求值、文档字符串，以及宏相关的函数。
@@ -322,3 +322,23 @@ CL 中有而这里没有的：`eval-when`（`:compile-toplevel`/`:load-toplevel`
 |---|---|---|---|
 | `enable-interrupt` | `(enable-interrupt n)` | `int→()` | 使外设中断 `n`（0～239）能够到来。在微控制器之外是运行时错误（在 `typl -c` 中是编译错误） |
 | `disable-interrupt` | `(disable-interrupt n)` | `int→()` | 使中断 `n` 不再到来。在微控制器之外的处理与 `enable-interrupt` 相同 |
+
+## 12. 调试 (`std::dbg`)
+
+用 `use` 引入，例如 `(use std::dbg::llvm-size-of)`。
+
+| 名称 | 形式 | 类型 | 说明 |
+|---|---|---|---|
+| `llvm-size-of` | `(llvm-size-of expr)` | `A→u32` | 编译后的代码用多少字节保存 `expr` 的值。LLVM 针对代码运行的目标，计算编译器给该值的 LLVM 类型的大小。`expr` 会被求值。在解释器中执行时是运行时错误 |
+
+`size-of-val` 回答由类型决定的大小，`llvm-size-of` 回答编译后的代码实际使用的大小。两者不一致时，说明编译器弄错了值的宽度。
+
+```lisp
+(use std::dbg::llvm-size-of)
+(defun widths ((x i8)) ()
+  (println "~a ~a ~a" (llvm-size-of x) (llvm-size-of (as u32 x)) (llvm-size-of (< x 0))))
+(compile widths)
+(widths 1)                          ; 打印 1 4 1
+```
+
+堆中的值（`string`、`defstruct` 类型等）和 `int` 占一个字，表示值所在的位置或值本身。

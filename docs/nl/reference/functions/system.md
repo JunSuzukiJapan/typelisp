@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/system.md @ 0af7d052ede61d9b74e6590bb00955c0c9c3b9a4 -->
+<!-- translated-from: docs/ja/reference/functions/system.md @ b01477a6134617bbcef066ff2065d17245132754 -->
 # Tijd, omgeving en implementatie
 
 Functies voor tijd, vragen over de runtime-omgeving, implementatiehulpmiddelen, het parsen en
@@ -388,3 +388,23 @@ Haal ze binnen met een `use`, zoals `(use std::board::enable-interrupt)`. Hoe je
 |---|---|---|---|
 | `enable-interrupt` | `(enable-interrupt n)` | `int→()` | Laat periferie-interrupt `n` (0 tot en met 239) komen. Buiten een microcontroller een runtimefout (een compileerfout onder `typl -c`) |
 | `disable-interrupt` | `(disable-interrupt n)` | `int→()` | Laat interrupt `n` niet meer komen. Buiten een microcontroller zoals `enable-interrupt` |
+
+## 12. Debuggen (`std::dbg`)
+
+Haal het binnen met een `use`, zoals in `(use std::dbg::llvm-size-of)`.
+
+| Naam | Vorm | Type | Beschrijving |
+|---|---|---|---|
+| `llvm-size-of` | `(llvm-size-of expr)` | `A→u32` | In hoeveel bytes gecompileerde code de waarde van `expr` bewaart. LLVM telt de grootte van het LLVM-type dat de compiler de waarde gaf, voor het doel waarop de code draait. `expr` wordt geëvalueerd. Uitgevoerd door de interpreter een runtimefout |
+
+`size-of-val` geeft de grootte die het type bepaalt, `llvm-size-of` de grootte die gecompileerde code echt gebruikt. Verschillen de twee, dan heeft de compiler de breedte van de waarde verkeerd.
+
+```lisp
+(use std::dbg::llvm-size-of)
+(defun widths ((x i8)) ()
+  (println "~a ~a ~a" (llvm-size-of x) (llvm-size-of (as u32 x)) (llvm-size-of (< x 0))))
+(compile widths)
+(widths 1)                          ; drukt 1 4 1 af
+```
+
+Een waarde in de heap (een `string`, een `defstruct`-type enzovoort) en een `int` nemen één woord, dat staat voor waar de waarde is of voor de waarde zelf.

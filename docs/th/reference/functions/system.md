@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/system.md @ 0af7d052ede61d9b74e6590bb00955c0c9c3b9a4 -->
+<!-- translated-from: docs/ja/reference/functions/system.md @ b01477a6134617bbcef066ff2065d17245132754 -->
 # เวลา สภาพแวดล้อม และการ implement
 
 ฟังก์ชันสำหรับเวลา การสอบถามสภาพแวดล้อมขณะรัน เครื่องมือของการ implement การแยกวิเคราะห์และ
@@ -366,3 +366,23 @@ hover ของ language server (`typl-lsp`) แสดง docstring ด้วย
 |---|---|---|---|
 | `enable-interrupt` | `(enable-interrupt n)` | `int→()` | ให้อินเทอร์รัปต์ของอุปกรณ์ต่อพ่วง `n` (0 ถึง 239) มาได้ นอกไมโครคอนโทรลเลอร์เป็นข้อผิดพลาดขณะทำงาน (ภายใต้ `typl -c` เป็นข้อผิดพลาดตอนคอมไพล์) |
 | `disable-interrupt` | `(disable-interrupt n)` | `int→()` | ทำให้อินเทอร์รัปต์ `n` ไม่มาอีก นอกไมโครคอนโทรลเลอร์เหมือน `enable-interrupt` |
+
+## 12. การดีบัก (`std::dbg`)
+
+นำเข้าด้วย `use` เช่น `(use std::dbg::llvm-size-of)`
+
+| ชื่อ | รูปแบบ | ชนิด | คำอธิบาย |
+|---|---|---|---|
+| `llvm-size-of` | `(llvm-size-of expr)` | `A→u32` | โค้ดที่คอมไพล์แล้วเก็บค่าของ `expr` ไว้กี่ไบต์ LLVM นับขนาดของชนิด LLVM ที่คอมไพเลอร์ให้กับค่า สำหรับเป้าหมายที่โค้ดทำงาน `expr` ถูกประเมินค่า ถ้ารันด้วยอินเทอร์พรีเตอร์จะเป็นข้อผิดพลาดขณะรัน |
+
+`size-of-val` ตอบขนาดที่ชนิดกำหนด ส่วน `llvm-size-of` ตอบขนาดที่โค้ดที่คอมไพล์แล้วใช้จริง ถ้าทั้งสองไม่ตรงกัน แสดงว่าคอมไพเลอร์เข้าใจความกว้างของค่าผิด
+
+```lisp
+(use std::dbg::llvm-size-of)
+(defun widths ((x i8)) ()
+  (println "~a ~a ~a" (llvm-size-of x) (llvm-size-of (as u32 x)) (llvm-size-of (< x 0))))
+(compile widths)
+(widths 1)                          ; พิมพ์ 1 4 1
+```
+
+ค่าในฮีป (`string` ชนิดของ `defstruct` ฯลฯ) และ `int` ใช้หนึ่งเวิร์ด ซึ่งแทนที่อยู่ของค่าหรือตัวค่าเอง

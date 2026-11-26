@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/system.md @ 0af7d052ede61d9b74e6590bb00955c0c9c3b9a4 -->
+<!-- translated-from: docs/ja/reference/functions/system.md @ b01477a6134617bbcef066ff2065d17245132754 -->
 # 시간, 환경, 구현
 
 시간 함수, 실행 환경에 대한 질의, 구현 도구, 텍스트의 해석과 평가, 문서 문자열, 매크로.
@@ -346,3 +346,23 @@ CL에 있고 이 언어에 없는 것: `eval-when`(`:compile-toplevel`/`:load-to
 |---|---|---|---|
 | `enable-interrupt` | `(enable-interrupt n)` | `int→()` | 주변 장치 인터럽트 `n`(0~239)이 오게 한다. 마이크로컨트롤러 밖에서는 실행 시간 오류(`typl -c`에서는 컴파일 오류) |
 | `disable-interrupt` | `(disable-interrupt n)` | `int→()` | 인터럽트 `n`이 오지 않게 한다. 마이크로컨트롤러 밖에서의 취급은 `enable-interrupt`와 같다 |
+
+## 12. 디버깅 (`std::dbg`)
+
+`(use std::dbg::llvm-size-of)`처럼 `use`로 가져와 쓴다.
+
+| 이름 | 형식 | 타입 | 설명 |
+|---|---|---|---|
+| `llvm-size-of` | `(llvm-size-of expr)` | `A→u32` | 컴파일된 코드가 `expr`의 값을 몇 바이트로 갖는지. 컴파일러가 값에 붙인 LLVM 타입의 크기를, 코드가 돌아가는 타깃에 대해 LLVM이 센다. `expr`은 평가한다. 인터프리터로 실행하면 런타임 오류 |
+
+`size-of-val`은 타입이 정하는 크기를, `llvm-size-of`는 컴파일된 코드가 실제로 쓰는 크기를 답한다. 둘이 어긋나면 컴파일러가 값의 폭을 잘못 알고 있는 것이다.
+
+```lisp
+(use std::dbg::llvm-size-of)
+(defun widths ((x i8)) ()
+  (println "~a ~a ~a" (llvm-size-of x) (llvm-size-of (as u32 x)) (llvm-size-of (< x 0))))
+(compile widths)
+(widths 1)                          ; 1 4 1을 출력한다
+```
+
+힙에 있는 값(`string`, `defstruct`의 타입 등)과 `int`는 값의 위치나 값 자체를 나타내는 워드 하나의 크기가 된다.

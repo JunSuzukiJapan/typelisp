@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/README.md @ 0af7d052ede61d9b74e6590bb00955c0c9c3b9a4 -->
+<!-- translated-from: docs/ja/reference/functions/README.md @ b01477a6134617bbcef066ff2065d17245132754 -->
 # Fungsi Bawaan
 
 Daftar fungsi bawaan, metode, dan pustaka standar. Untuk sintaks (bentuk khusus dan cara
@@ -38,6 +38,7 @@ path-nya, `std::net::tcp-connect`. Tabel berikut memuat nama-nama itu dan modul 
 | `std::board` | `disable-interrupt`, `enable-interrupt` |
 | `std::char` | `digit->char`, `digit-weight`, `name->char` |
 | `std::collections` | `Deque`, `HashSet`, `Scope`, `SortedTable`, `hashtable-iter` |
+| `std::dbg` | `llvm-size-of` |
 | `std::env` | `command-line-args`, `getenv`, `home-directory` |
 | `std::error` | `WrappedError`, `as-dyn-error`, `assert-equal`, `describe-error`, `wrap-error` |
 | `std::eval` | `Environment` |

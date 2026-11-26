@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/system.md @ 0af7d052ede61d9b74e6590bb00955c0c9c3b9a4 -->
+<!-- translated-from: docs/ja/reference/functions/system.md @ b01477a6134617bbcef066ff2065d17245132754 -->
 # समय, पर्यावरण और इम्प्लीमेंटेशन
 
 समय के फ़ंक्शन, रनटाइम पर्यावरण के बारे में प्रश्न, इम्प्लीमेंटेशन उपकरण, पाठ को पार्स और मूल्यांकित करना, डॉकस्ट्रिंग और macro।
@@ -302,3 +302,23 @@ macro कैसे परिभाषित करें यह [सिंटै
 |---|---|---|---|
 | `enable-interrupt` | `(enable-interrupt n)` | `int→()` | पेरिफेरल इंटरप्ट `n` (0 से 239) को आने देता है। माइक्रोकंट्रोलर के बाहर रनटाइम त्रुटि (`typl -c` में कंपाइल त्रुटि) |
 | `disable-interrupt` | `(disable-interrupt n)` | `int→()` | इंटरप्ट `n` का आना रोकता है। माइक्रोकंट्रोलर के बाहर `enable-interrupt` जैसा |
+
+## 12. डीबगिंग (`std::dbg`)
+
+`(use std::dbg::llvm-size-of)` की तरह `use` से लाएँ।
+
+| नाम | रूप | टाइप | विवरण |
+|---|---|---|---|
+| `llvm-size-of` | `(llvm-size-of expr)` | `A→u32` | संकलित कोड `expr` का मान कितने बाइट में रखता है। कंपाइलर ने मान को जो LLVM प्रकार दिया, उसका आकार LLVM उस लक्ष्य के लिए गिनता है जिस पर कोड चलता है। `expr` का मूल्यांकन होता है। इंटरप्रेटर में चलाने पर रनटाइम त्रुटि |
+
+`size-of-val` प्रकार से तय आकार बताता है, और `llvm-size-of` वह आकार जो संकलित कोड सचमुच उपयोग करता है। दोनों अलग हों तो कंपाइलर मान की चौड़ाई गलत समझ रहा है।
+
+```lisp
+(use std::dbg::llvm-size-of)
+(defun widths ((x i8)) ()
+  (println "~a ~a ~a" (llvm-size-of x) (llvm-size-of (as u32 x)) (llvm-size-of (< x 0))))
+(compile widths)
+(widths 1)                          ; 1 4 1 छापता है
+```
+
+हीप में रखा मान (`string`, `defstruct` का प्रकार आदि) और `int` एक शब्द लेते हैं, जो मान की जगह या स्वयं मान को दर्शाता है।

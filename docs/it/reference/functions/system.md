@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/system.md @ 0af7d052ede61d9b74e6590bb00955c0c9c3b9a4 -->
+<!-- translated-from: docs/ja/reference/functions/system.md @ b01477a6134617bbcef066ff2065d17245132754 -->
 # Tempo, ambiente e implementazione
 
 Funzioni per il tempo, interrogazioni sull'ambiente di esecuzione, strumenti di implementazione,
@@ -387,3 +387,23 @@ Si importano con un `use`, come `(use std::board::enable-interrupt)`. Come scriv
 |---|---|---|---|
 | `enable-interrupt` | `(enable-interrupt n)` | `int→()` | Fa arrivare l'interrupt di periferica `n` (da 0 a 239). Fuori da un microcontrollore, un errore a runtime (un errore di compilazione con `typl -c`) |
 | `disable-interrupt` | `(disable-interrupt n)` | `int→()` | Fa smettere di arrivare l'interrupt `n`. Fuori da un microcontrollore, come `enable-interrupt` |
+
+## 12. Debug (`std::dbg`)
+
+Si importa con un `use`, come in `(use std::dbg::llvm-size-of)`.
+
+| Nome | Forma | Tipo | Descrizione |
+|---|---|---|---|
+| `llvm-size-of` | `(llvm-size-of expr)` | `A→u32` | In quanti byte il codice compilato tiene il valore di `expr`. LLVM conta la dimensione del tipo LLVM che il compilatore ha dato al valore, per il target su cui gira il codice. `expr` viene valutato. Eseguito dall'interprete, un errore a runtime |
+
+`size-of-val` risponde con la dimensione decisa dal tipo, `llvm-size-of` con la dimensione che il codice compilato usa davvero. Se le due differiscono, il compilatore sbaglia la larghezza del valore.
+
+```lisp
+(use std::dbg::llvm-size-of)
+(defun widths ((x i8)) ()
+  (println "~a ~a ~a" (llvm-size-of x) (llvm-size-of (as u32 x)) (llvm-size-of (< x 0))))
+(compile widths)
+(widths 1)                          ; stampa 1 4 1
+```
+
+Un valore nello heap (una `string`, un tipo `defstruct` e così via) e un `int` occupano una parola, che rappresenta dove si trova il valore o il valore stesso.

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/system.md @ 0af7d052ede61d9b74e6590bb00955c0c9c3b9a4 -->
+<!-- translated-from: docs/ja/reference/functions/system.md @ b01477a6134617bbcef066ff2065d17245132754 -->
 # Zaman, Ortam ve Gerçekleştirim
 
 Zaman, çalışma zamanı ortamı hakkındaki sorgular, gerçekleştirim araçları, metin ayrıştırma ve
@@ -378,3 +378,23 @@ kalmaz: derlenen şey gövdenin açılmış biçimidir.
 |---|---|---|---|
 | `enable-interrupt` | `(enable-interrupt n)` | `int→()` | Çevre birimi kesmesi `n`'nin (0 ile 239 arası) gelmesini sağlar. Mikrodenetleyici dışında bir çalışma zamanı hatası (`typl -c` altında bir derleme hatası) |
 | `disable-interrupt` | `(disable-interrupt n)` | `int→()` | Kesme `n`'nin artık gelmemesini sağlar. Mikrodenetleyici dışında `enable-interrupt` gibi |
+
+## 12. Hata ayıklama (`std::dbg`)
+
+`(use std::dbg::llvm-size-of)` gibi bir `use` ile alınır.
+
+| Ad | Biçim | Tür | Açıklama |
+|---|---|---|---|
+| `llvm-size-of` | `(llvm-size-of expr)` | `A→u32` | Derlenmiş kodun `expr` değerini kaç baytta tuttuğu. LLVM, derleyicinin değere verdiği LLVM türünün boyutunu, kodun çalıştığı hedef için sayar. `expr` değerlendirilir. Yorumlayıcıda çalıştırılırsa çalışma zamanı hatası |
+
+`size-of-val` türün belirlediği boyutu, `llvm-size-of` ise derlenmiş kodun gerçekten kullandığı boyutu verir. İkisi farklıysa derleyici değerin genişliğini yanlış biliyordur.
+
+```lisp
+(use std::dbg::llvm-size-of)
+(defun widths ((x i8)) ()
+  (println "~a ~a ~a" (llvm-size-of x) (llvm-size-of (as u32 x)) (llvm-size-of (< x 0))))
+(compile widths)
+(widths 1)                          ; 1 4 1 yazdırır
+```
+
+Yığındaki bir değer (`string`, bir `defstruct` türü vb.) ve bir `int`, değerin yerini ya da değerin kendisini temsil eden bir sözcük kaplar.

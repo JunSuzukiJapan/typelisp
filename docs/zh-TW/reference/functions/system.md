@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/system.md @ 0af7d052ede61d9b74e6590bb00955c0c9c3b9a4 -->
+<!-- translated-from: docs/ja/reference/functions/system.md @ b01477a6134617bbcef066ff2065d17245132754 -->
 # 時間、執行環境與實作
 
 時間、執行環境的查詢、實作工具、文字的解析與求值、文件字串，以及巨集相關的函式。
@@ -318,3 +318,23 @@ CL 中有而這裡沒有的：`eval-when`（`:compile-toplevel`/`:load-toplevel`
 |---|---|---|---|
 | `enable-interrupt` | `(enable-interrupt n)` | `int→()` | 使周邊中斷 `n`（0～239）能夠到來。在微控制器之外是執行時期錯誤（在 `typl -c` 中是編譯錯誤） |
 | `disable-interrupt` | `(disable-interrupt n)` | `int→()` | 使中斷 `n` 不再到來。在微控制器之外的處理與 `enable-interrupt` 相同 |
+
+## 12. 除錯 (`std::dbg`)
+
+用 `use` 引入，例如 `(use std::dbg::llvm-size-of)`。
+
+| 名稱 | 形式 | 型別 | 說明 |
+|---|---|---|---|
+| `llvm-size-of` | `(llvm-size-of expr)` | `A→u32` | 編譯後的程式碼用多少位元組保存 `expr` 的值。LLVM 針對程式碼執行的目標，計算編譯器給該值的 LLVM 型別的大小。`expr` 會被求值。在直譯器中執行時是執行期錯誤 |
+
+`size-of-val` 回答由型別決定的大小，`llvm-size-of` 回答編譯後的程式碼實際使用的大小。兩者不一致時，表示編譯器弄錯了值的寬度。
+
+```lisp
+(use std::dbg::llvm-size-of)
+(defun widths ((x i8)) ()
+  (println "~a ~a ~a" (llvm-size-of x) (llvm-size-of (as u32 x)) (llvm-size-of (< x 0))))
+(compile widths)
+(widths 1)                          ; 印出 1 4 1
+```
+
+堆積中的值（`string`、`defstruct` 型別等）和 `int` 佔一個字組，表示值所在的位置或值本身。
