@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 4963ba6fc48045aeec32b258cf56b8c1af7acc94 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 1b5dc6ac828d8e4a95800a91218b5e9dffe83f98 -->
 # typelisp सिंटैक्स संदर्भ
 
 typelisp एक स्टैटिक रूप से टाइप किया गया Lisp है, जो S-एक्सप्रेशन में लिखा जाता है। बिल्ट-इन फ़ंक्शन और मेथड की सूची के लिए [बिल्ट-इन फ़ंक्शन](functions/README.md) देखें; टाइप की सूची के लिए [types.md](types.md); और त्रुटि संदेश पढ़ने के लिए [errors.md](errors.md)।
@@ -359,7 +359,7 @@ C जैसे ही लेआउट वाला struct घोषित कर
 | `(c-alloc T)` / `(c-alloc T n)` | `T` के `n` मान आवंटित करता है (छोड़ने पर 1)। सामग्री 0 से भरी जाती है। `(ptr T)` लौटाता है |
 | `(c-ref p i)` | `p` से तत्व `i` की ओर पॉइंटर। आवंटित सीमा के बाहर हो तो त्रुटि |
 | `(c-deref p)` / `(setf (c-deref p) v)` | `p` जिस स्केलर की ओर इंगित करता है उसे पढ़ता / लिखता है |
-| `(volatile-read-u32 addr)` / `(volatile-write-u32 addr v)` | पता `addr` (`int`) के रजिस्टर को पढ़ता या लिखता है, ठीक एक बार, उसी जगह। `-u8` और `-u16` भी ऐसे ही |
+| `(volatile-read-u32 addr)` / `(volatile-write-u32 addr v)` | पता `addr` (`int`, या `u16` जैसा निश्चित चौड़ाई का पूर्णांक) के रजिस्टर को पढ़ता या लिखता है, ठीक एक बार, उसी जगह। `-u8` और `-u16` भी ऐसे ही |
 | `p::field` / `(setf p::field v)` | struct का फ़ील्ड पढ़ता / लिखता है। एम्बेडेड struct वाला फ़ील्ड पढ़ने पर उसका पता (`(ptr inner-type)`) मिलता है |
 | `(as ptr p)` | टाइप भुला देता है, `ptr` बनाता है (`qsort` के `void *` जैसी चीज़ को पास करने के लिए)। वापस बदलने का कोई रूपांतरण नहीं है |
 

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/numbers.md @ 4da1b93779ddf5189b57a8cb0397636ee00f4b50 -->
+<!-- translated-from: docs/ja/reference/functions/numbers.md @ 1b5dc6ac828d8e4a95800a91218b5e9dffe83f98 -->
 # Tal
 
 Operationer på heltal, flyttal, kvoter, komplexa tal och booleska värden, samt andra talrelaterade
@@ -143,6 +143,7 @@ körning ("an integer argument does not fit a fixnum").
 | `log` (två argument) | `(log x base)` | `(f64,f64)→f64` | Logaritm med given bas. Expanderas till `(/ (log x) (log base))` (kapitel 8) |
 | `floor-div` `ceiling-div` `round-div` `truncate-div` | `(op a b)` | `(f64,f64)→cons-cell<f64,f64>` | Motsvarar CL:s versioner med två argument (`(floor 7.0 2.0)`→kvot 3, rest 1). Samma design som funktionerna med samma namn i kapitel 1 (`car`=kvot, `cdr`=rest) |
 | `float->int` | `(float->int x)` | `f64→int` | Konverterar till `int` genom att trunkera mot noll (CL:s `truncate`; exakt för ändliga värden av vilken storlek som helst). Ger panic vid oändlighet och NaN. För en fast bredd, använd `(as i32 x)` |
+| `float->i8` `float->i16` `float->i32` `float->u8` `float->u16` `float->u32` | `(op x)` | `f64→i8` | De låga bitarna av det `float->int` ger, som den typen (utan att gå via `int`). Oändligheten och NaN ger panic. Det som `(as i16 x)` bygger på |
 | `float->ratio` | `(float->ratio x)` | `f64→ratio` | Konverterar till en `ratio` som det exakta binära rationella talet (CL:s `rational`) |
 | `float->f32` `float->f64` | `(op x)` | `f64→f32` / `f64→f64` | Konverterar mellan flyttalsbredder. `float->f32` avrundar till närmaste, `float->f64` är alltid exakt. Det `(as f32 x)` gör |
 | `try-float->f32` `try-float->f64` | `(op x)` | `f64→Option<f32>` / `→Option<f64>` | Samma konvertering som en fråga. `None` om avrundningen ändrar värdet (vidgning till `f64` är alltid `Some`). Det `(try-as f32 x)` gör |

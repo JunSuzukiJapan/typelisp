@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/numbers.md @ 4da1b93779ddf5189b57a8cb0397636ee00f4b50 -->
+<!-- translated-from: docs/ja/reference/functions/numbers.md @ 1b5dc6ac828d8e4a95800a91218b5e9dffe83f98 -->
 # 수
 
 정수, 부동소수점 수, 유리수, 복소수, 진리값의 연산과 그 밖의 수 관련 함수. 호출 형식 읽는 법은
@@ -124,6 +124,7 @@ CL의 `integer`이며 이 언어의 **정수**이다. 주석 없는 정수 리�
 | `log`(2인수) | `(log x base)` | `(f64,f64)→f64` | 밑을 지정한 로그. `(/ (log x) (log base))`로 전개된다(8장) |
 | `floor-div` `ceiling-div` `round-div` `truncate-div` | `(op a b)` | `(f64,f64)→cons-cell<f64,f64>` | CL의 2인수판에 해당한다(`(floor 7.0 2.0)`→몫 3, 나머지 1). 1장의 같은 이름의 함수와 같은 설계(`car`=몫, `cdr`=나머지) |
 | `float->int` | `(float->int x)` | `f64→int` | 0 쪽으로 버려 `int`로 바꾼다(CL의 `truncate`. 크기와 관계없이 유한한 값이면 정확). 무한대와 NaN이면 panic. 고정 폭이 필요하면 `(as i32 x)` |
+| `float->i8` `float->i16` `float->i32` `float->u8` `float->u16` `float->u32` | `(op x)` | `f64→i8` | `float->int`의 답의 하위 비트를 그 타입으로 한 것(`int`를 거치지 않는다). 무한대·NaN은 panic. `(as i16 x)`의 실체 |
 | `float->ratio` | `(float->ratio x)` | `f64→ratio` | 정확한 2진 유리수로 `ratio`로 바꾼다(CL의 `rational`) |
 | `float->f32` `float->f64` | `(op x)` | `f64→f32` / `f64→f64` | 부동소수점 폭 사이의 변환. `float->f32`는 가장 가까운 값으로 반올림, `float->f64`는 항상 정확. `(as f32 x)`가 하는 일 |
 | `try-float->f32` `try-float->f64` | `(op x)` | `f64→Option<f32>` / `→Option<f64>` | 같은 변환을 질문으로. 반올림으로 값이 바뀌면 `None`(`f64`로의 확대는 항상 `Some`). `(try-as f32 x)`가 하는 일 |

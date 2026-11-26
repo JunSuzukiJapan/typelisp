@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ 00b2198ebe05054debbc1a0d1f9ebf1a9835d7a0 -->
+<!-- translated-from: docs/ja/guide/compile.md @ 1b5dc6ac828d8e4a95800a91218b5e9dffe83f98 -->
 # Kompilacja
 
 O ile nie zrobisz nic więcej, programy typelisp działają w interpreterze. Ponadto istnieją dwa
@@ -260,7 +260,7 @@ $ qemu-system-arm -M mps2-an505 -nographic \
   void     typelisp_host_sleep_us(uint64_t us);                           // czeka us mikrosekund
   ```
 
-- Rejestry płytki (peryferia odwzorowane w pamięci) odczytuje się przez `volatile-read-u8`, `volatile-read-u16` i `volatile-read-u32`, a zapisuje przez `volatile-write-u8`, `volatile-write-u16` i `volatile-write-u32`. Adres jest typu `int`, a odczytana wartość ma typ danej szerokości (`u8` itd.). Każda z nich czyta lub pisze dokładnie raz, w miejscu, w którym jest zapisana; kompilator jej nie pomija ani nie przenosi. Wszystkich można używać tylko wewnątrz `unsafe`. Adres ujemny albo niebędący wielokrotnością szerokości to błąd czasu wykonania, zanim cokolwiek zostanie odczytane lub zapisane.
+- Rejestry płytki (peryferia odwzorowane w pamięci) odczytuje się przez `volatile-read-u8`, `volatile-read-u16` i `volatile-read-u32`, a zapisuje przez `volatile-write-u8`, `volatile-write-u16` i `volatile-write-u32`. Adres jest typu `int` albo jest liczbą całkowitą o stałej szerokości, np. `u16`, a odczytana wartość ma typ danej szerokości (`u8` itd.). Każda z nich czyta lub pisze dokładnie raz, w miejscu, w którym jest zapisana; kompilator jej nie pomija ani nie przenosi. Wszystkich można używać tylko wewnątrz `unsafe`. Adres ujemny albo niebędący wielokrotnością szerokości to błąd czasu wykonania, zanim cokolwiek zostanie odczytane lub zapisane.
 
   ```lisp
   ;; UART 0 płytki mps2-an386 w QEMU: dane 0x40004000, stan 0x40004004, sterowanie 0x40004008
@@ -321,11 +321,11 @@ $ typl -c blink.typl --target avr-atmega328p -O2   # tworzy blink.elf
 $ qemu-system-avr -M uno -display none -serial stdio -bios blink.elf   # uruchom w QEMU
 ```
 
-- Nie ma środowiska uruchomieniowego, więc program, który go używa, to **błąd kompilacji**. Błąd podaje, co jest potrzebne i przez które funkcje się do tego dochodzi. Można używać: obliczeń na liczbach całkowitych o stałej szerokości (od `i8` do `u32`), `int`, `f32`, `f64`, `bool` i `char`, wywołań funkcji (także rekurencyjnych), warunków, pętli, `defvar` i `defconstant` z takimi wartościami, `volatile-read-u8` i podobnych oraz wywołań funkcji C.
+- Nie ma środowiska uruchomieniowego, więc program, który go używa, to **błąd kompilacji**. Błąd podaje, co jest potrzebne i przez które funkcje się do tego dochodzi. Można używać: obliczeń na liczbach całkowitych o stałej szerokości (od `i8` do `u32`), `f32`, `f64`, `bool` i `char`, wywołań funkcji (także rekurencyjnych), warunków, pętli, `defvar` i `defconstant` z takimi wartościami, `volatile-read-u8` i podobnych oraz wywołań funkcji C.
 - Nie można używać: wartości na stercie, takich jak napisy, listy i struktury; `catch` i wywołań wartości funkcyjnych; wywołań funkcji C, które przyjmują napis lub funkcję; funkcji matematycznych na liczbach zmiennoprzecinkowych, takich jak `sin` i `expt` (`sqrt` i zaokrąglenia, takie jak `floor`, są dostępne).
 - Procedurę obsługi przerwania zapisuje się jako `#[interrupt(N)]` ([Składnia](../reference/syntax.md), rozdział 3.17). `N` to numer przerwania ATmega328P, od 1 do 25, licząc reset jako 0 (przepełnienie licznika 1 to 13). Zobacz przykład poniżej.
 - Dzielenie przez 0 zatrzymuje mikrokontroler w tym miejscu (nie nadchodzą też już przerwania). Tak samo `/` najmniejszej wartości ze znakiem przez `-1`.
-- `int` mieści się od -16384 do 16383. Gdy wynik obliczenia albo wartość zamieniona na `int` wykracza poza ten zakres, mikrokontroler się zatrzymuje. Liczba zmiennoprzecinkowa jest zamieniana na całkowitą przez `int`, więc ten zakres dotyczy też takiej zamiany.
+- Nie można używać `int` (błąd kompilacji), ponieważ nie ma on stałej szerokości. Należy używać typu o stałej szerokości, np. `i16` lub `u16`. Adresy też można obliczać na liczbach całkowitych o stałej szerokości. Można używać tego, co jest ustalane podczas kompilacji, np. adresu zapisanego jako liczba i `int` z `defconstant`.
 - Gdy rekurencji zabraknie stosu, mikrokontroler się zatrzymuje.
 - Funkcję C deklaruje się przez `defffi`, a plik obiektowy skompilowany dla AVR podaje się przez `--link FILE`.
 - Pętla, która nic nie robi, znika od `-O1` wzwyż. W pętli oczekującej należy na przykład odczytywać rejestr.

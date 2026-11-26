@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ 00b2198ebe05054debbc1a0d1f9ebf1a9835d7a0 -->
+<!-- translated-from: docs/ja/guide/compile.md @ 1b5dc6ac828d8e4a95800a91218b5e9dffe83f98 -->
 # Compileren
 
 Tenzij je iets anders doet, draaien typelisp-programma's in de interpreter. Daarnaast zijn er twee
@@ -270,7 +270,7 @@ $ qemu-system-arm -M mps2-an505 -nographic \
   void     typelisp_host_sleep_us(uint64_t us);                           // wacht us microseconden
   ```
 
-- De registers van een bord (in het geheugen afgebeelde randapparatuur) lees je met `volatile-read-u8`, `volatile-read-u16` en `volatile-read-u32`, en schrijf je met `volatile-write-u8`, `volatile-write-u16` en `volatile-write-u32`. Het adres is een `int`, en de gelezen waarde heeft het type van de breedte (`u8` enzovoort). Elk leest of schrijft precies één keer, op de plek waar het staat; de compiler laat het niet weg en verplaatst het niet. Alle zijn alleen binnen `unsafe` te gebruiken. Een adres dat negatief is, of geen veelvoud van de breedte, is een runtimefout voordat er iets gelezen of geschreven wordt.
+- De registers van een bord (in het geheugen afgebeelde randapparatuur) lees je met `volatile-read-u8`, `volatile-read-u16` en `volatile-read-u32`, en schrijf je met `volatile-write-u8`, `volatile-write-u16` en `volatile-write-u32`. Het adres is een `int` of een geheel getal van vaste breedte zoals `u16`, en de gelezen waarde heeft het type van de breedte (`u8` enzovoort). Elk leest of schrijft precies één keer, op de plek waar het staat; de compiler laat het niet weg en verplaatst het niet. Alle zijn alleen binnen `unsafe` te gebruiken. Een adres dat negatief is, of geen veelvoud van de breedte, is een runtimefout voordat er iets gelezen of geschreven wordt.
 
   ```lisp
   ;; UART 0 van de mps2-an386 van QEMU: data 0x40004000, status 0x40004004, besturing 0x40004008
@@ -331,11 +331,11 @@ $ typl -c blink.typl --target avr-atmega328p -O2   # maakt blink.elf
 $ qemu-system-avr -M uno -display none -serial stdio -bios blink.elf   # in QEMU uitvoeren
 ```
 
-- Er is geen runtime, dus een programma dat die gebruikt is een **compileerfout**. De fout vermeldt wat er nodig is en via welke functies het wordt bereikt. Bruikbaar zijn: rekenen met gehele getallen van vaste breedte (`i8` tot en met `u32`), `int`, `f32`, `f64`, `bool` en `char`, functieaanroepen (ook recursieve), voorwaarden, lussen, `defvar` en `defconstant` met zulke waarden, `volatile-read-u8` en dergelijke, en aanroepen van C-functies.
+- Er is geen runtime, dus een programma dat die gebruikt is een **compileerfout**. De fout vermeldt wat er nodig is en via welke functies het wordt bereikt. Bruikbaar zijn: rekenen met gehele getallen van vaste breedte (`i8` tot en met `u32`), `f32`, `f64`, `bool` en `char`, functieaanroepen (ook recursieve), voorwaarden, lussen, `defvar` en `defconstant` met zulke waarden, `volatile-read-u8` en dergelijke, en aanroepen van C-functies.
 - Niet bruikbaar zijn: waarden in de heap, zoals strings, lijsten en structs; `catch` en aanroepen van functiewaarden; aanroepen van C-functies die een string of een functie krijgen; wiskundige functies van drijvendekommagetallen zoals `sin` en `expt` (`sqrt` en afronden zoals `floor` zijn wel bruikbaar).
 - Een interrupthandler schrijf je als `#[interrupt(N)]` ([Syntaxis](../reference/syntax.md), paragraaf 3.17). `N` is het interruptnummer van de ATmega328P, 1 tot en met 25 met reset als 0 geteld (overloop van timer 1 is 13). Zie het voorbeeld hieronder.
 - Delen door 0 stopt de microcontroller ter plekke (er komen ook geen interrupts meer). Dat geldt ook voor `/` van de kleinste waarde met teken door `-1`.
-- Een `int` loopt van -16384 tot en met 16383. Ligt de uitkomst van een berekening, of een naar `int` omgezette waarde, buiten dat bereik, dan stopt de microcontroller. Een drijvendekommagetal wordt via `int` naar een geheel getal omgezet, dus dat bereik geldt ook daarvoor.
+- Een `int` is niet bruikbaar (een compileerfout), omdat het geen vaste breedte heeft. Gebruik een type van vaste breedte, zoals `i16` of `u16`. Ook adressen reken je uit met gehele getallen van vaste breedte. Wat bij het compileren vastligt is wel bruikbaar, zoals een als getal geschreven adres en een `int` van een `defconstant`.
 - Raakt de stack bij een recursie op, dan stopt de microcontroller.
 - Een C-functie declareer je met `defffi`; het voor AVR gecompileerde objectbestand geef je mee met `--link FILE`.
 - Een lus die niets doet, verdwijnt vanaf `-O1`. Lees in een wachtlus bijvoorbeeld een register.

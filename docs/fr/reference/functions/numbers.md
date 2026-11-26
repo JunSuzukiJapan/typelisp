@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/numbers.md @ 4da1b93779ddf5189b57a8cb0397636ee00f4b50 -->
+<!-- translated-from: docs/ja/reference/functions/numbers.md @ 1b5dc6ac828d8e4a95800a91218b5e9dffe83f98 -->
 # Nombres
 
 Les opérations sur les entiers, les nombres à virgule flottante, les rationnels, les nombres complexes et les
@@ -142,6 +142,7 @@ d'exécution (« an integer argument does not fit a fixnum »).
 | `log` (deux arguments) | `(log x base)` | `(f64,f64)→f64` | Logarithme dans une base donnée. Développé en `(/ (log x) (log base))` (chapitre 8) |
 | `floor-div` `ceiling-div` `round-div` `truncate-div` | `(op a b)` | `(f64,f64)→cons-cell<f64,f64>` | Correspondent aux versions à deux arguments de CL (`(floor 7.0 2.0)`→quotient 3, reste 1). Même conception que les fonctions de même nom au chapitre 1 (`car`=quotient, `cdr`=reste) |
 | `float->int` | `(float->int x)` | `f64→int` | Convertit en `int` en tronquant vers zéro (le `truncate` de CL ; exact pour les valeurs finies de toute taille). Panic sur l'infini et NaN. Pour une largeur fixe, utilisez `(as i32 x)` |
+| `float->i8` `float->i16` `float->i32` `float->u8` `float->u16` `float->u32` | `(op x)` | `f64→i8` | Convertit dans ce type les bits de poids faible de ce que donne `float->int` (sans passer par `int`). L'infini et NaN provoquent un panic. Ce sur quoi repose `(as i16 x)` |
 | `float->ratio` | `(float->ratio x)` | `f64→ratio` | Convertit en `ratio` comme rationnel binaire exact (le `rational` de CL) |
 | `float->f32` `float->f64` | `(op x)` | `f64→f32` / `f64→f64` | Convertit entre largeurs flottantes. `float->f32` arrondit au plus proche, `float->f64` est toujours exact. Ce que fait `(as f32 x)` |
 | `try-float->f32` `try-float->f64` | `(op x)` | `f64→Option<f32>` / `→Option<f64>` | La même conversion sous forme de question. `None` si l'arrondi change la valeur (l'élargissement en `f64` est toujours `Some`). Ce que fait `(try-as f32 x)` |

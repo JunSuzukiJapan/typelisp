@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/numbers.md @ 4da1b93779ddf5189b57a8cb0397636ee00f4b50 -->
+<!-- translated-from: docs/ja/reference/functions/numbers.md @ 1b5dc6ac828d8e4a95800a91218b5e9dffe83f98 -->
 # ตัวเลข
 
 การดำเนินการกับจำนวนเต็ม จำนวนทศนิยม จำนวนตรรกยะ จำนวนเชิงซ้อน และบูลีน รวมถึงฟังก์ชันอื่นที่เกี่ยวกับ
@@ -138,6 +138,7 @@ argument does not fit a fixnum")
 | `log` (สองอาร์กิวเมนต์) | `(log x base)` | `(f64,f64)→f64` | ลอการิทึมที่ฐานที่กำหนด ขยายเป็น `(/ (log x) (log base))` (บทที่ 8) |
 | `floor-div` `ceiling-div` `round-div` `truncate-div` | `(op a b)` | `(f64,f64)→cons-cell<f64,f64>` | สอดคล้องกับเวอร์ชันสองอาร์กิวเมนต์ของ CL (`(floor 7.0 2.0)`→ผลหาร 3 เศษ 1) การออกแบบเดียวกับฟังก์ชันชื่อเดียวกันในบทที่ 1 (`car`=ผลหาร, `cdr`=เศษ) |
 | `float->int` | `(float->int x)` | `f64→int` | แปลงเป็น `int` โดยตัดไปทางศูนย์ (`truncate` ของ CL; ถูกต้องแม่นยำสำหรับค่าจำกัดทุกขนาด) panic เมื่อเป็นอนันต์และ NaN สำหรับความกว้างคงที่ ใช้ `(as i32 x)` |
+| `float->i8` `float->i16` `float->i32` `float->u8` `float->u16` `float->u32` | `(op x)` | `f64→i8` | บิตล่างของคำตอบของ `float->int` ในชนิดนั้น (ไม่ผ่าน `int`) อนันต์และ NaN ทำให้ panic เป็นตัวจริงของ `(as i16 x)` |
 | `float->ratio` | `(float->ratio x)` | `f64→ratio` | แปลงเป็น `ratio` ในรูปจำนวนตรรกยะฐานสองที่ถูกต้องแม่นยำ (`rational` ของ CL) |
 | `float->f32` `float->f64` | `(op x)` | `f64→f32` / `f64→f64` | แปลงระหว่างความกว้างของจำนวนทศนิยม `float->f32` ปัดไปค่าที่ใกล้ที่สุด `float->f64` ถูกต้องแม่นยำเสมอ สิ่งที่ `(as f32 x)` ทำ |
 | `try-float->f32` `try-float->f64` | `(op x)` | `f64→Option<f32>` / `→Option<f64>` | การแปลงเดียวกันในรูปของคำถาม `None` หากการปัดเปลี่ยนค่า (การขยายเป็น `f64` เป็น `Some` เสมอ) สิ่งที่ `(try-as f32 x)` ทำ |

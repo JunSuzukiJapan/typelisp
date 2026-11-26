@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/numbers.md @ 4da1b93779ddf5189b57a8cb0397636ee00f4b50 -->
+<!-- translated-from: docs/ja/reference/functions/numbers.md @ 1b5dc6ac828d8e4a95800a91218b5e9dffe83f98 -->
 # 数值
 
 整数、浮点数、有理数、复数、布尔值的运算以及与数值相关的函数。调用形式的读法见[内置函数](README.md)。
@@ -120,6 +120,7 @@ CL 的 `integer`，也就是这门语言的**整数**——未注解的整数字
 | `log`（双参数） | `(log x base)` | `(f64,f64)→f64` | 指定底数的对数。展开为 `(/ (log x) (log base))`（第 8 章） |
 | `floor-div` `ceiling-div` `round-div` `truncate-div` | `(op a b)` | `(f64,f64)→cons-cell<f64,f64>` | 相当于 CL 的双参数版本（`(floor 7.0 2.0)`→商 3、余数 1）。与第 1 章同名函数的设计相同（`car`=商、`cdr`=余数） |
 | `float->int` | `(float->int x)` | `f64→int` | 向零截断转换为 `int`（CL 的 `truncate`；任何大小的有限值都是精确的）。无穷大和 NaN 时 panic。需要固定宽度时用 `(as i32 x)` |
+| `float->i8` `float->i16` `float->i32` `float->u8` `float->u16` `float->u32` | `(op x)` | `f64→i8` | 将 `float->int` 结果的低位转为该类型（不经过 `int`）。无穷大和 NaN 会 panic。是 `(as i16 x)` 的实体 |
 | `float->ratio` | `(float->ratio x)` | `f64→ratio` | 作为精确的二进制有理数转换为 `ratio`（CL 的 `rational`） |
 | `float->f32` `float->f64` | `(op x)` | `f64→f32` / `f64→f64` | 浮点宽度的转换。`float->f32` 舍入到最近，`float->f64` 总是精确的。`(as f32 x)` 的实质 |
 | `try-float->f32` `try-float->f64` | `(op x)` | `f64→Option<f32>` / `→Option<f64>` | 把同样的转换作为询问。舍入会改变值时为 `None`（扩展到 `f64` 总是 `Some`）。`(try-as f32 x)` 的实质 |

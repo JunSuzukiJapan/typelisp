@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ 00b2198ebe05054debbc1a0d1f9ebf1a9835d7a0 -->
+<!-- translated-from: docs/ja/guide/compile.md @ 1b5dc6ac828d8e4a95800a91218b5e9dffe83f98 -->
 # Compilation
 
 Sauf indication contraire, les programmes typelisp s'exécutent dans l'interpréteur. Il existe en outre deux façons
@@ -264,7 +264,7 @@ $ qemu-system-arm -M mps2-an505 -nographic \
   void     typelisp_host_sleep_us(uint64_t us);                           // attend us microsecondes
   ```
 
-- Les registres d'une carte (périphériques projetés en mémoire) se lisent avec `volatile-read-u8`, `volatile-read-u16` et `volatile-read-u32`, et s'écrivent avec `volatile-write-u8`, `volatile-write-u16` et `volatile-write-u32`. L'adresse est un `int`, et la valeur lue a le type de la largeur (`u8`, etc.). Chacun lit ou écrit exactement une fois, là où il est écrit ; le compilateur ne l'omet ni ne le déplace. Tous ne s'utilisent qu'à l'intérieur de `unsafe`. Une adresse négative, ou qui n'est pas un multiple de la largeur, est une erreur à l'exécution avant toute lecture ou écriture.
+- Les registres d'une carte (périphériques projetés en mémoire) se lisent avec `volatile-read-u8`, `volatile-read-u16` et `volatile-read-u32`, et s'écrivent avec `volatile-write-u8`, `volatile-write-u16` et `volatile-write-u32`. L'adresse est un `int` ou un entier de largeur fixe comme `u16`, et la valeur lue a le type de la largeur (`u8`, etc.). Chacun lit ou écrit exactement une fois, là où il est écrit ; le compilateur ne l'omet ni ne le déplace. Tous ne s'utilisent qu'à l'intérieur de `unsafe`. Une adresse négative, ou qui n'est pas un multiple de la largeur, est une erreur à l'exécution avant toute lecture ou écriture.
 
   ```lisp
   ;; UART 0 du mps2-an386 de QEMU : données 0x40004000, état 0x40004004, contrôle 0x40004008
@@ -325,11 +325,11 @@ $ typl -c blink.typl --target avr-atmega328p -O2   # crée blink.elf
 $ qemu-system-avr -M uno -display none -serial stdio -bios blink.elf   # exécuter dans QEMU
 ```
 
-- Il n'y a pas de runtime : un programme qui l'utilise est une **erreur de compilation**. L'erreur indique ce qui est nécessaire et par quelles fonctions on y arrive. On peut utiliser : les calculs sur les entiers de largeur fixe (de `i8` à `u32`), `int`, `f32`, `f64`, `bool` et `char`, les appels de fonctions (récursifs compris), les conditions, les boucles, `defvar` et `defconstant` contenant ces valeurs, `volatile-read-u8` et les autres, ainsi que les appels de fonctions C.
+- Il n'y a pas de runtime : un programme qui l'utilise est une **erreur de compilation**. L'erreur indique ce qui est nécessaire et par quelles fonctions on y arrive. On peut utiliser : les calculs sur les entiers de largeur fixe (de `i8` à `u32`), `f32`, `f64`, `bool` et `char`, les appels de fonctions (récursifs compris), les conditions, les boucles, `defvar` et `defconstant` contenant ces valeurs, `volatile-read-u8` et les autres, ainsi que les appels de fonctions C.
 - On ne peut pas utiliser : les valeurs placées dans le tas, comme les chaînes, les listes et les structures ; `catch` et les appels de valeurs de fonction ; les appels de fonctions C qui reçoivent une chaîne ou une fonction ; les fonctions mathématiques sur les flottants comme `sin` et `expt` (`sqrt` et les arrondis comme `floor` sont utilisables).
 - Un gestionnaire d'interruption s'écrit `#[interrupt(N)]` ([Syntaxe](../reference/syntax.md), section 3.17). `N` est le numéro de l'interruption de l'ATmega328P, de 1 à 25 en comptant la réinitialisation comme 0 (le débordement du timer 1 est 13). Voir l'exemple ci-dessous.
 - Une division par 0 arrête le microcontrôleur sur place (plus aucune interruption ne survient). Il en va de même de `/` de la plus petite valeur signée par `-1`.
-- Un `int` va de -16384 à 16383. Si le résultat d'un calcul, ou une valeur convertie en `int`, sort de cet intervalle, le microcontrôleur s'arrête. Un flottant est converti en entier en passant par `int` : cet intervalle est donc aussi ce qui peut être converti.
+- On ne peut pas utiliser `int` (c'est une erreur de compilation), car il n'a pas de largeur fixe. Utilisez un type de largeur fixe, comme `i16` ou `u16`. Les adresses se calculent aussi avec des entiers de largeur fixe. Ce qui est déterminé à la compilation reste utilisable, comme une adresse écrite comme un nombre et un `int` d'un `defconstant`.
 - Si une récursion épuise la pile, le microcontrôleur s'arrête.
 - Une fonction C se déclare avec `defffi`, et le fichier objet compilé pour AVR se passe avec `--link FILE`.
 - Une boucle qui ne fait rien disparaît à partir de `-O1`. Dans une boucle d'attente, lisez par exemple un registre.

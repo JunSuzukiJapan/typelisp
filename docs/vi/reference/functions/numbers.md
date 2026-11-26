@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/numbers.md @ 4da1b93779ddf5189b57a8cb0397636ee00f4b50 -->
+<!-- translated-from: docs/ja/reference/functions/numbers.md @ 1b5dc6ac828d8e4a95800a91218b5e9dffe83f98 -->
 # Số
 
 Các phép toán trên số nguyên, số dấu phẩy động, số hữu tỉ, số phức và boolean, cùng các hàm khác liên quan
@@ -137,6 +137,7 @@ not fit a fixnum").
 | `log` (hai đối số) | `(log x base)` | `(f64,f64)→f64` | Logarit theo một cơ số cho trước. Được khai triển thành `(/ (log x) (log base))` (chương 8) |
 | `floor-div` `ceiling-div` `round-div` `truncate-div` | `(op a b)` | `(f64,f64)→cons-cell<f64,f64>` | Tương ứng với các phiên bản hai đối số của CL (`(floor 7.0 2.0)`→thương 3, dư 1). Cùng thiết kế như các hàm cùng tên ở chương 1 (`car`=thương, `cdr`=số dư) |
 | `float->int` | `(float->int x)` | `f64→int` | Chuyển thành `int` bằng cách cắt về phía không (`truncate` của CL; chính xác với các giá trị hữu hạn ở mọi cỡ). Panic với vô cực và NaN. Với độ rộng cố định, hãy dùng `(as i32 x)` |
+| `float->i8` `float->i16` `float->i32` `float->u8` `float->u16` `float->u32` | `(op x)` | `f64→i8` | Các bit thấp của kết quả `float->int` theo kiểu đó (không đi qua `int`). Vô cực và NaN gây panic. Là bản chất của `(as i16 x)` |
 | `float->ratio` | `(float->ratio x)` | `f64→ratio` | Chuyển thành một `ratio` dưới dạng số hữu tỉ nhị phân chính xác (`rational` của CL) |
 | `float->f32` `float->f64` | `(op x)` | `f64→f32` / `f64→f64` | Chuyển đổi giữa các độ rộng dấu phẩy động. `float->f32` làm tròn đến gần nhất, `float->f64` luôn chính xác. Việc `(as f32 x)` làm |
 | `try-float->f32` `try-float->f64` | `(op x)` | `f64→Option<f32>` / `→Option<f64>` | Cùng phép chuyển đổi dưới dạng một câu hỏi. `None` nếu việc làm tròn thay đổi giá trị (mở rộng sang `f64` luôn là `Some`). Việc `(try-as f32 x)` làm |

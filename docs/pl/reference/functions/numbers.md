@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/numbers.md @ 4da1b93779ddf5189b57a8cb0397636ee00f4b50 -->
+<!-- translated-from: docs/ja/reference/functions/numbers.md @ 1b5dc6ac828d8e4a95800a91218b5e9dffe83f98 -->
 # Liczby
 
 Operacje na liczbach całkowitych, zmiennoprzecinkowych, wymiernych, zespolonych i wartościach logicznych oraz inne
@@ -142,6 +142,7 @@ argument does not fit a fixnum").
 | `log` (dwa argumenty) | `(log x base)` | `(f64,f64)→f64` | Logarytm o zadanej podstawie. Rozwijany do `(/ (log x) (log base))` (rozdział 8) |
 | `floor-div` `ceiling-div` `round-div` `truncate-div` | `(op a b)` | `(f64,f64)→cons-cell<f64,f64>` | Odpowiadają wersjom dwuargumentowym z CL (`(floor 7.0 2.0)`→iloraz 3, reszta 1). Ten sam projekt co funkcje o tych samych nazwach w rozdziale 1 (`car`=iloraz, `cdr`=reszta) |
 | `float->int` | `(float->int x)` | `f64→int` | Konwertuje na `int` przez obcięcie w stronę zera (`truncate` z CL; dokładne dla skończonych wartości dowolnej wielkości). Powoduje panic dla nieskończoności i NaN. Dla stałej szerokości użyj `(as i32 x)` |
+| `float->i8` `float->i16` `float->i32` `float->u8` `float->u16` `float->u32` | `(op x)` | `f64→i8` | Młodsze bity wyniku `float->int` jako ten typ (bez przechodzenia przez `int`). Nieskończoność i NaN powodują panic. To, czym jest `(as i16 x)` |
 | `float->ratio` | `(float->ratio x)` | `f64→ratio` | Konwertuje na `ratio` jako dokładną binarną liczbę wymierną (`rational` z CL) |
 | `float->f32` `float->f64` | `(op x)` | `f64→f32` / `f64→f64` | Konwertuje między szerokościami zmiennoprzecinkowymi. `float->f32` zaokrągla do najbliższej, `float->f64` jest zawsze dokładne. To, co robi `(as f32 x)` |
 | `try-float->f32` `try-float->f64` | `(op x)` | `f64→Option<f32>` / `→Option<f64>` | Ta sama konwersja w postaci pytania. `None`, jeśli zaokrąglenie zmienia wartość (rozszerzenie do `f64` zawsze daje `Some`). To, co robi `(try-as f32 x)` |

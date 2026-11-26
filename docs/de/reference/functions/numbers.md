@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/numbers.md @ 4da1b93779ddf5189b57a8cb0397636ee00f4b50 -->
+<!-- translated-from: docs/ja/reference/functions/numbers.md @ 1b5dc6ac828d8e4a95800a91218b5e9dffe83f98 -->
 # Zahlen
 
 Operationen auf Ganzzahlen, Gleitkommazahlen, rationalen Zahlen, komplexen Zahlen und Wahrheitswerten sowie
@@ -143,6 +143,7 @@ passt, ist ein Laufzeitfehler („an integer argument does not fit a fixnum“).
 | `log` (zwei Argumente) | `(log x base)` | `(f64,f64)→f64` | Logarithmus zu einer gegebenen Basis. Expandiert zu `(/ (log x) (log base))` (Kapitel 8) |
 | `floor-div` `ceiling-div` `round-div` `truncate-div` | `(op a b)` | `(f64,f64)→cons-cell<f64,f64>` | Entsprechen CLs zweistelligen Fassungen (`(floor 7.0 2.0)`→Quotient 3, Rest 1). Derselbe Entwurf wie die gleichnamigen Funktionen in Kapitel 1 (`car`=Quotient, `cdr`=Rest) |
 | `float->int` | `(float->int x)` | `f64→int` | Wandelt durch Abschneiden gegen null in `int` um (CLs `truncate`; exakt für endliche Werte jeder Größe). Panic bei Unendlich und NaN. Für eine feste Breite verwendet man `(as i32 x)` |
+| `float->i8` `float->i16` `float->i32` `float->u8` `float->u16` `float->u32` | `(op x)` | `f64→i8` | Die unteren Bits dessen, was `float->int` liefert, als dieser Typ (ohne Umweg über `int`). Unendlich und NaN führen zu panic. Das, was `(as i16 x)` ist |
 | `float->ratio` | `(float->ratio x)` | `f64→ratio` | Wandelt als exakte binäre rationale Zahl in ein `ratio` um (CLs `rational`) |
 | `float->f32` `float->f64` | `(op x)` | `f64→f32` / `f64→f64` | Wandelt zwischen Gleitkommabreiten um. `float->f32` rundet zum nächsten Wert, `float->f64` ist immer exakt. Das, was `(as f32 x)` tut |
 | `try-float->f32` `try-float->f64` | `(op x)` | `f64→Option<f32>` / `→Option<f64>` | Dieselbe Umwandlung als Frage. `None`, wenn das Runden den Wert ändert (das Erweitern auf `f64` ist immer `Some`). Das, was `(try-as f32 x)` tut |

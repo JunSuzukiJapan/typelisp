@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ 00b2198ebe05054debbc1a0d1f9ebf1a9835d7a0 -->
+<!-- translated-from: docs/ja/guide/compile.md @ 1b5dc6ac828d8e4a95800a91218b5e9dffe83f98 -->
 # Kompilierung
 
 Ohne weiteres Zutun laufen typelisp-Programme im Interpreter. Darüber hinaus gibt es zwei Wege, in nativen
@@ -266,7 +266,7 @@ $ qemu-system-arm -M mps2-an505 -nographic \
   void     typelisp_host_sleep_us(uint64_t us);                           // wartet us Mikrosekunden
   ```
 
-- Die Register einer Platine (in den Speicher eingeblendete Peripherie) werden mit `volatile-read-u8`, `volatile-read-u16` und `volatile-read-u32` gelesen und mit `volatile-write-u8`, `volatile-write-u16` und `volatile-write-u32` geschrieben. Die Adresse ist ein `int`, der gelesene Wert hat den Typ der Breite (`u8` usw.). Jeder Zugriff liest oder schreibt genau einmal, an der Stelle, an der er steht; der Compiler lässt ihn weder weg noch verschiebt er ihn. Alle sind nur innerhalb von `unsafe` nutzbar. Eine negative Adresse oder eine, die kein Vielfaches der Breite ist, ist ein Laufzeitfehler, bevor etwas gelesen oder geschrieben wird.
+- Die Register einer Platine (in den Speicher eingeblendete Peripherie) werden mit `volatile-read-u8`, `volatile-read-u16` und `volatile-read-u32` gelesen und mit `volatile-write-u8`, `volatile-write-u16` und `volatile-write-u32` geschrieben. Die Adresse ist ein `int` oder eine Ganzzahl fester Breite wie `u16`, der gelesene Wert hat den Typ der Breite (`u8` usw.). Jeder Zugriff liest oder schreibt genau einmal, an der Stelle, an der er steht; der Compiler lässt ihn weder weg noch verschiebt er ihn. Alle sind nur innerhalb von `unsafe` nutzbar. Eine negative Adresse oder eine, die kein Vielfaches der Breite ist, ist ein Laufzeitfehler, bevor etwas gelesen oder geschrieben wird.
 
   ```lisp
   ;; UART 0 des mps2-an386 von QEMU: Daten 0x40004000, Status 0x40004004, Steuerung 0x40004008
@@ -327,11 +327,11 @@ $ typl -c blink.typl --target avr-atmega328p -O2   # erzeugt blink.elf
 $ qemu-system-avr -M uno -display none -serial stdio -bios blink.elf   # in QEMU ausführen
 ```
 
-- Es gibt keine Laufzeitumgebung, daher ist ein Programm, das sie benutzt, ein **Kompilierfehler**. Die Meldung nennt, was benötigt wird und über welche Funktionen es erreicht wird. Verwendbar sind: Rechnen mit Ganzzahlen fester Breite (`i8` bis `u32`), `int`, `f32`, `f64`, `bool` und `char`, Funktionsaufrufe (auch rekursive), Verzweigungen, Schleifen, `defvar` und `defconstant` mit solchen Werten, `volatile-read-u8` und Ähnliches sowie Aufrufe von C-Funktionen.
+- Es gibt keine Laufzeitumgebung, daher ist ein Programm, das sie benutzt, ein **Kompilierfehler**. Die Meldung nennt, was benötigt wird und über welche Funktionen es erreicht wird. Verwendbar sind: Rechnen mit Ganzzahlen fester Breite (`i8` bis `u32`), `f32`, `f64`, `bool` und `char`, Funktionsaufrufe (auch rekursive), Verzweigungen, Schleifen, `defvar` und `defconstant` mit solchen Werten, `volatile-read-u8` und Ähnliches sowie Aufrufe von C-Funktionen.
 - Nicht verwendbar sind: Werte im Heap wie Zeichenketten, Listen und Strukturen; `catch` und Aufrufe von Funktionswerten; Aufrufe von C-Funktionen, die eine Zeichenkette oder eine Funktion erhalten; mathematische Funktionen von Gleitkommazahlen wie `sin` und `expt` (`sqrt` und Rundungen wie `floor` sind verwendbar).
 - Ein Interrupt-Handler wird als `#[interrupt(N)]` geschrieben ([Syntax](../reference/syntax.md), Abschnitt 3.17). `N` ist die Interrupt-Nummer des ATmega328P, 1 bis 25, wobei Reset als 0 zählt (der Überlauf von Timer 1 ist 13). Siehe das Beispiel unten.
 - Eine Division durch 0 hält den Mikrocontroller an dieser Stelle an (es kommen auch keine Interrupts mehr). Ebenso `/` des kleinsten vorzeichenbehafteten Werts durch `-1`.
-- Ein `int` reicht von -16384 bis 16383. Liegt das Ergebnis einer Rechnung oder ein in `int` umgewandelter Wert außerhalb dieses Bereichs, hält der Mikrocontroller an. Eine Gleitkommazahl wird über `int` in eine Ganzzahl umgewandelt, daher gilt dieser Bereich auch dafür.
+- Ein `int` ist nicht verwendbar (Kompilierfehler), da es keine feste Breite hat. Verwenden Sie einen Typ fester Breite wie `i16` oder `u16`. Auch Adressen lassen sich mit Ganzzahlen fester Breite berechnen. Was beim Kompilieren feststeht, ist verwendbar, etwa eine als Zahl geschriebene Adresse und ein `int` einer `defconstant`.
 - Reicht der Stack für eine Rekursion nicht aus, hält der Mikrocontroller an.
 - Eine C-Funktion wird mit `defffi` deklariert; die für AVR kompilierte Objektdatei wird mit `--link FILE` übergeben.
 - Eine Schleife, die nichts tut, wird ab `-O1` entfernt. Lesen Sie in einer Warteschleife zum Beispiel ein Register.

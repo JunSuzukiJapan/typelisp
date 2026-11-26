@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ 00b2198ebe05054debbc1a0d1f9ebf1a9835d7a0 -->
+<!-- translated-from: docs/ja/guide/compile.md @ 1b5dc6ac828d8e4a95800a91218b5e9dffe83f98 -->
 # Kompilering
 
 Om du inte gör något annat körs typelisp-program i tolken. Dessutom finns två sätt att kompilera till
@@ -263,7 +263,7 @@ $ qemu-system-arm -M mps2-an505 -nographic \
   void     typelisp_host_sleep_us(uint64_t us);                           // väntar us mikrosekunder
   ```
 
-- Ett korts register (kringutrustning mappad i minnet) läses med `volatile-read-u8`, `volatile-read-u16` och `volatile-read-u32` och skrivs med `volatile-write-u8`, `volatile-write-u16` och `volatile-write-u32`. Adressen är en `int`, och det lästa värdet har breddens typ (`u8` och så vidare). Var och en läser eller skriver exakt en gång, där den står; kompilatorn varken utelämnar eller flyttar den. Alla kan bara användas inuti `unsafe`. En adress som är negativ, eller inte en multipel av bredden, är ett körtidsfel innan något läses eller skrivs.
+- Ett korts register (kringutrustning mappad i minnet) läses med `volatile-read-u8`, `volatile-read-u16` och `volatile-read-u32` och skrivs med `volatile-write-u8`, `volatile-write-u16` och `volatile-write-u32`. Adressen är en `int` eller ett heltal av fast bredd som `u16`, och det lästa värdet har breddens typ (`u8` och så vidare). Var och en läser eller skriver exakt en gång, där den står; kompilatorn varken utelämnar eller flyttar den. Alla kan bara användas inuti `unsafe`. En adress som är negativ, eller inte en multipel av bredden, är ett körtidsfel innan något läses eller skrivs.
 
   ```lisp
   ;; UART 0 på QEMU:s mps2-an386: data 0x40004000, status 0x40004004, styrning 0x40004008
@@ -324,11 +324,11 @@ $ typl -c blink.typl --target avr-atmega328p -O2   # skapar blink.elf
 $ qemu-system-avr -M uno -display none -serial stdio -bios blink.elf   # kör i QEMU
 ```
 
-- Det finns ingen runtime, så ett program som använder den ger ett **kompileringsfel**. Felet anger vad som behövs och genom vilka funktioner det nås. Det som kan användas är beräkningar med heltal av fast bredd (`i8` till `u32`), `int`, `f32`, `f64`, `bool` och `char`, funktionsanrop (även rekursiva), villkor, loopar, `defvar` och `defconstant` med sådana värden, `volatile-read-u8` med flera samt anrop av C-funktioner.
+- Det finns ingen runtime, så ett program som använder den ger ett **kompileringsfel**. Felet anger vad som behövs och genom vilka funktioner det nås. Det som kan användas är beräkningar med heltal av fast bredd (`i8` till `u32`), `f32`, `f64`, `bool` och `char`, funktionsanrop (även rekursiva), villkor, loopar, `defvar` och `defconstant` med sådana värden, `volatile-read-u8` med flera samt anrop av C-funktioner.
 - Det som inte kan användas är värden i heapen, till exempel strängar, listor och strukturer; `catch` och anrop av funktionsvärden; anrop av C-funktioner som tar en sträng eller en funktion; matematiska funktioner av flyttal som `sin` och `expt` (`sqrt` och avrundning som `floor` kan användas).
 - En avbrottshanterare skrivs `#[interrupt(N)]` ([Syntax](../reference/syntax.md), avsnitt 3.17). `N` är avbrottets nummer på ATmega328P, 1 till 25 med återställning räknad som 0 (spill i timer 1 är 13). Se exemplet nedan.
 - Division med 0 stoppar mikrokontrollern på stället (inga fler avbrott kommer heller). Detsamma gäller `/` av det minsta värdet med tecken med `-1`.
-- En `int` går från -16384 till 16383. Om svaret på en beräkning, eller ett värde som omvandlas till `int`, hamnar utanför det intervallet stannar mikrokontrollern. Ett flyttal omvandlas till heltal via `int`, så intervallet gäller även där.
+- En `int` kan inte användas (det ger ett kompileringsfel), eftersom den saknar fast bredd. Använd en typ av fast bredd, som `i16` eller `u16`. Även adresser kan beräknas med heltal av fast bredd. Det som bestäms vid kompileringen kan användas, som en adress skriven som ett tal och en `int` i en `defconstant`.
 - Om stacken tar slut vid rekursion stannar mikrokontrollern.
 - Deklarera en C-funktion med `defffi` och skicka med en objektfil kompilerad för AVR med `--link FILE`.
 - En loop som inte gör något tas bort från och med `-O1`. Läs till exempel ett register i en vänteloop.

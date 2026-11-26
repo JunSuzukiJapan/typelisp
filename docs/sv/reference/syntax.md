@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 4963ba6fc48045aeec32b258cf56b8c1af7acc94 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 1b5dc6ac828d8e4a95800a91218b5e9dffe83f98 -->
 # Syntaxreferens för typelisp
 
 typelisp är ett statiskt typat Lisp, skrivet med S-uttryck. För listan över inbyggda funktioner och
@@ -543,7 +543,7 @@ Allokering, läsning och skrivning skrivs i följande former. Alla kan användas
 | `(c-alloc T)` / `(c-alloc T n)` | Allokerar `n` värden av `T` (1 om utelämnat). Innehållet fylls med 0. Returnerar en `(ptr T)` |
 | `(c-ref p i)` | En pekare till element `i` från `p`. Ett fel om utanför det allokerade intervallet |
 | `(c-deref p)` / `(setf (c-deref p) v)` | Läser / skriver den skalär `p` pekar på |
-| `(volatile-read-u32 addr)` / `(volatile-write-u32 addr v)` | Läser eller skriver registret på adressen `addr` (en `int`), exakt en gång, där den står. Samma för `-u8` och `-u16` |
+| `(volatile-read-u32 addr)` / `(volatile-write-u32 addr v)` | Läser eller skriver registret på adressen `addr` (en `int`, eller ett heltal av fast bredd som `u16`), exakt en gång, där den står. Samma för `-u8` och `-u16` |
 | `p::field` / `(setf p::field v)` | Läser / skriver ett fält i en struct. Att läsa ett fält som är en inbäddad struct ger dess adress (`(ptr inner-type)`) |
 | `(as ptr p)` | Glömmer typen och gör en `ptr` (för att skicka till något som `void *` i `qsort`). Det finns ingen konvertering tillbaka |
 

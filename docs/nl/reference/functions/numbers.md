@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/numbers.md @ 4da1b93779ddf5189b57a8cb0397636ee00f4b50 -->
+<!-- translated-from: docs/ja/reference/functions/numbers.md @ 1b5dc6ac828d8e4a95800a91218b5e9dffe83f98 -->
 # Getallen
 
 Bewerkingen op gehele getallen, drijvendekommagetallen, rationale getallen, complexe getallen en
@@ -145,6 +145,7 @@ fixnum past is een runtimefout ("an integer argument does not fit a fixnum").
 | `log` (twee argumenten) | `(log x base)` | `(f64,f64)→f64` | Logaritme met een gegeven grondtal. Wordt uitgebreid tot `(/ (log x) (log base))` (hoofdstuk 8) |
 | `floor-div` `ceiling-div` `round-div` `truncate-div` | `(op a b)` | `(f64,f64)→cons-cell<f64,f64>` | Komen overeen met de versies met twee argumenten van CL (`(floor 7.0 2.0)`→quotiënt 3, rest 1). Hetzelfde ontwerp als de functies met dezelfde naam in hoofdstuk 1 (`car`=quotiënt, `cdr`=rest) |
 | `float->int` | `(float->int x)` | `f64→int` | Converteert naar `int` door af te kappen richting nul (`truncate` van CL; exact voor eindige waarden van elke grootte). Geeft een panic bij oneindig en NaN. Gebruik voor een vaste breedte `(as i32 x)` |
+| `float->i8` `float->i16` `float->i32` `float->u8` `float->u16` `float->u32` | `(op x)` | `f64→i8` | De lage bits van wat `float->int` geeft, als dat type (zonder omweg via `int`). Oneindig en NaN geven een panic. Wat `(as i16 x)` is |
 | `float->ratio` | `(float->ratio x)` | `f64→ratio` | Converteert naar een `ratio` als het exacte binaire rationale getal (`rational` van CL) |
 | `float->f32` `float->f64` | `(op x)` | `f64→f32` / `f64→f64` | Converteert tussen drijvendekommabreedtes. `float->f32` rondt af naar het dichtstbijzijnde, `float->f64` is altijd exact. Wat `(as f32 x)` doet |
 | `try-float->f32` `try-float->f64` | `(op x)` | `f64→Option<f32>` / `→Option<f64>` | Dezelfde conversie als vraag. `None` als afronden de waarde verandert (verbreden naar `f64` is altijd `Some`). Wat `(try-as f32 x)` doet |

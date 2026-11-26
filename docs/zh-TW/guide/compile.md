@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ 00b2198ebe05054debbc1a0d1f9ebf1a9835d7a0 -->
+<!-- translated-from: docs/ja/guide/compile.md @ 1b5dc6ac828d8e4a95800a91218b5e9dffe83f98 -->
 # 編譯
 
 不做任何處理的話，typelisp 程式由直譯器執行。此外還有兩種編譯為原生碼的方法，以及一種保存環境的方法。規格的詳情見
@@ -246,7 +246,7 @@ $ qemu-system-arm -M mps2-an505 -nographic \
   void     typelisp_host_sleep_us(uint64_t us);                           // 等待 us 微秒
   ```
 
-- 板子的暫存器（對映到記憶體的周邊裝置）用 `volatile-read-u8`、`volatile-read-u16`、`volatile-read-u32` 讀取，用 `volatile-write-u8`、`volatile-write-u16`、`volatile-write-u32` 寫入。位址以 `int` 傳入，讀到的值是該寬度的型別（`u8` 等）。每個都在寫下它的位置恰好讀寫一次，編譯器既不省略也不移動它。它們都只能在 `unsafe` 中使用。位址為負數或不是寬度的倍數時，在讀寫之前就是執行期錯誤。
+- 板子的暫存器（對映到記憶體的周邊裝置）用 `volatile-read-u8`、`volatile-read-u16`、`volatile-read-u32` 讀取，用 `volatile-write-u8`、`volatile-write-u16`、`volatile-write-u32` 寫入。位址以 `int` 或 `u16` 等固定寬度的整數傳入，讀到的值是該寬度的型別（`u8` 等）。每個都在寫下它的位置恰好讀寫一次，編譯器既不省略也不移動它。它們都只能在 `unsafe` 中使用。位址為負數或不是寬度的倍數時，在讀寫之前就是執行期錯誤。
 
   ```lisp
   ;; QEMU 的 mps2-an386 的 UART 0：資料 0x40004000，狀態 0x40004004，控制 0x40004008
@@ -307,11 +307,11 @@ $ typl -c blink.typl --target avr-atmega328p -O2   # 產生 blink.elf
 $ qemu-system-avr -M uno -display none -serial stdio -bios blink.elf   # 在 QEMU 中執行
 ```
 
-- 由於沒有執行階段，使用執行階段的程式會成為**編譯錯誤**。錯誤會指出需要什麼，以及經由哪些函式到達。可以使用的有：固定寬度整數（`i8` 到 `u32`）、`int`、`f32`、`f64`、`bool`、`char` 的計算，函式呼叫（包括遞迴），條件分支，迴圈，保存這些值的 `defvar` 和 `defconstant`，`volatile-read-u8` 等，以及 C 函式的呼叫。
+- 由於沒有執行階段，使用執行階段的程式會成為**編譯錯誤**。錯誤會指出需要什麼，以及經由哪些函式到達。可以使用的有：固定寬度整數（`i8` 到 `u32`）、`f32`、`f64`、`bool`、`char` 的計算，函式呼叫（包括遞迴），條件分支，迴圈，保存這些值的 `defvar` 和 `defconstant`，`volatile-read-u8` 等，以及 C 函式的呼叫。
 - 不能使用的有：字串、串列、結構等放在堆積上的值；`catch`、函式值的呼叫；傳遞字串或函式的 C 函式的呼叫；`sin`、`expt` 等浮點數的數學函式（`sqrt` 和 `floor` 等取整可以使用）。
 - 中斷處理函式用 `#[interrupt(N)]` 撰寫（[語法](../reference/syntax.md) 3.17 節）。`N` 是 ATmega328P 的中斷編號，以重設為 0 計，從 1 到 25（計時器 1 溢位是 13）。請看下面的例子。
 - 除以 0 時，微控制器會當場停止（中斷也不再到來）。用 `/` 將有號的最小值除以 `-1` 也一樣。
-- `int` 的範圍是 -16384 到 16383。計算結果或轉換為 `int` 的值超出這個範圍時，微控制器會停止。浮點數轉換為整數時要經過 `int`，因此能轉換的也是這個範圍。
+- `int` 沒有固定寬度，因此不能使用（編譯錯誤）。請使用 `i16`、`u16` 等固定寬度的型別。位址也可以用固定寬度的整數計算。寫成數字的位址和 `defconstant` 的 `int` 這類在編譯時就確定值的東西可以使用。
 - 遞迴使堆疊不足時，微控制器會停止。
 - C 函式用 `defffi` 宣告，並用 `--link FILE` 傳入為 AVR 編譯的目的檔。
 - 什麼都不做的迴圈在 `-O1` 以上會被移除。在等待的迴圈中，請讀取暫存器等。

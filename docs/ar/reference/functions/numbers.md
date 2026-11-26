@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/numbers.md @ 4da1b93779ddf5189b57a8cb0397636ee00f4b50 -->
+<!-- translated-from: docs/ja/reference/functions/numbers.md @ 1b5dc6ac828d8e4a95800a91218b5e9dffe83f98 -->
 # الأعداد
 
 العمليات على الأعداد الصحيحة والأعداد ذات الفاصلة العائمة والأعداد الكسرية والمركبة والقيم المنطقية، ودوال
@@ -132,6 +132,7 @@
 | `log` (وسيطان) | `(log x base)` | `(f64,f64)→f64` | لوغاريتم بأساس معين. يتوسع إلى `(/ (log x) (log base))` (الفصل 8) |
 | `floor-div` `ceiling-div` `round-div` `truncate-div` | `(op a b)` | `(f64,f64)→cons-cell<f64,f64>` | تقابل صيغ الوسيطين في CL (`(floor 7.0 2.0)`←الخارج 3 والباقي 1). والتصميم نفسه كالدوال ذات الاسم نفسه في الفصل 1 (`car`=الخارج، `cdr`=الباقي) |
 | `float->int` | `(float->int x)` | `f64→int` | يحوّل إلى `int` بالاقتطاع نحو الصفر (`truncate` في CL؛ دقيق للقيم المنتهية من أي حجم). ويحدث `panic` عند اللانهاية وNaN. ولعرض ثابت استخدم `(as i32 x)` |
+| `float->i8` `float->i16` `float->i32` `float->u8` `float->u16` `float->u32` | `(op x)` | `f64→i8` | يحوّل البتات الدنيا لما يجيب به `float->int` إلى ذلك النوع (دون المرور بـ `int`). اللانهاية وNaN تسبب panic. وهو ما يقوم عليه `(as i16 x)` |
 | `float->ratio` | `(float->ratio x)` | `f64→ratio` | يحوّل إلى `ratio` على أنه الكسر الثنائي الدقيق (`rational` في CL) |
 | `float->f32` `float->f64` | `(op x)` | `f64→f32` / `f64→f64` | يحوّل بين عروض الفاصلة العائمة. `float->f32` تقرّب إلى الأقرب، و`float->f64` دقيقة دائمًا. وهو ما يفعله `(as f32 x)` |
 | `try-float->f32` `try-float->f64` | `(op x)` | `f64→Option<f32>` / `→Option<f64>` | التحويل نفسه على صورة سؤال. `None` إذا غيّر التقريب القيمة (والتوسيع إلى `f64` هو دائمًا `Some`). وهو ما يفعله `(try-as f32 x)` |

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/numbers.md @ 4da1b93779ddf5189b57a8cb0397636ee00f4b50 -->
+<!-- translated-from: docs/ja/reference/functions/numbers.md @ 1b5dc6ac828d8e4a95800a91218b5e9dffe83f98 -->
 # Numbers
 
 Operations on integers, floating-point numbers, rationals, complex numbers and booleans, and other
@@ -142,6 +142,7 @@ argument does not fit a fixnum").
 | `log` (two arguments) | `(log x base)` | `(f64,f64)→f64` | Logarithm to a given base. Expanded to `(/ (log x) (log base))` (chapter 8) |
 | `floor-div` `ceiling-div` `round-div` `truncate-div` | `(op a b)` | `(f64,f64)→cons-cell<f64,f64>` | Correspond to CL's two-argument versions (`(floor 7.0 2.0)`→quotient 3, remainder 1). The same design as the functions of the same name in chapter 1 (`car`=quotient, `cdr`=remainder) |
 | `float->int` | `(float->int x)` | `f64→int` | Converts to `int` by truncating toward zero (CL's `truncate`; exact for finite values of any size). Panics on infinity and NaN. For a fixed width, use `(as i32 x)` |
+| `float->i8` `float->i16` `float->i32` `float->u8` `float->u16` `float->u32` | `(op x)` | `f64→i8` | Converts to the type the low bits of what `float->int` answers (with no `int` on the way). Infinity and NaN panic. What `(as i16 x)` is |
 | `float->ratio` | `(float->ratio x)` | `f64→ratio` | Converts to a `ratio` as the exact binary rational (CL's `rational`) |
 | `float->f32` `float->f64` | `(op x)` | `f64→f32` / `f64→f64` | Converts between floating-point widths. `float->f32` rounds to nearest, `float->f64` is always exact. What `(as f32 x)` does |
 | `try-float->f32` `try-float->f64` | `(op x)` | `f64→Option<f32>` / `→Option<f64>` | The same conversion as a question. `None` if rounding changes the value (widening to `f64` is always `Some`). What `(try-as f32 x)` does |

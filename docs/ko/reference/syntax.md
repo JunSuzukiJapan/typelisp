@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 4963ba6fc48045aeec32b258cf56b8c1af7acc94 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 1b5dc6ac828d8e4a95800a91218b5e9dffe83f98 -->
 # typelisp 문법 레퍼런스
 
 typelisp는 S 식으로 쓰는 정적 타입 Lisp이다. 내장 함수와 메서드의 목록은 [내장 함수](functions/README.md), 타입 목록은
@@ -452,7 +452,7 @@ C와 같은 배치의 구조체를 선언한다. 최상위의 `unsafe` 안에만
 | `(c-alloc T)` / `(c-alloc T n)` | `T`를 `n`개(생략하면 1개) 할당한다. 내용은 0으로 채워진다. `(ptr T)`를 반환한다 |
 | `(c-ref p i)` | `p`에서 `i`번째 요소의 포인터. 할당한 범위를 벗어나면 오류 |
 | `(c-deref p)` / `(setf (c-deref p) v)` | `p`가 가리키는 스칼라를 읽기 / 쓰기 |
-| `(volatile-read-u32 addr)` / `(volatile-write-u32 addr v)` | 주소 `addr`(`int`)의 레지스터를 읽거나 쓴다. 반드시 그 자리에서 한 번. `-u8`, `-u16`도 같다 |
+| `(volatile-read-u32 addr)` / `(volatile-write-u32 addr v)` | 주소 `addr`(`int`, 또는 `u16` 같은 폭이 정해진 정수)의 레지스터를 읽거나 쓴다. 반드시 그 자리에서 한 번. `-u8`, `-u16`도 같다 |
 | `p::field` / `(setf p::field v)` | 구조체의 필드를 읽기 / 쓰기. 포함된 구조체인 필드를 읽으면 그 주소(`(ptr 안쪽-타입)`)를 얻는다 |
 | `(as ptr p)` | 타입을 잊고 `ptr`로 만든다(`qsort`의 `void *` 같은 데 넘기기 위해). 반대 방향의 변환은 없다 |
 

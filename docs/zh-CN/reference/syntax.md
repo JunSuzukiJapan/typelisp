@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 4963ba6fc48045aeec32b258cf56b8c1af7acc94 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 1b5dc6ac828d8e4a95800a91218b5e9dffe83f98 -->
 # typelisp 语法参考
 
 typelisp 是一种静态类型的 Lisp，语法采用 S 表达式。内置函数和方法的一览见[内置函数](functions/README.md)，类型一览见
@@ -406,7 +406,7 @@ C 函数的调用只能写在 `unsafe` 中，所以只有在 `unsafe` 中才能�
 | `(c-alloc T)` / `(c-alloc T n)` | 分配 `n` 个（省略时 1 个）`T`。内容填充为 0。返回 `(ptr T)` |
 | `(c-ref p i)` | 从 `p` 起第 `i` 个元素的指针。超出分配范围时是错误 |
 | `(c-deref p)` / `(setf (c-deref p) v)` | 读取／写入 `p` 所指的标量 |
-| `(volatile-read-u32 addr)` / `(volatile-write-u32 addr v)` | 读取或写入地址 `addr`（`int`）处的寄存器，在该位置恰好一次。`-u8`、`-u16` 同样 |
+| `(volatile-read-u32 addr)` / `(volatile-write-u32 addr v)` | 读取或写入地址 `addr`（`int`，或 `u16` 等固定宽度的整数）处的寄存器，在该位置恰好一次。`-u8`、`-u16` 同样 |
 | `p::field` / `(setf p::field v)` | 读取／写入结构体的字段。读取嵌入的结构体字段得到其地址（`(ptr 内部类型)`） |
 | `(as ptr p)` | 忘掉类型变为 `ptr`（为了传给 `qsort` 的 `void *` 之类）。没有反方向的转换 |
 

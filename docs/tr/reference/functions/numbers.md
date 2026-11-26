@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/numbers.md @ 4da1b93779ddf5189b57a8cb0397636ee00f4b50 -->
+<!-- translated-from: docs/ja/reference/functions/numbers.md @ 1b5dc6ac828d8e4a95800a91218b5e9dffe83f98 -->
 # Sayılar
 
 Tamsayılar, kayan noktalı sayılar, rasyonel sayılar, karmaşık sayılar ve mantıksal değerler üzerindeki
@@ -142,6 +142,7 @@ sayısı vb.) `int` kabul eder, ancak bir fixnum'a sığmayan bir değer geçirm
 | `log` (iki bağımsız değişken) | `(log x base)` | `(f64,f64)→f64` | Verilen tabanda logaritma. `(/ (log x) (log base))`'e açılır (8. bölüm) |
 | `floor-div` `ceiling-div` `round-div` `truncate-div` | `(op a b)` | `(f64,f64)→cons-cell<f64,f64>` | CL'nin iki bağımsız değişkenli sürümlerine karşılık gelir (`(floor 7.0 2.0)`→bölüm 3, kalan 1). 1. bölümdeki aynı adlı fonksiyonlarla aynı tasarım (`car`=bölüm, `cdr`=kalan) |
 | `float->int` | `(float->int x)` | `f64→int` | Sıfıra doğru keserek `int`'e çevirir (CL'nin `truncate`'i; her boyuttaki sonlu değerler için tam). Sonsuzluk ve NaN'da panic olur. Sabit bir genişlik için `(as i32 x)` kullanın |
+| `float->i8` `float->i16` `float->i32` `float->u8` `float->u16` `float->u32` | `(op x)` | `f64→i8` | `float->int`'in cevabının düşük bitlerini o türe çevirir (`int` üzerinden geçmeden). Sonsuz ve NaN panic verir. `(as i16 x)`'in özü |
 | `float->ratio` | `(float->ratio x)` | `f64→ratio` | Tam ikili rasyonel olarak bir `ratio`'ya çevirir (CL'nin `rational`'ı) |
 | `float->f32` `float->f64` | `(op x)` | `f64→f32` / `f64→f64` | Kayan noktalı genişlikler arasında dönüştürür. `float->f32` en yakına yuvarlar, `float->f64` her zaman tamdır. `(as f32 x)`'in yaptığı şey |
 | `try-float->f32` `try-float->f64` | `(op x)` | `f64→Option<f32>` / `→Option<f64>` | Aynı dönüşüm bir soru olarak. Yuvarlama değeri değiştiriyorsa `None` (`f64`'e genişletme her zaman `Some`'dır). `(try-as f32 x)`'in yaptığı şey |

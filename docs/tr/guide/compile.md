@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ 00b2198ebe05054debbc1a0d1f9ebf1a9835d7a0 -->
+<!-- translated-from: docs/ja/guide/compile.md @ 1b5dc6ac828d8e4a95800a91218b5e9dffe83f98 -->
 # Derleme
 
 Başka bir şey yapmazsanız typelisp programları yorumlayıcıda çalışır. Buna ek olarak yerel koda
@@ -262,7 +262,7 @@ $ qemu-system-arm -M mps2-an505 -nographic \
   void     typelisp_host_sleep_us(uint64_t us);                           // us mikrosaniye bekler
   ```
 
-- Bir kartın yazmaçları (belleğe eşlenmiş çevre birimleri) `volatile-read-u8`, `volatile-read-u16` ve `volatile-read-u32` ile okunur, `volatile-write-u8`, `volatile-write-u16` ve `volatile-write-u32` ile yazılır. Adres bir `int` olarak verilir ve okunan değer o genişliğin türündedir (`u8` vb.). Her biri yazıldığı yerde tam olarak bir kez okur veya yazar; derleyici onu atlamaz ve yerini değiştirmez. Hepsi yalnızca `unsafe` içinde kullanılabilir. Negatif ya da genişliğin katı olmayan bir adres, bir şey okunmadan veya yazılmadan önce çalışma zamanı hatasıdır.
+- Bir kartın yazmaçları (belleğe eşlenmiş çevre birimleri) `volatile-read-u8`, `volatile-read-u16` ve `volatile-read-u32` ile okunur, `volatile-write-u8`, `volatile-write-u16` ve `volatile-write-u32` ile yazılır. Adres bir `int` ya da `u16` gibi sabit genişlikli bir tam sayı olarak verilir ve okunan değer o genişliğin türündedir (`u8` vb.). Her biri yazıldığı yerde tam olarak bir kez okur veya yazar; derleyici onu atlamaz ve yerini değiştirmez. Hepsi yalnızca `unsafe` içinde kullanılabilir. Negatif ya da genişliğin katı olmayan bir adres, bir şey okunmadan veya yazılmadan önce çalışma zamanı hatasıdır.
 
   ```lisp
   ;; QEMU'nun mps2-an386 kartının UART 0'ı: veri 0x40004000, durum 0x40004004, denetim 0x40004008
@@ -323,11 +323,11 @@ $ typl -c blink.typl --target avr-atmega328p -O2   # blink.elf oluşur
 $ qemu-system-avr -M uno -display none -serial stdio -bios blink.elf   # QEMU'da çalıştır
 ```
 
-- Çalışma zamanı yoktur; bu yüzden çalışma zamanını kullanan bir program **derleme hatasıdır**. Hata, neyin gerektiğini ve ona hangi fonksiyonlardan ulaşıldığını söyler. Kullanılabilenler: sabit genişlikli tam sayılar (`i8` ile `u32` arası), `int`, `f32`, `f64`, `bool` ve `char` hesapları, fonksiyon çağrıları (özyinelemeli olanlar da), koşullar, döngüler, bu değerleri tutan `defvar` ve `defconstant`, `volatile-read-u8` gibi işlemler ve C fonksiyonlarının çağrılması.
+- Çalışma zamanı yoktur; bu yüzden çalışma zamanını kullanan bir program **derleme hatasıdır**. Hata, neyin gerektiğini ve ona hangi fonksiyonlardan ulaşıldığını söyler. Kullanılabilenler: sabit genişlikli tam sayılar (`i8` ile `u32` arası), `f32`, `f64`, `bool` ve `char` hesapları, fonksiyon çağrıları (özyinelemeli olanlar da), koşullar, döngüler, bu değerleri tutan `defvar` ve `defconstant`, `volatile-read-u8` gibi işlemler ve C fonksiyonlarının çağrılması.
 - Kullanılamayanlar: dizgi, liste ve yapı gibi heap'te duran değerler; `catch` ve fonksiyon değerlerinin çağrılması; dizgi ya da fonksiyon alan C fonksiyonlarının çağrılması; `sin` ve `expt` gibi kayan noktalı matematik fonksiyonları (`sqrt` ve `floor` gibi yuvarlamalar kullanılabilir).
 - Kesme işleyicisi `#[interrupt(N)]` ile yazılır ([Sözdizimi](../reference/syntax.md), bölüm 3.17). `N`, ATmega328P'nin kesme numarasıdır; sıfırlama 0 sayılarak 1 ile 25 arasındadır (zamanlayıcı 1 taşması 13'tür). Aşağıdaki örneğe bakın.
 - 0'a bölme mikrodenetleyiciyi olduğu yerde durdurur (artık kesme de gelmez). En küçük işaretli değerin `/` ile `-1`'e bölünmesi de öyledir.
-- `int` -16384 ile 16383 arasındadır. Bir hesabın sonucu ya da `int`'e dönüştürülen bir değer bu aralığın dışında kalırsa mikrodenetleyici durur. Kayan noktalı sayı tam sayıya `int` üzerinden dönüştürülür; bu yüzden dönüştürülebilen değerler de bu aralıktadır.
+- `int` kullanılamaz (derleme hatasıdır), çünkü sabit bir genişliği yoktur. `i16` veya `u16` gibi sabit genişlikli bir tür kullanın. Adresler de sabit genişlikli tam sayılarla hesaplanabilir. Sayı olarak yazılmış bir adres ve bir `defconstant`'ın `int`'i gibi değeri derleme sırasında belirlenenler kullanılabilir.
 - Özyinelemede yığın yetmezse mikrodenetleyici durur.
 - C fonksiyonunu `defffi` ile bildirin ve AVR için derlenmiş nesne dosyasını `--link FILE` ile verin.
 - Hiçbir şey yapmayan bir döngü `-O1` ve üstünde kaldırılır. Bekleme döngüsünde örneğin bir yazmaç okuyun.

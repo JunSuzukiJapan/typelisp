@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 4963ba6fc48045aeec32b258cf56b8c1af7acc94 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 1b5dc6ac828d8e4a95800a91218b5e9dffe83f98 -->
 # typelisp Sözdizimi Başvurusu
 
 typelisp, S-ifadelerle yazılan, statik tür denetimli bir Lisp'tir. Yerleşik fonksiyonların ve metotların
@@ -548,7 +548,7 @@ Ayırma, okuma ve yazma aşağıdaki biçimlerle yazılır. Hepsi yalnızca `uns
 | `(c-alloc T)` / `(c-alloc T n)` | `T`'den `n` değer ayırır (atlanırsa 1). İçerik 0 ile doldurulur. Bir `(ptr T)` döndürür |
 | `(c-ref p i)` | `p`'den `i`'inci elemana bir işaretçi. Ayrılan aralığın dışındaysa hata |
 | `(c-deref p)` / `(setf (c-deref p) v)` | `p`'nin işaret ettiği skaleri okur / yazar |
-| `(volatile-read-u32 addr)` / `(volatile-write-u32 addr v)` | `addr` adresindeki (`int`) yazmacı okur veya yazar, yazıldığı yerde tam bir kez. `-u8` ve `-u16` de aynı |
+| `(volatile-read-u32 addr)` / `(volatile-write-u32 addr v)` | `addr` adresindeki (`int` ya da `u16` gibi sabit genişlikli bir tam sayı) yazmacı okur veya yazar, yazıldığı yerde tam bir kez. `-u8` ve `-u16` de aynı |
 | `p::field` / `(setf p::field v)` | Bir struct'ın bir alanını okur / yazar. Gömülü bir struct olan alanı okumak adresini verir (`(ptr inner-type)`) |
 | `(as ptr p)` | Türü unutur ve bir `ptr` yapar (`qsort`'un `void *`'ı gibi bir şeye geçirmek için). Geri dönüşüm yoktur |
 

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ 00b2198ebe05054debbc1a0d1f9ebf1a9835d7a0 -->
+<!-- translated-from: docs/ja/guide/compile.md @ 1b5dc6ac828d8e4a95800a91218b5e9dffe83f98 -->
 # Compiling
 
 Unless you do anything else, typelisp programs run in the interpreter. In addition there are two
@@ -269,7 +269,7 @@ $ qemu-system-arm -M mps2-an505 -nographic \
   void     typelisp_host_sleep_us(uint64_t us);                           // waits us microseconds
   ```
 
-- Read a board's registers (peripherals mapped into memory) with `volatile-read-u8`, `volatile-read-u16` and `volatile-read-u32`, and write them with `volatile-write-u8`, `volatile-write-u16` and `volatile-write-u32`. The address is an `int`, and the value read has the type of the width (`u8` and so on). Each reads or writes exactly once, where it is written; the compiler neither leaves it out nor moves it. All of them can be used only inside `unsafe`. An address that is negative, or not a multiple of the width, is a runtime error before anything is read or written.
+- Read a board's registers (peripherals mapped into memory) with `volatile-read-u8`, `volatile-read-u16` and `volatile-read-u32`, and write them with `volatile-write-u8`, `volatile-write-u16` and `volatile-write-u32`. The address is an `int` or an integer of a fixed width such as `u16`, and the value read has the type of the width (`u8` and so on). Each reads or writes exactly once, where it is written; the compiler neither leaves it out nor moves it. All of them can be used only inside `unsafe`. An address that is negative, or not a multiple of the width, is a runtime error before anything is read or written.
 
   ```lisp
   ;; UART 0 of QEMU's mps2-an386: data 0x40004000, state 0x40004004, control 0x40004008
@@ -330,11 +330,11 @@ $ typl -c blink.typl --target avr-atmega328p -O2   # makes blink.elf
 $ qemu-system-avr -M uno -display none -serial stdio -bios blink.elf   # run it in QEMU
 ```
 
-- There is no runtime, so a program that uses the runtime is a **compile error**. The error says what is needed and through which functions it is reached. What can be used: arithmetic on fixed-width integers (`i8` to `u32`), `int`, `f32`, `f64`, `bool` and `char`, function calls (recursive ones too), conditionals, loops, `defvar` and `defconstant` holding those values, `volatile-read-u8` and the like, and calls of C functions.
+- There is no runtime, so a program that uses the runtime is a **compile error**. The error says what is needed and through which functions it is reached. What can be used: arithmetic on fixed-width integers (`i8` to `u32`), `f32`, `f64`, `bool` and `char`, function calls (recursive ones too), conditionals, loops, `defvar` and `defconstant` holding those values, `volatile-read-u8` and the like, and calls of C functions.
 - What cannot be used: values that live in the heap, such as strings, lists and structs; `catch`, and calls of function values; calls of C functions that take a string or a function; mathematical functions of floating-point numbers such as `sin` and `expt` (`sqrt`, and rounding such as `floor`, can be used).
 - An interrupt handler is written `#[interrupt(N)]` ([Syntax](../reference/syntax.md), section 3.17). `N` is the ATmega328P's number of the interrupt, 1 to 25 counting reset as 0 (timer 1 overflowing is 13). See the example below.
 - Dividing by 0 stops the microcontroller there (no interrupt comes any more). So does `/` of the smallest signed value by `-1`.
-- An `int` is from -16384 to 16383. When the answer of a calculation, or a value converted to `int`, is outside that range, the microcontroller stops. A floating-point number is converted to an integer by way of `int`, so that range is also what can be converted.
+- An `int` cannot be used (it is a compile error), because it has no fixed width. Use a type of a fixed width, such as `i16` or `u16`. Addresses can be calculated in integers of a fixed width too. What is worked out at compile time can be used, such as an address written as a number and an `int` of a `defconstant`.
 - When a recursion runs out of stack, the microcontroller stops.
 - Declare a C function with `defffi`, and pass an object file compiled for AVR with `--link FILE`.
 - A loop that does nothing is removed at `-O1` and above. In a loop that waits, read a register, for example.

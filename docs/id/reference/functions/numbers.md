@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/numbers.md @ 4da1b93779ddf5189b57a8cb0397636ee00f4b50 -->
+<!-- translated-from: docs/ja/reference/functions/numbers.md @ 1b5dc6ac828d8e4a95800a91218b5e9dffe83f98 -->
 # Bilangan
 
 Operasi pada bilangan bulat, bilangan floating-point, rasional, bilangan kompleks, dan boolean, serta
@@ -144,6 +144,7 @@ kesalahan saat dijalankan ("an integer argument does not fit a fixnum").
 | `log` (dua argumen) | `(log x base)` | `(f64,f64)→f64` | Logaritma dengan basis tertentu. Diekspansi menjadi `(/ (log x) (log base))` (bab 8) |
 | `floor-div` `ceiling-div` `round-div` `truncate-div` | `(op a b)` | `(f64,f64)→cons-cell<f64,f64>` | Sepadan dengan versi dua argumen pada CL (`(floor 7.0 2.0)`→hasil bagi 3, sisa 1). Rancangan yang sama seperti fungsi bernama sama pada bab 1 (`car`=hasil bagi, `cdr`=sisa) |
 | `float->int` | `(float->int x)` | `f64→int` | Mengubah menjadi `int` dengan memotong ke arah nol (`truncate` pada CL; tepat untuk nilai hingga berukuran berapa pun). Panic pada tak hingga dan NaN. Untuk lebar tetap, gunakan `(as i32 x)` |
+| `float->i8` `float->i16` `float->i32` `float->u8` `float->u16` `float->u32` | `(op x)` | `f64→i8` | Bit rendah dari jawaban `float->int` sebagai tipe itu (tanpa melalui `int`). Tak hingga dan NaN menyebabkan panic. Yang mendasari `(as i16 x)` |
 | `float->ratio` | `(float->ratio x)` | `f64→ratio` | Mengubah menjadi `ratio` sebagai rasional biner yang tepat (`rational` pada CL) |
 | `float->f32` `float->f64` | `(op x)` | `f64→f32` / `f64→f64` | Mengubah antarlebar floating-point. `float->f32` membulatkan ke yang terdekat, `float->f64` selalu tepat. Yang dilakukan `(as f32 x)` |
 | `try-float->f32` `try-float->f64` | `(op x)` | `f64→Option<f32>` / `→Option<f64>` | Konversi yang sama sebagai pertanyaan. `None` jika pembulatan mengubah nilai (pelebaran ke `f64` selalu `Some`). Yang dilakukan `(try-as f32 x)` |

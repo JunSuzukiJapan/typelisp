@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ 00b2198ebe05054debbc1a0d1f9ebf1a9835d7a0 -->
+<!-- translated-from: docs/ja/guide/compile.md @ 1b5dc6ac828d8e4a95800a91218b5e9dffe83f98 -->
 # 编译
 
 如果不做任何处理，typelisp 程序由解释器执行。除此之外，还有两种编译为本机代码的方法，以及一种保存环境的方法。
@@ -249,7 +249,7 @@ $ qemu-system-arm -M mps2-an505 -nographic \
   void     typelisp_host_sleep_us(uint64_t us);                           // 等待 us 微秒
   ```
 
-- 板子的寄存器（映射到内存的外设）用 `volatile-read-u8`、`volatile-read-u16`、`volatile-read-u32` 读取，用 `volatile-write-u8`、`volatile-write-u16`、`volatile-write-u32` 写入。地址以 `int` 传入，读到的值是该宽度的类型（`u8` 等）。每个都在写下它的位置恰好读写一次，编译器既不省略也不移动它。它们都只能在 `unsafe` 中使用。地址为负数或不是宽度的倍数时，在读写之前就是运行时错误。
+- 板子的寄存器（映射到内存的外设）用 `volatile-read-u8`、`volatile-read-u16`、`volatile-read-u32` 读取，用 `volatile-write-u8`、`volatile-write-u16`、`volatile-write-u32` 写入。地址以 `int` 或 `u16` 等固定宽度的整数传入，读到的值是该宽度的类型（`u8` 等）。每个都在写下它的位置恰好读写一次，编译器既不省略也不移动它。它们都只能在 `unsafe` 中使用。地址为负数或不是宽度的倍数时，在读写之前就是运行时错误。
 
   ```lisp
   ;; QEMU 的 mps2-an386 的 UART 0：数据 0x40004000，状态 0x40004004，控制 0x40004008
@@ -310,11 +310,11 @@ $ typl -c blink.typl --target avr-atmega328p -O2   # 生成 blink.elf
 $ qemu-system-avr -M uno -display none -serial stdio -bios blink.elf   # 在 QEMU 中运行
 ```
 
-- 由于没有运行时，使用运行时的程序会成为**编译错误**。错误会指出需要什么，以及经由哪些函数到达。可以使用的有：固定宽度整数（`i8` 到 `u32`）、`int`、`f32`、`f64`、`bool`、`char` 的计算，函数调用（包括递归），条件分支，循环，保存这些值的 `defvar` 和 `defconstant`，`volatile-read-u8` 等，以及 C 函数的调用。
+- 由于没有运行时，使用运行时的程序会成为**编译错误**。错误会指出需要什么，以及经由哪些函数到达。可以使用的有：固定宽度整数（`i8` 到 `u32`）、`f32`、`f64`、`bool`、`char` 的计算，函数调用（包括递归），条件分支，循环，保存这些值的 `defvar` 和 `defconstant`，`volatile-read-u8` 等，以及 C 函数的调用。
 - 不能使用的有：字符串、列表、结构体等放在堆上的值；`catch`、函数值的调用；传递字符串或函数的 C 函数的调用；`sin`、`expt` 等浮点数的数学函数（`sqrt` 和 `floor` 等取整可以使用）。
 - 中断处理函数用 `#[interrupt(N)]` 书写（[语法](../reference/syntax.md) 3.17 节）。`N` 是 ATmega328P 的中断编号，以复位为 0 计，从 1 到 25（定时器 1 溢出是 13）。请看下面的例子。
 - 除以 0 时，微控制器会当场停止（中断也不再到来）。用 `/` 将有符号的最小值除以 `-1` 也一样。
-- `int` 的范围是 -16384 到 16383。计算结果或转换为 `int` 的值超出这个范围时，微控制器会停止。浮点数转换为整数时要经过 `int`，因此能转换的也是这个范围。
+- `int` 没有固定宽度，因此不能使用（编译错误）。请使用 `i16`、`u16` 等固定宽度的类型。地址也可以用固定宽度的整数计算。写成数字的地址和 `defconstant` 的 `int` 这类在编译时就确定值的东西可以使用。
 - 递归使栈不足时，微控制器会停止。
 - C 函数用 `defffi` 声明，并用 `--link FILE` 传入为 AVR 编译的目标文件。
 - 什么都不做的循环在 `-O1` 及以上会被删除。在等待的循环中，请读取寄存器等。

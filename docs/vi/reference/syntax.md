@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 4963ba6fc48045aeec32b258cf56b8c1af7acc94 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 1b5dc6ac828d8e4a95800a91218b5e9dffe83f98 -->
 # Tham chiếu cú pháp typelisp
 
 typelisp là một ngôn ngữ Lisp có kiểu tĩnh, được viết bằng S-expression. Về danh sách các hàm và phương thức
@@ -524,7 +524,7 @@ Việc cấp phát, đọc và ghi được viết theo các dạng sau. Tất c
 | `(c-alloc T)` / `(c-alloc T n)` | Cấp phát `n` giá trị kiểu `T` (1 nếu bỏ qua). Nội dung được điền bằng 0. Trả về một `(ptr T)` |
 | `(c-ref p i)` | Một con trỏ tới phần tử `i` kể từ `p`. Lỗi nếu ngoài phạm vi đã cấp phát |
 | `(c-deref p)` / `(setf (c-deref p) v)` | Đọc / ghi giá trị vô hướng mà `p` trỏ tới |
-| `(volatile-read-u32 addr)` / `(volatile-write-u32 addr v)` | Đọc hoặc ghi thanh ghi tại địa chỉ `addr` (một `int`), đúng một lần, tại nơi viết. `-u8` và `-u16` cũng vậy |
+| `(volatile-read-u32 addr)` / `(volatile-write-u32 addr v)` | Đọc hoặc ghi thanh ghi tại địa chỉ `addr` (một `int`, hoặc số nguyên có độ rộng cố định như `u16`), đúng một lần, tại nơi viết. `-u8` và `-u16` cũng vậy |
 | `p::field` / `(setf p::field v)` | Đọc / ghi một trường của struct. Đọc một trường là struct nhúng cho địa chỉ của nó (`(ptr kiểu-bên-trong)`) |
 | `(as ptr p)` | Quên kiểu, tạo một `ptr` (để truyền cho thứ như `void *` của `qsort`). Không có chuyển đổi ngược lại |
 

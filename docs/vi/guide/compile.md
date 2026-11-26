@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ 00b2198ebe05054debbc1a0d1f9ebf1a9835d7a0 -->
+<!-- translated-from: docs/ja/guide/compile.md @ 1b5dc6ac828d8e4a95800a91218b5e9dffe83f98 -->
 # Biên dịch
 
 Nếu bạn không làm gì thêm, chương trình typelisp chạy trong trình thông dịch. Ngoài ra còn có hai
@@ -259,7 +259,7 @@ $ qemu-system-arm -M mps2-an505 -nographic \
   void     typelisp_host_sleep_us(uint64_t us);                           // chờ us micro giây
   ```
 
-- Thanh ghi của bo mạch (thiết bị ngoại vi ánh xạ vào bộ nhớ) được đọc bằng `volatile-read-u8`, `volatile-read-u16` và `volatile-read-u32`, và được ghi bằng `volatile-write-u8`, `volatile-write-u16` và `volatile-write-u32`. Địa chỉ được truyền dưới dạng `int`, và giá trị đọc được có kiểu theo độ rộng (`u8`, v.v.). Mỗi lệnh đọc hoặc ghi đúng một lần, tại nơi nó được viết; trình biên dịch không bỏ đi hay di chuyển nó. Tất cả chỉ dùng được bên trong `unsafe`. Địa chỉ âm, hoặc không phải bội số của độ rộng, là lỗi thời gian chạy trước khi đọc hay ghi bất cứ thứ gì.
+- Thanh ghi của bo mạch (thiết bị ngoại vi ánh xạ vào bộ nhớ) được đọc bằng `volatile-read-u8`, `volatile-read-u16` và `volatile-read-u32`, và được ghi bằng `volatile-write-u8`, `volatile-write-u16` và `volatile-write-u32`. Địa chỉ được truyền dưới dạng `int` hoặc số nguyên có độ rộng cố định như `u16`, và giá trị đọc được có kiểu theo độ rộng (`u8`, v.v.). Mỗi lệnh đọc hoặc ghi đúng một lần, tại nơi nó được viết; trình biên dịch không bỏ đi hay di chuyển nó. Tất cả chỉ dùng được bên trong `unsafe`. Địa chỉ âm, hoặc không phải bội số của độ rộng, là lỗi thời gian chạy trước khi đọc hay ghi bất cứ thứ gì.
 
   ```lisp
   ;; UART 0 của mps2-an386 trong QEMU: dữ liệu 0x40004000, trạng thái 0x40004004, điều khiển 0x40004008
@@ -320,11 +320,11 @@ $ typl -c blink.typl --target avr-atmega328p -O2   # tạo ra blink.elf
 $ qemu-system-avr -M uno -display none -serial stdio -bios blink.elf   # chạy trong QEMU
 ```
 
-- Không có runtime, nên chương trình dùng runtime là **lỗi biên dịch**. Lỗi cho biết cần gì và đi tới đó qua những hàm nào. Những thứ dùng được: phép tính trên số nguyên có độ rộng cố định (từ `i8` đến `u32`), `int`, `f32`, `f64`, `bool` và `char`, lời gọi hàm (kể cả đệ quy), rẽ nhánh, vòng lặp, `defvar` và `defconstant` chứa các giá trị đó, `volatile-read-u8` cùng các hàm tương tự, và lời gọi hàm C.
+- Không có runtime, nên chương trình dùng runtime là **lỗi biên dịch**. Lỗi cho biết cần gì và đi tới đó qua những hàm nào. Những thứ dùng được: phép tính trên số nguyên có độ rộng cố định (từ `i8` đến `u32`), `f32`, `f64`, `bool` và `char`, lời gọi hàm (kể cả đệ quy), rẽ nhánh, vòng lặp, `defvar` và `defconstant` chứa các giá trị đó, `volatile-read-u8` cùng các hàm tương tự, và lời gọi hàm C.
 - Những thứ không dùng được: giá trị nằm trên heap như chuỗi, danh sách và struct; `catch` và lời gọi giá trị hàm; lời gọi hàm C nhận chuỗi hoặc hàm; các hàm toán học của số dấu phẩy động như `sin` và `expt` (`sqrt` và các phép làm tròn như `floor` thì dùng được).
 - Trình xử lý ngắt được viết bằng `#[interrupt(N)]` ([Cú pháp](../reference/syntax.md), mục 3.17). `N` là số hiệu ngắt của ATmega328P, từ 1 đến 25 với reset tính là 0 (tràn bộ định thời 1 là 13). Xem ví dụ bên dưới.
 - Chia cho 0 làm vi điều khiển dừng ngay tại đó (cũng không còn ngắt nào đến). Phép `/` của giá trị có dấu nhỏ nhất cho `-1` cũng vậy.
-- `int` nằm trong khoảng từ -16384 đến 16383. Khi kết quả của một phép tính, hoặc giá trị được chuyển sang `int`, nằm ngoài khoảng này thì vi điều khiển dừng. Số dấu phẩy động được chuyển sang số nguyên qua `int`, nên khoảng chuyển được cũng là khoảng này.
+- Không dùng được `int` (là lỗi biên dịch), vì nó không có độ rộng cố định. Hãy dùng kiểu có độ rộng cố định như `i16` hoặc `u16`. Địa chỉ cũng tính được bằng số nguyên có độ rộng cố định. Những thứ có giá trị được xác định khi biên dịch thì dùng được, như địa chỉ viết bằng số và `int` của `defconstant`.
 - Khi đệ quy làm hết ngăn xếp thì vi điều khiển dừng.
 - Khai báo hàm C bằng `defffi`, và truyền tệp đối tượng đã biên dịch cho AVR bằng `--link FILE`.
 - Vòng lặp không làm gì sẽ bị xóa từ `-O1` trở lên. Trong vòng lặp chờ, hãy đọc một thanh ghi chẳng hạn.

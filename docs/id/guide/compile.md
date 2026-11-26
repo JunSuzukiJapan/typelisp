@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ 00b2198ebe05054debbc1a0d1f9ebf1a9835d7a0 -->
+<!-- translated-from: docs/ja/guide/compile.md @ 1b5dc6ac828d8e4a95800a91218b5e9dffe83f98 -->
 # Kompilasi
 
 Jika Anda tidak melakukan apa-apa lagi, program typelisp berjalan di interpreter. Selain itu ada dua
@@ -265,7 +265,7 @@ $ qemu-system-arm -M mps2-an505 -nographic \
   void     typelisp_host_sleep_us(uint64_t us);                           // menunggu us mikrodetik
   ```
 
-- Register papan (periferal yang dipetakan ke memori) dibaca dengan `volatile-read-u8`, `volatile-read-u16`, dan `volatile-read-u32`, dan ditulis dengan `volatile-write-u8`, `volatile-write-u16`, dan `volatile-write-u32`. Alamat diberikan sebagai `int`, dan nilai yang dibaca bertipe sesuai lebarnya (`u8` dan seterusnya). Masing-masing membaca atau menulis tepat sekali, di tempat ia ditulis; kompiler tidak menghilangkan atau memindahkannya. Semuanya hanya dapat digunakan di dalam `unsafe`. Alamat yang negatif, atau bukan kelipatan lebarnya, adalah galat waktu jalan sebelum apa pun dibaca atau ditulis.
+- Register papan (periferal yang dipetakan ke memori) dibaca dengan `volatile-read-u8`, `volatile-read-u16`, dan `volatile-read-u32`, dan ditulis dengan `volatile-write-u8`, `volatile-write-u16`, dan `volatile-write-u32`. Alamat diberikan sebagai `int` atau bilangan bulat berlebar tetap seperti `u16`, dan nilai yang dibaca bertipe sesuai lebarnya (`u8` dan seterusnya). Masing-masing membaca atau menulis tepat sekali, di tempat ia ditulis; kompiler tidak menghilangkan atau memindahkannya. Semuanya hanya dapat digunakan di dalam `unsafe`. Alamat yang negatif, atau bukan kelipatan lebarnya, adalah galat waktu jalan sebelum apa pun dibaca atau ditulis.
 
   ```lisp
   ;; UART 0 dari mps2-an386 QEMU: data 0x40004000, status 0x40004004, kontrol 0x40004008
@@ -326,11 +326,11 @@ $ typl -c blink.typl --target avr-atmega328p -O2   # menghasilkan blink.elf
 $ qemu-system-avr -M uno -display none -serial stdio -bios blink.elf   # jalankan di QEMU
 ```
 
-- Tidak ada runtime, jadi program yang memakai runtime adalah **galat kompilasi**. Galat menyebutkan apa yang diperlukan dan melalui fungsi mana hal itu dicapai. Yang dapat dipakai: perhitungan bilangan bulat berlebar tetap (`i8` sampai `u32`), `int`, `f32`, `f64`, `bool`, dan `char`, pemanggilan fungsi (juga yang rekursif), percabangan, perulangan, `defvar` dan `defconstant` yang berisi nilai tersebut, `volatile-read-u8` dan sejenisnya, serta pemanggilan fungsi C.
+- Tidak ada runtime, jadi program yang memakai runtime adalah **galat kompilasi**. Galat menyebutkan apa yang diperlukan dan melalui fungsi mana hal itu dicapai. Yang dapat dipakai: perhitungan bilangan bulat berlebar tetap (`i8` sampai `u32`), `f32`, `f64`, `bool`, dan `char`, pemanggilan fungsi (juga yang rekursif), percabangan, perulangan, `defvar` dan `defconstant` yang berisi nilai tersebut, `volatile-read-u8` dan sejenisnya, serta pemanggilan fungsi C.
 - Yang tidak dapat dipakai: nilai yang berada di heap seperti string, list, dan struct; `catch` dan pemanggilan nilai fungsi; pemanggilan fungsi C yang menerima string atau fungsi; fungsi matematika bilangan titik mengambang seperti `sin` dan `expt` (`sqrt` dan pembulatan seperti `floor` dapat dipakai).
 - Penangan interupsi ditulis `#[interrupt(N)]` ([Sintaks](../reference/syntax.md), bagian 3.17). `N` adalah nomor interupsi ATmega328P, 1 sampai 25 dengan reset dihitung 0 (luapan timer 1 adalah 13). Lihat contoh di bawah.
 - Pembagian dengan 0 menghentikan mikrokontroler di tempat itu (interupsi pun tidak datang lagi). Begitu pula `/` dari nilai bertanda terkecil dengan `-1`.
-- `int` berkisar dari -16384 sampai 16383. Bila hasil perhitungan, atau nilai yang diubah menjadi `int`, berada di luar kisaran itu, mikrokontroler berhenti. Bilangan titik mengambang diubah menjadi bilangan bulat melalui `int`, jadi kisaran itu juga batas yang dapat diubah.
+- `int` tidak dapat dipakai (galat kompilasi), karena lebarnya tidak tetap. Pakai tipe berlebar tetap seperti `i16` atau `u16`. Alamat juga dapat dihitung dengan bilangan bulat berlebar tetap. Yang nilainya ditentukan saat kompilasi dapat dipakai, seperti alamat yang ditulis sebagai angka dan `int` pada `defconstant`.
 - Bila rekursi kehabisan stack, mikrokontroler berhenti.
 - Deklarasikan fungsi C dengan `defffi`, dan berikan berkas objek yang dikompilasi untuk AVR dengan `--link FILE`.
 - Perulangan yang tidak melakukan apa-apa dihapus pada `-O1` ke atas. Dalam perulangan yang menunggu, bacalah misalnya sebuah register.

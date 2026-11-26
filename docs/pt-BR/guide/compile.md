@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ 00b2198ebe05054debbc1a0d1f9ebf1a9835d7a0 -->
+<!-- translated-from: docs/ja/guide/compile.md @ 1b5dc6ac828d8e4a95800a91218b5e9dffe83f98 -->
 # Compilação
 
 Se você não fizer nada além disso, os programas typelisp são executados no interpretador. Além disso há duas
@@ -261,7 +261,7 @@ $ qemu-system-arm -M mps2-an505 -nographic \
   void     typelisp_host_sleep_us(uint64_t us);                           // espera us microssegundos
   ```
 
-- Os registradores de uma placa (periféricos mapeados em memória) são lidos com `volatile-read-u8`, `volatile-read-u16` e `volatile-read-u32`, e escritos com `volatile-write-u8`, `volatile-write-u16` e `volatile-write-u32`. O endereço é um `int`, e o valor lido tem o tipo da largura (`u8` etc.). Cada um lê ou escreve exatamente uma vez, onde está escrito; o compilador não o omite nem o move. Todos só podem ser usados dentro de `unsafe`. Um endereço negativo, ou que não seja múltiplo da largura, é um erro em tempo de execução antes de qualquer leitura ou escrita.
+- Os registradores de uma placa (periféricos mapeados em memória) são lidos com `volatile-read-u8`, `volatile-read-u16` e `volatile-read-u32`, e escritos com `volatile-write-u8`, `volatile-write-u16` e `volatile-write-u32`. O endereço é um `int` ou um inteiro de largura fixa como `u16`, e o valor lido tem o tipo da largura (`u8` etc.). Cada um lê ou escreve exatamente uma vez, onde está escrito; o compilador não o omite nem o move. Todos só podem ser usados dentro de `unsafe`. Um endereço negativo, ou que não seja múltiplo da largura, é um erro em tempo de execução antes de qualquer leitura ou escrita.
 
   ```lisp
   ;; UART 0 do mps2-an386 do QEMU: dados 0x40004000, estado 0x40004004, controle 0x40004008
@@ -322,11 +322,11 @@ $ typl -c blink.typl --target avr-atmega328p -O2   # cria blink.elf
 $ qemu-system-avr -M uno -display none -serial stdio -bios blink.elf   # executa no QEMU
 ```
 
-- Não há runtime, portanto um programa que o usa é um **erro de compilação**. O erro diz o que é necessário e por quais funções se chega a isso. Podem ser usados: cálculos com inteiros de largura fixa (de `i8` a `u32`), `int`, `f32`, `f64`, `bool` e `char`, chamadas de função (também recursivas), condicionais, laços, `defvar` e `defconstant` com esses valores, `volatile-read-u8` e similares, e chamadas de funções C.
+- Não há runtime, portanto um programa que o usa é um **erro de compilação**. O erro diz o que é necessário e por quais funções se chega a isso. Podem ser usados: cálculos com inteiros de largura fixa (de `i8` a `u32`), `f32`, `f64`, `bool` e `char`, chamadas de função (também recursivas), condicionais, laços, `defvar` e `defconstant` com esses valores, `volatile-read-u8` e similares, e chamadas de funções C.
 - Não podem ser usados: valores que ficam no heap, como strings, listas e estruturas; `catch` e chamadas de valores de função; chamadas de funções C que recebem uma string ou uma função; funções matemáticas de ponto flutuante como `sin` e `expt` (`sqrt` e arredondamentos como `floor` podem ser usados).
 - Um tratador de interrupção se escreve `#[interrupt(N)]` ([Sintaxe](../reference/syntax.md), seção 3.17). `N` é o número da interrupção do ATmega328P, de 1 a 25 contando o reset como 0 (o estouro do timer 1 é 13). Veja o exemplo abaixo.
 - Dividir por 0 para o microcontrolador naquele ponto (também não chegam mais interrupções). O mesmo vale para `/` do menor valor com sinal por `-1`.
-- Um `int` vai de -16384 a 16383. Se o resultado de um cálculo, ou um valor convertido para `int`, ficar fora desse intervalo, o microcontrolador para. Um número de ponto flutuante é convertido para inteiro passando por `int`, portanto esse intervalo também é o que pode ser convertido.
+- Não é possível usar `int` (é um erro de compilação), porque ele não tem largura fixa. Use um tipo de largura fixa, como `i16` ou `u16`. Endereços também podem ser calculados com inteiros de largura fixa. O que é determinado na compilação pode ser usado, como um endereço escrito como número e um `int` de um `defconstant`.
 - Se uma recursão esgotar a pilha, o microcontrolador para.
 - Declare uma função C com `defffi` e passe o arquivo objeto compilado para AVR com `--link FILE`.
 - Um laço que não faz nada é removido em `-O1` ou acima. Em um laço de espera, leia um registrador, por exemplo.

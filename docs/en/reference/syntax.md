@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 4963ba6fc48045aeec32b258cf56b8c1af7acc94 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 1b5dc6ac828d8e4a95800a91218b5e9dffe83f98 -->
 # typelisp Syntax Reference
 
 typelisp is a statically typed Lisp, written in S-expressions. For the list of built-in functions and
@@ -541,7 +541,7 @@ Allocation, reading and writing are written in the following forms. All of them 
 | `(c-alloc T)` / `(c-alloc T n)` | Allocates `n` values of `T` (1 if omitted). The contents are filled with 0. Returns a `(ptr T)` |
 | `(c-ref p i)` | A pointer to element `i` from `p`. An error if outside the allocated range |
 | `(c-deref p)` / `(setf (c-deref p) v)` | Reads / writes the scalar `p` points to |
-| `(volatile-read-u32 addr)` / `(volatile-write-u32 addr v)` | Read or write the register at address `addr` (an `int`), exactly once, where written. The same for `-u8` and `-u16` |
+| `(volatile-read-u32 addr)` / `(volatile-write-u32 addr v)` | Read or write the register at address `addr` (an `int`, or an integer of a fixed width such as `u16`), exactly once, where written. The same for `-u8` and `-u16` |
 | `p::field` / `(setf p::field v)` | Reads / writes a field of a struct. Reading a field that is an embedded struct gives its address (`(ptr inner-type)`) |
 | `(as ptr p)` | Forgets the type, making a `ptr` (to pass to something like the `void *` of `qsort`). There is no conversion back |
 
