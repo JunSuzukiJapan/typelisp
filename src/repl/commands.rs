@@ -122,7 +122,7 @@ pub fn help_text() -> String {
         }
         out.push('\n');
     }
-    out.push_str("Anything else is read as forms and evaluated.\n");
+    out.push_str("Anything else is read as forms and evaluated. In them :*, :** and :*** are the last three values.\n");
     out
 }
 

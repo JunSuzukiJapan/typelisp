@@ -657,6 +657,20 @@ impl Interp {
     /// right after construction; contexts that never run user `eval` (AOT
     /// compilation, the compiler-island bootstrap, most tests) skip it and
     /// leave the handle `None`. See the `checker` field's doc comment.
+    /// Binds the global `path`, which the checker has defined, to `v`: the
+    /// runtime half of a `defvar` whose value is already in hand.
+    pub fn define_global_value(&self, heap: &mut Heap, path: &Path, v: Value) {
+        heap.push_root(v);
+        let slot = self.slot(heap, v);
+        heap.pop_root();
+        self.root.borrow_mut().insert_global(path, slot);
+    }
+
+    /// Removes the global `path`, whose definition the checker removed.
+    pub fn forget_global(&self, path: &Path) {
+        self.root.borrow_mut().remove_global(path);
+    }
+
     /// The calls that were open when the last drive's main task failed,
     /// innermost first, leaving none behind. Empty after a drive that did
     /// not fail, or one whose failure left from no call.

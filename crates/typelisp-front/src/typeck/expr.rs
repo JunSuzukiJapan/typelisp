@@ -504,6 +504,14 @@ fn check_form(cx: &Cx, heap: &mut Heap, locals: &Locals, v: Value, expected: Opt
             return Ok(Typed { node: Node::Number { value: v }, ty: cx.number_hole(kind), loc });
         }
     }
+    // At the REPL `:*` and its two siblings read the last three results;
+    // anywhere else, and quoted, they are keywords like any other.
+    if let Value::Symbol(id) = v {
+        if let Some(result) = cx.reg.prompt_result(id) {
+            let (path, ty) = result?;
+            return Ok(Typed { node: Node::Global { path }, ty, loc });
+        }
+    }
     if let Some(lit) = literal(heap, v, solved.as_ref())? {
         if let Some(value) = lit.value {
             heap.push_root(value);

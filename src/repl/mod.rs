@@ -63,6 +63,9 @@ struct Session<'a> {
     /// Each form typed at the prompt, where it was read and its text: what
     /// `:src` prints for a definition typed here, which has no file.
     typed: Vec<(Loc, String)>,
+    /// The globals holding the last three values echoed, the newest first:
+    /// what `:*`, `:**` and `:***` read.
+    results: Vec<Path>,
 }
 
 /// Runs the REPL over an environment the caller has loaded (the prelude, or
@@ -87,9 +90,12 @@ pub fn run(heap: &mut Heap, reader: &Reader, checker: Checker, interp: &mut Inte
     // it: the modules already loaded were found from there.
     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
     let src_root = find_src_root(&cwd).unwrap_or(cwd);
-    let mut session = Session { heap, reader, checker, interp, loader: Loader::new(src_root), backtrace: Vec::new(), typed: Vec::new() };
+    let mut session = Session { heap, reader, checker, interp, loader: Loader::new(src_root), backtrace: Vec::new(), typed: Vec::new(), results: Vec::new() };
     interrupt::install();
     session.start(&startup);
+    // From here `:*` and its siblings are the REPL's. The startup files are
+    // files, where they are keywords like any other.
+    session.checker.borrow_mut().set_prompt_results(&[]);
     session.read_loop()
 }
 
@@ -332,8 +338,9 @@ impl Session<'_> {
         let mut found: Vec<(String, &'static str)> = Vec::new();
         for d in self.checker.borrow().definitions() {
             let path = d.path.to_string();
-            // The library's own helpers are not the program's to use.
-            if path.contains("%internal") {
+            // The library's own helpers, and the REPL's, are not the
+            // program's to use.
+            if path.contains('%') {
                 continue;
             }
             if hit(d.path.name_symbol().name()) {
@@ -433,7 +440,7 @@ impl Session<'_> {
         // last failure's calls are not this text's.
         typelisp_abi::interrupt::clear();
         self.backtrace.clear();
-        let Session { heap, reader, checker, interp, loader, backtrace, typed } = self;
+        let Session { heap, reader, checker, interp, loader, backtrace, typed, results } = self;
         let mark = heap.root_count();
         let mut forms = reader.forms_within(file, text, checker.borrow().current_module());
         // Where the reader stopped after the last *completed* form, in
@@ -499,6 +506,9 @@ impl Session<'_> {
                     break;
                 }
             };
+            // Read now: running the form may check others (`eval`), and the
+            // checker keeps only the last one's type.
+            let ty = checker.borrow().expr_type().cloned();
             // An `(in-module ...)` moves the session, and the next form is read
             // where it moved to.
             forms.set_module(checker.borrow().current_module());
@@ -517,12 +527,14 @@ impl Session<'_> {
                     Ok(Some(v)) if echo => {
                         // The form's checked type decides how a niched `Option`
                         // prints — the word alone cannot say it is one.
+                        let ty = ty.expect("an expression's value has the type it was checked to have");
                         let repr = {
                             let chk = checker.borrow();
-                            chk.expr_type().map(|ty| check::repr::Repr::of_by(ty, &|p| chk.type_kind(p)))
+                            check::repr::Repr::of_by(&ty, &|p| chk.type_kind(p))
                         };
                         heap.push_root(v);
-                        let rendered = interp.render_readably(heap, v, repr.as_ref());
+                        let rendered = interp.render_readably(heap, v, Some(&repr));
+                        remember_result(heap, &mut checker.borrow_mut(), interp, results, v, ty);
                         heap.pop_root();
                         match rendered {
                             // The REPL's other half of `dribble`: the value
@@ -624,6 +636,22 @@ impl Session<'_> {
             None => {}
         }
     }
+}
+
+/// Makes `v`, of type `ty`, the newest of the results `:*` and its siblings
+/// read. The one that falls out of the three is removed, unless a form read
+/// it: a definition may still.
+fn remember_result(heap: &mut Heap, checker: &mut Checker, interp: &Interp, results: &mut Vec<Path>, v: Value, ty: Type) {
+    let path = checker.define_prompt_result(ty);
+    interp.define_global_value(heap, &path, v);
+    results.insert(0, path);
+    if results.len() > 3 {
+        let old = results.pop().expect("there are four");
+        if checker.forget_prompt_result(&old) {
+            interp.forget_global(&old);
+        }
+    }
+    checker.set_prompt_results(results);
 }
 
 /// The text of `src` that `at` spans, from its start to its end.

@@ -122,6 +122,13 @@ impl ModuleScope {
         self.module_mut(path.ns()).globals.insert(path.name_symbol(), slot);
     }
 
+    /// Removes the global at `path`.
+    pub(crate) fn remove_global(&mut self, path: &Path) {
+        if let Some(m) = self.modules.get_mut(&path.ns()) {
+            m.globals.remove(&path.name_symbol());
+        }
+    }
+
     /// Registers the type at `path`.
     pub(crate) fn insert_type(&mut self, path: &Path, entry: TypeEntry) {
         self.module_mut(path.ns()).types.insert(path.name_symbol(), entry);
