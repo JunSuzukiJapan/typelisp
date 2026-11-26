@@ -475,11 +475,19 @@ fn needs_runtime_header(target: super::Target) -> String {
     format!("--target {}: the target has no runtime, and the program needs it:", target.name())
 }
 
+/// The runtime functions of an `int`'s operations, by what their names start
+/// with.
+const INT_FUNCTIONS: [&str; 8] =
+    ["rt_integer_", "rt_int_not_fixnum", "rt_bignum_", "rt_largest_fixnum", "rt_float_to_int", "rt_float_to_ratio", "rt_c_address", "rt_rational_"];
+
 /// Refuses a program whose `entry` reaches a runtime function.
 pub(super) fn check_reaches_no_runtime(module: &Module<'static>, target: super::Target, entry: FunctionValue<'static>) -> Result<(), String> {
     let uses = reach::uses(module, entry, |name| {
         match crate::compile::externs::BOARD_ONLY_SHIMS.iter().find(|(shim, _)| *shim == name) {
             Some((_, what)) => Some(format!("{}, which is for an interrupt controller the chip has not: the device's own register enables its interrupt", what)),
+            None if INT_FUNCTIONS.iter().any(|f| name.starts_with(f)) => {
+                Some("an `int`, which has no fixed width: write a type of a fixed width, such as `i16`".to_string())
+            }
             None if super::is_runtime(module, name) => Some(format!("the runtime function `{}`", name)),
             // LLVM's own, which it calls the C library for.
             None => ["sin", "cos", "exp", "log", "pow"]

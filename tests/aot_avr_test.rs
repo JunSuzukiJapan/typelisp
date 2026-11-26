@@ -582,7 +582,7 @@ fn a_program_that_needs_the_runtime_is_refused() {
     for (name, source, why) in [
         ("string", r#"(defun main () () (println "hi"))"#, "the runtime function `rt_str_new` (reached by prog::main)"),
         ("variable", "(defvar (s string) \"a\")\n(defun main () ())", "the runtime function `rt_str_new` (reached by $global_init$"),
-        ("bignum", "(defun main () int 100000)", "the runtime function `rt_bignum_new` (reached by prog::main)"),
+        ("int", "(defun main () int 100000)", "an `int`, which has no fixed width: write a type of a fixed width, such as `i16` (reached by prog::main)"),
         (
             "c_string",
             "(defffi c-go (string) ())\n(defun main () () (unsafe (c-go \"a\")))",
@@ -615,53 +615,31 @@ fn the_runtime_s_flags_are_refused() {
     }
 }
 
-/// `int` is the fixnums, whose operations past one stop the program.
+/// An `int` has no fixed width, and no value of one can be made at run time:
+/// the constants it is written in are worked out at compile time.
 #[test]
-fn int_is_what_a_word_holds() {
+fn int_is_refused() {
+    let why = "an `int`, which has no fixed width: write a type of a fixed width, such as `i16`";
+    for (name, source, reached) in [
+        ("sum", "(defvar (k i16) 3)\n(defun main () () (setf k (as i16 (+ (as int k) 1))) ())", "(reached by prog::main)"),
+        ("loop", "(defun main () () (dotimes (q 10) (unsafe (volatile-write-u8 #x200 1))) ())", "(reached by prog::main)"),
+        ("address", "(defvar (k i16) 3)\n(defun main () () (unsafe (volatile-write-u8 (+ 512 (as int k)) 1)) ())", "(reached by prog::main)"),
+    ] {
+        let err = refused(&format!("avr_int_{}", name), source);
+        assert!(err.contains(&format!("{} {}", why, reached)), "{}: {}", name, err);
+    }
+    let err = refused("avr_int_global", "(defvar (n int) 3)\n(defun main () () (setf n 4) ())");
+    assert!(err.contains("the global variable `prog::n`, an `int`, which has no fixed width"), "{}", err);
     let source = r#"
-(defvar (n int) 1000)
-(defvar (m int) -7)
-(defvar (i u8) 3)
-(defvar (j u16) 500)
-(defvar (k i32) -20000)
-(defvar (s8 i8) -7)
-(defvar (s16 i16) -300)
-(defun say ((ok bool)) () (put (if ok 89 78)))
+(defconstant (BASE int) #x200)
+(defconstant (TWICE int) (* BASE 2))
 (defun main () ()
   (start)
-  (say (= (+ n m) 993)) (say (= (- m n) -1007)) (say (= (* n m) -7000))
-  (say (= (truncate n m) -142)) (say (= (rem n m) 6)) (say (= (mod n m) -1)) (say (= (mod m n) 993))
-  (say (= (floor m 2) -4)) (say (= (abs m) 7)) (say (= (max n m) n))
-  (say (< m n)) (say (not (> m n))) (say (<= n 1000)) (say (/= n m))
-  (say (= (logand n 255) 232)) (say (= (logior m 1) -7)) (say (= (logxor n m) -1007)) (say (= (lognot m) 6))
-  (say (= (ash n 4) 16000)) (say (= (ash n -3) 125)) (say (= (ash m -100) -1)) (say (= (ash 0 100) 0))
-  (say (= (logcount n) 6)) (say (= (logcount m) 2)) (say (= (integer-length n) 10)) (say (= (integer-length m) 3))
-  (say (logbitp n 3)) (say (logbitp m 100)) (say (not (logbitp n 100)))
-  (say (= (as int s8) -7)) (say (= (as int s16) -300)) (say (= (ash k -31) -1)) (say (= (as i32 s8) -7))
-  (say (= (as int i) 3)) (say (= (as int j) n::j-half))
-  (say (= (as u8 n) 232)) (say (= (as i8 m) -7)) (say (= (as u16 m) 65529)) (say (= (as i32 m) -7))
-  (let ((sum 0)) (dotimes (q 100) (setf sum (+ sum q))) (say (= sum 4950)))
-  (put 46))
-"#
-    .replace("n::j-half", "(truncate n 2)");
-    let out = written("avr_int", &source);
-    assert!(!out.contains('N') && out.len() > 30, "{}", out);
-    for (name, stops) in [
-        ("add", "(setf n (+ n 16000))"),
-        ("sub", "(setf n (- -16000 n))"),
-        ("mul", "(setf n (* n n))"),
-        ("zero", "(setf n (truncate n (- n n)))"),
-        ("wide", "(setf n (as int k))"),
-        ("shift", "(setf n (ash n 5))"),
-        ("address", "(unsafe (volatile-write-u8 m 1))"),
-        ("aligned", "(unsafe (volatile-write-u16 (+ n 1) 1))"),
-    ] {
-        let source = format!(
-            "(defvar (n int) 1000)(defvar (m int) -7)(defvar (k i32) -20000)\n(defun main () () (start) (put 97) (put 46) {} (put 98) (put 46))",
-            stops
-        );
-        assert_stops(&format!("avr_int_{}", name), &source, "a.");
-    }
+  (unsafe (volatile-write-u8 BASE 89) (volatile-write-u8 (+ BASE 1) 46))
+  (put (unsafe (volatile-read-u8 #x200)))
+  (put (if (= TWICE 1024) (unsafe (volatile-read-u8 (+ BASE 1))) 78)))
+"#;
+    assert_eq!(written("avr_int_constants", source), "Y.");
 }
 
 /// A recursion goes as deep as the stack, and past it the program stops.
@@ -698,8 +676,8 @@ fn a_function_calls_itself() {
 #[test]
 fn an_address_is_computed() {
     let source = r#"
-(defvar (base int) 512)
-(defun at ((i u8)) int (+ base (as int i)))
+(defvar (base u16) 512)
+(defun at ((i u8)) u16 (+ base (as u16 i)))
 (defun main () ()
   (start)
   (let ((i (the u8 0)))
@@ -711,7 +689,7 @@ fn an_address_is_computed() {
       (put (unsafe (volatile-read-u8 (at i))))
       (setf i (+ i 1))))
   (unsafe (volatile-write-u16 (+ base 2) 16961) (volatile-write-u32 (+ base 4) 1145258561))
-  (dotimes (k 6) (put (unsafe (volatile-read-u8 (+ base 2 k)))))
+  (let ((k (the u16 0))) (while (< k (the u16 6)) (put (unsafe (volatile-read-u8 (+ base 2 k)))) (setf k (+ k 1))))
   (put (if (= (unsafe (volatile-read-u16 (+ base 2))) 16961) 89 78))
   (put (if (= (unsafe (volatile-read-u32 (+ base 4))) 1145258561) 89 78))
   (put 46))
@@ -818,7 +796,7 @@ fn a_c_function_is_called() {
 (defvar (small i8) 100)
 (defvar (yes bool) true)
 (defvar (half f32) 0.5)
-(defvar (n int) 3000)
+(defvar (n i16) 3000)
 (defun say ((ok bool)) () (put (if ok 89 78)))
 (defun main () ()
   (start)
@@ -827,7 +805,7 @@ fn a_c_function_is_called() {
     (say (= (negated small) -100))
     (say (not (c-not yes)))
     (say (c-not (c-not yes)))
-    (say (= (as int (c-twice (as c-long n))) 6000))
+    (say (= (as i32 (c-twice (as c-long n))) 6000))
     (say (= (negated (negated small)) small))
     (setf half (c-minus half))
     (say (= half -0.5))
@@ -851,7 +829,7 @@ fn floating_point_numbers_are_calculated_with() {
 (defvar (y f64) 2.5)
 (defvar (i i16) -300)
 (defvar (u u32) 4000000000)
-(defvar (n int) 50)
+(defvar (n i16) 50)
 (defvar (b u8) 200)
 (defun say ((ok bool)) () (put (if ok 89 78)))
 (defun main () ()
@@ -862,7 +840,7 @@ fn floating_point_numbers_are_calculated_with() {
   (say (< x 2.0)) (say (<= x 1.5)) (say (> x 1.0)) (say (>= x 1.5)) (say (not (< x 1.5))) (say (not (= x 1.0)))
   (say (< y 3.0)) (say (> y -3.0)) (say (not (> y 2.5))) (say (>= y 2.5))
   (say (= (as f32 i) -300.0)) (say (= (as f64 u) 4000000000.0)) (say (= (as f32 b) 200.0)) (say (= (as f64 n) 50.0))
-  (say (= (as i16 (* x 100.0)) 150)) (say (= (as u8 (* y 10.0)) 25)) (say (= (as int (- 0.0 y)) -2))
+  (say (= (as i16 (* x 100.0)) 150)) (say (= (as u8 (* y 10.0)) 25)) (say (= (as i16 (- 0.0 y)) -2)) (say (= (as u16 (* y 40000.0)) 34464)) (say (= (as i8 (* x -87.0)) 126)) (say (= (as u32 (- x 2.5)) 4294967295))
   (say (= (as f64 x) 1.5)) (say (= (as f32 y) 2.5))
   (say (= (sqrt (* y 6.4)) 4.0)) (say (= (sqrt (* x 1.5)) x))
   (say (= (max x 2.0) 2.0)) (say (= (min y 2.0) 2.0)) (say (= (abs (- 0.0 y)) y))
@@ -874,5 +852,5 @@ fn floating_point_numbers_are_calculated_with() {
 "#;
     let out = written("avr_float", source);
     assert!(!out.contains('N') && out.len() > 30, "{}", out);
-    assert_stops("avr_float_wide", "(defvar (x f32) 20000.0)(defvar (i i16) 0)\n(defun main () () (start) (put 97) (setf i (as i16 x)) (put 98))", "a");
+    assert_stops("avr_float_infinite", "(defvar (x f32) 0.0)(defvar (i i16) 0)\n(defun main () () (start) (put 97) (setf i (as i16 (/ x x))) (put 98))", "a");
 }

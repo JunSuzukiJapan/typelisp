@@ -65,6 +65,11 @@ pub(crate) fn check_as(
         boxed.loc = loc;
         return Ok(boxed);
     }
+    // A float to a fixed width, with no `int` on the way.
+    if from.is_float() && target.is_int_family() && target != Type::Int && !try_variant {
+        let width = target.scalar_name().expect("a fixed width is a scalar");
+        return call_conversion(cx, heap, locals, src, &format!("float->{}", width), loc);
+    }
     let Some((panic_method, try_method)) = as_conversion(&from, &target) else {
         return Err(Error::TypeError(format!(
             "{}: no conversion from `{}` to `{}` (as/try-as cover only the numeric/char catalog: int/f64/bignum/ratio/char)",
@@ -78,13 +83,17 @@ pub(crate) fn check_as(
     if try_variant && try_method.is_some() {
         return Ok(called);
     }
-    let called = if target != called_width(&target) { width_cast(cx, heap, locals, called, &target, false, loc.clone())? } else { called };
-    Ok(wrapped(called, try_variant, loc))
+    if target == called_width(&target) {
+        return Ok(wrapped(called, try_variant, loc));
+    }
+    // `try-int->W` answers whether the width keeps the value, and is an
+    // `Option` itself.
+    width_cast(cx, heap, locals, called, &target, try_variant, loc)
 }
 
 /// `src` converted to `target`, of the same integer or float family as it:
 /// `int->W` or `float->W`, or the `try-` one asking whether nothing was lost.
-fn width_cast(cx: &Cx, heap: &mut Heap, locals: &Locals, src: Typed, target: &Type, try_variant: bool, loc: Option<Loc>) -> Result<Typed, Error> {
+pub(crate) fn width_cast(cx: &Cx, heap: &mut Heap, locals: &Locals, src: Typed, target: &Type, try_variant: bool, loc: Option<Loc>) -> Result<Typed, Error> {
     let family = if target.is_int_family() || target.is_c_word() { "int" } else { "float" };
     let width = target.scalar_name().expect("a width cast's target is a scalar");
     let name = if try_variant { format!("try-{}->{}", family, width) } else { format!("{}->{}", family, width) };

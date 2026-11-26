@@ -156,6 +156,30 @@ pub unsafe extern "C-unwind" fn rt_float_to_int(f: f64) -> Word {
     }
 }
 
+/// `float->i8` and the other fixed widths for compiled code: the low 64 bits
+/// of the integer `f` truncates to, which the caller cuts to the width. A
+/// non-finite float raises as [`rt_float_to_int`] does.
+///
+/// # Safety
+///
+/// A `Heap` must be registered on this thread, for the raise.
+#[no_mangle]
+pub unsafe extern "C-unwind" fn rt_float_to_bits(f: f64) -> u64 {
+    if !f.is_finite() {
+        return raise(format!("float->int: {} is not finite", f)).into_zero();
+    }
+    let bits = f.to_bits();
+    let exponent = ((bits >> 52) & 0x7ff) as i32 - 1075;
+    let significand = if bits >> 52 & 0x7ff == 0 { bits & ((1 << 52) - 1) } else { bits & ((1 << 52) - 1) | 1 << 52 };
+    let magnitude = match exponent {
+        e if e <= -53 => 0,
+        e if e < 0 => significand >> -e,
+        e if e < 64 => significand << e,
+        _ => 0,
+    };
+    if f < 0.0 { magnitude.wrapping_neg() } else { magnitude }
+}
+
 /// `float->ratio` for compiled code — widening and exact: every finite
 /// `f64` is itself an exact dyadic rational (`BigRational::from_float`, CL's
 /// `rational` rather than the lossy-round-trip `rationalize`). Fatal on a

@@ -1,11 +1,11 @@
-# ABI バージョン 0.3.88
+# ABI バージョン 0.3.89
 
 `scripts/regen-abi-version.sh` が生成した文書。手で編集しない。
 
-コンパイラが生成するコードが、ABI バージョン 0.3.88 のランタイムライブラリについて仮定していることの一覧。
+コンパイラが生成するコードが、ABI バージョン 0.3.89 のランタイムライブラリについて仮定していることの一覧。
 ここに書かれていない前提(シムが引数をどう扱うか、生成コードがヒープを直接読む箇所など)は含まない。
 
-内容ハッシュ (FNV-1a 64): `2f7626173c942227`
+内容ハッシュ (FNV-1a 64): `46bea35c07b76cf3`
 
 ## 呼び出し規約 (typelisp_abi)
 
@@ -824,6 +824,12 @@
 | 700 | `size-of` |
 | 701 | `size-of-val` |
 | 702 | `entry-safepoint` |
+| 703 | `float->i8` |
+| 704 | `float->i16` |
+| 705 | `float->i32` |
+| 706 | `float->u8` |
+| 707 | `float->u16` |
+| 708 | `float->u32` |
 
 ## 組み込み型 (typelisp_mem::BUILTIN_TYPES)
 
@@ -1126,6 +1132,7 @@
 | `rt_file_owner_name` | `word (word)` |
 | `rt_file_rename` | `word (word, word)` |
 | `rt_file_truename` | `word (word)` |
+| `rt_float_to_bits` | `u64 (double)` |
 | `rt_float_to_int` | `word (double)` |
 | `rt_float_to_ratio` | `word (double)` |
 | `rt_fmt_as_list` | `word (ptr, u32)` |
@@ -1704,8 +1711,14 @@
 - インスタンス `expt`: `(f32, f32) -> f32`
 - インスタンス `float->f32`: `(f32) -> f32`
 - インスタンス `float->f64`: `(f32) -> f64`
+- インスタンス `float->i16`: `(f32) -> i16`
+- インスタンス `float->i32`: `(f32) -> i32`
+- インスタンス `float->i8`: `(f32) -> i8`
 - インスタンス `float->int`: `(f32) -> int`
 - インスタンス `float->ratio`: `(f32) -> ratio`
+- インスタンス `float->u16`: `(f32) -> u16`
+- インスタンス `float->u32`: `(f32) -> u32`
+- インスタンス `float->u8`: `(f32) -> u8`
 - インスタンス `floor`: `(f32) -> f32`
 - インスタンス `log`: `(f32) -> f32`
 - インスタンス `max`: `(f32, f32) -> f32`
@@ -1749,8 +1762,14 @@
 - インスタンス `expt`: `(f64, f64) -> f64`
 - インスタンス `float->f32`: `(f64) -> f32`
 - インスタンス `float->f64`: `(f64) -> f64`
+- インスタンス `float->i16`: `(f64) -> i16`
+- インスタンス `float->i32`: `(f64) -> i32`
+- インスタンス `float->i8`: `(f64) -> i8`
 - インスタンス `float->int`: `(f64) -> int`
 - インスタンス `float->ratio`: `(f64) -> ratio`
+- インスタンス `float->u16`: `(f64) -> u16`
+- インスタンス `float->u32`: `(f64) -> u32`
+- インスタンス `float->u8`: `(f64) -> u8`
 - インスタンス `floor`: `(f64) -> f64`
 - インスタンス `log`: `(f64) -> f64`
 - インスタンス `max`: `(f64, f64) -> f64`

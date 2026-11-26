@@ -1190,6 +1190,12 @@ const SOURCE_TEMPLATE: &str = r#"
     (("int->u32" "try-int->u32") (quote u32))
     ("int->c-long" (quote c-long))
     ("int->c-ulong" (quote c-ulong))
+    ("float->i8" (quote i8))
+    ("float->i16" (quote i16))
+    ("float->i32" (quote i32))
+    ("float->u8" (quote u8))
+    ("float->u16" (quote u16))
+    ("float->u32" (quote u32))
     (:else (panic (append "width-cast-target: not a width cast: " method)))))
 
 ;; A fixed-width integer's natively-compilable methods: every one of them,
@@ -1333,6 +1339,7 @@ const SOURCE_TEMPLATE: &str = r#"
       "float->int" "float->ratio" "<" "<=" ">" ">=" "=" "/="
       "eq" "eql" "equal" "equalp") true)
     (("float->f32" "float->f64") true)
+    (("float->i8" "float->i16" "float->i32" "float->u8" "float->u16" "float->u32") true)
     (("try-float->f32" "try-float->f64") true)
     (("max" "min") true)
     (("sin" "cos" "tan" "asin" "acos" "atan" "sinh" "cosh" "tanh" "asinh"
@@ -2480,6 +2487,10 @@ const SOURCE_TEMPLATE: &str = r#"
               (call-1 builder m "rt_float_to_int" a))
              ("float->ratio"
               (call-1 builder m "rt_float_to_ratio" a))
+             ;; The low bits of the integer, 64 of them, cut to the width.
+             (("float->i8" "float->i16" "float->i32" "float->u8" "float->u16" "float->u32")
+              (coerce builder (int-wsig m (width-cast-target method))
+                      (call-1 builder m "rt_float_to_bits" a)))
              ;; No LLVM intrinsic in the pinned version: the runtime's, one
              ;; per width (`rt_f32_tan`, `rt_f64_tan`).
              (("tan" "asin" "acos" "atan" "sinh" "cosh" "tanh" "asinh" "acosh" "atanh")

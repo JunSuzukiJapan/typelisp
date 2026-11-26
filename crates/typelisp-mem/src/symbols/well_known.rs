@@ -1033,4 +1033,12 @@ well_known_symbols! {
     "Appended 2026-11-25. Where compiled code may collect on its way into a
      function."
     M_ENTRY_SAFEPOINT => "entry-safepoint"
+    "Appended 2026-11-26. A float converted to an integer of a fixed width,
+     with no `int` on the way."
+    M_FLOAT_TO_I8 => "float->i8"
+    M_FLOAT_TO_I16 => "float->i16"
+    M_FLOAT_TO_I32 => "float->i32"
+    M_FLOAT_TO_U8 => "float->u8"
+    M_FLOAT_TO_U16 => "float->u16"
+    M_FLOAT_TO_U32 => "float->u32"
 }

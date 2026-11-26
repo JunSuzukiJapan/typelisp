@@ -719,6 +719,13 @@ pub fn compile_file_with(source_path: &str, output_path: &str, options: &BuildOp
         whys.extend(
             defvar_inits.iter().enumerate().filter(|(i, _)| !statics.contains_key(i)).map(|(_, (path, _))| format!("the global variable `{}`", path)),
         );
+        // A `defconstant`'s value is worked out at compile time.
+        whys.extend(
+            defvar_inits
+                .iter()
+                .filter(|(path, _)| chk.var_type(path).is_some_and(|(ty, assigned)| assigned && ty == crate::Type::Int))
+                .map(|(path, _)| format!("the global variable `{}`, an `int`, which has no fixed width: write a type of a fixed width, such as `i16`", path)),
+        );
         whys.extend(chk.ffi_callbacks().iter().map(|sig| format!("`{}`, given to C as a callback", sig.function)));
         if !whys.is_empty() {
             return Err(avr::needs_runtime(options.target, &whys));

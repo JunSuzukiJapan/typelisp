@@ -3,7 +3,7 @@
 
 use crate::{wk, Heap, Path, SymRef, TypeId, Value};
 use crate::eval::value::EvalError;
-use super::{backend, bool_eq, char_compare, char_eq, char_eqp, char_lt, char_to_int, eval_float_builtin, eval_get_internal_real_time, eval_get_universal_time, eval_fixed_builtin, eval_integer_builtin, eval_llvm_builtin_method, eval_make_random_state_fresh, eval_parse_float, eval_random_state_copy, eval_random_state_next, eval_ratio_builtin, eval_rational_builtin, eval_seed_random_state, expect_char, expect_int, expect_str, expect_struct_box, float_to_int, float_to_ratio, float_to_width, hashtable_bucket_count, hashtable_bucket_delete, hashtable_bucket_key, hashtable_bucket_put, hashtable_bucket_value, hashtable_clear, hashtable_count, hashtable_entries, hashtable_keys, hashtable_values, int_pair, integer_conversion, integer_to_width, integer_unary, ratio_denominator, ratio_numerator, ratio_to_float, ratio_to_int, rational_unary, rt_f64, rt_i64, rt_str, scope_clone_frames_heap, scope_get_heap, scope_pop_frame_heap, scope_push_frame_heap, scope_set_heap, sexpr_eq, sexpr_eql, sexpr_equal, sexpr_equalp, str_rt, string_append, string_compare, string_content_eq, string_content_eqp, string_identity_eq, string_length, string_lt, string_ref, string_substring, try_float_to_f32, vector_get, vector_len, vector_pop, vector_push, vector_set, width_cast_target, Interp};
+use super::{backend, bool_eq, char_compare, char_eq, char_eqp, char_lt, char_to_int, eval_float_builtin, eval_get_internal_real_time, eval_get_universal_time, eval_fixed_builtin, eval_integer_builtin, eval_llvm_builtin_method, eval_make_random_state_fresh, eval_parse_float, eval_random_state_copy, eval_random_state_next, eval_ratio_builtin, eval_rational_builtin, eval_seed_random_state, expect_char, expect_int, expect_str, expect_struct_box, float_to_fixed, float_to_int, float_to_ratio, float_to_width, hashtable_bucket_count, hashtable_bucket_delete, hashtable_bucket_key, hashtable_bucket_put, hashtable_bucket_value, hashtable_clear, hashtable_count, hashtable_entries, hashtable_keys, hashtable_values, int_pair, integer_conversion, integer_to_width, integer_unary, ratio_denominator, ratio_numerator, ratio_to_float, ratio_to_int, rational_unary, rt_f64, rt_i64, rt_str, scope_clone_frames_heap, scope_get_heap, scope_pop_frame_heap, scope_push_frame_heap, scope_set_heap, sexpr_eq, sexpr_eql, sexpr_equal, sexpr_equalp, str_rt, string_append, string_compare, string_content_eq, string_content_eqp, string_identity_eq, string_length, string_lt, string_ref, string_substring, try_float_to_f32, vector_get, vector_len, vector_pop, vector_push, vector_set, width_cast_target, Interp};
 
 impl Interp {
     /// Evaluate a built-in operator. Returns `None` if `name` is not a
@@ -572,6 +572,9 @@ pub(crate) fn eval_builtin_method(
                 heap.alloc_option(ret_type, some)
             })),
             wk::M_FLOAT_TO_INT => Some(float_to_int(heap, args)),
+            wk::M_FLOAT_TO_I8 | wk::M_FLOAT_TO_I16 | wk::M_FLOAT_TO_I32 | wk::M_FLOAT_TO_U8 | wk::M_FLOAT_TO_U16 | wk::M_FLOAT_TO_U32 => {
+                Some(float_to_fixed(heap, method, args, ret_type))
+            }
             wk::M_FLOAT_TO_RATIO => Some(float_to_ratio(heap, args)),
             _ => eval_float_builtin(heap, method, args, single),
         };

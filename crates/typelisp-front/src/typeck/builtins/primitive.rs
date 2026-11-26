@@ -322,6 +322,11 @@ fn float(def: &mut BuiltinType, ty: Type) {
     // `truncate`); a non-finite float panics, having no integer to truncate
     // to. A fixed-width target is reached by chaining `int->W`.
     def.instance("float->int", vec![ty.clone()], Type::Int);
+    // `float->i8` and the other fixed widths: the low bits of what
+    // `float->int` answers, worked out with no `int` on the way.
+    for (name, to) in [("float->i8", Type::I8), ("float->i16", Type::I16), ("float->i32", Type::I32), ("float->u8", Type::U8), ("float->u16", Type::U16), ("float->u32", Type::U32)] {
+        def.instance(name, vec![ty.clone()], to);
+    }
     // `float->ratio`: widening and *exact* — every finite `f64` is itself an
     // exact dyadic rational (CL's `rational`, not the lossy-round-trip
     // `rationalize`), via `num_rational::BigRational::from_float`.

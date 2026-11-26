@@ -162,6 +162,7 @@ fn value_name(v: LLVMValueRef) -> String {
 /// spelled with the program's own names.
 pub(super) fn report(header: &str, uses: &[Use]) -> String {
     let mut msg = String::from(header);
+    let mut said = std::collections::HashSet::new();
     for u in uses {
         let chain: Vec<&str> = u
             .chain
@@ -171,7 +172,10 @@ pub(super) fn report(header: &str, uses: &[Use]) -> String {
             .map(|s| s.strip_suffix(super::direct::COPY_SUFFIX).unwrap_or(s))
             .map(|s| typelisp_mem::ConcreteNames::link_name_of(s).unwrap_or(s))
             .collect();
-        msg.push_str(&format!("\n  {} (reached by {})", u.what, chain.join(" -> ")));
+        let line = format!("\n  {} (reached by {})", u.what, chain.join(" -> "));
+        if said.insert(line.clone()) {
+            msg.push_str(&line);
+        }
     }
     msg
 }

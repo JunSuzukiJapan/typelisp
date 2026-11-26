@@ -765,6 +765,7 @@ pub(crate) fn native_lowered_primitive_methods(ty: u32) -> &'static [u32] {
         wk::F64 | wk::F32 => &[
             wk::M_OP_ADD, wk::M_OP_SUB, wk::M_OP_MUL, wk::M_OP_DIV, wk::M_EXPT, wk::M_SQRT, wk::M_FLOOR, wk::M_CEILING, wk::M_ROUND, wk::M_TRUNCATE,
             wk::M_FLOAT_TO_INT, wk::M_FLOAT_TO_RATIO, wk::M_FLOAT_TO_F32, wk::M_FLOAT_TO_F64,
+            wk::M_FLOAT_TO_I8, wk::M_FLOAT_TO_I16, wk::M_FLOAT_TO_I32, wk::M_FLOAT_TO_U8, wk::M_FLOAT_TO_U16, wk::M_FLOAT_TO_U32,
             // Same reason as the integer `try-*` group above: no prelude
             // caller, lowered so a user's `(try-as f32 x)` can compile.
             wk::M_TRY_FLOAT_TO_F32, wk::M_TRY_FLOAT_TO_F64,
@@ -940,7 +941,7 @@ pub(crate) fn runtime_addresses() -> impl Iterator<Item = (&'static str, usize)>
 
 /// The shims every target has: `typelisp-rt`'s, the printer's, the reader's
 /// and `rt_llvm_call`.
-fn rt_shims() -> [(&'static str, Shim); 355] {
+fn rt_shims() -> [(&'static str, Shim); 356] {
     use typelisp_rt::c_mem::{
         rt_c_alloc, rt_c_arena_close, rt_c_arena_open, rt_c_index, rt_c_load, rt_c_offset, rt_c_address, rt_c_ptr_check, rt_c_store,
         rt_c_volatile_load, rt_c_volatile_store,
@@ -1003,7 +1004,7 @@ fn rt_shims() -> [(&'static str, Shim); 355] {
         rt_box_kind, rt_car, rt_cdr,
         rt_cell_get, rt_cell_new, rt_cell_set, rt_char_alphap, rt_char_digitp, rt_char_downcase,
         rt_char_equalp, rt_char_upcase, rt_int_to_char, rt_closure_env_get, rt_closure_env_len,
-        rt_closure_fnptr, rt_closure_new, rt_coroutine_closure_new, rt_cons, rt_consp, rt_data_field, rt_data_new, rt_data_variant, rt_f64_new, rt_f32_new, rt_float_to_int,
+        rt_closure_fnptr, rt_closure_new, rt_coroutine_closure_new, rt_cons, rt_consp, rt_data_field, rt_data_new, rt_data_variant, rt_f64_new, rt_f32_new, rt_float_to_int, rt_float_to_bits,
         rt_i8_box, rt_i16_box, rt_i32_box, rt_u8_box, rt_u16_box, rt_u32_box, rt_i8_unbox, rt_i16_unbox, rt_i32_unbox, rt_u8_unbox, rt_u16_unbox, rt_u32_unbox,
         rt_float_to_ratio, rt_f64_value, rt_f32_value, rt_global_get, rt_global_new, rt_global_set, rt_int_div_fault, rt_int_mod_fault,
         rt_f32_tan, rt_f32_asin, rt_f32_acos, rt_f32_atan, rt_f32_sinh, rt_f32_cosh, rt_f32_tanh, rt_f32_asinh, rt_f32_acosh, rt_f32_atanh,
@@ -1400,6 +1401,7 @@ fn rt_shims() -> [(&'static str, Shim); 355] {
         ("rt_heap_info", shim(rt_heap_info as unsafe extern "C" fn() -> Word)),
         ("rt_int_to_ratio", shim(rt_int_to_ratio as unsafe extern "C" fn(i64) -> Word)),
         ("rt_float_to_int", shim(rt_float_to_int as unsafe extern "C-unwind" fn(f64) -> Word)),
+        ("rt_float_to_bits", shim(rt_float_to_bits as unsafe extern "C-unwind" fn(f64) -> u64)),
         ("rt_float_to_ratio", shim(rt_float_to_ratio as unsafe extern "C" fn(f64) -> Word)),
         ("rt_ratio_add", shim(rt_ratio_add as unsafe extern "C" fn(Word, Word) -> Word)),
         ("rt_ratio_sub", shim(rt_ratio_sub as unsafe extern "C" fn(Word, Word) -> Word)),

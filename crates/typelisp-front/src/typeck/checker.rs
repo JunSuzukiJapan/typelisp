@@ -457,6 +457,15 @@ impl Checker {
     }
 
     /// What the module-level function `path` returns, when there is one.
+    /// The type of the global variable `path`, and whether it can be
+    /// assigned (it is no `defconstant`).
+    pub fn var_type(&self, path: &Path) -> Option<(Type, bool)> {
+        match self.reg.values.get(path) {
+            Some(super::registry::ValueDef::Var(var)) => Some((var.ty.clone(), var.mutable)),
+            _ => None,
+        }
+    }
+
     pub fn fn_ret(&self, path: &Path) -> Option<Type> {
         self.reg.fn_def(path).map(|def| def.ret.clone())
     }

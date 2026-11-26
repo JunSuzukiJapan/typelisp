@@ -221,7 +221,7 @@ function types; `&optional' and `&key' are `defmacro'-only.")
     "int->c-long" "int->c-ulong" "try-int->c-long" "try-int->c-ulong"
     "float->f32" "float->f64" "try-float->f32" "try-float->f64"
     "int->int" "ratio->int" "int->ratio"
-    "float->ratio" "ratio->float" "numerator" "denominator"
+    "float->ratio" "float->i8" "float->i16" "float->i32" "float->u8" "float->u16" "float->u32" "ratio->float" "numerator" "denominator"
     "ratio->rational" "rational->int" "try-rational->int" "rational->ratio" "rational->float"
     "symbol->string" "intern"
     ;; generic pair (cons-cell<A,B>); set-car/set-cdr were removed, mutate

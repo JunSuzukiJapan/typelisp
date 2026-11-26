@@ -605,6 +605,22 @@ pub(super) fn float_to_int(heap: &mut Heap, args: &[Value]) -> Result<Value, Eva
     Ok(heap.int_from_bigint(BigInt::from_f64(f.trunc()).expect("a finite float truncates to a representable BigInt")))
 }
 
+/// `float->i8` and the other fixed widths: the low bits of [`float_to_int`]'s
+/// answer.
+pub(super) fn float_to_fixed(heap: &mut Heap, method: SymRef, args: &[Value], ret_type: TypeId) -> Result<Value, EvalError> {
+    let to = match method.well_known() {
+        wk::M_FLOAT_TO_I8 => FixedType::I8,
+        wk::M_FLOAT_TO_I16 => FixedType::I16,
+        wk::M_FLOAT_TO_I32 => FixedType::I32,
+        wk::M_FLOAT_TO_U8 => FixedType::U8,
+        wk::M_FLOAT_TO_U16 => FixedType::U16,
+        wk::M_FLOAT_TO_U32 => FixedType::U32,
+        _ => unreachable!("float_to_fixed: {}", method.name()),
+    };
+    let n = float_to_int(heap, args)?;
+    integer_to_width(heap, &[n], to, false, ret_type)
+}
+
 /// `float->ratio` (`registry::float_assoc`): widening and *exact* — every
 /// finite `f64` is itself an exact dyadic rational (CL's `rational`, not the
 /// lossy-round-trip-through-decimal `rationalize`). Panics on a non-finite

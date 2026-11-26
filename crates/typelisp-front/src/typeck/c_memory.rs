@@ -305,10 +305,29 @@ fn int_arg(cx: &Cx, heap: &mut Heap, locals: &Locals, (v, loc): &(Value, Option<
     Ok(Typed { node: Node::UntagInt { value: Box::new(n) }, ty: Type::I32, loc: None })
 }
 
-/// An `int` argument that is an address.
+/// An integer argument that is an address: an `int`, or one of a fixed
+/// width, which is widened or narrowed to the unsigned type as wide as a
+/// pointer — the same word as a `ptr`.
 fn address_arg(cx: &Cx, heap: &mut Heap, locals: &Locals, (v, loc): &(Value, Option<Loc>)) -> Result<Typed, Error> {
-    let n = check_expr(cx, heap, locals, *v, Some(&Type::Int), loc.clone())?;
-    Ok(builtin(b::ADDRESS, vec![n], Type::Ptr))
+    let mut n = check_expr(cx, heap, locals, *v, None, loc.clone())?;
+    // A number literal no type decided is an `int`.
+    cx.decide(&n.ty);
+    let ty = cx.resolve(&n.ty);
+    if ty == Type::Int {
+        return Ok(builtin(b::ADDRESS, vec![n], Type::Ptr));
+    }
+    if !ty.is_int_family() {
+        return Err(Error::TypeError(format!("an address is an integer, and this is a `{}`", ty)));
+    }
+    let word = match typelisp_mem::target::DataModel::current().pointer_bits() {
+        16 => Type::U16,
+        32 => Type::U32,
+        _ => Type::CULong,
+    };
+    n.ty = ty.clone();
+    let mut address = if ty == word { n } else { super::cast::width_cast(cx, heap, locals, n, &word, false, loc.clone())? };
+    address.ty = Type::Ptr;
+    Ok(address)
 }
 
 /// A typed pointer argument, and what it points at.
