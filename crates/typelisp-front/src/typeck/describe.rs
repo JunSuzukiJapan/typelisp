@@ -120,7 +120,7 @@ fn fn_lines(f: &FnDef) -> Vec<String> {
 }
 
 /// The function type `f` has, as `:type` writes it.
-fn fn_type(f: &FnDef) -> Type {
+pub(crate) fn fn_type(f: &FnDef) -> Type {
     Type::Fn(f.params.clone(), f.rest.clone().map(Box::new), Box::new(f.ret.clone()))
 }
 

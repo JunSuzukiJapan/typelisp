@@ -7,12 +7,12 @@
 //! reachable from it.
 
 use rustyline::error::ReadlineError;
-use rustyline::DefaultEditor;
 
 use crate::check::repr::Repr;
 use crate::*;
 use typelisp_front::Parts;
 
+use super::helper::ReplEditor;
 use super::{is_incomplete, Session};
 
 /// One part of a value: what it is called in its whole, the value and its
@@ -25,7 +25,7 @@ struct Part {
 
 impl Session<'_> {
     /// `:inspect FORM`.
-    pub(super) fn inspect(&mut self, rl: &mut DefaultEditor, arg: &str) {
+    pub(super) fn inspect(&mut self, rl: &mut ReplEditor, arg: &str) {
         let mark = self.heap.root_count();
         match self.value_of(arg) {
             Ok(top) => self.browse(rl, top),
@@ -62,7 +62,7 @@ impl Session<'_> {
     }
 
     /// The inspector's own loop, from `top` down.
-    fn browse(&mut self, rl: &mut DefaultEditor, top: Part) {
+    fn browse(&mut self, rl: &mut ReplEditor, top: Part) {
         let mut path = vec![top];
         loop {
             let here = path.last().expect("the inspector always has the value it is at");

@@ -440,6 +440,17 @@ impl Checker {
         super::describe::describe(&self.reg, expander, &self.notes, heap, self.ns, v)
     }
 
+    /// The names of the forms the checker itself knows, special and
+    /// top-level (`if`, `defun`, ...): what completion offers beside the
+    /// definitions, which they are not.
+    pub fn form_names() -> Vec<&'static str> {
+        super::expr::SPECIAL_FORM_HEADS
+            .iter()
+            .chain(super::expr::TOPLEVEL_FORM_HEADS)
+            .map(|&i| typelisp_mem::symbols::well_known_symbol(i).name())
+            .collect()
+    }
+
     /// What a value of `ty` is made of, for the REPL's `:inspect`.
     pub fn parts_of(&self, ty: &Type) -> super::describe::Parts {
         super::describe::parts_of(&self.reg, ty)

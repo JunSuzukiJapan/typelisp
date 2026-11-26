@@ -9,6 +9,7 @@
 //! `--eval`/`--load` in the order given.
 
 pub mod commands;
+mod helper;
 mod inspect;
 mod interrupt;
 
@@ -17,7 +18,6 @@ use std::path::{Path as FsPath, PathBuf};
 use std::rc::Rc;
 
 use rustyline::error::ReadlineError;
-use rustyline::DefaultEditor;
 
 use crate::project::{find_src_root, load_file_flat, Loader};
 use crate::*;
@@ -129,7 +129,12 @@ impl Session<'_> {
     }
 
     fn read_loop(&mut self) -> rustyline::Result<()> {
-        let mut rl = DefaultEditor::new()?;
+        let config = rustyline::Config::builder().completion_type(rustyline::CompletionType::List).build();
+        let mut rl = helper::ReplEditor::with_config(config)?;
+        rl.set_helper(Some(helper::ReplHelper::new(Rc::clone(&self.checker))));
+        // A terminal gets the next line of an unfinished form indented by
+        // how many lists are open; piped input is read as it is.
+        let terminal = std::io::IsTerminal::is_terminal(&std::io::stdin());
         let hist_path = home_file(".typl_history").unwrap_or_else(|| PathBuf::from(".typl_history"));
         let _ = rl.load_history(&hist_path);
 
@@ -142,7 +147,8 @@ impl Session<'_> {
             let prompt = if pending.is_empty() { prompt } else { format!("{:<width$}", "...", width = prompt.len()) };
             // Native: while this thread waits for a keystroke it holds nothing
             // another thread's collection would have to wait for.
-            match self.heap.native(|| rl.readline(&prompt)) {
+            let indent = if terminal && !pending.is_empty() { "  ".repeat(helper::open_lists(&pending)) } else { String::new() };
+            match self.heap.native(|| rl.readline_with_initial(&prompt, (&indent, ""))) {
                 Ok(line) => {
                     let _ = rl.add_history_entry(line.as_str());
                     // The REPL's own half of `dribble`: the line as typed. The
