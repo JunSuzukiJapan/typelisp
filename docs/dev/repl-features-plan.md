@@ -74,6 +74,11 @@
 - `:who-calls NAME`: NAME を呼んでいる定義の一覧。チェッカーは今これを記録していないので、大域の名前を解決する 1 か所で「どの定義の中から何を参照したか」を記録する
 - `:inspect FORM`: FORM を評価し、値を型に沿って開く。構造体・enum はフィールド、`Vector`/リスト/`HashTable` は要素。番号で中へ、`u` で上へ、`q` で抜ける(SBCL・CCL の inspector)
 - テスト: 各コマンドの出力を REPL 経由で比べる
+- 実装
+  - `:describe`: 名前の解決は `(documentation name)` と同じ関数(`typeck::documentation::definition`)。中身は `typeck::describe`。引数の名前はインタプリタの定義から足す
+  - `:src`: ファイルの定義はファイルを、標準ライブラリの定義は埋め込みのソースを、位置の範囲で切り出す。REPL で打った定義は REPL が各フォームの文字列と位置を覚えておく。REPL の入力は行ごとに 1 行目から数えるので同じ位置が重なりうる。位置が合い、かつ名前を含む最新のものを出す。ダンプから読んだ標準ライブラリの定義には位置が無く、出せない
+  - `:who-calls`: チェッカーに新しい表は作らず、インタプリタが持つ本体(コア形式)の `call`/`fnref`/`assoc`/`methodref` を探す(`eval::interp::xref`)。ジェネリックは単型化した記号で呼ばれるので、`typelisp_mem::specialization::specialized` で元の定義に戻して照合する。まだ単型化されていない標準ライブラリのジェネリックは本体が無いので対象外
+  - `:inspect`: 開けるのは構造体・enum(niche の `Option` も)・`Vector`・`HashTable`。リストや `Sexpr` はそのまま表示する。型から部分の型を出すのは `Checker::parts_of`
 
 ### 段階 5: 入力の支援(項目 2)
 

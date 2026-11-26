@@ -434,6 +434,17 @@ impl Checker {
         super::editor::candidates(&self.reg, here)
     }
 
+    /// What the REPL's `:describe` says about the definition the name `v`
+    /// (a symbol or a `::` path) names in the current module.
+    pub fn describe(&self, heap: &Heap, expander: &dyn MacroExpander, v: Value) -> Result<super::describe::Description, Error> {
+        super::describe::describe(&self.reg, expander, &self.notes, heap, self.ns, v)
+    }
+
+    /// What a value of `ty` is made of, for the REPL's `:inspect`.
+    pub fn parts_of(&self, ty: &Type) -> super::describe::Parts {
+        super::describe::parts_of(&self.reg, ty)
+    }
+
     /// Where each definition, and each local variable a reference names,
     /// was written, and the type of each expression: what the LSP's
     /// goto-definition and hover read.

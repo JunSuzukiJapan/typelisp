@@ -101,6 +101,11 @@ impl ModuleScope {
         self.modules.entry(ns).or_default()
     }
 
+    /// Every function, macro and method defined in any module.
+    pub(crate) fn every_fn(&self) -> impl Iterator<Item = &Rc<FnDef>> {
+        self.modules.values().flat_map(|m| m.fns.values().chain(m.methods.values()))
+    }
+
     /// Registers the function or macro `def` at `path`, replacing whatever
     /// was there.
     pub(crate) fn insert_fn(&mut self, path: &Path, def: Rc<FnDef>) {

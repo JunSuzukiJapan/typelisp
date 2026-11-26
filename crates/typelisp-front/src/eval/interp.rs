@@ -70,6 +70,7 @@ mod backend;
 mod collections;
 mod strings;
 mod equality;
+mod xref;
 pub(crate) use compiled::*;
 pub(crate) use builtins::*;
 // What the worker threads' printer snapshot reads (`worker_print`).

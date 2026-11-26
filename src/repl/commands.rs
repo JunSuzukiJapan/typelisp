@@ -16,6 +16,11 @@ pub enum CommandKind {
     Pwd,
     Backtrace,
     Locals,
+    Describe,
+    Apropos,
+    Src,
+    WhoCalls,
+    Inspect,
 }
 
 /// One REPL command: what [`COMMANDS`] lists.
@@ -39,6 +44,35 @@ pub const COMMANDS: &[Command] = &[
         args: "FORM",
         help: "print the type of FORM without running it",
         kind: CommandKind::Type,
+    },
+    Command {
+        name: ":describe",
+        aliases: &[":d"],
+        args: "NAME",
+        help: "say what NAME is: its type, fields or methods, where it was defined, its documentation",
+        kind: CommandKind::Describe,
+    },
+    Command {
+        name: ":apropos",
+        aliases: &[],
+        args: "TEXT",
+        help: "list the definitions of every module whose name contains TEXT",
+        kind: CommandKind::Apropos,
+    },
+    Command { name: ":src", aliases: &[], args: "NAME", help: "print the source NAME was defined with", kind: CommandKind::Src },
+    Command {
+        name: ":who-calls",
+        aliases: &[],
+        args: "NAME",
+        help: "list the functions and methods that call the function or method NAME",
+        kind: CommandKind::WhoCalls,
+    },
+    Command {
+        name: ":inspect",
+        aliases: &[":i"],
+        args: "FORM",
+        help: "run FORM and open its value by its type: a number goes into a part, u up, q out",
+        kind: CommandKind::Inspect,
     },
     Command {
         name: ":backtrace",

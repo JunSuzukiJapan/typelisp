@@ -9,6 +9,7 @@
 //! `--eval`/`--load` in the order given.
 
 pub mod commands;
+mod inspect;
 mod interrupt;
 
 use std::cell::RefCell;
@@ -21,6 +22,7 @@ use rustyline::DefaultEditor;
 use crate::project::{find_src_root, load_file_flat, Loader};
 use crate::*;
 use commands::CommandKind;
+use typelisp_front::Description;
 
 /// The prompt's start, before the module when that is not `user`.
 const PROMPT_NAME: &str = "typl";
@@ -58,6 +60,9 @@ struct Session<'a> {
     loader: Loader,
     /// The calls that were open when the last line failed (`:backtrace`).
     backtrace: Vec<BacktraceFrame>,
+    /// Each form typed at the prompt, where it was read and its text: what
+    /// `:src` prints for a definition typed here, which has no file.
+    typed: Vec<(Loc, String)>,
 }
 
 /// Runs the REPL over an environment the caller has loaded (the prelude, or
@@ -82,7 +87,7 @@ pub fn run(heap: &mut Heap, reader: &Reader, checker: Checker, interp: &mut Inte
     // it: the modules already loaded were found from there.
     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
     let src_root = find_src_root(&cwd).unwrap_or(cwd);
-    let mut session = Session { heap, reader, checker, interp, loader: Loader::new(src_root), backtrace: Vec::new() };
+    let mut session = Session { heap, reader, checker, interp, loader: Loader::new(src_root), backtrace: Vec::new(), typed: Vec::new() };
     interrupt::install();
     session.start(&startup);
     session.read_loop()
@@ -149,6 +154,10 @@ impl Session<'_> {
                     if pending.is_empty() {
                         match commands::parse(&line) {
                             Some((CommandKind::Quit, _)) => break,
+                            Some((CommandKind::Inspect, form)) => {
+                                self.inspect(&mut rl, form);
+                                continue;
+                            }
                             Some((CommandKind::Type, form)) => {
                                 showing_type = true;
                                 text = form;
@@ -222,7 +231,11 @@ impl Session<'_> {
             }
             CommandKind::Backtrace => Ok(self.backtrace_text()),
             CommandKind::Locals => self.locals_text(arg),
-            CommandKind::Quit | CommandKind::Type => unreachable!("the read loop runs {:?} itself", kind),
+            CommandKind::Describe => self.with_name(":describe", arg, Self::describe_text),
+            CommandKind::Apropos => self.apropos_text(arg),
+            CommandKind::Src => self.with_name(":src", arg, Self::src_text),
+            CommandKind::WhoCalls => self.with_name(":who-calls", arg, Self::who_calls_text),
+            CommandKind::Quit | CommandKind::Type | CommandKind::Inspect => unreachable!("the read loop runs {:?} itself", kind),
         };
         match out {
             Ok(text) => {
@@ -249,6 +262,132 @@ impl Session<'_> {
             }
         }
         out
+    }
+
+    /// Runs `answer` on the name `arg` reads as, for the command `who`.
+    fn with_name(&mut self, who: &str, arg: &str, answer: fn(&mut Self, Value) -> Result<String, String>) -> Result<String, String> {
+        let mark = self.heap.root_count();
+        let read = {
+            let mut forms = self.reader.forms_within("<stdin>", arg, self.checker.borrow().current_module());
+            let first = forms.next_form_with(self.heap, Some(&*self.interp));
+            match first {
+                Ok(Some((v, _))) => match forms.next_form_with(self.heap, Some(&*self.interp)) {
+                    Ok(None) => Ok(v),
+                    _ => Err(format!("{}: give one name, as in `{} foo`", who, who)),
+                },
+                Ok(None) => Err(format!("{}: give a name, as in `{} foo`", who, who)),
+                Err(e) => Err(format!("{}: {}", who, e)),
+            }
+        };
+        let out = read.and_then(|v| answer(self, v));
+        self.heap.truncate_roots(mark);
+        out
+    }
+
+    /// The definition the name `v` names, as `:describe` says it.
+    fn description(&mut self, v: Value) -> Result<Description, String> {
+        self.checker.borrow().describe(self.heap, &*self.interp, v).map_err(|e| e.to_string())
+    }
+
+    /// What `:describe NAME` prints.
+    fn describe_text(&mut self, v: Value) -> Result<String, String> {
+        let d = self.description(v)?;
+        let mut out = format!("{}\n", d.title);
+        for line in &d.lines {
+            out.push_str(&format!("  {}\n", line));
+        }
+        // The parameters' names are the body's, which the interpreter holds.
+        let body = match &d.target {
+            Some(CompileTarget::Fn(path)) => self.interp.root.borrow().get_fn(&path),
+            Some(CompileTarget::Method(owner, m)) => self.interp.root.borrow().get_method(&owner, *m),
+            None => None,
+        };
+        if let Some(f) = body.filter(|f| !f.params.is_empty()) {
+            let names: Vec<&str> = f.params.iter().map(|p| p.name()).collect();
+            out.push_str(&format!("  parameters: {}\n", names.join(" ")));
+        }
+        if let Some(at) = &d.at {
+            out.push_str(&format!("  defined at {}\n", at));
+        }
+        if let Some(doc) = &d.doc {
+            out.push_str(&format!("\n{}\n", doc));
+        }
+        Ok(out)
+    }
+
+    /// What `:apropos TEXT` prints: each definition whose name contains
+    /// `TEXT`, ignoring case as CL's `apropos` does, with what it is.
+    fn apropos_text(&mut self, text: &str) -> Result<String, String> {
+        if text.is_empty() {
+            return Err(":apropos: give the text to look for, as in `:apropos hash`".to_string());
+        }
+        let needle = text.to_lowercase();
+        let hit = |name: &str| name.to_lowercase().contains(&needle);
+        let mut found: Vec<(String, &'static str)> = Vec::new();
+        for d in self.checker.borrow().definitions() {
+            let path = d.path.to_string();
+            // The library's own helpers are not the program's to use.
+            if path.contains("%internal") {
+                continue;
+            }
+            if hit(d.path.name_symbol().name()) {
+                found.push((path.clone(), defined_kind_name(d.kind)));
+            }
+            for m in &d.methods {
+                if hit(m.name()) {
+                    found.push((format!("{}::{}", path, m.name()), "method"));
+                }
+            }
+        }
+        if found.is_empty() {
+            return Ok(format!("no definition's name contains `{}`\n", text));
+        }
+        found.sort();
+        found.dedup();
+        let width = found.iter().map(|(p, _)| p.chars().count()).max().unwrap_or(0);
+        Ok(found.iter().map(|(p, k)| format!("  {:<width$}  {}\n", p, k, width = width)).collect())
+    }
+
+    /// What `:src NAME` prints: the text the definition was read from.
+    fn src_text(&mut self, v: Value) -> Result<String, String> {
+        let d = self.description(v)?;
+        let Some(at) = d.at else {
+            return Err(format!(":src: no source location is recorded for {}", d.name));
+        };
+        // The same location can be another form's: each line typed starts
+        // again at line 1, and the library is two texts. The form wanted is
+        // the latest one at the location that names the definition.
+        let names_it = |text: &str| text.split(|c: char| c.is_whitespace() || "()<>".contains(c)).any(|w| w == d.name);
+        let found = if &*at.file == "<stdin>" {
+            self.typed
+                .iter()
+                .rev()
+                .filter(|(loc, _)| (loc.line, loc.col, loc.end_line, loc.end_col) == (at.line, at.col, at.end_line, at.end_col))
+                .map(|(_, text)| text.clone())
+                .find(|text| names_it(text))
+        } else if at.is_library() {
+            crate::prelude::dumped_sources().iter().map(|src| span_text(src, &at)).find(|text| names_it(text))
+        } else {
+            let src = std::fs::read_to_string(&*at.file).map_err(|e| format!(":src: cannot read `{}`: {}", at.file, e))?;
+            Some(span_text(&src, &at))
+        };
+        match found {
+            Some(text) => Ok(format!("{}\n", text)),
+            None => Err(format!(":src: the source of {} at {} is no longer here", d.name, at)),
+        }
+    }
+
+    /// What `:who-calls NAME` prints.
+    fn who_calls_text(&mut self, v: Value) -> Result<String, String> {
+        let d = self.description(v)?;
+        let Some(target) = &d.target else {
+            return Err(format!(":who-calls: {}, which is not called", d.title));
+        };
+        let callers = self.interp.callers_of(self.heap, target);
+        if callers.is_empty() {
+            return Ok(format!("nothing calls {}\n", target.written_name()));
+        }
+        Ok(callers.iter().map(|c| format!("  {}\n", c)).collect())
     }
 
     /// What `:locals N` prints: each argument of call `N` of the backtrace.
@@ -288,7 +427,7 @@ impl Session<'_> {
         // last failure's calls are not this text's.
         typelisp_abi::interrupt::clear();
         self.backtrace.clear();
-        let Session { heap, reader, checker, interp, loader, backtrace } = self;
+        let Session { heap, reader, checker, interp, loader, backtrace, typed } = self;
         let mark = heap.root_count();
         let mut forms = reader.forms_within(file, text, checker.borrow().current_module());
         // Where the reader stopped after the last *completed* form, in
@@ -310,6 +449,10 @@ impl Session<'_> {
                     break;
                 }
             };
+            if echo {
+                let form_text: String = text.chars().skip(consumed).take(forms.pos() - consumed).collect();
+                typed.push((loc.clone(), form_text.trim().to_string()));
+            }
 
             // Load this form's `use` dependencies before checking it, so
             // `check_use` finds them in the registry (see `typelisp::project`).
@@ -474,6 +617,38 @@ impl Session<'_> {
             None if !read_any => eprintln!("error: :type needs a form, as in `:type (+ 1 2)`"),
             None => {}
         }
+    }
+}
+
+/// The text of `src` that `at` spans, from its start to its end.
+fn span_text(src: &str, at: &Loc) -> String {
+    let mut out = String::new();
+    for (i, line) in src.lines().enumerate() {
+        let n = i as u32 + 1;
+        if n < at.line || n > at.end_line {
+            continue;
+        }
+        let chars: Vec<char> = line.chars().collect();
+        let from = if n == at.line { (at.col as usize).saturating_sub(1) } else { 0 };
+        let to = if n == at.end_line { (at.end_col as usize).saturating_sub(1).min(chars.len()) } else { chars.len() };
+        if n > at.line {
+            out.push('\n');
+        }
+        out.extend(&chars[from.min(to)..to]);
+    }
+    out
+}
+
+/// How `:apropos` names what a definition is.
+fn defined_kind_name(kind: DefinedKind) -> &'static str {
+    match kind {
+        DefinedKind::Function => "function",
+        DefinedKind::Variable => "variable",
+        DefinedKind::Macro => "macro",
+        DefinedKind::Type => "type",
+        DefinedKind::TypeAlias => "type alias",
+        DefinedKind::Trait => "trait",
+        DefinedKind::CStruct => "C struct",
     }
 }
 
