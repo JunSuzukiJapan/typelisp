@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/intro.md @ 398532233e28225bb121ed5b18609d41ea1bf813 -->
+<!-- translated-from: docs/ja/tutorial/intro.md @ fddb236d8b1f4c292e9e126057ed7732aa8259a8 -->
 # Başlarken
 
 Bu bölüm, REPL'de ifade değerlendirmekten başlayarak sırasıyla fonksiyonları, değişkenleri,
@@ -19,7 +19,7 @@ int
 typl> :quit
 ```
 
-Bundan sonra REPL girdisi ve sonuçları bu biçimde gösterilir.
+Bundan sonra REPL girdisi ve sonuçları bu biçimde gösterilir. REPL komutları, tamamlama ve diğerleri [REPL rehberinde](../guide/repl.md) anlatılır.
 
 ## 2. İfadeleri değerlendirme
 

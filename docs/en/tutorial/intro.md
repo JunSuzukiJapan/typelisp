@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/intro.md @ 398532233e28225bb121ed5b18609d41ea1bf813 -->
+<!-- translated-from: docs/ja/tutorial/intro.md @ fddb236d8b1f4c292e9e126057ed7732aa8259a8 -->
 # Getting Started
 
 Starting from evaluating expressions in the REPL, this chapter covers functions, variables,
@@ -19,7 +19,7 @@ int
 typl> :quit
 ```
 
-From here on, REPL input and results are shown in this form.
+From here on, REPL input and results are shown in this form. The REPL's commands, completion and more are described in the [REPL guide](../guide/repl.md).
 
 ## 2. Evaluating expressions
 

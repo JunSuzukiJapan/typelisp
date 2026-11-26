@@ -101,6 +101,11 @@ impl ModuleScope {
         self.modules.entry(ns).or_default()
     }
 
+    /// Every function, macro and method defined in any module.
+    pub(crate) fn every_fn(&self) -> impl Iterator<Item = &Rc<FnDef>> {
+        self.modules.values().flat_map(|m| m.fns.values().chain(m.methods.values()))
+    }
+
     /// Registers the function or macro `def` at `path`, replacing whatever
     /// was there.
     pub(crate) fn insert_fn(&mut self, path: &Path, def: Rc<FnDef>) {
@@ -115,6 +120,13 @@ impl ModuleScope {
     /// Registers the global variable at `path`.
     pub(crate) fn insert_global(&mut self, path: &Path, slot: Slot) {
         self.module_mut(path.ns()).globals.insert(path.name_symbol(), slot);
+    }
+
+    /// Removes the global at `path`.
+    pub(crate) fn remove_global(&mut self, path: &Path) {
+        if let Some(m) = self.modules.get_mut(&path.ns()) {
+            m.globals.remove(&path.name_symbol());
+        }
     }
 
     /// Registers the type at `path`.

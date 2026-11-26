@@ -12,14 +12,9 @@ use std::cell::RefCell;
 use std::path::{Path as FsPath, PathBuf};
 use std::rc::Rc;
 
-use rustyline::error::ReadlineError;
-use rustyline::DefaultEditor;
-
-use typelisp::project::{find_src_root, load_file_flat, Loader};
+use typelisp::project::{find_src_root, Loader};
+use typelisp::repl::{Startup, StartupAction};
 use typelisp::*;
-
-const PROMPT_PRIMARY: &str = "typl> ";
-const PROMPT_CONTINUE: &str = "...   ";
 
 /// Default cons-arena capacity (cells), used when `--heap-cells` is absent.
 /// The arena is fixed-size — sized up front, never grown (see
@@ -81,6 +76,11 @@ Options:
                          library to link with (repeatable)
   --feature NAME         add a feature for #+/#- (repeatable)
   --on-redefine=POLICY   on redefinition: warn (default), error or silent
+  --eval FORM            REPL only: run FORM before the first prompt
+                         (repeatable; run in order with --load)
+  --load FILE            REPL only: run FILE's forms before the first prompt
+                         (repeatable)
+  --no-init              REPL only: do not read ~/.typlrc at startup
   --remove-lib           remove the library this typl wrote for compiled
                          executables to link, and exit
   --remove-lib --others  remove the ones other builds of typl wrote instead
@@ -115,6 +115,9 @@ fn main() -> rustyline::Result<()> {
     // the static library an AOT executable links, for `-c` and for every
     // `(compile-file ...)` this process runs.
     let (lib_dir, args) = parse_lib_dir(args);
+    // `--eval`, `--load` and `--no-init` are the REPL's; taken from before a
+    // script's name only, since from the name on they are the script's.
+    let (startup, args) = parse_startup(args);
     // `--help`/`--version`/`--remove-lib` (and its `--others`/`--all`) are
     // `typl`'s only among the options before a script's name; from the name
     // on, they are the script's own arguments.
@@ -210,6 +213,15 @@ fn main() -> rustyline::Result<()> {
         std::process::exit(compile_command(flag, &args[1..], heap_cells));
     }
     let heap_cells = heap_cells.unwrap_or(DEFAULT_HEAP_CELLS);
+    // What starts the REPL is the absence of a subcommand and a script, so
+    // an option of the REPL's beside either is refused rather than ignored.
+    let starts_repl = !args.iter().any(|a| !a.starts_with("--"));
+    if !starts_repl {
+        if let Some(flag) = startup_flag_given(&startup) {
+            eprintln!("{}: only for the REPL (typl with no FILE)", flag);
+            std::process::exit(1);
+        }
+    }
     if args.first().is_some_and(|a| a == "test") {
         std::process::exit(test_command(&args[1..], heap_cells, features, image));
     }
@@ -231,7 +243,74 @@ fn main() -> rustyline::Result<()> {
     // set explicitly rather than left to the process argv, which would leak
     // `--heap-cells` and friends into a program's view of its arguments.
     typelisp_rt_sys::env::set_command_line_args(vec!["typl".to_string()]);
-    repl(heap_cells, features, image)
+    start_repl(heap_cells, features, image, startup)
+}
+
+/// Loads the environment and hands it to the REPL (`typelisp::repl`).
+fn start_repl(heap_cells: usize, features: Vec<String>, image: Option<PathBuf>, startup: Startup) -> rustyline::Result<()> {
+    let mut heap = Heap::with_capacity(heap_cells);
+    let reader = Reader::with_features(features);
+    let mut checker = Checker::new();
+    checker.set_redef_policy(parse_redef_policy());
+    let mut interp = Interp::new();
+    if let Err(e) = load_environment(&mut heap, &mut checker, &mut interp, image) {
+        eprintln!("error: {}", e);
+        std::process::exit(1);
+    }
+    typelisp::repl::run(&mut heap, &reader, checker, &mut interp, startup)
+}
+
+/// Takes `--eval FORM`, `--load FILE` (each also as `FLAG=VALUE`) and
+/// `--no-init` out of `args`, up to the first argument that is not an
+/// option: a script's name or a subcommand, and everything after it, is left
+/// as it is. The actions keep the order they were given in.
+fn parse_startup(args: Vec<String>) -> (Startup, Vec<String>) {
+    let mut startup = Startup { init_file: true, actions: Vec::new() };
+    let mut rest = Vec::with_capacity(args.len());
+    let mut it = args.into_iter();
+    while let Some(a) = it.next() {
+        if !a.starts_with('-') {
+            rest.push(a);
+            rest.extend(it);
+            break;
+        }
+        if a == "--no-init" {
+            startup.init_file = false;
+            continue;
+        }
+        let mut action = None;
+        for (flag, missing, make) in [
+            ("--eval", "needs a form", StartupAction::Eval as fn(String) -> StartupAction),
+            ("--load", "needs a file", |v: String| StartupAction::Load(PathBuf::from(v))),
+        ] {
+            if a == flag {
+                match it.next() {
+                    Some(v) => action = Some(make(v)),
+                    None => {
+                        eprintln!("{}: {}", flag, missing);
+                        std::process::exit(1);
+                    }
+                }
+            } else if let Some(v) = a.strip_prefix(flag).and_then(|v| v.strip_prefix('=')) {
+                action = Some(make(v.to_string()));
+            }
+        }
+        match action {
+            Some(action) => startup.actions.push(action),
+            None => rest.push(a),
+        }
+    }
+    (startup, rest)
+}
+
+/// The first of the REPL's own options that `startup` says was given.
+fn startup_flag_given(startup: &Startup) -> Option<&'static str> {
+    match startup.actions.first() {
+        Some(StartupAction::Eval(_)) => Some("--eval"),
+        Some(StartupAction::Load(_)) => Some("--load"),
+        None if !startup.init_file => Some("--no-init"),
+        None => None,
+    }
 }
 
 /// `typl -c SOURCE [-o OUTPUT]`: `args` is what follows the `-c` (or
@@ -631,91 +710,6 @@ fn test_command(args: &[String], heap_cells: usize, features: Vec<String>, image
     }
 }
 
-fn repl(heap_cells: usize, features: Vec<String>, image: Option<PathBuf>) -> rustyline::Result<()> {
-    let mut heap = Heap::with_capacity(heap_cells);
-    let reader = Reader::with_features(features);
-    // The checker lives behind a shared `RefCell` so the interpreter can reach
-    // it to type-check a runtime `(eval ...)` form (`Interp::eval_form`), while
-    // the REPL keeps checking each new line through the same cell. Every
-    // per-line use borrows it only during the check phase, releasing before
-    // the exec phase — see `try_run_pending`'s borrow discipline.
-    let checker = Rc::new(RefCell::new(Checker::new()));
-    checker.borrow_mut().set_redef_policy(parse_redef_policy());
-    let mut interp = Interp::new();
-    if let Err(e) = load_environment(&mut heap, &mut checker.borrow_mut(), &mut interp, image) {
-        eprintln!("error: {}", e);
-        std::process::exit(1);
-    }
-    // Wire the interpreter to the checker now that loading is done, so
-    // `(eval ...)` at the REPL type-checks against the live environment.
-    interp.set_checker(Rc::clone(&checker));
-    // The session's own definitions go in the module `user`, not in the root
-    // or the standard library's module.
-    if let Err(e) = checker.borrow_mut().enter_file_module(&[typelisp::types::USER_MODULE.to_string()]) {
-        eprintln!("error: {}", e);
-        std::process::exit(1);
-    }
-    // `use` in the REPL resolves files against the current directory (or the
-    // project root if a manifest is found above it).
-    let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-    let src_root = find_src_root(&cwd).unwrap_or(cwd);
-    let mut loader = Loader::new(src_root);
-    let mut rl = DefaultEditor::new()?;
-    let hist_path = history_path();
-    let _ = rl.load_history(&hist_path);
-
-    let mut pending = String::new();
-    // Whether `pending` is the form of a `:type` command rather than forms
-    // to run.
-    let mut showing_type = false;
-    loop {
-        let prompt = if pending.is_empty() { PROMPT_PRIMARY } else { PROMPT_CONTINUE };
-        // Native: while this thread waits for a keystroke it holds nothing
-        // another thread's collection would have to wait for.
-        match heap.native(|| rl.readline(prompt)) {
-            Ok(line) => {
-                let trimmed = line.trim();
-                if pending.is_empty() && (trimmed == ":quit" || trimmed == ":exit") {
-                    break;
-                }
-                let _ = rl.add_history_entry(line.as_str());
-                // The REPL's own half of `dribble`: the line as typed. The
-                // other two doors a session's output leaves by are inside the
-                // runtime — see `typelisp_abi::dribble`'s module docs.
-                typelisp_abi::dribble::note(&line);
-                typelisp_abi::dribble::note("\n");
-                let text = match pending.is_empty().then(|| type_command(&line)).flatten() {
-                    Some(form) => {
-                        showing_type = true;
-                        form
-                    }
-                    None => line.as_str(),
-                };
-                pending.push_str(text);
-                pending.push('\n');
-                if showing_type {
-                    show_pending_type(&mut heap, &reader, &checker, &interp, &mut pending);
-                    showing_type = !pending.is_empty();
-                } else {
-                    try_run_pending(&mut heap, &reader, &checker, &mut interp, &mut loader, &mut pending);
-                }
-            }
-            Err(ReadlineError::Interrupted) => {
-                pending.clear();
-                showing_type = false;
-                println!();
-            }
-            Err(ReadlineError::Eof) => break,
-            Err(e) => {
-                eprintln!("readline error: {}", e);
-                break;
-            }
-        }
-    }
-    let _ = rl.save_history(&hist_path);
-    Ok(())
-}
-
 /// Parses `--on-redefine=warn|error|silent` from the process arguments
 /// (defaults to `RedefPolicy::Warn` if absent or unrecognized — no `clap`
 /// dependency for one flag, hand-rolled like the rest of this small CLI).
@@ -734,251 +728,5 @@ fn parse_redef_policy() -> RedefPolicy {
         }
     }
     RedefPolicy::Warn
-}
-
-/// `$HOME/.typl_history`, falling back to the current directory if `HOME` is
-/// unset.
-fn history_path() -> PathBuf {
-    match std::env::var_os("HOME") {
-        Some(home) if !home.is_empty() => PathBuf::from(home).join(".typl_history"),
-        _ => PathBuf::from(".typl_history"),
-    }
-}
-
-/// Read+check+execute whatever is currently in `pending`, **one form at a
-/// time**: each form is read, checked and run before the next one is read
-/// (`Reader::forms_in`), which is what a Lisp REPL has always meant by
-/// reading from a stream and is what lets a form affect how the text after it
-/// is read.
-///
-/// On a recoverable "need more input" error, `pending` is cut back to the
-/// unread tail — the forms already read have already *run*, so leaving them
-/// in `pending` would run them a second time when the next line arrives. On
-/// success or a real error, clears `pending`.
-///
-/// GC-root discipline: the reader's roots protect the raw forms across
-/// checking (macro expansion conses, and can collect), and are the only thing
-/// doing so — `check_form`'s output never retains the raw `Value`. They
-/// accumulate interleaved with the checked forms' own roots and are all
-/// popped together at the end; nothing pops in between, so the stack stays
-/// LIFO. `Interp::exec` is balanced on that stack (it roots a definition
-/// permanently, on the other stack), so running a form mid-batch leaves the
-/// discipline intact.
-fn try_run_pending(
-    heap: &mut Heap,
-    reader: &Reader,
-    checker: &RefCell<Checker>,
-    interp: &mut Interp,
-    loader: &mut Loader,
-    pending: &mut String,
-) {
-    let mark = heap.root_count();
-    let mut forms = reader.forms_within("<stdin>", pending, checker.borrow().current_module());
-    // Where the reader stopped after the last *completed* form, in characters.
-    // Only used on the "need more input" path, to decide what is left over.
-    let mut consumed = 0usize;
-    let mut fatal: Option<Error> = None;
-    let mut incomplete = false;
-
-    loop {
-        let (v, loc) = match forms.next_form_with(heap, Some(&*interp)) {
-            Ok(Some(pair)) => pair,
-            Ok(None) => break,
-            Err(e) => {
-                if is_incomplete(&e) {
-                    incomplete = true;
-                } else {
-                    fatal = Some(e);
-                }
-                break;
-            }
-        };
-
-        // Load this form's `use` dependencies before checking it, so
-        // `check_use` finds them in the registry (see `typelisp::project`). A
-        // nested load pushes and pops its own read roots strictly above ours,
-        // so the root-stack discipline is undisturbed.
-        if let Err(e) = loader.load_uses_in(heap, reader, &mut checker.borrow_mut(), interp, &[v]) {
-            fatal = Some(e);
-            break;
-        }
-        // A loaded module's own forms run before the form that `use`d it —
-        // its definitions and `defvar` initializers must exist by the time
-        // this form does anything.
-        let mut load_failed = false;
-        for tl in loader.take_pending() {
-            if let Err(e) = interp.exec(heap, tl) {
-                eprintln!("error: {}", e);
-                load_failed = true;
-                break;
-            }
-        }
-        if load_failed {
-            break;
-        }
-
-        // Borrow the checker only for the check itself, so the borrow is
-        // released before any `interp.exec` below — a form's exec must be
-        // free to let a runtime `(eval ...)` re-borrow the checker
-        // (`Interp::eval_form`).
-        let result = checker.borrow_mut().check_form_at(heap, &*interp, v, Some(loc));
-        for w in checker.borrow_mut().take_warnings() {
-            eprintln!("{}", w);
-        }
-        let tl = match result {
-            Ok(tl) => tl,
-            Err(e) => {
-                fatal = Some(e);
-                break;
-            }
-        };
-        // An `(in-module ...)` moves the session, and the next form is read
-        // where it moved to.
-        forms.set_module(checker.borrow().current_module());
-        // `(load "path")` loads inline, fasl-preferred, into the current
-        // (root) environment — resolved relative to the process cwd.
-        // (A `(load)`ed file whose *own* top-level contains `(eval ...)`
-        // is the one corner this borrow doesn't cover — `load_file_flat`
-        // execs inline while this `borrow_mut` is held; an ordinary
-        // module/fasl load never top-level-`eval`s, so it doesn't arise
-        // in practice.)
-        if let Some(path) = typelisp::project::load_path_of(heap, tl) {
-            if let Err(e) = load_file_flat(heap, reader, &mut checker.borrow_mut(), interp, FsPath::new("."), &path) {
-                fatal = Some(e);
-                break;
-            }
-        } else {
-            match interp.exec(heap, tl) {
-                // The REPL's other half of `dribble`: the value echoed back.
-                Ok(Some(v)) => {
-                    // The form's checked type decides how a niched `Option`
-                    // prints — the word alone cannot say it is one.
-                    let repr = {
-                        let chk = checker.borrow();
-                        chk.expr_type().map(|ty| check::repr::Repr::of_by(ty, &|p| chk.type_kind(p)))
-                    };
-                    heap.push_root(v);
-                    let rendered = interp.render_readably(heap, v, repr.as_ref());
-                    heap.pop_root();
-                    match rendered {
-                        Ok(text) => {
-                            typelisp_abi::dribble::note(&text);
-                            typelisp_abi::dribble::note("\n");
-                            println!("{}", text);
-                        }
-                        Err(e) => {
-                            eprintln!("error: {}", e);
-                            break;
-                        }
-                    }
-                }
-                Ok(None) => {}
-                Err(e) => {
-                    eprintln!("error: {}", e);
-                    break;
-                }
-            }
-        }
-        consumed = forms.pos();
-    }
-
-    // Anything the dependency loads warned about: the per-form drain below
-    // only covers this batch's own forms, and a `use` that failed never
-    // reached it.
-    for w in checker.borrow_mut().take_warnings() {
-        eprintln!("{}", w);
-    }
-    while heap.root_count() > mark {
-        heap.pop_root();
-    }
-
-    if incomplete {
-        // Keep only what has not been read. Everything before `consumed` has
-        // already run; re-reading it when the rest of the form arrives would
-        // run it twice.
-        *pending = pending.chars().skip(consumed).collect();
-        return;
-    }
-    pending.clear();
-    if let Some(e) = fatal {
-        eprintln!("error: {}", e);
-    }
-}
-
-/// The text after the REPL command `:type` (or its short name `:t`) on
-/// `line`, when `line` is one: the form whose type to show.
-fn type_command(line: &str) -> Option<&str> {
-    let line = line.trim_start();
-    [":type", ":t"].iter().find_map(|cmd| {
-        let rest = line.strip_prefix(cmd)?;
-        (rest.is_empty() || rest.starts_with(char::is_whitespace)).then_some(rest)
-    })
-}
-
-/// The REPL's `:type`: reads the forms in `pending` and prints the type
-/// checking proves for each, running none of them. Like
-/// [`try_run_pending`], it leaves `pending` holding what is unread when a
-/// form is not finished yet, and empties it otherwise.
-fn show_pending_type(heap: &mut Heap, reader: &Reader, checker: &RefCell<Checker>, interp: &Interp, pending: &mut String) {
-    let mark = heap.root_count();
-    let mut forms = reader.forms_within("<stdin>", pending, checker.borrow().current_module());
-    let mut consumed = 0usize;
-    let mut read_any = false;
-    let mut incomplete = false;
-    let mut fatal: Option<Error> = None;
-    loop {
-        let (v, loc) = match forms.next_form_with(heap, Some(interp)) {
-            Ok(Some(pair)) => pair,
-            Ok(None) => break,
-            Err(e) => {
-                match is_incomplete(&e) {
-                    true => incomplete = true,
-                    false => fatal = Some(e),
-                }
-                break;
-            }
-        };
-        read_any = true;
-        let result = checker.borrow_mut().type_of_form(heap, interp, v, Some(loc));
-        for w in checker.borrow_mut().take_warnings() {
-            eprintln!("{}", w);
-        }
-        match result {
-            Ok(ty) => {
-                let text = ty.to_string();
-                typelisp_abi::dribble::note(&text);
-                typelisp_abi::dribble::note("\n");
-                println!("{}", text);
-            }
-            Err(e) => {
-                fatal = Some(e);
-                break;
-            }
-        }
-        consumed = forms.pos();
-    }
-    while heap.root_count() > mark {
-        heap.pop_root();
-    }
-    if incomplete {
-        *pending = pending.chars().skip(consumed).collect();
-        return;
-    }
-    pending.clear();
-    match fatal {
-        Some(e) => eprintln!("error: {}", e),
-        None if !read_any => eprintln!("error: :type needs a form, as in `:type (+ 1 2)`"),
-        None => {}
-    }
-}
-
-/// True if `e` signals "ran out of input mid-form" (need another line)
-/// rather than a real syntax error.
-fn is_incomplete(e: &Error) -> bool {
-    // `e` may be wrapped in `Error::At(loc, ..)`; match on the underlying kind.
-    matches!(
-        e.kind(),
-        Error::IllegalEndWhileReadingList | Error::IllegalEndOfString | Error::IllegalEndOfEscapeSequence
-    )
 }
 

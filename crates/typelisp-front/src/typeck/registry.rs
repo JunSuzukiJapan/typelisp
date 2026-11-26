@@ -532,6 +532,15 @@ pub(crate) struct Registry {
     local_macros: std::cell::Cell<u64>,
     /// The number of commits: the generation of the writes being made.
     generation: u64,
+    /// At the REPL, what `:*`, `:**` and `:***` read: each keyword and the
+    /// global holding the result it stands for, `None` before there are
+    /// that many results ([`Self::prompt_result`]). Empty anywhere else.
+    pub(crate) prompt_results: Vec<(SymRef, Option<Path>)>,
+    /// The results a form has read through one of those keywords, which
+    /// stay defined however old they get: a definition may still read them.
+    pub(crate) prompt_results_read: std::cell::RefCell<std::collections::HashSet<Path>>,
+    /// How many result globals the REPL has defined, to name the next one.
+    pub(crate) prompt_results_made: u64,
 }
 
 /// A definition, as its documentation string and its place are kept by:
@@ -550,6 +559,21 @@ pub(crate) enum Definition {
 }
 
 impl Registry {
+    /// The global the keyword `sym` reads at the REPL (`:*` and the like),
+    /// and its type, noting that it was read. `None` for any other symbol,
+    /// and anywhere but at the REPL.
+    pub(crate) fn prompt_result(&self, sym: SymRef) -> Option<Result<(Path, Type), crate::Error>> {
+        let (_, path) = self.prompt_results.iter().find(|(k, _)| *k == sym)?;
+        let Some(path) = path else {
+            return Some(Err(crate::Error::TypeError(format!("`{}` has no value yet: there have not been that many results", sym.spelling()))));
+        };
+        let Some(ValueDef::Var(var)) = self.values.get(path) else {
+            unreachable!("a prompt result is a global the REPL defined")
+        };
+        self.prompt_results_read.borrow_mut().insert(*path);
+        Some(Ok((*path, var.ty.clone())))
+    }
+
     pub(crate) fn type_def(&self, path: &Path) -> Option<&TypeDef> {
         match self.types.get(path) {
             Some(TypeEntry::Type(def)) => Some(def),

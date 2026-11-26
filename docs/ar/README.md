@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/README.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
+<!-- translated-from: docs/ja/README.md @ fddb236d8b1f4c292e9e126057ed7732aa8259a8 -->
 # توثيق typelisp (العربية)
 
 typelisp هي لغة Lisp ذات أنواع ساكنة. للاطلاع على طريقة التثبيت والبناء راجع
@@ -144,6 +144,7 @@ typelisp هي لغة Lisp ذات أنواع ساكنة. للاطلاع على ط
 
 ## الأدلة
 
+- [REPL](guide/repl.md): أوامر الـ REPL والإكمال والنتائج السابقة والإيقاف بـ `Ctrl+C` والتحقق بعد الخطأ
 - [الوحدات وتنظيم الملفات](guide/modules.md): `use` و`pub` وكيفية ربط الملفات بالوحدات
 - [الترجمة](guide/compile.md): الـ JIT وبناء الملفات التنفيذية بالترجمة المسبقة AOT وملفات الـ dump
 - [إدخال وإخراج الملفات والتدفقات والشبكات](guide/io.md): الملفات والمسارات وTCP / TLS / UDP وحل الأسماء

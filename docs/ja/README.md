@@ -152,6 +152,7 @@ typelisp は静的型付きの Lisp です。インストールとビルドの�
 
 ## ガイド
 
+- [REPL](guide/repl.md)：REPL のコマンド、補完、直前の結果、`Ctrl+C` での中断、エラーのあとの調べ方
 - [モジュールとファイル構成](guide/modules.md)：`use`、`pub`、ファイルとモジュールの対応
 - [コンパイル](guide/compile.md)：JIT、AOT で実行ファイルを作る方法、ダンプ
 - [ファイル I/O、ストリーム、ネットワーク](guide/io.md)：ファイル、パス名、TCP / TLS / UDP、名前解決

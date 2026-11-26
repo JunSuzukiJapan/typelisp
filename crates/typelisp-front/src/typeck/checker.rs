@@ -434,6 +434,59 @@ impl Checker {
         super::editor::candidates(&self.reg, here)
     }
 
+    /// What the REPL's `:describe` says about the definition the name `v`
+    /// (a symbol or a `::` path) names in the current module.
+    pub fn describe(&self, heap: &Heap, expander: &dyn MacroExpander, v: Value) -> Result<super::describe::Description, Error> {
+        super::describe::describe(&self.reg, expander, &self.notes, heap, self.ns, v)
+    }
+
+    /// The names of the forms the checker itself knows, special and
+    /// top-level (`if`, `defun`, ...): what completion offers beside the
+    /// definitions, which they are not.
+    pub fn form_names() -> Vec<&'static str> {
+        super::expr::SPECIAL_FORM_HEADS
+            .iter()
+            .chain(super::expr::TOPLEVEL_FORM_HEADS)
+            .map(|&i| typelisp_mem::symbols::well_known_symbol(i).name())
+            .collect()
+    }
+
+    /// Defines a global of type `ty` to hold a value the REPL echoed, in a
+    /// module of the REPL's own, and returns its path. The interpreter is
+    /// given the value (`Interp::define_global_value`).
+    pub fn define_prompt_result(&mut self, ty: Type) -> Path {
+        let n = self.reg.prompt_results_made;
+        self.reg.prompt_results_made += 1;
+        let path = Path::in_ns(prompt_results_ns(), &format!("result-{}", n));
+        self.reg.values.insert(path, super::registry::ValueDef::Var(super::registry::VarDef { ty, public: true, mutable: false }));
+        self.reg.commit();
+        path
+    }
+
+    /// Makes `:*`, `:**` and `:***` read `results`, the newest first; one
+    /// with no result yet is an error. Until this is called they are
+    /// keywords like any other, which is what they are outside the REPL.
+    pub fn set_prompt_results(&mut self, results: &[Path]) {
+        let keys = ["*", "**", "***"].map(typelisp_mem::symbols::intern_keyword);
+        self.reg.prompt_results = keys.into_iter().enumerate().map(|(i, k)| (k, results.get(i).copied())).collect();
+    }
+
+    /// Removes the result global `path` unless a form has read it, and
+    /// says whether it did.
+    pub fn forget_prompt_result(&mut self, path: &Path) -> bool {
+        if self.reg.prompt_results_read.borrow().contains(path) {
+            return false;
+        }
+        self.reg.values.remove(path);
+        self.reg.commit();
+        true
+    }
+
+    /// What a value of `ty` is made of, for the REPL's `:inspect`.
+    pub fn parts_of(&self, ty: &Type) -> super::describe::Parts {
+        super::describe::parts_of(&self.reg, ty)
+    }
+
     /// Where each definition, and each local variable a reference names,
     /// was written, and the type of each expression: what the LSP's
     /// goto-definition and hover read.
@@ -584,5 +637,39 @@ impl Checker {
     /// bound.
     pub(crate) fn toplevel_env(&self) -> super::macros::Site<'_> {
         super::macros::Site::toplevel(&self.reg, self.ns)
+    }
+}
+
+/// The module the REPL's result globals are defined in.
+fn prompt_results_ns() -> NsId {
+    typelisp_mem::symbols::ns_of(&["%repl".to_string()])
+}
+
+#[cfg(test)]
+mod prompt_results_tests {
+    use super::*;
+
+    #[test]
+    fn a_result_no_form_read_is_forgotten_and_one_read_is_kept() {
+        let mut checker = Checker::new();
+        let unread = checker.define_prompt_result(Type::Int);
+        let read = checker.define_prompt_result(Type::Str);
+        checker.set_prompt_results(&[read, unread]);
+        let star = typelisp_mem::symbols::intern_keyword("*");
+        let (path, ty) = checker.reg.prompt_result(star).expect("`:*` is the REPL's").expect("there is a result");
+        assert_eq!((path, ty), (read, Type::Str));
+        assert!(checker.forget_prompt_result(&unread));
+        assert!(checker.reg.values.get(&unread).is_none());
+        assert!(!checker.forget_prompt_result(&read));
+        assert!(checker.reg.values.get(&read).is_some());
+    }
+
+    #[test]
+    fn the_keywords_are_keywords_until_the_repl_takes_them() {
+        let mut checker = Checker::new();
+        let three = typelisp_mem::symbols::intern_keyword("***");
+        assert!(checker.reg.prompt_result(three).is_none());
+        checker.set_prompt_results(&[]);
+        assert!(checker.reg.prompt_result(three).expect("`:***` is the REPL's").is_err());
     }
 }

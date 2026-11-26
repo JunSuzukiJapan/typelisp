@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/intro.md @ 398532233e28225bb121ed5b18609d41ea1bf813 -->
+<!-- translated-from: docs/ja/tutorial/intro.md @ fddb236d8b1f4c292e9e126057ed7732aa8259a8 -->
 # Erste Schritte
 
 Ausgehend vom Auswerten von Ausdrücken in der REPL behandelt dieses Kapitel der Reihe nach Funktionen,
@@ -19,7 +19,7 @@ int
 typl> :quit
 ```
 
-Von hier an werden Eingaben und Ergebnisse der REPL in dieser Form gezeigt.
+Von hier an werden Eingaben und Ergebnisse der REPL in dieser Form gezeigt. Die REPL-Befehle, die Vervollständigung und weiteres beschreibt der [REPL-Leitfaden](../guide/repl.md).
 
 ## 2. Ausdrücke auswerten
 

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/README.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
+<!-- translated-from: docs/ja/README.md @ fddb236d8b1f4c292e9e126057ed7732aa8259a8 -->
 # typelisp-dokumentation (Svenska)
 
 typelisp är ett statiskt typat Lisp. Installation och bygge beskrivs i [README.md](../../README.md)
@@ -155,6 +155,7 @@ där makrot anropades. Se [Makron](tutorial/macros.md) för detaljer.
 
 ## Guider
 
+- [REPL](guide/repl.md): REPL-kommandon, komplettering, tidigare resultat, avbryta med `Ctrl+C`, undersöka efter ett fel
 - [Moduler och filuppdelning](guide/modules.md): `use`, `pub`, hur filer motsvarar moduler
 - [Kompilering](guide/compile.md): JIT, att bygga körbara filer med AOT-kompilering, dumpar
 - [Fil-I/O, strömmar och nätverk](guide/io.md): filer, pathnames, TCP / TLS / UDP, namnuppslagning

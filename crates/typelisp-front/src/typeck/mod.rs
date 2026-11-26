@@ -63,6 +63,7 @@ pub(crate) mod checker;
 pub(crate) mod collection_literal;
 pub(crate) mod control;
 pub(crate) mod define;
+pub(crate) mod describe;
 pub(crate) mod defenum;
 pub(crate) mod defffi;
 pub(crate) mod defmacro;

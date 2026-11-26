@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/intro.md @ 398532233e28225bb121ed5b18609d41ea1bf813 -->
+<!-- translated-from: docs/ja/tutorial/intro.md @ fddb236d8b1f4c292e9e126057ed7732aa8259a8 -->
 # 入门
 
 本章从在 REPL 中求值表达式开始，依次介绍函数、变量、条件分支、循环，以及列表和 `Vector`。
@@ -18,7 +18,7 @@ int
 typl> :quit
 ```
 
-下文用这种形式表示 REPL 中的输入和结果。
+下文用这种形式表示 REPL 中的输入和结果。REPL 的命令、补全等在 [REPL 指南](../guide/repl.md) 中说明。
 
 ## 2. 求值表达式
 

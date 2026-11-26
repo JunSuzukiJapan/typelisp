@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/intro.md @ 398532233e28225bb121ed5b18609d41ea1bf813 -->
+<!-- translated-from: docs/ja/tutorial/intro.md @ fddb236d8b1f4c292e9e126057ed7732aa8259a8 -->
 # Memulai
 
 Dimulai dari mengevaluasi ekspresi di REPL, bab ini membahas fungsi, variabel, percabangan,
@@ -19,7 +19,7 @@ int
 typl> :quit
 ```
 
-Mulai dari sini, masukan dan hasil REPL ditampilkan dalam bentuk ini.
+Mulai dari sini, masukan dan hasil REPL ditampilkan dalam bentuk ini. Perintah REPL, pelengkapan, dan lainnya dijelaskan di [panduan REPL](../guide/repl.md).
 
 ## 2. Mengevaluasi ekspresi
 

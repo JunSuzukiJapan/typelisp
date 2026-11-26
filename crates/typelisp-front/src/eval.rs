@@ -12,5 +12,5 @@ pub mod interp;
 pub mod scope;
 
 pub use value::EvalError;
-pub use interp::Interp;
+pub use interp::{BacktraceFrame, Interp};
 

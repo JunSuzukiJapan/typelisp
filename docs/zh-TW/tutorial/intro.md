@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/intro.md @ 398532233e28225bb121ed5b18609d41ea1bf813 -->
+<!-- translated-from: docs/ja/tutorial/intro.md @ fddb236d8b1f4c292e9e126057ed7732aa8259a8 -->
 # 入門
 
 本章從在 REPL 中對運算式求值開始，依序介紹函式、變數、條件分支、迴圈，以及串列與 `Vector`。`typl` 的建置方法請參閱
@@ -17,7 +17,7 @@ int
 typl> :quit
 ```
 
-以下以這種形式表示 REPL 中的輸入與結果。
+以下以這種形式表示 REPL 中的輸入與結果。REPL 的命令、補全等在 [REPL 指南](../guide/repl.md) 中說明。
 
 ## 2. 對運算式求值
 

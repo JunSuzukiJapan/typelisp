@@ -52,8 +52,8 @@ fn push_definitions(reg: &Registry, keep: impl Fn(&Path) -> bool, out: &mut Vec<
     for (path, def) in reg.values.iter().filter(|(p, _)| keep(p)) {
         let name = path.name_symbol().name();
         out.push(match def {
-            ValueDef::Fn(def) => candidate(name, CompletionKind::Function, format!("({:?}) -> {:?}", def.params, def.ret)),
-            ValueDef::Var(def) => candidate(name, CompletionKind::Variable, format!("{:?}", def.ty)),
+            ValueDef::Fn(def) => candidate(name, CompletionKind::Function, super::describe::fn_type(def).to_string()),
+            ValueDef::Var(def) => candidate(name, CompletionKind::Variable, def.ty.to_string()),
             ValueDef::Macro { .. } => candidate(name, CompletionKind::Macro, "macro".to_string()),
             ValueDef::SymbolMacro { .. } => candidate(name, CompletionKind::Macro, "symbol macro".to_string()),
         });

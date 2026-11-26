@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/README.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
+<!-- translated-from: docs/ja/README.md @ fddb236d8b1f4c292e9e126057ed7732aa8259a8 -->
 # typelisp 文件（繁體中文）
 
 typelisp 是一種靜態型別的 Lisp。安裝與建置方法請參閱儲存庫根目錄的 [README.md](../../README.md)（英文）。
@@ -143,6 +143,7 @@ typelisp 是一種靜態型別的 Lisp。安裝與建置方法請參閱儲存庫
 
 ## 指南
 
+- [REPL](guide/repl.md)：REPL 命令、補全、先前的結果、用 `Ctrl+C` 中斷、出錯後的調查
 - [模組與檔案結構](guide/modules.md)：`use`、`pub`、檔案與模組的對應
 - [編譯](guide/compile.md)：JIT、用 AOT 編譯產生執行檔、傾印
 - [檔案 I/O、串流與網路](guide/io.md)：檔案、路徑名稱、TCP / TLS / UDP、名稱解析

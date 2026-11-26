@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/README.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
+<!-- translated-from: docs/ja/README.md @ fddb236d8b1f4c292e9e126057ed7732aa8259a8 -->
 # Tài liệu typelisp (Tiếng Việt)
 
 typelisp là một ngôn ngữ Lisp có kiểu tĩnh. Về cách cài đặt và build, xem [README.md](../../README.md)
@@ -155,6 +155,7 @@ Nếu mới làm quen với typelisp, hãy đọc theo thứ tự sau.
 
 ## Hướng dẫn chuyên đề
 
+- [REPL](guide/repl.md): lệnh REPL, tự hoàn thành, kết quả trước đó, dừng bằng `Ctrl+C`, điều tra sau lỗi
 - [Module và cách bố trí tệp](guide/modules.md): `use`, `pub`, cách tệp tương ứng với module
 - [Biên dịch](guide/compile.md): JIT, tạo tệp thực thi bằng biên dịch AOT, dump
 - [Vào/ra tệp, stream và mạng](guide/io.md): tệp, pathname, TCP / TLS / UDP, phân giải tên

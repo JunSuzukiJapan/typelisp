@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/intro.md @ 398532233e28225bb121ed5b18609d41ea1bf813 -->
+<!-- translated-from: docs/ja/tutorial/intro.md @ fddb236d8b1f4c292e9e126057ed7732aa8259a8 -->
 # Komma igång
 
 Kapitlet utgår från att utvärdera uttryck i REPL och går sedan igenom funktioner, variabler, villkor,
@@ -19,7 +19,7 @@ int
 typl> :quit
 ```
 
-Från och med nu visas indata och resultat i REPL i den här formen.
+Från och med nu visas indata och resultat i REPL i den här formen. REPL:ens kommandon, komplettering med mera beskrivs i [REPL-guiden](../guide/repl.md).
 
 ## 2. Utvärdera uttryck
 

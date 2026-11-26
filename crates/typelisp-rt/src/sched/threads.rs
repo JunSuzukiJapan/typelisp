@@ -451,6 +451,9 @@ fn next<B: TaskBody>(shared: &SchedShared<B>, heap: &mut Heap, who: Who) -> Next
                 if let Some(v) = s.take_main_result(heap, main) {
                     return Next::Main(Ok(v));
                 }
+                if typelisp_abi::interrupt::pending() {
+                    s.interrupt_waiting(heap, main);
+                }
             }
             Who::Worker if s.guard.stopped => return Next::Stop,
             Who::Worker => {}
@@ -504,7 +507,13 @@ fn next<B: TaskBody>(shared: &SchedShared<B>, heap: &mut Heap, who: Who) -> Next
                 SchedError::Internal("scheduler: every task is blocked and none can proceed".to_string()).into()
             ));
         }
-        let until = deadline.map(|d| d.saturating_duration_since(typelisp_mem::host::Instant::now()));
+        let mut until = deadline.map(|d| d.saturating_duration_since(typelisp_mem::host::Instant::now()));
+        // The thread waiting on the main task looks for the REPL's Ctrl-C
+        // every so often, which nothing else would wake it for.
+        if matches!(who, Who::Main(_)) && typelisp_abi::interrupt::watched() {
+            let look = typelisp_abi::interrupt::LOOK_EVERY;
+            until = Some(until.map_or(look, |u| u.min(look)));
+        }
         if let Some(poller) = sockets {
             if !s.guard.polling {
                 s = s.poll(heap, poller, until);

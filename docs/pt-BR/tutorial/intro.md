@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/intro.md @ 398532233e28225bb121ed5b18609d41ea1bf813 -->
+<!-- translated-from: docs/ja/tutorial/intro.md @ fddb236d8b1f4c292e9e126057ed7732aa8259a8 -->
 # Primeiros passos
 
 Começando pela avaliação de expressões no REPL, este capítulo aborda, nesta ordem, funções, variáveis,
@@ -19,7 +19,7 @@ int
 typl> :quit
 ```
 
-Daqui em diante, a entrada e os resultados do REPL são mostrados desta forma.
+Daqui em diante, a entrada e os resultados do REPL são mostrados desta forma. Os comandos do REPL, o autocompletar e o resto são explicados no [guia do REPL](../guide/repl.md).
 
 ## 2. Avaliar expressões
 

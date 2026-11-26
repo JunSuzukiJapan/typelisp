@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/intro.md @ 398532233e28225bb121ed5b18609d41ea1bf813 -->
+<!-- translated-from: docs/ja/tutorial/intro.md @ fddb236d8b1f4c292e9e126057ed7732aa8259a8 -->
 # 시작하기
 
 REPL에서 식을 평가하는 것부터 시작해 함수, 변수, 조건 분기, 반복, 리스트와 `Vector`를 차례로 다룬다. `typl`을
@@ -18,7 +18,7 @@ int
 typl> :quit
 ```
 
-이후로는 REPL의 입력과 결과를 이 형태로 보인다.
+이후로는 REPL의 입력과 결과를 이 형태로 보인다. REPL 명령과 자동 완성 등은 [REPL 가이드](../guide/repl.md)에서 설명한다.
 
 ## 2. 식 평가하기
 

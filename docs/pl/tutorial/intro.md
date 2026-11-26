@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/intro.md @ 398532233e28225bb121ed5b18609d41ea1bf813 -->
+<!-- translated-from: docs/ja/tutorial/intro.md @ fddb236d8b1f4c292e9e126057ed7732aa8259a8 -->
 # Pierwsze kroki
 
 Zaczynając od obliczania wyrażeń w REPL, ten rozdział omawia po kolei funkcje, zmienne,
@@ -19,7 +19,7 @@ int
 typl> :quit
 ```
 
-Od tej pory dane wejściowe i wyniki REPL będą pokazywane w tej postaci.
+Od tej pory dane wejściowe i wyniki REPL będą pokazywane w tej postaci. Polecenia REPL, uzupełnianie i resztę opisuje [przewodnik po REPL](../guide/repl.md).
 
 ## 2. Obliczanie wyrażeń
 

@@ -58,6 +58,8 @@ num-rational = "0.4"
 num-traits = "0.2"
 num-integer = "0.1"
 rustyline = "18"
+# The REPL's Ctrl-C handler (`src/repl/interrupt.rs`).
+libc = "0.2"
 inkwell = { version = "0.9", features = ["llvm22-1"] }
 typelisp-abi = { workspace = true, features = ["std"] }
 typelisp-front.workspace = true

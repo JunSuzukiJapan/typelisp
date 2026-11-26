@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/README.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
+<!-- translated-from: docs/ja/README.md @ fddb236d8b1f4c292e9e126057ed7732aa8259a8 -->
 # typelisp Belgeleri (Türkçe)
 
 typelisp, statik tür denetimli bir Lisp'tir. Kurulumu ve derlenmesi için deponun kök dizinindeki
@@ -156,6 +156,7 @@ typelisp'e yeni başlıyorsanız bunları sırayla okuyun.
 
 ## Kılavuzlar
 
+- [REPL](guide/repl.md): REPL komutları, tamamlama, önceki sonuçlar, `Ctrl+C` ile durdurma, hatadan sonra inceleme
 - [Modüller ve Dosya Düzeni](guide/modules.md): `use`, `pub`, dosyaların modüllere karşılık gelme biçimi
 - [Derleme](guide/compile.md): JIT, AOT derlemesiyle çalıştırılabilir dosya üretme, dump'lar
 - [Dosya G/Ç, Akışlar ve Ağ](guide/io.md): dosyalar, yol adları, TCP / TLS / UDP, ad çözümleme
