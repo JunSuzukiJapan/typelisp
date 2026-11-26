@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/system.md @ 7622044725db7d28dabb691d82e592367d9284e8 -->
+<!-- translated-from: docs/ja/reference/functions/system.md @ b01477a6134617bbcef066ff2065d17245132754 -->
 # Zeit, Umgebung und Implementierung
 
 Funktionen für Zeit, Abfragen der Laufzeitumgebung, Werkzeuge der Implementierung, Parsen und Auswerten von
@@ -372,3 +372,32 @@ Beide sind Spezialformen, die **Namen, die keine Werte sind**, lexikalisch binde
 | `with-standard-io-syntax` | `(with-standard-io-syntax body...)` | — | Führt `body` aus, mit jeder Steuervariable der Ausgabe auf ihrem Standardwert und `*read-eval*` auf `true` ([Ausgabe](printing.md#6-steuern-wie-viel-ausgegeben-wird)) |
 | `exit` | `(exit code)` | `int→!` | Beendet den Prozess |
 | `dump` | `(dump path)` | `string→bool` | Schreibt die aktuelle Umgebung (Typinformation plus kompilierte Rümpfe) in eine Datei. `typl --image <path>` startet erneut daraus. Nur im Interpreter ([Syntaxreferenz 10.1](../syntax.md#101-dumps)) |
+
+## 11. Interrupts eines Mikrocontrollers (`std::board`)
+
+Mit einem `use` einbinden, etwa `(use std::board::enable-interrupt)`. Wie man einen Interrupt-Handler schreibt, steht in [Syntaxreferenz 3.17](../syntax.md#317-interruptn--exceptionname--interrupt-handler).
+
+| Name | Form | Typ | Beschreibung |
+|---|---|---|---|
+| `enable-interrupt` | `(enable-interrupt n)` | `int→()` | Lässt den Peripherie-Interrupt `n` (0 bis 239) kommen. Außerhalb eines Mikrocontrollers ein Laufzeitfehler (unter `typl -c` ein Kompilierfehler) |
+| `disable-interrupt` | `(disable-interrupt n)` | `int→()` | Lässt Interrupt `n` nicht mehr kommen. Außerhalb eines Mikrocontrollers wie `enable-interrupt` |
+
+## 12. Fehlersuche (`std::dbg`)
+
+Mit einem `use` hereinholen, etwa `(use std::dbg::llvm-size-of)`.
+
+| Name | Form | Typ | Beschreibung |
+|---|---|---|---|
+| `llvm-size-of` | `(llvm-size-of expr)` | `A→u32` | In wie vielen Bytes kompilierter Code den Wert von `expr` hält. LLVM zählt die Größe des LLVM-Typs, den der Compiler dem Wert gegeben hat, für das Ziel, auf dem der Code läuft. `expr` wird ausgewertet. Vom Interpreter ausgeführt ein Laufzeitfehler |
+
+`size-of-val` antwortet mit der Größe, die der Typ festlegt, `llvm-size-of` mit der Größe, die kompilierter Code tatsächlich verwendet. Weichen die beiden ab, hat der Compiler die Breite des Werts falsch.
+
+```lisp
+(use std::dbg::llvm-size-of)
+(defun widths ((x i8)) ()
+  (println "~a ~a ~a" (llvm-size-of x) (llvm-size-of (as u32 x)) (llvm-size-of (< x 0))))
+(compile widths)
+(widths 1)                          ; gibt 1 4 1 aus
+```
+
+Ein Wert im Heap (ein `string`, ein `defstruct`-Typ usw.) und ein `int` belegen ein Wort, das für den Ort des Werts oder für den Wert selbst steht.

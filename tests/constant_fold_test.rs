@@ -67,10 +67,10 @@ fn nested_and_variadic_calls_fold_bottom_up() {
 #[test]
 fn fixed_widths_fold_in_their_own_arithmetic() {
     // `u8` wraps: 200 + 100 = 300 = 44 (mod 256).
-    assert_eq!(lowered("(+ (the u8 200) 100)"), "(expr (int-any-width 44))");
-    assert_eq!(lowered("(- (the i32 1) 2)"), "(expr (int-any-width -1))");
+    assert_eq!(lowered("(+ (the u8 200) 100)"), "(expr (int-any-width 44 u8))");
+    assert_eq!(lowered("(- (the i32 1) 2)"), "(expr (int-any-width -1 i32))");
     // `i8` wraps on the sign: 127 + 1 = -128.
-    assert_eq!(lowered("(+ (the i8 127) 1)"), "(expr (int-any-width -128))");
+    assert_eq!(lowered("(+ (the i8 127) 1)"), "(expr (int-any-width -128 i8))");
 }
 
 #[test]
@@ -98,7 +98,7 @@ fn comparisons_and_conversions_fold() {
     assert_eq!(lowered("(equal 1 1)"), "(expr (bool true))");
     assert_eq!(lowered("(as f64 3)"), "(expr (float-any-width 3.0))");
     assert_eq!(lowered("(as int 2.75)"), "(expr (int 2))");
-    assert_eq!(lowered("(as u8 300)"), "(expr (int-any-width 44))");
+    assert_eq!(lowered("(as u8 300)"), "(expr (int-any-width 44 u8))");
     assert_eq!(lowered("(as char 65)"), "(expr (char #\\A))");
 }
 
@@ -138,7 +138,7 @@ fn a_call_that_would_raise_is_left_to_raise_at_runtime() {
     );
     assert_eq!(
         lowered("(mod (the i32 1) 0)"),
-        "(expr (assoc i32 mod true int-any-width (int-any-width int-any-width) (type-named i32) (int-any-width 1) (int-any-width 0)))"
+        "(expr (assoc i32 mod true i32 (i32 i32) (type-named i32) (int-any-width 1 i32) (int-any-width 0 i32)))"
     );
     // The fold must not have turned the runtime panic into a check error.
     let mut s = Session::new(Load::Prelude);

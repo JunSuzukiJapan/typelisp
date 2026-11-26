@@ -4,7 +4,7 @@
 //! [`super::toplevel`].
 
 use std::cell::{Cell, RefCell};
-use std::collections::BTreeMap;
+
 
 use typelisp_mem::{NsId, SymRef};
 
@@ -12,9 +12,9 @@ use crate::check::semantic::TypeUse;
 use crate::check::{CompletionCandidate, DefLocs, Defined, Docs, Imported};
 use crate::dump::{CheckerDelta, RegistrySignature};
 use crate::types::{Path, Type};
-use crate::{CompileTarget, Error, Heap, Loc, Value};
+use crate::{Error, Heap, Loc, Value};
 
-use super::attribute::{TestCase, TestForms, Tests};
+use super::attribute::{TestCase, TestForms, Attributed};
 use super::expr::Notes;
 use super::registry::{AdtKind, Registry, Since};
 use super::toplevel::{check_toplevel, in_module, publish, publish_all, publish_name_view, publish_uses, CREATED};
@@ -112,10 +112,9 @@ pub struct Checker {
     /// Every C callback entry the checked code asks for, in the order first
     /// asked.
     callbacks: Vec<crate::ffi_callback::CallbackSig>,
-    /// Every definition a `~/name/` directive calls.
-    format_calls: BTreeMap<CompileTarget, typelisp_print::aot::ArgWord>,
-    /// What a `#[test]` definition is checked into, and the tests found.
-    tests: Tests,
+    /// What the definitions with an attribute are checked into: the tests
+    /// found, and the interrupt handlers.
+    attributed: Attributed,
     /// What checking has written down beside the trees.
     notes: Notes,
     /// The module forms are checked in now.
@@ -152,8 +151,7 @@ impl Checker {
             expr_ty: None,
             warnings: RefCell::default(),
             callbacks: Vec::new(),
-            format_calls: BTreeMap::new(),
-            tests: Tests::default(),
+            attributed: Attributed::default(),
             notes: Notes::default(),
             ns: NsId::ROOT,
             file_ns: Vec::new(),
@@ -201,11 +199,10 @@ impl Checker {
         // into the form, which is then reachable from nothing but the caller.
         // Nothing allocates between releasing them and the caller rooting it.
         let roots_base = heap.root_count();
-        let result = check_toplevel(reg, expander, heap, site, v, loc.clone(), &mut self.warnings.borrow_mut(), &self.notes, &mut self.tests);
+        let result = check_toplevel(reg, expander, heap, site, v, loc.clone(), &mut self.warnings.borrow_mut(), &self.notes, &mut self.attributed);
         heap.truncate_roots(roots_base);
         match result {
             Ok((form, ty, reached)) => {
-                self.format_calls.extend(reached.format_calls);
                 for sig in reached.callbacks {
                     if !self.callbacks.contains(&sig) {
                         self.callbacks.push(sig);
@@ -262,7 +259,7 @@ impl Checker {
             return Err(at(Error::TypeError("an `in-module` form has no type".into())));
         }
         let roots_base = heap.root_count();
-        let result = check_toplevel(reg, expander, heap, site, v, loc.clone(), &mut self.warnings.borrow_mut(), &self.notes, &mut self.tests);
+        let result = check_toplevel(reg, expander, heap, site, v, loc.clone(), &mut self.warnings.borrow_mut(), &self.notes, &mut self.attributed);
         heap.truncate_roots(roots_base);
         reg.rollback();
         match result.map_err(at)? {
@@ -328,13 +325,13 @@ impl Checker {
     /// What a `#[test]` definition and a top-level expression are checked
     /// into — see [`TestForms`].
     pub fn set_test_forms(&mut self, forms: TestForms) {
-        self.tests.forms = forms;
+        self.attributed.forms = forms;
     }
 
     /// The tests recorded under [`TestForms::Collect`] since the last call,
     /// in the order they were defined.
     pub fn take_tests(&mut self) -> Vec<TestCase> {
-        std::mem::take(&mut self.tests.found)
+        std::mem::take(&mut self.attributed.found)
     }
 
     /// Every callback entry the checked code asks for, in the order it first
@@ -344,12 +341,10 @@ impl Checker {
         self.callbacks.clone()
     }
 
-    /// Every definition a `~/name/` directive checked so far calls, with how
-    /// its argument crosses into it. Read by `compile::aot::compile_file`,
-    /// which turns each into a startup registration so the directive works
-    /// in a standalone executable.
-    pub fn format_call_targets(&self) -> Vec<(CompileTarget, typelisp_print::aot::ArgWord)> {
-        self.format_calls.iter().map(|(t, a)| (t.clone(), *a)).collect()
+    /// The interrupt handlers (`#[interrupt(N)]`, `#[exception(NAME)]`), each
+    /// with the number of the vector-table entry it is at.
+    pub fn interrupt_handlers(&self) -> Vec<(u16, Path)> {
+        self.attributed.handlers.iter().map(|(v, p)| (*v, *p)).collect()
     }
 
     /// Reports every `defsignature` in this unit that never got a definition.
@@ -462,6 +457,15 @@ impl Checker {
     }
 
     /// What the module-level function `path` returns, when there is one.
+    /// The type of the global variable `path`, and whether it can be
+    /// assigned (it is no `defconstant`).
+    pub fn var_type(&self, path: &Path) -> Option<(Type, bool)> {
+        match self.reg.values.get(path) {
+            Some(super::registry::ValueDef::Var(var)) => Some((var.ty.clone(), var.mutable)),
+            _ => None,
+        }
+    }
+
     pub fn fn_ret(&self, path: &Path) -> Option<Type> {
         self.reg.fn_def(path).map(|def| def.ret.clone())
     }

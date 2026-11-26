@@ -97,10 +97,11 @@ pub mod field_kind {
     /// Not representable in compiled code: a still-generic type variable,
     /// or a raw machine word, which must never be tagged as a fixnum.
     pub const NOT_REPRESENTABLE: usize = 0;
-    /// A fixed-width integer, carried as a raw word and tagged as a fixnum on
-    /// the way in. Shares its number with [`super::INT`] but not its meaning:
-    /// an `int` *variant* is already a tagged word, which is [`TAGGED`]'s
-    /// encoding — the island's `sexpr-variant-kind` maps one to the other.
+    /// An untagged word that is a small integer (a handle), tagged as a
+    /// fixnum on the way in. Shares its number with [`super::INT`] but not
+    /// its meaning: an `int` *variant* is already a tagged word, which is
+    /// [`TAGGED`]'s encoding — the island's `sexpr-variant-kind` maps one to
+    /// the other.
     pub const RAW_INT: usize = super::INT;
     pub const F64: usize = super::F64;
     pub const CHAR: usize = super::CHAR;
@@ -113,6 +114,26 @@ pub mod field_kind {
     /// A niched `Option` — a tagged word like [`TAGGED`], with its own number
     /// so the island can tell where an `Option` around it must be boxed.
     pub const NICHE: usize = 101;
+    /// A fixed-width integer, stored as the fixnum of its value: this plus
+    /// `width * 2 + signed`, which says what type it is on the way out. Its
+    /// own numbers, clear of the variants: a `u8` field of a struct is a
+    /// fixnum, where a `u8` in a `Sexpr` is the [`super::U8`] variant's box.
+    pub const FIXED: usize = 200;
+}
+
+/// How compiled code carries a value, as the island and the bridge number it
+/// (`compile::carriers::Carrier::code`): the kinds below, and a fixed-width
+/// integer as `width * 2 + signed`.
+pub mod carrier {
+    /// A tagged value or an untagged word.
+    pub const WORD: usize = 0;
+    pub const BOOL: usize = 1;
+    pub const UNIT: usize = 2;
+    pub const F32: usize = 3;
+    pub const F64: usize = 4;
+    /// A 32-bit unsigned integer, the scalar value.
+    pub const CHAR: usize = 64;
+    pub const I64: usize = 129;
 }
 
 /// Every name the compiler island's source may write as `#%name`, with the
@@ -154,6 +175,11 @@ const ISLAND_NAMES: &[(&str, usize)] = &[
     ("kind-f32", field_kind::F32),
     ("kind-unit", field_kind::UNIT),
     ("kind-niche", field_kind::NICHE),
+    ("kind-fixed", field_kind::FIXED),
+    ("carrier-word", carrier::WORD),
+    ("carrier-bool", carrier::BOOL),
+    ("carrier-char", carrier::CHAR),
+    ("carrier-i64", carrier::I64),
 ];
 
 /// The compiler island's source with every `#%name` replaced by its number.

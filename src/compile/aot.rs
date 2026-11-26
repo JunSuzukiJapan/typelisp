@@ -61,7 +61,7 @@ use std::rc::Rc;
 
 use inkwell::context::Context;
 use inkwell::module::Module;
-use inkwell::values::{CallSiteValue, InstructionOpcode, Operand};
+use inkwell::values::{InstructionOpcode, Operand};
 use inkwell::AddressSpace;
 
 use crate::check::core;
@@ -70,8 +70,16 @@ use crate::CompileTarget;
 use crate::{Checker, Heap, Interp, Path, Reader, TopLevelForm, Value};
 use typelisp_mem::{wk, ConcreteNames};
 mod archive;
+mod bare;
+mod direct;
+mod settle;
+mod soft_float;
+mod made;
+mod masking;
 mod native;
 mod reach;
+pub(crate) mod avr;
+mod embedded;
 mod wasm;
 
 pub use archive::*;
@@ -231,10 +239,10 @@ fn is_entry_call(heap: &Heap, tl: Value, entry_path: &Path) -> bool {
     if !core::op_is(heap, form, wk::CALL) {
         return false;
     }
-    // `(call PATH (R...) ARG...)`: the resolved path, and no arguments past
-    // the representation list.
+    // `(call PATH RET-R (R...) ARG...)`: the resolved path, and no arguments
+    // past the representation list.
     let is_main = core::definition_field(heap, form, 0).is_some_and(|p| &p == entry_path);
-    is_main && core::fields(heap, form).map(|f| f.len() == 2).unwrap_or(false)
+    is_main && core::fields(heap, form).map(|f| f.len() == 3).unwrap_or(false)
 }
 
 /// [`compile_file`] for a caller that is itself a running program — the
@@ -285,7 +293,8 @@ pub struct BuildOptions {
     /// The cons arena's capacity, in cells (`--heap-cells`); the arena is
     /// fixed at it. `None` is the program's default: an arena of
     /// [`typelisp_rt::DEFAULT_AOT_HEAP_CAPACITY`] cells, or
-    /// [`EVAL_HEAP_CAPACITY`] for a program that calls `eval`, that grows as
+    /// [`EVAL_HEAP_CAPACITY`] for a program that calls `eval`, or
+    /// [`BOARD_HEAP_CAPACITY`] for a board, that grows as
     /// `Heap::with_capacity` lets it.
     pub heap_cells: Option<usize>,
     /// The bound on the bytes the running executable allocates
@@ -297,6 +306,49 @@ pub struct BuildOptions {
     pub no_cons: bool,
     /// What the executable runs on (`--target`).
     pub target: Target,
+    /// For a board ([`Target::board`]): the file that says where its flash
+    /// and RAM are (`--linker-script`), in the form of `cortex-m-rt`'s
+    /// `memory.x`. `None` is the QEMU board that stands for the target's
+    /// core ([`embedded::Board::qemu_memory`]).
+    pub linker_script: Option<std::path::PathBuf>,
+    /// For a board: who gives the board's functions (`--board-functions`).
+    pub board_functions: BoardFunctions,
+    /// For a board: objects and static libraries to link the program with
+    /// (`--link`) — the board's functions when it gives them as C
+    /// functions, a vendor's library the program calls through `defffi`.
+    pub link: Vec<std::path::PathBuf>,
+}
+
+/// Who gives a board's executable the functions it asks of the board
+/// (`typelisp_host_*`: writing, reading, ending, the clock, waiting).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum BoardFunctions {
+    /// The runtime, over semihosting: what QEMU (`-semihosting`) and a
+    /// debugger answer.
+    #[default]
+    Semihosting,
+    /// The board, as C functions the link is given (`--link`).
+    C,
+}
+
+impl BoardFunctions {
+    /// The choice `--board-functions` names.
+    pub fn parse(name: &str) -> Result<BoardFunctions, String> {
+        match name {
+            "semihosting" => Ok(BoardFunctions::Semihosting),
+            "c" => Ok(BoardFunctions::C),
+            _ => Err(format!("--board-functions: unknown `{}` (semihosting or c)", name)),
+        }
+    }
+
+    /// The runtime built for it, in `embedded_runtime_dir`: the static
+    /// library of `typelisp-rt-semihosting` or of `typelisp-rt-embedded`.
+    pub(crate) fn archive(self) -> &'static str {
+        match self {
+            BoardFunctions::Semihosting => "libtypelisp_rt_semihosting.a",
+            BoardFunctions::C => "libtypelisp_rt_embedded.a",
+        }
+    }
 }
 
 /// What an executable is built to run on.
@@ -310,6 +362,14 @@ pub enum Target {
     /// `wasm32-unknown-unknown`: a WebAssembly module that imports what it
     /// needs of its host from JavaScript, with the JavaScript that loads it.
     Wasm32Unknown,
+    /// `thumbv7em-none-eabihf`: an ELF executable for a Cortex-M4F or M7
+    /// board without an operating system.
+    Thumbv7em,
+    /// `thumbv8m.main-none-eabihf`: the same for a Cortex-M33 board.
+    Thumbv8mMain,
+    /// `avr-atmega328p`: an ELF executable for the ATmega328P (Arduino Uno),
+    /// which has no runtime ([`avr`]).
+    AvrAtmega328p,
 }
 
 impl Target {
@@ -318,10 +378,60 @@ impl Target {
         match name {
             "wasm32-wasip1" => Ok(Target::Wasip1),
             "wasm32-unknown-unknown" => Ok(Target::Wasm32Unknown),
+            "thumbv7em-none-eabihf" => Ok(Target::Thumbv7em),
+            "thumbv8m.main-none-eabihf" => Ok(Target::Thumbv8mMain),
+            "avr-atmega328p" => Ok(Target::AvrAtmega328p),
             _ => Err(format!(
-                "--target: unknown target `{}` (the ones there are: wasm32-wasip1, wasm32-unknown-unknown)",
-                name
+                "--target: unknown target `{}` (the ones there are: wasm32-wasip1, wasm32-unknown-unknown, {})",
+                name,
+                Target::board_names()
             )),
+        }
+    }
+
+    /// The targets that are boards without an operating system.
+    pub const BOARDS: [Target; 3] = [Target::Thumbv7em, Target::Thumbv8mMain, Target::AvrAtmega328p];
+
+    /// The board the target is, if it is one.
+    pub fn board(self) -> Option<&'static embedded::Board> {
+        match self {
+            Target::Thumbv7em => Some(&embedded::CORTEX_M4),
+            Target::Thumbv8mMain => Some(&embedded::CORTEX_M33),
+            Target::AvrAtmega328p => Some(&avr::ATMEGA328P),
+            Target::Host | Target::Wasip1 | Target::Wasm32Unknown => None,
+        }
+    }
+
+    /// Whether there is a runtime for the target. An executable for one there
+    /// is none for is the program's own code and nothing else.
+    pub fn has_runtime(self) -> bool {
+        self != Target::AvrAtmega328p
+    }
+
+    /// The boards' triples, for a message.
+    pub fn board_names() -> String {
+        Target::BOARDS.iter().map(|t| t.name()).collect::<Vec<_>>().join(", ")
+    }
+
+    /// The runtime crates the target has not got, whose shims a program
+    /// compiled for it must not reach.
+    pub(crate) fn missing_runtimes(self) -> &'static [crate::compile::externs::RuntimeCrate] {
+        use crate::compile::externs::RuntimeCrate;
+        match self {
+            Target::Host => &[],
+            Target::Wasip1 => &[RuntimeCrate::Posix],
+            Target::Wasm32Unknown => &[RuntimeCrate::Sys, RuntimeCrate::Posix],
+            Target::Thumbv7em | Target::Thumbv8mMain | Target::AvrAtmega328p => &[RuntimeCrate::Sys, RuntimeCrate::Posix, RuntimeCrate::Front],
+        }
+    }
+
+    /// The C data model of the machine the target is.
+    pub fn data_model(self) -> typelisp_mem::target::DataModel {
+        use typelisp_mem::target::DataModel;
+        match self {
+            Target::Host => DataModel::HOST,
+            Target::Wasip1 | Target::Wasm32Unknown | Target::Thumbv7em | Target::Thumbv8mMain => DataModel::ILP32,
+            Target::AvrAtmega328p => DataModel::AVR,
         }
     }
 
@@ -331,6 +441,9 @@ impl Target {
             Target::Host => "host",
             Target::Wasip1 => "wasm32-wasip1",
             Target::Wasm32Unknown => "wasm32-unknown-unknown",
+            Target::Thumbv7em => "thumbv7em-none-eabihf",
+            Target::Thumbv8mMain => "thumbv8m.main-none-eabihf",
+            Target::AvrAtmega328p => "avr-atmega328p",
         }
     }
 }
@@ -341,6 +454,14 @@ pub fn compile_file_with(source_path: &str, output_path: &str, options: &BuildOp
         return Err("--no-cons and --heap-cells cannot be combined: without cons cells there is no arena to size".to_string());
     }
     crate::compile::driver::emitted_layout_is_runnable()?;
+    // Code for another machine: C's `long` and a pointer are as wide as they
+    // are there, for the checker's layouts and casts as much as for the code
+    // generated.
+    let _data_model = typelisp_mem::target::DataModel::producing(options.target.data_model());
+    // Another machine's C functions are that machine's: while its program
+    // compiles, `defffi` does not look for them here. (Called here, they
+    // would be called with the other machine's widths.)
+    let _c_functions = crate::compile::ffi::CFunctionsOn::target(options.target != Target::Host);
     let source =
         fs::read_to_string(source_path).map_err(|e| format!("failed to read \"{}\": {}", source_path, e))?;
 
@@ -356,8 +477,8 @@ pub fn compile_file_with(source_path: &str, output_path: &str, options: &BuildOp
     // program could call the builtins and its own definitions and nothing
     // else: `abs`, `gcd`, `identity`, every stream and pathname helper — the
     // whole prelude — answered "no such function" at compile time. Its bodies
-    // now come along in the executable (`prelude.bitcode`, linked into the
-    // module below) and its globals get their storage at the executable's own
+    // are compiled into the executable as far as the program reaches them
+    // (below), and its globals get their storage at the executable's own
     // startup (`prelude.global_inits`).
     let prelude = crate::compile::prelude_bootstrap::load_for_aot(&mut heap, &mut chk, &mut interp)?;
     crate::load_compiler(&mut heap, &mut chk, &mut interp);
@@ -478,6 +599,10 @@ pub fn compile_file_with(source_path: &str, output_path: &str, options: &BuildOp
     // `COMPILE_LOCK`); the non-LLVM work in between (the `eval` environment)
     // runs under it too, which only costs other threads' wait.
     let _guard = crate::compile::COMPILE_LOCK.lock().unwrap();
+    // From here on everything emitted is the executable's, but for the
+    // `eval` environment's checking.
+    let emitting = || crate::compile::carriers::word_of(options.target.data_model().pointer_bits());
+    let word_width = emitting();
     let module = {
         let module = ctx.create_module("compiled_file");
         // Forward-declares every `rt_*` shim (no body) so `compile-call`'s
@@ -489,42 +614,149 @@ pub fn compile_file_with(source_path: &str, output_path: &str, options: &BuildOp
         // (`driver::compile_function`), no addresses are passed
         // here: these resolve as ordinary linker symbols against
         // `typelisp-rt`'s `staticlib` once `write_executable` links it in.
-        let ptr_ty = ctx.ptr_type(AddressSpace::default());
-        let fn_ty = ctx.i64_type().fn_type(&[ptr_ty.into(), ctx.i32_type().into()], false);
-        for (name, _) in crate::compile::externs::rt_extern_functions() {
-            module.add_function(name, fn_ty, None);
-        }
-        // The FFI thunks, before the prelude is linked in and long before any
+        crate::compile::externs::declare_runtime_functions(&module);
+        // The FFI thunks, long before any
         // body is translated: a compiled call to `c-strlen` resolves
         // `tl_c-strlen` with `get-function`, and the island **aborts the
         // process** on a name it cannot find. Each thunk declares its C
         // function too; unlike the JIT path nothing maps an address here —
         // these resolve as ordinary linker symbols, which is what the `-l`
         // flags below are for.
-        for decl in &ffi_decls {
+        //
+        // Where there is no runtime they are direct functions, emitted once
+        // which functions are is known.
+        for decl in ffi_decls.iter().filter(|_| options.target.has_runtime()) {
             crate::compile::ffi::emit_thunk(&module, decl)?;
         }
-        // The prelude's compiled bodies, merged in here — *before* the first
-        // `add_compiled_function` below, not after. The island's
-        // `compile-call` resolves a callee with `get-function` against this
-        // very module and aborts the process when it finds nothing, so a call
-        // to `abs` needs `tl_abs` present by the time any body is translated,
-        // not merely by the time the module is written out.
-        let buffer =
-            inkwell::memory_buffer::MemoryBuffer::create_from_memory_range_copy(prelude.bitcode, "prelude");
-        let prelude_module = Module::parse_bitcode_from_buffer(&buffer, ctx)
-            .map_err(|e| format!("the committed prelude bitcode failed to parse: {}", e))?;
-        module
-            .link_in_module(prelude_module)
-            .map_err(|e| format!("linking the prelude into the compiled file failed: {}", e))?;
-        // The link left a handler of inkwell's behind — see the function.
-        crate::compile::codegen_prep::install_diagnostic_handler();
         Rc::new(RefCell::new(module))
     };
 
+    // Every body this file will emit, translated for the island before any
+    // is emitted: whether a function is direct (`crate::compile::direct`) is
+    // read off what it does, and decides how every call to it is emitted.
+    // Rooted for the rest of the build, like the forms they come from.
+    let translated = |heap: &mut Heap, item: &CompileTarget| -> Result<direct::Body, String> {
+        let (params, body) = interp.compiled_fn_body(item).map_err(|e| e.to_string())?;
+        let ret = interp.compiled_fn_ret(item).map_err(|e| e.to_string())?;
+        let (param_list, body) =
+            crate::compile::driver::translate(&interp, heap, &params, &body, &std::collections::HashSet::new()).map_err(|e| e.to_string())?;
+        heap.push_root(param_list);
+        heap.push_root(body);
+        let params = params.into_iter().map(|(_, r)| r).collect();
+        Ok(direct::Body { symbol: target_symbol_name(item), params, ret, param_list, body })
+    };
+    let mut bodies: Vec<direct::Body> = Vec::with_capacity(items.len());
+    // The prelude's functions by symbol. A specialization of one that this
+    // file asks for too is the same function and is emitted once, as the
+    // program's.
+    let mut prelude_items: std::collections::HashMap<String, &CompileTarget> =
+        prelude.items.iter().map(|i| (target_symbol_name(i), i)).collect();
+    for item in &items {
+        let body = translated(&mut heap, item)?;
+        prelude_items.remove(&body.symbol);
+        bodies.push(body);
+    }
+    let mut init_bodies: Vec<Value> = Vec::with_capacity(defvar_inits.len());
+    // The program's own globals that can be static (`llvm_builtins::globals`),
+    // by place in `defvar_inits`, each with its id and whether it can be
+    // assigned.
+    let mut statics: std::collections::BTreeMap<usize, (usize, bool)> = Default::default();
+    let mut static_inits: Vec<direct::Body> = Vec::new();
+    for (i, (path, form)) in defvar_inits.iter().enumerate() {
+        let body = crate::compile::driver::translate_global_init(&interp, &mut heap, *form).map_err(|e| e.to_string())?;
+        heap.push_root(body);
+        init_bodies.push(body);
+        let assigned = !matches!(core::field(&heap, *form, 2), Some(Value::Bool(false)));
+        if static_global(&heap, body, assigned, options.target) {
+            let id = interp.compiled_global_id(path).ok_or_else(|| format!("internal error: global `{}` was never promoted", path))?;
+            statics.insert(i, (id, assigned));
+            static_inits.push(direct::Body {
+                symbol: format!("$global_init${}", prelude.global_inits.len() + i),
+                params: Vec::new(),
+                ret: crate::check::repr::Repr::Unit,
+                param_list: Value::Empty,
+                body,
+            });
+        }
+    }
+    let other_inits: Vec<Value> = init_bodies.iter().enumerate().filter(|(i, _)| !statics.contains_key(i)).map(|(_, b)| *b).collect();
+    // The functions whose address the executable hands the runtime, each
+    // entered under the coroutine ABI.
+    let mut pinned: std::collections::HashSet<String> = std::collections::HashSet::new();
+    if options.target.has_runtime() {
+        pinned.insert(target_symbol_name(&CompileTarget::Fn(entry_path)));
+    }
+    pinned.extend(items.iter().chain(&prelude.items).filter(|i| print_object_receiver(i).is_some()).map(target_symbol_name));
+    let handlers: Vec<(u16, String)> =
+        chk.interrupt_handlers().into_iter().map(|(vector, path)| (vector, target_symbol_name(&CompileTarget::Fn(path)))).collect();
+    // With no runtime, what the board enters instead.
+    let mut vectors: Vec<(u16, String)> = Vec::new();
+    if options.target.has_runtime() {
+        pinned.extend(handlers.iter().map(|(_, symbol)| symbol.clone()));
+    } else {
+        for ((vector, path), (_, symbol)) in chk.interrupt_handlers().iter().zip(&handlers) {
+            vectors.push((avr::interrupt_number(options.target, *vector, path)?, symbol.clone()));
+        }
+    }
+    let entered: Vec<String> = vectors.iter().map(|(_, symbol)| symbol.clone()).collect();
+    pinned.extend(chk.ffi_callbacks().into_iter().map(|sig| ConcreteNames::symbol(&sig.function.to_string())));
+    for (_, slots) in interp.vtable_descriptors() {
+        pinned.extend(slots.iter().map(|(type_name, method)| ConcreteNames::method_symbol(type_name, method.name())));
+    }
+    let entry_symbol = target_symbol_name(&CompileTarget::Fn(entry_path));
+    let direct::Direct { sigs, emit, entry: direct_entry, called, interprets, why_not } = direct::direct_functions(&mut heap, &module.borrow(), &bodies, &static_inits, &other_inits, &pinned, &entry_symbol, &entered, options.target.has_runtime(), |heap, symbol| {
+        prelude_items.get(symbol).map(|item| translated(heap, item)).transpose()
+    })?;
+    bodies.extend(emit);
+    if interprets {
+        statics.clear();
+    }
+    if !options.target.has_runtime() {
+        // What a program cannot do without the runtime is told from what it
+        // is made of; what is left is emitted as far as the entry calls it,
+        // and whether that calls the runtime is seen once it is (`avr`).
+        let mut whys = why_not;
+        whys.extend(
+            defvar_inits.iter().enumerate().filter(|(i, _)| !statics.contains_key(i)).map(|(_, (path, _))| format!("the global variable `{}`", path)),
+        );
+        // A `defconstant`'s value is worked out at compile time.
+        whys.extend(
+            defvar_inits
+                .iter()
+                .filter(|(path, _)| chk.var_type(path).is_some_and(|(ty, assigned)| assigned && ty == crate::Type::Int))
+                .map(|(path, _)| format!("the global variable `{}`, an `int`, which has no fixed width: write a type of a fixed width, such as `i16`", path)),
+        );
+        whys.extend(chk.ffi_callbacks().iter().map(|sig| format!("`{}`, given to C as a callback", sig.function)));
+        if !whys.is_empty() {
+            return Err(avr::needs_runtime(options.target, &whys));
+        }
+        bodies.retain(|b| called.contains(&b.symbol));
+    }
+    let mut sigs = sigs;
+    if !options.target.has_runtime() {
+        for decl in &ffi_decls {
+            sigs.insert(ConcreteNames::symbol(&decl.path.to_string()), crate::compile::ffi::direct_sig(decl)?);
+            crate::compile::ffi::emit_direct_thunk(&module.borrow(), decl)?;
+        }
+    }
+    let direct_names: Vec<String> = sigs.keys().cloned().collect();
+    let producing_direct = crate::compile::direct::producing(sigs, options.target.has_runtime());
+    let producing_static =
+        crate::compile::llvm_builtins::globals::producing(
+            statics.values().map(|(id, assigned)| (*id as i64, *assigned)).collect(),
+        );
+    // What runs at startup for each static global, its variable, and whether
+    // that can be assigned.
+    let static_globals: Vec<(String, String, bool)> = statics
+        .iter()
+        .map(|(i, (id, assigned))| {
+            (format!("$global_init${}", prelude.global_inits.len() + i), crate::compile::llvm_builtins::globals::symbol(*id), *assigned)
+        })
+        .collect();
+
     {
         // Every body this file will emit, declared before any of them is
-        // translated — the same thing the prelude artifact's generator does
+        // emitted — the same thing the prelude artifact's generator does
         // with its own item list.
         //
         // Declaration order is not call order. A file's own `defun`s used to
@@ -534,9 +766,8 @@ pub fn compile_file_with(source_path: &str, output_path: &str, options: &BuildOp
         // `length <vector-iter<i32>,i32>` precedes the `vector-iter::next
         // <i32>` it calls. The island resolves a callee by looking it up in
         // this module and **aborts the process** when it finds nothing, so the
-        // declaration has to be there first. Nothing exercised this until the
-        // prelude arrived: a file that could not name a generic could not
-        // instantiate one either. Under the whole-build guard above.
+        // declaration has to be there first. Under the whole-build guard
+        // above.
         let m = module.borrow();
         // A *Lisp* function's type, so it must follow this process's emit ABI
         // rather than the fixed `(ptr, i32)` the `rt_*` shims keep. A
@@ -548,27 +779,27 @@ pub fn compile_file_with(source_path: &str, output_path: &str, options: &BuildOp
             crate::compile::llvm_builtins::coroutine_fn_type()
         } else {
             let ptr_ty = ctx.ptr_type(AddressSpace::default());
-            ctx.i64_type().fn_type(&[ptr_ty.into(), ctx.i32_type().into()], false)
+            crate::compile::carriers::word().fn_type(&[ptr_ty.into(), ctx.i32_type().into()], false)
         };
-        for item in &items {
-            let symbol = target_symbol_name(item);
-            if m.get_function(&symbol).is_none() {
-                m.add_function(&symbol, lisp_fn_ty, None);
+        let symbols = bodies.iter().map(|b| &b.symbol).chain(prelude_items.keys());
+        for symbol in symbols {
+            if m.get_function(symbol).is_none() {
+                let ty = crate::compile::direct::sig_of(symbol).map_or(lisp_fn_ty, |sig| sig.fn_type());
+                m.add_function(symbol, ty, None);
             }
         }
     }
 
-    // One shared module, one `add_compiled_function` call per `defun` —
-    // *not* per-function modules merged afterward, see this module's doc
-    // comment for why. Each call takes `COMPILE_LOCK` per LLVM builtin (via
-    // `eval_llvm_builtin_method`), nesting inside the whole-build guard above.
-    for item in &items {
-        // Every user body's own LLVM symbol name is `ConcreteNames::symbol`'s
-        // — `main` is no longer a special case: `build_main_wrapper` calls it
-        // by that same symbol (`tl_p::main` for `p.typl`). A method's symbol
-        // is `ConcreteNames::method_symbol`'s `tl_type''method`, exactly what
-        // a compiled call site emits.
-        crate::compile::driver::add_compiled_function(&interp, &mut heap, module.clone(), item, &target_symbol_name(item)).map_err(|e| e.to_string())?;
+    // One shared module, one `compile-function` per body — *not*
+    // per-function modules merged afterward, see this module's doc comment
+    // for why. Each LLVM builtin takes `COMPILE_LOCK`, nesting inside the
+    // whole-build guard above. Every user body's own LLVM symbol name is
+    // `ConcreteNames::symbol`'s — `main` is no longer a special case:
+    // `build_main_wrapper` calls it by that same symbol (`tl_p::main` for
+    // `p.typl`). A method's symbol is `ConcreteNames::method_symbol`'s
+    // `tl_type''method`, exactly what a compiled call site emits.
+    for b in &bodies {
+        crate::compile::driver::run_compile_function(&interp, &mut heap, module.clone(), &b.symbol, b.param_list, b.body).map_err(|e| e.to_string())?;
     }
 
     // One `add_compiled_global_init` per `defvar`, in the order
@@ -582,56 +813,146 @@ pub fn compile_file_with(source_path: &str, output_path: &str, options: &BuildOp
     // The prelude's are not optional even for a program that never mentions
     // one: its compiled bodies address their globals by baked-in slot id, so
     // `*print-pretty*` has to have storage before anything that prints runs.
-    let all_inits: Vec<(Path, Value)> =
-        prelude.global_inits.iter().chain(defvar_inits.iter()).cloned().collect();
-    let mut global_init_names: Vec<String> = Vec::with_capacity(all_inits.len());
-    for (i, (_, form)) in all_inits.iter().enumerate() {
-        let internal_name = format!("$global_init${}", i);
+    let mut global_init_names: Vec<String> = Vec::with_capacity(prelude.global_inits.len() + defvar_inits.len());
+    let prelude_inits: &[(Path, Value)] = if options.target.has_runtime() { &prelude.global_inits } else { &[] };
+    for (_, form) in prelude_inits {
+        let internal_name = format!("$global_init${}", global_init_names.len());
         crate::compile::driver::add_compiled_global_init(&interp, &mut heap, module.clone(), &internal_name, *form).map_err(|e| e.to_string())?;
         global_init_names.push(internal_name);
     }
+    for (i, body) in init_bodies.iter().enumerate() {
+        let internal_name = format!("$global_init${}", global_init_names.len());
+        if !statics.contains_key(&i) {
+            crate::compile::driver::run_compile_function(&interp, &mut heap, module.clone(), &internal_name, Value::Empty, *body).map_err(|e| e.to_string())?;
+        }
+        global_init_names.push(internal_name);
+    }
+    let all_inits: Vec<(Path, Value)> =
+        prelude.global_inits.iter().chain(defvar_inits.iter()).cloned().collect();
+    // The rest of the prelude the executable may need: the `print-object`s
+    // the printer may choose, the functions whose address the runtime is
+    // handed, and what they, the globals' initializers and
+    // anything else emitted so far refer to. Which of it can run, the finished
+    // `main` says; what cannot is not linked in.
+    let mut wanted: Vec<String> = prelude
+        .items
+        .iter()
+        .filter(|i| print_object_receiver(i).is_some())
+        .map(target_symbol_name)
+        .chain(pinned)
+        .filter(|_| options.target.has_runtime())
+        .collect();
+    loop {
+        let missing = |m: &Module<'static>, symbol: &str| m.get_function(symbol).is_some_and(|f| f.count_basic_blocks() == 0);
+        wanted.retain(|symbol| prelude_items.contains_key(symbol) && missing(&module.borrow(), symbol));
+        wanted.extend(
+            prelude_items
+                .keys()
+                .filter(|symbol| {
+                    let m = module.borrow();
+                    let f = m.get_function(symbol);
+                    use inkwell::values::BasicValue;
+                    f.is_some_and(|f| f.count_basic_blocks() == 0 && f.as_global_value().as_pointer_value().get_first_use().is_some())
+                })
+                .cloned(),
+        );
+        wanted.sort();
+        wanted.dedup();
+        if wanted.is_empty() {
+            break;
+        }
+        for symbol in std::mem::take(&mut wanted) {
+            let b = translated(&mut heap, prelude_items[&symbol])?;
+            crate::compile::driver::run_compile_function(&interp, &mut heap, module.clone(), &b.symbol, b.param_list, b.body).map_err(|e| e.to_string())?;
+        }
+    }
+    let skipped_safepoints = crate::compile::direct::skipped_safepoints();
+    // Every body is emitted. What compiles from here on compiles for this
+    // process (the `eval` environment's checking), and nothing there is direct.
+    drop(producing_direct);
+    drop(producing_static);
+    let running_inits = settle::settle_inits(&module.borrow(), &static_globals, options.target.has_runtime())?;
+    settle::settle(&module.borrow(), &direct_names, options.target.has_runtime())?;
+    if !options.target.has_runtime() {
+        bare::check_stack(&module.borrow(), &direct_names)?;
+        bare::link_into(ctx, &module.borrow())?;
+        let result = {
+            let m = module.borrow();
+            let entry = direct_entry.as_deref().and_then(|name| m.get_function(name)).ok_or("internal error: the entry point was not compiled")?;
+            let main_returns_int = chk.fn_ret(&entry_path).is_some_and(|ret| ret == crate::Type::Int);
+            let inits: Vec<_> = running_inits.iter().filter_map(|name| m.get_function(name)).collect();
+            let handlers = vectors
+                .iter()
+                .map(|(n, symbol)| {
+                    let f = if *symbol == entry_symbol { Some(entry) } else { m.get_function(symbol) };
+                    f.map(|f| (*n, f)).ok_or_else(|| format!("internal error: the interrupt handler `{}` was not compiled", symbol))
+                })
+                .collect::<Result<Vec<_>, String>>()?;
+            let entered: Vec<_> = handlers.iter().map(|(_, f)| *f).collect();
+            let variables: Vec<String> = static_globals.iter().map(|(_, variable, _)| variable.clone()).collect();
+            let mask_globals = || -> Result<(), String> {
+                let masked = masking::mask(&m, &variables, entry, &entered)?;
+                for ((i, _), variable) in statics.iter().zip(&variables) {
+                    if let Some(masked) = masked.get(variable) {
+                        let accessed = match (masked.read, masked.written) {
+                            (true, true) => "read or written",
+                            (true, false) => "read",
+                            _ => "written",
+                        };
+                        eprintln!(
+                            "warning: interrupts are disabled while the global variable `{}` is {}: it is {} bytes, and an interrupt handler that uses it could come between them",
+                            defvar_inits[*i].0, accessed, masked.bytes
+                        );
+                    }
+                }
+                Ok(())
+            };
+            let reached: Result<(), String> =
+                inits.iter().copied().chain([entry]).chain(handlers.iter().map(|(_, f)| *f)).try_for_each(|f| avr::check_reaches_no_runtime(&m, options.target, f));
+            reached
+                .and_then(|()| mask_globals())
+                .and_then(|()| bare_main(ctx, &m, &inits, !handlers.is_empty(), entry, main_returns_int))
+                .and_then(|()| handlers.iter().try_for_each(|(n, f)| avr::vector(&m, *n, *f)))
+                .and_then(|()| crate::compile::type_table::settle_for_export(&m).map(|_| ()))
+                .and_then(|()| m.verify().map_err(|e| format!("module failed verification: {}", e)))
+                .and_then(|()| direct::check_only_called(&m, &direct_names))
+                .and_then(|()| write_ir(&m))
+                .and_then(|()| avr::write_executable(&m, output_path, &items, &handlers.iter().map(|(n, _)| *n).collect::<Vec<_>>(), options))
+        };
+        // Under the guard, as at the end of this function.
+        drop(module);
+        return result;
+    }
+    if !running_inits.is_empty() {
+        return Err(format!("internal error: a static global's initial value is not a constant ({})", running_inits.join(", ")));
+    }
 
     // Which types have a compiled `print-object`, for the printer's AOT
-    // startup registration: this file's, and the prelude's own (`complex`,
+    // startup registration to choose from (`live_types` keeps those
+    // the executable can make a value of): this file's, and the prelude's own (`complex`,
     // `pathname`, the streams, the error types, ...), which no item of this
     // file names — they are chosen by the printer at run time, never called.
-    // Their bodies are in the module already, the prelude bitcode having been
-    // linked in whole above, so registering them is all that is missing;
+    // Their bodies are in the module already, so registering them is all that
+    // is missing;
     // without it an executable printed a `complex` as `#<complex re: 1.0 im:
     // 2.0>` where `typl` said `#C(1.0 2.0)`. Read off the items rather than
     // off the method tables because the address has to name a function the
     // module has a body for: `compile-file` compiles every top-level body in
     // the file, so an `impl print-object` in it is here whether or not
     // anything calls it.
+    //
+    // A primitive's is left out: the executable's printer asks the
+    // registration about a struct's or an enum's value only
+    // (`typelisp_print::aot`), and no primitive's value is either.
     let mut print_objects: Vec<(typelisp_mem::TypeId, String)> = Vec::new();
     for item in items.iter().chain(&prelude.items) {
         if let Some(ty) = print_object_receiver(item) {
-            if !print_objects.iter().any(|(t, _)| *t == ty) {
+            let primitive = matches!(typelisp_mem::type_shape(ty), typelisp_mem::TypeShape::Named(ns, ..) if ns == typelisp_mem::StdModule::PRIMITIVE.ns());
+            if !primitive && !print_objects.iter().any(|(t, _)| *t == ty) {
                 print_objects.push((ty, target_symbol_name(item)));
             }
         }
     }
-
-    // What the `~/name/` directives in this file resolved to
-    // (`Checker::format_call_targets`). The interpreter fetches the
-    // definition from its own tables when the directive runs, but a
-    // standalone executable has none, so each becomes a startup registration
-    // below, exactly as `print-object` does.
-    let format_calls: Vec<(String, String, typelisp_print::aot::ArgWord)> = chk
-        .format_call_targets()
-        .into_iter()
-        .map(|(target, arg)| {
-            let symbol = items
-                .iter()
-                .find(|item| **item == target)
-                .map(target_symbol_name)
-                .ok_or_else(|| format!(
-                    "compile-file: a `~/name/` directive calls `{}`, which was not compiled into this file",
-                    target.link_name()
-                ))?;
-            Ok((target.link_name(), symbol, arg))
-        })
-        .collect::<Result<_, String>>()?;
 
     // Each global's path with the slot id `collect_aot_item` promoted it to,
     // for the `eval` environment's startup binding. Read back rather than
@@ -647,6 +968,47 @@ pub fn compile_file_with(source_path: &str, output_path: &str, options: &BuildOp
             Ok((*path, id))
         })
         .collect::<Result<_, String>>()?;
+
+    // Which globals each compiled body reads or assigns, by id: what decides
+    // which of the prelude's globals the executable initialises
+    // (`build_main_wrapper`). Read off the bodies' core forms, where a
+    // global is still named — the IR addresses it by an id stored as a
+    // constant, which says nothing a walk can rely on.
+    let globals_read = |heap: &Heap, forms: &[Value]| -> Result<Vec<usize>, String> {
+        let targets = crate::compile::core_bridge::collect_targets(heap, forms).map_err(|e| e.to_string())?;
+        targets
+            .globals
+            .iter()
+            .map(|path| {
+                interp
+                    .compiled_global_id(path)
+                    .ok_or_else(|| format!("internal error: global `{}` is read and was never promoted", path))
+            })
+            .collect()
+    };
+    let mut body_globals: std::collections::HashMap<String, Vec<usize>> = std::collections::HashMap::new();
+    for item in items.iter().chain(&prelude.items) {
+        let (_, body) = interp.compiled_fn_body(item).map_err(|e| e.to_string())?;
+        let symbol = target_symbol_name(item);
+        let read = globals_read(&heap, &body)?;
+        // A direct copy is the same body.
+        if let Some(copy) = direct_entry.as_ref().filter(|_| symbol == entry_symbol) {
+            body_globals.insert(copy.clone(), read.clone());
+        }
+        body_globals.insert(symbol, read);
+    }
+    let is_static = |i: usize| i.checked_sub(prelude.global_inits.len()).is_some_and(|i| statics.contains_key(&i));
+    let globals = Globals {
+        inits: all_inits
+            .iter()
+            .zip(&eval_globals)
+            .enumerate()
+            .map(|(i, ((_, form), (_, id)))| {
+                Ok(GlobalInit { id: *id, reads: globals_read(&heap, std::slice::from_ref(form))?, always: i >= prelude.global_inits.len() && !is_static(i), is_static: is_static(i) })
+            })
+            .collect::<Result<_, String>>()?,
+        bodies: body_globals,
+    };
 
     // The printer control variables' compiled ids, for the startup to
     // register: the prelude defines all of them, so each was promoted with
@@ -679,12 +1041,15 @@ pub fn compile_file_with(source_path: &str, output_path: &str, options: &BuildOp
     // Nothing below consults it — `build_main_wrapper` emits ids as constants
     // and `write_executable` links — and `compile_file` already reset it once
     // at the top for its own `interp`.
+    drop(word_width);
     let eval_env: Option<Vec<u8>> = if calls_eval {
         let mut env_heap = Heap::with_capacity(EVAL_HEAP_CAPACITY);
         Some(crate::compile::dump::capture_program_dump(&mut env_heap, &source, &src_root, &entry_segs, &eval_globals)?)
     } else {
         None
     };
+
+    let _word_width = emitting();
 
     // What `main` answers with decides how the exit code is read off it: an
     // `int` is a tagged word (a fixnum's payload is the code; a bignum has
@@ -694,6 +1059,11 @@ pub fn compile_file_with(source_path: &str, output_path: &str, options: &BuildOp
     // `typl file.typl` places it (`run_file`), so a bare name in it resolves
     // to the program's own definition.
     let eval_ns = typelisp_front::mem::symbols::ns_of(&entry_segs);
+    // The executable's type names are written from that same module, as
+    // `typl file.typl` writes them: the view the printer's registration
+    // carries (`emit_print_registration`) is the one the checker publishes
+    // for it.
+    chk.set_current_ns(eval_ns);
 
     // Under the whole-build guard above (no second take here: rebinding
     // `_guard` in this scope would drop the outer one first).
@@ -707,27 +1077,47 @@ pub fn compile_file_with(source_path: &str, output_path: &str, options: &BuildOp
             let entry = crate::compile::ffi::emit_callback_entry_in_module(&m, &format!("tl_ffi_callback_entry${}", i), &sig)?;
             callback_entries.push((sig, entry));
         }
+        // The functions a board runs when an interrupt comes.
+        let mut interrupt_handlers = Vec::new();
+        for (vector, path) in chk.interrupt_handlers() {
+            if options.target.board().is_none() {
+                return Err(format!(
+                    "`{}` is an interrupt handler, and only a board has interrupts: compile it with --target for one ({})",
+                    path,
+                    Target::board_names()
+                ));
+            }
+            let symbol = target_symbol_name(&CompileTarget::Fn(path));
+            let handler = m
+                .get_function(&symbol)
+                .ok_or_else(|| format!("internal error: the interrupt handler `{}` was not compiled into the module", path))?;
+            interrupt_handlers.push((vector, handler));
+        }
         build_main_wrapper(
             ctx,
             &m,
-            &target_symbol_name(&CompileTarget::Fn(entry_path)),
+            &entry_symbol,
+            direct_entry.as_deref(),
             &global_init_names,
+            &globals,
             &interp.vtable_descriptors(),
             &interp.upcast_descriptors(),
             &interp.enum_variant_descriptors(),
             &interp.field_template_descriptors(),
             &interp.field_name_descriptors(),
             &print_objects,
-            &format_calls,
             &printer_globals,
             &callback_entries,
+            &interrupt_handlers,
             eval_env.as_deref().map(|bytes| (bytes, eval_ns, crate::release::is_release())),
             main_returns_int,
+            options.target,
             HeapInit {
                 cells: match options.heap_cells {
                     Some(cells) => cells,
                     None if options.no_cons => 0,
                     None if eval_env.is_some() => EVAL_HEAP_CAPACITY,
+                    None if options.target.board().is_some() => BOARD_HEAP_CAPACITY,
                     None => typelisp_rt::DEFAULT_AOT_HEAP_CAPACITY,
                 },
                 fixed: options.heap_cells.is_some() || options.no_cons,
@@ -735,6 +1125,17 @@ pub fn compile_file_with(source_path: &str, output_path: &str, options: &BuildOp
             },
         )
             .and_then(|()| m.verify().map_err(|e| format!("module failed verification: {}", e)))
+            .and_then(|()| direct::check_only_called(&m, &direct_names))
+            .and_then(|()| {
+                // A direct function's loop offers the scheduler no turn, which
+                // is right only in a program with no other task to run.
+                let entry = m.get_function(ENTRY_POINT_NAME).expect("build_main_wrapper defined `main`");
+                let waits = reach::uses(&m, entry, |name| crate::compile::externs::needs_scheduler(name).then(String::new));
+                if skipped_safepoints > 0 && !waits.is_empty() {
+                    return Err("internal error: a direct function has a loop, and the program runs other tasks".to_string());
+                }
+                Ok(())
+            })
             .and_then(|()| {
                 if !options.no_cons {
                     return Ok(());
@@ -745,25 +1146,56 @@ pub fn compile_file_with(source_path: &str, output_path: &str, options: &BuildOp
                 });
                 if uses.is_empty() { Ok(()) } else { Err(reach::report("--no-cons: the program uses cons cells:", &uses)) }
             })
+            .and_then(|()| {
+                let shim = |table: &'static [(&'static str, &'static str)]| {
+                    move |name: &str| table.iter().find(|(shim, _)| *shim == name).map(|(_, what)| what.to_string())
+                };
+                if options.target.board().is_none() {
+                    let entry = m.get_function(ENTRY_POINT_NAME).expect("build_main_wrapper defined `main`");
+                    let uses = reach::uses(&m, entry, shim(crate::compile::externs::BOARD_ONLY_SHIMS));
+                    if !uses.is_empty() {
+                        return Err(reach::report("the program uses what only a board has:", &uses));
+                    }
+                }
+                for (_, handler) in &interrupt_handlers {
+                    let uses = reach::uses(&m, *handler, shim(crate::compile::externs::ALWAYS_WAITING_SHIMS));
+                    if !uses.is_empty() {
+                        let header = format!(
+                            "the interrupt handler `{}` waits, and a handler cannot — it runs on top of the program it stopped:",
+                            handler.get_name().to_string_lossy()
+                        );
+                        return Err(reach::report(&header, &uses));
+                    }
+                }
+                Ok(())
+            })
+            .and_then(|()| {
+                write_ir(&m)
+            })
             .and_then(|()| match options.target {
                 Target::Host => write_executable(&m, output_path, &link_libraries, &items),
-                Target::Wasip1 | Target::Wasm32Unknown => {
-                    let unavailable = match options.target {
-                        Target::Wasip1 => crate::compile::externs::wasm_unavailable,
-                        _ => crate::compile::externs::wasm_unknown_unavailable,
-                    };
+                Target::AvrAtmega328p => Err("internal error: a target without a runtime is built without a driver".to_string()),
+                Target::Wasip1 | Target::Wasm32Unknown | Target::Thumbv7em | Target::Thumbv8mMain => {
+                    let missing = options.target.missing_runtimes();
+                    // A board calls its vendor's C functions; a WebAssembly
+                    // module has no C library to find them in.
+                    let c_functions = options.target.board().is_none();
                     let entry = m.get_function(ENTRY_POINT_NAME).expect("build_main_wrapper defined `main`");
                     let uses = reach::uses(&m, entry, |name| {
-                        if let Some(what) = unavailable(name) {
+                        if let Some(what) = crate::compile::externs::unavailable_in(missing, name) {
                             return Some(what.to_string());
                         }
-                        ffi_decls.iter().any(|d| d.c_symbol == name).then(|| format!("the C function `{}`", name))
+                        (c_functions && ffi_decls.iter().any(|d| d.c_symbol == name)).then(|| format!("the C function `{}`", name))
                     });
                     if !uses.is_empty() {
                         let header = format!("--target {}: the program uses what the target does not have:", options.target.name());
                         return Err(reach::report(&header, &uses));
                     }
-                    wasm::write_module(&m, output_path, &items, options.target)
+                    if options.target.board().is_some() {
+                        embedded::write_executable(&m, output_path, &items, options)
+                    } else {
+                        wasm::write_module(&m, output_path, &items, options.target)
+                    }
                 }
             })
     };
@@ -828,18 +1260,21 @@ fn build_main_wrapper(
     ctx: &'static Context,
     module: &Module<'static>,
     entry_symbol: &str,
+    direct_entry: Option<&str>,
     global_init_names: &[String],
+    globals: &Globals,
     vtables: &[(u32, Vec<(Path, typelisp_mem::SymRef)>)],
     upcasts: &[(u32, u32, u32)],
     enum_variants: &[(Path, usize, String)],
     field_templates: &[(Path, i64, i64, crate::TypeId)],
     field_names: &[(Path, i64, String)],
     print_objects: &[(typelisp_mem::TypeId, String)],
-    format_calls: &[(String, String, typelisp_print::aot::ArgWord)],
     printer_globals: &[(&str, usize)],
     callback_entries: &[(typelisp_front::ffi_callback::CallbackSig, inkwell::values::FunctionValue<'static>)],
+    interrupt_handlers: &[(u16, inkwell::values::FunctionValue<'static>)],
     eval_env: Option<(&[u8], typelisp_mem::NsId, bool)>,
     main_returns_int: bool,
+    target: Target,
     heap: HeapInit,
 ) -> Result<(), String> {
     let tl_main = module
@@ -847,9 +1282,6 @@ fn build_main_wrapper(
         .ok_or_else(|| "internal error: compiled entry point not found in module".to_string())?;
 
     let i32_type = ctx.i32_type();
-    let ptr_ty = ctx.ptr_type(AddressSpace::default());
-    let fn_ty = ctx.i64_type().fn_type(&[ptr_ty.into(), ctx.i32_type().into()], false);
-    module.add_function("rt_heap_init", fn_ty, None);
     let main_fn = module.add_function(ENTRY_POINT_NAME, i32_type.fn_type(&[], false), None);
     let entry_block = ctx.append_basic_block(main_fn, "entry");
     let builder = ctx.create_builder();
@@ -868,22 +1300,42 @@ fn build_main_wrapper(
         .set_volatile(true)
         .map_err(|e| format!("failed to mark the ABI marker load volatile: {:?}", e))?;
 
+    // A program nothing of which calls the runtime: no heap, and nothing to
+    // start. What it runs is all there is.
+    let outside = !callback_entries.is_empty() || !interrupt_handlers.is_empty() || eval_env.is_some();
+    let direct_entry = match direct_entry.filter(|_| !outside) {
+        Some(name) => Some(module.get_function(name).ok_or_else(|| format!("internal error: `{}` was not compiled", name))?),
+        None => None,
+    };
+    if let Some(entry) = direct_entry {
+        if globals.inits.iter().all(|i| !i.always) && !reach::reached(module, &[entry], None).functions.iter().any(|f| is_runtime(module, f)) {
+            run_bare_entry(ctx, &builder, entry, main_returns_int)?;
+            return crate::compile::type_table::settle_for_export(module).map(|_| ());
+        }
+    }
+
+    // A board's memory and interrupt controller, readied for the runtime
+    // before anything allocates.
+    if target.board().is_some() {
+        let start = module.add_function("typelisp_board_start", ctx.void_type().fn_type(&[], false), None);
+        builder.build_call(start, &[], "").map_err(|e| format!("failed to build the board's start: {}", e))?;
+    }
 
     // The C callback entries (`typelisp_rt::ffi_callback`): the entry's
     // address under the function's definition and the function type C calls
     // it at, which is what a callback argument looks up.
     for (i, (sig, entry)) in callback_entries.iter().enumerate() {
-        let i64_ty = ctx.i64_type();
+        let word_ty = crate::compile::carriers::word();
         let definition = typelisp_mem::type_words::definition_words(sig.function.ns(), sig.function.name_symbol());
         let (definition, len) =
             crate::compile::type_table::constant_words(module, &format!("ffi_callback_function${}", i), &definition);
         let words = [
-            entry.as_global_value().as_pointer_value().const_to_int(i64_ty),
+            entry.as_global_value().as_pointer_value().const_to_int(word_ty),
             crate::compile::type_table::load(&builder, module, sig.ty)?,
-            definition.as_pointer_value().const_to_int(i64_ty),
-            i64_ty.const_int(len as u64, false),
+            definition.as_pointer_value().const_to_int(word_ty),
+            word_ty.const_int(len as u64, false),
         ];
-        call_shim(ctx, module, &builder, "rt_ffi_callback_register", &words)?;
+        call_shim(module, &builder, "rt_ffi_callback_register", &words)?;
     }
     // The printer's two program facts (`typelisp_print::aot`): an enum's
     // variant *names* and each type's `print-object`, neither of which a
@@ -896,120 +1348,40 @@ fn build_main_wrapper(
     // `(defun main () i32 42)`: 3,530,224 bytes with no printer symbol in it
     // at all when this guard does not trip, 3,877,648 and 124 of them when it
     // does.
-    if module_calls_any(module, &PRINT_SHIMS) {
-        let i64_ty = ctx.i64_type();
-        // A `(pointer, length)` pair per string, from a module-level constant
-        // — no heap involved, so this can run before `rt_heap_init`.
-        let literal = |builder: &inkwell::builder::Builder<'static>, text: &str| -> Result<(inkwell::values::IntValue<'static>, inkwell::values::IntValue<'static>), String> {
-            let g = builder
-                .build_global_string_ptr(text, "print_reg_str")
-                .map_err(|e| format!("failed to build a printer-registration string: {}", e))?;
-            Ok((
-                g.as_pointer_value().const_to_int(i64_ty),
-                i64_ty.const_int(text.len() as u64, false),
-            ))
-        };
-        let call = |builder: &inkwell::builder::Builder<'static>, name: &str, words: &[inkwell::values::IntValue<'static>]| -> Result<(), String> {
-            let f = module
-                .get_function(name)
-                .ok_or_else(|| format!("internal error: {} not declared in module", name))?;
-            let args_ptr = builder
-                .build_alloca(i64_ty.array_type(words.len() as u32), "print_reg_args")
-                .map_err(|e| format!("failed to alloca printer-registration args: {}", e))?;
-            for (i, w) in words.iter().enumerate() {
-                let p = unsafe {
-                    builder
-                        .build_gep(i64_ty, args_ptr, &[i64_ty.const_int(i as u64, false)], "print_reg_arg_ptr")
-                        .map_err(|e| format!("failed to build printer-registration gep: {}", e))?
-                };
-                builder.build_store(p, *w).map_err(|e| format!("failed to store printer-registration arg: {}", e))?;
-            }
-            builder
-                .build_call(f, &[args_ptr.into(), ctx.i32_type().const_int(words.len() as u32 as u64, false).into()], "print_reg_result")
-                .map_err(|e| format!("failed to build {} call: {}", name, e))?;
-            Ok(())
-        };
-        // The definitions and the field types, read out of the module's type
-        // table (`compile::type_table`): a type's id is this process's number,
-        // so the executable carries the shapes and its startup interns them.
-        let ty = |ty: crate::TypeId| crate::compile::type_table::load(&builder, module, ty);
-        let definition = |path: &Path| ty(typelisp_front::type_key::type_key_id(path, Vec::new()));
-        for (path, variant, name) in enum_variants {
-            let (name_ptr, name_len) = literal(&builder, name)?;
-            call(&builder, "rt_print_enum_variant", &[definition(path)?, i64_ty.const_int(*variant as u64, false), name_ptr, name_len])?;
-        }
-        for (path, variant, index, template) in field_templates {
-            call(
-                &builder,
-                "rt_print_field_template",
-                &[definition(path)?, i64_ty.const_int(*variant as u64, true), i64_ty.const_int(*index as u64, true), ty(*template)?],
-            )?;
-        }
-        for (path, index, name) in field_names {
-            let (name_ptr, name_len) = literal(&builder, name)?;
-            call(&builder, "rt_print_field_name", &[definition(path)?, i64_ty.const_int(*index as u64, true), name_ptr, name_len])?;
-        }
-        for (receiver, symbol) in print_objects {
-            let target = module.get_function(symbol).ok_or_else(|| {
-                format!("compile-file: `print-object` implementation `{}` was not compiled into this file", symbol)
-            })?;
-            let fn_ptr = classic_door(ctx, module, target)?;
-            call(&builder, "rt_print_object_method", &[ty(*receiver)?, fn_ptr])?;
-        }
-        for (name, symbol, arg) in format_calls {
-            let target = module.get_function(symbol).ok_or_else(|| {
-                format!("compile-file: a `~/name/` directive calls `{}`, which was not compiled into this file", name)
-            })?;
-            let (name_ptr, name_len) = literal(&builder, name)?;
-            let fn_ptr = classic_door(ctx, module, target)?;
-            call(&builder, "rt_format_call_method", &[name_ptr, name_len, fn_ptr, i64_ty.const_int(arg.code() as u64, true)])?;
-        }
-        for (name, id) in printer_globals {
-            let (name_ptr, name_len) = literal(&builder, name)?;
-            call(&builder, "rt_print_global", &[name_ptr, name_len, i64_ty.const_int(*id as u64, false)])?;
-        }
-        // Type names are written for the module the program was checked in,
-        // as the interpreter writes them — the view the checker left behind.
-        let view = typelisp_print::shared::name_view();
-        let words = |name: &str, words: &[typelisp_mem::type_words::Word]| {
-            let (global, len) = crate::compile::type_table::constant_words(module, name, words);
-            (global.as_pointer_value().const_to_int(i64_ty), i64_ty.const_int(len as u64, false))
-        };
-        let (module_ptr, module_len) = words("print_name_module", &typelisp_mem::type_words::ns_words(view.module()));
-        call(&builder, "rt_print_name_module", &[module_ptr, module_len])?;
-        // In the order of the names, so the executable is the same each time.
-        let mut imports: Vec<(&(typelisp_mem::NsId, typelisp_mem::symbols::SymRef), &&'static str)> = view.imports().iter().collect();
-        imports.sort_by_key(|(_, name)| **name);
-        for (i, ((ns, sym), name)) in imports.into_iter().enumerate() {
-            let (def_ptr, def_len) =
-                words(&format!("print_name_import${}", i), &typelisp_mem::type_words::definition_words(*ns, *sym));
-            let (name_ptr, name_len) = literal(&builder, name)?;
-            call(&builder, "rt_print_name_import", &[def_ptr, def_len, name_ptr, name_len])?;
-        }
-    }
+    //
+    // In a function of its own, which `main` calls here and which is given
+    // its body once `main` is complete: which `print-object`s it registers
+    // depends on what the rest of the executable can make
+    // ([`live_types`]).
+    let print_register = if module_calls_any(module, &PRINT_SHIMS) {
+        let register = module.add_function("typelisp_print_register", ctx.void_type().fn_type(&[], false), None);
+        builder.build_call(register, &[], "").map_err(|e| format!("failed to build the printer registration call: {}", e))?;
+        Some(register)
+    } else {
+        None
+    };
     // The environment `eval` needs, as one immutable blob. Registration only —
     // the shim just remembers the pointer — so this belongs with the other
     // pre-heap stores. Emitted, like the printer's block above, only when the
     // module actually calls `rt_eval`: naming the shim is what pulls the
     // checker and the interpreter into the executable.
     if let Some((bytes, ns, release)) = eval_env {
-        let i64_ty = ctx.i64_type();
+        let word_ty = crate::compile::carriers::word();
         let blob = module.add_global(ctx.i8_type().array_type(bytes.len() as u32), None, "typelisp_eval_env");
         blob.set_initializer(&ctx.const_string(bytes, false));
         blob.set_constant(true);
         let (ns_words, ns_len) =
             crate::compile::type_table::constant_words(module, "typelisp_eval_ns", &typelisp_mem::type_words::ns_words(ns));
         call_shim(
-            ctx,
             module,
             &builder,
             "rt_eval_state",
             &[
-                blob.as_pointer_value().const_to_int(i64_ty),
-                i64_ty.const_int(bytes.len() as u64, false),
-                ns_words.as_pointer_value().const_to_int(i64_ty),
-                i64_ty.const_int(ns_len as u64, false),
-                i64_ty.const_int(release as u64, false),
+                blob.as_pointer_value().const_to_int(word_ty),
+                word_ty.const_int(bytes.len() as u64, false),
+                ns_words.as_pointer_value().const_to_int(word_ty),
+                word_ty.const_int(ns_len as u64, false),
+                word_ty.const_int(release as u64, false),
             ],
         )?;
     }
@@ -1022,14 +1394,13 @@ fn build_main_wrapper(
     // The bound on memory is set by the same call, before the arena is
     // allocated, so the arena counts toward it (0 is no bound).
     call_shim(
-        ctx,
         module,
         &builder,
         "rt_heap_init",
         &[
-            ctx.i64_type().const_int(heap.cells as u64, false),
-            ctx.i64_type().const_int(heap.max_memory.unwrap_or(0) as u64, false),
-            ctx.i64_type().const_int(heap.fixed as u64, false),
+            crate::compile::carriers::word().const_int(heap.cells as u64, false),
+            crate::compile::carriers::word().const_int(heap.max_memory.unwrap_or(0) as u64, false),
+            crate::compile::carriers::word().const_int(heap.fixed as u64, false),
         ],
     )?;
     // Between the heap and the vtables and global inits, and that position
@@ -1038,19 +1409,20 @@ fn build_main_wrapper(
     // slots the machine code addresses. See `typelisp_front::shim`'s module
     // doc comment.
     if eval_env.is_some() {
-        call_shim(ctx, module, &builder, "rt_eval_init", &[])?;
+        call_shim(module, &builder, "rt_eval_init", &[])?;
+    }
+    // A board's interrupt handlers (`typelisp_rt::interrupt`), each under its
+    // vector-table entry: after the heap, which a handler runs on.
+    for (vector, handler) in interrupt_handlers {
+        let word_ty = crate::compile::carriers::word();
+        let words = [word_ty.const_int(u64::from(*vector), false), handler.as_global_value().as_pointer_value().const_to_int(word_ty)];
+        call_shim(module, &builder, "rt_interrupt_register", &words)?;
     }
     // Trait-object vtables: after `rt_eval_init` (above), whose `Interp::new`
     // clears the table, and complete before `tl_main` can reach a `:dyn`
     // call site.
     if !vtables.is_empty() {
-        let i64_ty = ctx.i64_type();
-        let rt_vtable_set = module
-            .get_function("rt_vtable_set")
-            .ok_or_else(|| "internal error: rt_vtable_set not declared in module".to_string())?;
-        let args_ptr = builder
-            .build_alloca(i64_ty.array_type(4), "vtable_set_args")
-            .map_err(|e| format!("failed to alloca vtable-set args: {}", e))?;
+        let word_ty = crate::compile::carriers::word();
         for (id, slots) in vtables {
             for (slot, (type_name, method)) in slots.iter().enumerate() {
                 let symbol = ConcreteNames::method_symbol(type_name, method.name());
@@ -1061,7 +1433,7 @@ fn build_main_wrapper(
                         method.name()
                     )
                 })?;
-                let fn_ptr = target.as_global_value().as_pointer_value().const_to_int(i64_ty);
+                let fn_ptr = target.as_global_value().as_pointer_value().const_to_int(word_ty);
                 // `IntValue` is `Copy`, so the deref below is free — spelled
                 // out because this crate is edition 2018, where an array's
                 // `into_iter()` still yields references.
@@ -1074,54 +1446,26 @@ fn build_main_wrapper(
                     typelisp_abi::BODY_ABI_CLASSIC
                 };
                 let set_args = [
-                    i64_ty.const_int(*id as u64, false),
-                    i64_ty.const_int(slot as u64, false),
+                    word_ty.const_int(*id as u64, false),
+                    word_ty.const_int(slot as u64, false),
                     fn_ptr,
-                    i64_ty.const_int(u64::from(body_abi), false),
+                    word_ty.const_int(u64::from(body_abi), false),
                 ];
-                for (i, v) in set_args.iter().enumerate() {
-                    let v = *v;
-                    let p = unsafe {
-                        builder
-                            .build_gep(i64_ty, args_ptr, &[i64_ty.const_int(i as u64, false)], "vtable_set_arg_ptr")
-                            .map_err(|e| format!("failed to build vtable-set gep: {}", e))?
-                    };
-                    builder.build_store(p, v).map_err(|e| format!("failed to store vtable-set arg: {}", e))?;
-                }
-                builder
-                    .build_call(rt_vtable_set, &[args_ptr.into(), ctx.i32_type().const_int(4, false).into()], "vtable_set_result")
-                    .map_err(|e| format!("failed to build rt_vtable_set call: {}", e))?;
+                call_shim(module, &builder, "rt_vtable_set", &set_args)?;
             }
         }
     }
     // The supertrait upcast table, for the same reason and at the same
     // point: a `:dyn` upcast in `tl_main` reads it, and it is all constants.
     if !upcasts.is_empty() {
-        let i64_ty = ctx.i64_type();
-        let rt_upcast_set = module
-            .get_function("rt_upcast_set")
-            .ok_or_else(|| "internal error: rt_upcast_set not declared in module".to_string())?;
-        let args_ptr = builder
-            .build_alloca(i64_ty.array_type(3), "upcast_set_args")
-            .map_err(|e| format!("failed to alloca upcast-set args: {}", e))?;
+        let word_ty = crate::compile::carriers::word();
         for (from, trait_id, to) in upcasts {
             let set_args = [
-                i64_ty.const_int(*from as u64, false),
-                i64_ty.const_int(*trait_id as u64, false),
-                i64_ty.const_int(*to as u64, false),
+                word_ty.const_int(*from as u64, false),
+                word_ty.const_int(*trait_id as u64, false),
+                word_ty.const_int(*to as u64, false),
             ];
-            for (i, v) in set_args.iter().enumerate() {
-                let v = *v;
-                let p = unsafe {
-                    builder
-                        .build_gep(i64_ty, args_ptr, &[i64_ty.const_int(i as u64, false)], "upcast_set_arg_ptr")
-                        .map_err(|e| format!("failed to build upcast-set gep: {}", e))?
-                };
-                builder.build_store(p, v).map_err(|e| format!("failed to store upcast-set arg: {}", e))?;
-            }
-            builder
-                .build_call(rt_upcast_set, &[args_ptr.into(), ctx.i32_type().const_int(3, false).into()], "upcast_set_result")
-                .map_err(|e| format!("failed to build rt_upcast_set call: {}", e))?;
+            call_shim(module, &builder, "rt_upcast_set", &set_args)?;
         }
     }
     // The program proper: its global initialisers and then `tl_main`.
@@ -1164,9 +1508,13 @@ fn build_main_wrapper(
     // `(task ...)` admits -- which is the AOT-scheduler work's remaining
     // limit this closes.
     let coroutine_fn_ty = crate::compile::llvm_builtins::coroutine_fn_type();
-    let i64_ty = ctx.i64_type();
+    let word_ty = crate::compile::carriers::word();
     let mut init_addrs: Vec<inkwell::values::IntValue<'static>> = Vec::with_capacity(global_init_names.len());
-    for name in global_init_names {
+    for (name, init) in global_init_names.iter().zip(&globals.inits) {
+        if init.is_static {
+            init_addrs.push(word_ty.const_zero());
+            continue;
+        }
         let f = module
             .get_function(name)
             .ok_or_else(|| format!("internal error: global-init function \"{}\" not found in module", name))?;
@@ -1176,36 +1524,35 @@ fn build_main_wrapper(
                 name
             ));
         }
-        init_addrs.push(f.as_global_value().as_pointer_value().const_to_int(i64_ty));
+        init_addrs.push(f.as_global_value().as_pointer_value().const_to_int(word_ty));
     }
-    let entry_addr = tl_main.as_global_value().as_pointer_value().const_to_int(i64_ty);
-    let call: CallSiteValue = if tl_main.get_type() == coroutine_fn_ty {
-        let entry_shim = match (eval_env.is_some(), main_returns_int) {
-            (true, true) => "rt_run_program_interp_int",
-            (true, false) => "rt_run_program_interp",
-            (false, true) => "rt_run_program_int",
-            (false, false) => "rt_run_program",
+    let entry_addr = tl_main.as_global_value().as_pointer_value().const_to_int(word_ty);
+    // The entry shim, and the one without a scheduler that takes its place
+    // when the program turns out to need none (below).
+    let mut entry: Option<(inkwell::values::FunctionValue<'static>, &str)> = None;
+    let result = if tl_main.get_type() == coroutine_fn_ty {
+        // A native executable's tasks run on OS threads too; a WebAssembly
+        // module has none.
+        let threads = matches!(target, Target::Host);
+        let entry_shim = match (eval_env.is_some(), main_returns_int, threads) {
+            (true, true, _) => "rt_run_program_interp_int",
+            (true, false, _) => "rt_run_program_interp",
+            (false, true, true) => "rt_run_program_threads_int",
+            (false, false, true) => "rt_run_program_threads",
+            (false, true, false) => "rt_run_program_int",
+            (false, false, false) => "rt_run_program",
         };
-        let rt_run_program = module.add_function(entry_shim, fn_ty, None);
-        let inits = module.add_global(i64_ty.array_type(init_addrs.len() as u32), None, "tl_global_inits");
-        inits.set_initializer(&i64_ty.const_array(&init_addrs));
-        inits.set_constant(true);
-        let inits_addr = inits.as_pointer_value().const_to_int(i64_ty);
-        let words = [inits_addr, i64_ty.const_int(init_addrs.len() as u64, false), entry_addr];
-        let args_ptr = builder
-            .build_alloca(i64_ty.array_type(words.len() as u32), "program_args")
-            .map_err(|e| format!("failed to alloca the program arguments: {}", e))?;
-        for (i, w) in words.iter().enumerate() {
-            let slot = unsafe {
-                builder
-                    .build_gep(i64_ty, args_ptr, &[i64_ty.const_int(i as u64, false)], "program_arg_ptr")
-                    .map_err(|e| format!("failed to build the program argument gep: {}", e))?
-            };
-            builder.build_store(slot, *w).map_err(|e| format!("failed to store a program argument: {}", e))?;
+        let rt_run_program = declare_entry(module, entry_shim)?;
+        if eval_env.is_none() {
+            entry = Some((rt_run_program, if main_returns_int { "rt_run_program_alone_int" } else { "rt_run_program_alone" }));
         }
-        builder
-            .build_call(rt_run_program, &[args_ptr.into(), ctx.i32_type().const_int(words.len() as u64, false).into()], "tl_main_result")
-            .map_err(|e| format!("failed to build entry-point call: {}", e))?
+        let inits = module.add_global(word_ty.array_type(init_addrs.len() as u32), None, "tl_global_inits");
+        inits.set_initializer(&word_ty.const_array(&init_addrs));
+        inits.set_constant(true);
+        let inits_addr = inits.as_pointer_value().const_to_int(word_ty);
+        let words = [inits_addr.into(), word_ty.const_int(init_addrs.len() as u64, false).into(), entry_addr.into()];
+        let sig = crate::compile::externs::runtime_sig(entry_shim).expect("an entry shim is in the entry table");
+        crate::compile::runtime_abi::call_declared(&builder, rt_run_program, sig, &words)?.1.into_int_value()
     } else {
         if main_returns_int {
             return Err("an `int`-returning main under the classic ABI is not supported".to_string());
@@ -1213,31 +1560,555 @@ fn build_main_wrapper(
         if !init_addrs.is_empty() {
             return Err("internal error: a classic-ABI entry point cannot run global initialisers (no scheduler)".to_string());
         }
-        let rt_run_entry = module.add_function("rt_run_entry", i64_ty.fn_type(&[i64_ty.into()], false), None);
-        builder
-            .build_call(rt_run_entry, &[entry_addr.into()], "tl_main_result")
-            .map_err(|e| format!("failed to build entry-point call: {}", e))?
-    };
-    let result = match call.try_as_basic_value() {
-        inkwell::values::ValueKind::Basic(v) => v.into_int_value(),
-        inkwell::values::ValueKind::Instruction(_) => {
-            return Err("internal error: entry point produced no value".to_string())
-        }
+        crate::compile::runtime_abi::call_word(&builder, module, "rt_run_entry", &[entry_addr.into()])?.1
     };
     let exit_code = builder
         .build_int_truncate(result, i32_type, "exit_code")
         .map_err(|e| format!("failed to truncate exit code: {}", e))?;
     builder.build_return(Some(&exit_code)).map_err(|e| format!("failed to build entry-point return: {}", e))?;
 
+    // Whether the executable writes through the printer, which reads the
+    // printer control variables.
+    let mut writes = false;
+    if let Some(register) = print_register {
+        // What the printer needs to write a value, only when the executable
+        // can write one: asked of the finished `main`, whose registration
+        // has no body yet and is not walked. Without it, the registered
+        // `print-object` methods would bring the printer in after all.
+        let reaches = |shim: fn(&str) -> bool| {
+            eval_env.is_some() || !reach::uses(module, main_fn, |name| shim(name).then(String::new)).is_empty()
+        };
+        let live = if reaches(|name| PRINT_SHIMS.contains(&name)) {
+            Some(live_types(module, main_fn, print_objects, eval_env.is_some())?)
+        } else {
+            None
+        };
+        writes = reaches(writes_through_the_printer);
+        emit_print_registration(
+            ctx, module, register, enum_variants, field_templates, field_names, print_objects, live.as_ref(), writes, printer_globals,
+        )?;
+    }
+
+
+    // The prelude's globals nothing the executable can run reads are left
+    // out: their initialisers, and what those make, are not linked in. The
+    // program's own `defvar`s all run, as `typl` runs them. Not for an
+    // executable that calls `eval`, whose forms can read any global.
+    if eval_env.is_none() {
+        leave_out_unread_globals(module, main_fn, globals, if writes { printer_globals } else { &[] })?;
+    }
+
+    // A program that nothing it can run makes wait — no task, thread,
+    // channel, `sleep` or socket — runs without a scheduler, and the
+    // scheduler is not linked into it. Asked of the finished `main`, which
+    // refers to everything that can run: the initialisers, `tl_main`, the
+    // registered `print-object` methods, the interrupt handlers and C
+    // callbacks.
+    if let Some((scheduled, alone)) = entry {
+        let waits = reach::uses(module, main_fn, |name| crate::compile::externs::needs_scheduler(name).then(String::new));
+        if waits.is_empty() {
+            let alone = declare_entry(module, alone)?;
+            scheduled.as_global_value().as_pointer_value().replace_all_uses_with(alone.as_global_value().as_pointer_value());
+            // SAFETY: a declaration with no uses left.
+            unsafe { scheduled.delete() };
+            // With no global to initialise either, an entry that is direct
+            // runs on this frame, and what drives a coroutine is not linked
+            // in.
+            let nothing_to_initialise = module
+                .get_global("tl_global_inits")
+                .and_then(|g| g.get_initializer())
+                // SAFETY: a live constant of `module`.
+                .is_some_and(|i| unsafe { inkwell::llvm_sys::core::LLVMIsNull(inkwell::values::AsValueRef::as_value_ref(&i)) } != 0);
+            if let Some(direct) = direct_entry.filter(|_| nothing_to_initialise) {
+                run_direct_entry(module, &builder, main_fn, alone, direct, main_returns_int)?;
+            }
+        }
+    }
+
     // The types the executable's code reads, the prelude's included: interned
-    // first of all, since everything after reads them out of the tables.
+    // first of all, since everything after reads them out of the tables. A
+    // table nothing the executable can run reads from is not interned, and
+    // with it go the shapes and what interns them. Asked last, of the
+    // finished `main`, whose initialiser array now names only the
+    // initialisers that run.
     crate::compile::type_table::settle_for_export(module)?;
+    let read = reach::reached(module, &[main_fn], None).globals;
     let first = entry_block.get_first_instruction().expect("`main` was just given a body");
+    // After the board's start, which is what they allocate from.
+    let first = match entry_block.get_instructions().find(|i| calls(i, "typelisp_board_start")) {
+        Some(start) => start.get_next_instruction().expect("`main` goes on after the board's start"),
+        None => first,
+    };
     builder.position_before(&first);
     for init in crate::compile::type_table::init_functions(module) {
         let f = module.get_function(&init).expect("an init function the module defines");
-        builder.build_call(f, &[], "").map_err(|e| format!("failed to build the call to `{}`: {}", init, e))?;
+        let table = crate::compile::type_table::table_of(f)?;
+        if read.contains(&inkwell::values::AsValueRef::as_value_ref(&table)) {
+            builder.build_call(f, &[], "").map_err(|e| format!("failed to build the call to `{}`: {}", init, e))?;
+        }
     }
+    Ok(())
+}
+
+/// Whether the function `name` is the runtime's: one the module only
+/// declares, that is not LLVM's own and not a C function the program calls.
+fn is_runtime(module: &Module<'static>, name: &str) -> bool {
+    name.starts_with("rt_") && module.get_function(name).is_some_and(|f| f.count_basic_blocks() == 0)
+}
+
+/// Whether `i` is a call of the function `name`.
+fn calls(i: &inkwell::values::InstructionValue<'static>, name: &str) -> bool {
+    i.get_opcode() == InstructionOpcode::Call
+        && matches!(i.get_operand(i.get_num_operands() - 1), Some(Operand::Value(v)) if v.is_pointer_value() && v.into_pointer_value().get_name().to_bytes() == name.as_bytes())
+}
+
+/// Puts, in `main`, a call of the direct entry point and of what reads its
+/// answer in place of the call that would drive the program (`driven`).
+fn run_direct_entry(
+    module: &Module<'static>,
+    builder: &inkwell::builder::Builder<'static>,
+    main_fn: inkwell::values::FunctionValue<'static>,
+    driven: inkwell::values::FunctionValue<'static>,
+    entry: inkwell::values::FunctionValue<'static>,
+    main_returns_int: bool,
+) -> Result<(), String> {
+    let name = driven.get_name().to_string_lossy().into_owned();
+    let call = main_fn
+        .get_basic_blocks()
+        .into_iter()
+        .flat_map(|b| b.get_instructions().collect::<Vec<_>>())
+        .find(|i| calls(i, &name))
+        .ok_or_else(|| format!("internal error: `main` does not call `{}`", name))?;
+    builder.position_before(&call);
+    let word_ty = crate::compile::carriers::word();
+    let answer = builder.build_call(entry, &[], "answer").map_err(|e| format!("failed to call the entry point: {}", e))?;
+    let code = match answer.try_as_basic_value() {
+        inkwell::values::ValueKind::Basic(word) if main_returns_int => call_entry(builder, module, "rt_main_answered", &[word.into_int_value()])?,
+        _ => call_entry(builder, module, "rt_main_returned", &[])?,
+    };
+    let call: inkwell::values::IntValue<'static> = call.try_into().map_err(|()| "internal error: the program's answer is not a word".to_string())?;
+    debug_assert_eq!(call.get_type(), word_ty);
+    call.replace_all_uses_with(code);
+    call.as_instruction().expect("a call").erase_from_basic_block();
+    Ok(())
+}
+
+/// The whole program's IR, for reading, whatever the target.
+/// An AOT module is the one the island's output is hardest to
+/// see: it is neither `disassemble`'s single function nor a
+/// committed dump, and by the time anything is wrong it is
+/// machine code. `TYPELISP_AOT_IR=<path>` writes it here.
+fn write_ir(module: &Module<'static>) -> Result<(), String> {
+    if let Ok(path) = std::env::var("TYPELISP_AOT_IR") {
+        fs::write(&path, module.print_to_string().to_string()).map_err(|e| format!("failed to write {}: {}", path, e))?;
+    }
+    Ok(())
+}
+
+/// Whether the global `body` (`core_bridge::global_init`) makes can be static
+/// (`llvm_builtins::globals`), `assigned` being whether it can be assigned.
+///
+/// Without a runtime there is no heap, and any can. With one, what is kept
+/// must be nothing the collector has to see — a number, a character or a
+/// `bool`, or a fixnum that stays — and its initial value a literal, so that
+/// nothing has to run to make it.
+fn static_global(heap: &Heap, body: Value, assigned: bool, target: Target) -> bool {
+    use crate::compile::llvm_builtins::globals::kept_in;
+    use typelisp_front::sexpr_variant::field_kind as k;
+    let Ok(parts) = core::fields(heap, body) else { return false };
+    let [_, Value::Int(kind), value] = parts[..] else { return false };
+    if kept_in(kind).is_none() {
+        return false;
+    }
+    if !target.has_runtime() {
+        return true;
+    }
+    let scalar = usize::try_from(kind).is_ok_and(|kind| kind >= k::FIXED || [k::F64, k::F32, k::CHAR, k::BOOL].contains(&kind));
+    let literal = core::op_wk(heap, value).unwrap_or(typelisp_mem::NOT_WELL_KNOWN);
+    match literal {
+        // An `int` that is not a fixnum is no literal (`core_bridge`).
+        wk::INT => !assigned,
+        wk::INT_ANY_WIDTH | wk::FLOAT_ANY_WIDTH | wk::CHAR | wk::BOOL => scalar,
+        _ => false,
+    }
+}
+
+/// `main` of a program nothing of which calls the runtime: a call of its
+/// static globals' initializers, and of its direct entry point. Interrupts may
+/// come, if `interrupts` says so, from when the globals are initialized.
+fn bare_main(
+    ctx: &'static Context,
+    module: &Module<'static>,
+    inits: &[inkwell::values::FunctionValue<'static>],
+    interrupts: bool,
+    entry: inkwell::values::FunctionValue<'static>,
+    main_returns_int: bool,
+) -> Result<(), String> {
+    let main_fn = module.add_function(ENTRY_POINT_NAME, ctx.i32_type().fn_type(&[], false), None);
+    let builder = ctx.create_builder();
+    builder.position_at_end(ctx.append_basic_block(main_fn, "entry"));
+    for init in inits {
+        builder.build_call(*init, &[], "").map_err(|e| format!("failed to call a global's initializer: {}", e))?;
+    }
+    if interrupts {
+        avr::enable_interrupts(&builder)?;
+    }
+    run_bare_entry(ctx, &builder, entry, main_returns_int)
+}
+
+/// Calls the direct entry point and returns the exit code its answer is.
+fn run_bare_entry(
+    ctx: &'static Context,
+    builder: &inkwell::builder::Builder<'static>,
+    entry: inkwell::values::FunctionValue<'static>,
+    main_returns_int: bool,
+) -> Result<(), String> {
+    let i32_type = ctx.i32_type();
+    let call = builder.build_call(entry, &[], "answer").map_err(|e| format!("failed to call the entry point: {}", e))?;
+    let code = match call.try_as_basic_value() {
+        // With no runtime there is no bignum, so an `int` is a fixnum.
+        inkwell::values::ValueKind::Basic(word) if main_returns_int => {
+            let n = builder
+                .build_right_shift(word.into_int_value(), word.get_type().into_int_type().const_int(1, false), true, "code")
+                .map_err(|e| format!("failed to read the exit code: {}", e))?;
+            builder.build_int_cast_sign_flag(n, i32_type, true, "exit_code").map_err(|e| format!("failed to read the exit code: {}", e))?
+        }
+        _ => i32_type.const_zero(),
+    };
+    builder.build_return(Some(&code)).map_err(|e| format!("failed to build entry-point return: {}", e))?;
+    Ok(())
+}
+
+/// Calls the entry shim `name`, whose answer is a word.
+fn call_entry(
+    builder: &inkwell::builder::Builder<'static>,
+    module: &Module<'static>,
+    name: &str,
+    words: &[inkwell::values::IntValue<'static>],
+) -> Result<inkwell::values::IntValue<'static>, String> {
+    let f = declare_entry(module, name)?;
+    let sig = crate::compile::externs::runtime_sig(name).expect("an entry shim is in the entry table");
+    let words: Vec<_> = words.iter().map(|w| (*w).into()).collect();
+    Ok(crate::compile::runtime_abi::call_declared(builder, f, sig, &words)?.1.into_int_value())
+}
+
+/// What each global's initialiser and each compiled body read, by global
+/// id: what decides which globals an executable initialises
+/// ([`leave_out_unread_globals`]).
+#[derive(Default)]
+struct Globals {
+    /// One per initialiser, in the order `main` runs them.
+    inits: Vec<GlobalInit>,
+    /// Each body's symbol, with the globals it reads or assigns.
+    bodies: std::collections::HashMap<String, Vec<usize>>,
+}
+
+struct GlobalInit {
+    /// The global it initialises.
+    id: usize,
+    /// The globals its form reads.
+    reads: Vec<usize>,
+    /// A `defvar` of the program's own, which runs whether or not anything
+    /// reads it.
+    always: bool,
+    /// A static global: it has no initialiser to run.
+    is_static: bool,
+}
+
+/// Replaces, in `main`'s initialiser array (`tl_global_inits`), the
+/// initialiser of every global nothing the executable can run reads with 0,
+/// which the runtime takes as "no slot" (`typelisp_rt::global_skip`).
+///
+/// A global is read when a body reached from `main` — not through the
+/// array — reads it, when the initialiser of a global that runs reads it,
+/// or when it is one of `printer_globals`; a global runs when it is read or
+/// is the program's own. The bodies those initialisers reach count too, so
+/// the walk goes on until it finds nothing new.
+fn leave_out_unread_globals(
+    module: &Module<'static>,
+    main_fn: inkwell::values::FunctionValue<'static>,
+    globals: &Globals,
+    printer_globals: &[(&str, usize)],
+) -> Result<(), String> {
+    let Some(array) = module.get_global("tl_global_inits") else { return Ok(()) };
+    let init_fns: Vec<Option<inkwell::values::FunctionValue<'static>>> = (0..globals.inits.len())
+        .map(|i| {
+            if globals.inits[i].is_static {
+                return Ok(None);
+            }
+            module
+                .get_function(&format!("$global_init${}", i))
+                .map(Some)
+                .ok_or_else(|| format!("internal error: global initialiser {} is not in the module", i))
+        })
+        .collect::<Result<_, String>>()?;
+    let mut read: std::collections::HashSet<usize> = printer_globals.iter().map(|(_, id)| *id).collect();
+    loop {
+        let runs = |init: &GlobalInit| init.always || read.contains(&init.id);
+        let mut roots = vec![main_fn];
+        let mut now = read.clone();
+        for (init, f) in globals.inits.iter().zip(&init_fns) {
+            if let Some(f) = f.filter(|_| runs(init)) {
+                roots.push(f);
+                now.extend(&init.reads);
+            }
+        }
+        for name in reach::reached(module, &roots, Some(inkwell::values::AsValueRef::as_value_ref(&array))).functions {
+            if let Some(ids) = globals.bodies.get(&name) {
+                now.extend(ids);
+            }
+        }
+        if now == read {
+            break;
+        }
+        read = now;
+    }
+    let word_ty = crate::compile::carriers::word();
+    let words: Vec<inkwell::values::IntValue<'static>> = globals
+        .inits
+        .iter()
+        .zip(&init_fns)
+        .map(|(init, f)| {
+            match f.filter(|_| init.always || read.contains(&init.id)) {
+                Some(f) => f.as_global_value().as_pointer_value().const_to_int(word_ty),
+                None => word_ty.const_zero(),
+            }
+        })
+        .collect();
+    array.set_initializer(&word_ty.const_array(&words));
+    Ok(())
+}
+
+/// What the executable can make a value of, which decides what the
+/// printer's registration holds ([`emit_print_registration`]).
+struct Live {
+    /// A program that calls `eval` can make a value of any type.
+    every: bool,
+    /// Whether each of `print_objects` is registered.
+    print_objects: Vec<bool>,
+    /// The definitions of the types the executable's code reads.
+    definitions: std::collections::HashSet<(typelisp_mem::NsId, typelisp_mem::SymRef)>,
+}
+
+impl Live {
+    /// Whether a value of a type the definition at `path` makes can exist,
+    /// so that the printer needs what the registration says about it: its
+    /// variants' names, its fields' types and names.
+    fn has_definition(&self, path: &Path) -> bool {
+        if self.every {
+            return true;
+        }
+        let definition = typelisp_front::type_key::type_key_id(path, Vec::new());
+        if !made::tracked(definition) && typelisp_mem::runtime_builds(definition) {
+            return true;
+        }
+        match typelisp_mem::type_shape(definition) {
+            typelisp_mem::TypeShape::Named(ns, sym, _) => self.definitions.contains(&(ns, sym)),
+            _ => false,
+        }
+    }
+}
+
+/// What the executable can make a value of. A value is made by compiled
+/// code, which reads its type out of a type table to hand it to the
+/// runtime, or by the runtime itself ([`typelisp_mem::runtime_builds`]). So
+/// a type is live when the code the executable can run reads it, or one it
+/// is an argument of, or when the runtime builds it: for the few types the
+/// runtime makes only in some builtins ([`made`]), when the executable
+/// reaches one of those. What can run is what
+/// `main` reaches, and what each live type's `print-object` does in turn;
+/// the printer's own registration (still without a body here) is not
+/// walked, since naming a type there makes no value of it.
+fn live_types(
+    module: &Module<'static>,
+    main_fn: inkwell::values::FunctionValue<'static>,
+    print_objects: &[(typelisp_mem::TypeId, String)],
+    calls_eval: bool,
+) -> Result<Live, String> {
+    if calls_eval {
+        return Ok(Live { every: true, print_objects: vec![true; print_objects.len()], definitions: Default::default() });
+    }
+    let mut reach = reach::TypeReach::new(module)?;
+    reach.walk(module, main_fn)?;
+    let mut live = vec![false; print_objects.len()];
+    loop {
+        let read = with_arguments(&reach.types);
+        let runtime_makes = |ty: typelisp_mem::TypeId| -> Result<bool, String> {
+            if made::tracked(ty) {
+                made::made(ty, |shim| reach.reaches(module, shim))
+            } else {
+                Ok(typelisp_mem::runtime_builds(ty))
+            }
+        };
+        let mut newly = Vec::new();
+        for (i, (ty, _)) in print_objects.iter().enumerate() {
+            if !live[i] && (read.contains(ty) || runtime_makes(*ty)?) {
+                newly.push(i);
+            }
+        }
+        let grew = !newly.is_empty();
+        for i in newly {
+            let symbol = &print_objects[i].1;
+            live[i] = true;
+            let method = module.get_function(symbol).ok_or_else(|| {
+                format!("compile-file: `print-object` implementation `{}` was not compiled into this file", symbol)
+            })?;
+            reach.walk(module, method)?;
+        }
+        if !grew {
+            // The definitions the code reads, and the tracked ones a reached
+            // builtin makes.
+            let mut definitions = std::collections::HashSet::new();
+            for (module_path, name) in made::TRACKED {
+                let ty = typelisp_mem::intern_spec(&typelisp_mem::TypeSpec::Named(*module_path, name, &[]));
+                if made::made(ty, |shim| reach.reaches(module, shim))? {
+                    definitions.insert(ty);
+                }
+            }
+            let definitions = read
+                .into_iter()
+                .chain(definitions)
+                .filter_map(|ty| match typelisp_mem::type_shape(ty) {
+                    typelisp_mem::TypeShape::Named(ns, sym, _) => Some((ns, sym)),
+                    _ => None,
+                })
+                .collect();
+            return Ok(Live { every: false, print_objects: live, definitions });
+        }
+    }
+}
+
+/// `types` and every type each is made of: a value of one can hold values
+/// of those.
+fn with_arguments(types: &std::collections::HashSet<typelisp_mem::TypeId>) -> std::collections::HashSet<typelisp_mem::TypeId> {
+    use typelisp_mem::TypeShape;
+    let mut all = std::collections::HashSet::new();
+    let mut pending: Vec<typelisp_mem::TypeId> = types.iter().copied().collect();
+    while let Some(ty) = pending.pop() {
+        if !all.insert(ty) {
+            continue;
+        }
+        match typelisp_mem::type_shape(ty) {
+            TypeShape::Named(_, _, args) | TypeShape::Dyn(_, _, args) => pending.extend(args),
+            TypeShape::Fn(params, rest, ret) => {
+                pending.extend(params);
+                pending.extend(rest);
+                pending.push(ret);
+            }
+            TypeShape::Ptr(pointee) => pending.push(pointee),
+            TypeShape::CStruct(..) | TypeShape::Unit | TypeShape::Never | TypeShape::Param(_) => {}
+        }
+    }
+    all
+}
+
+/// The body of `register`, which the generated `main` calls before the heap
+/// exists: the printer's program facts (`typelisp_print::aot`), an enum's
+/// variant names, the fields' types and names, each type's `print-object`
+/// and the printer control variables, none of which a standalone executable
+/// can look up the way the interpreter does. Only for what `live` says a
+/// value of can exist ([`live_types`]): the rest is never printed. Without
+/// `live` the executable writes no value; unless it `writes`, it does not
+/// write through the printer at all and the printer control variables are
+/// left out too. How type names are written is always registered: a
+/// runtime error message uses it as well.
+fn emit_print_registration(
+    ctx: &'static Context,
+    module: &Module<'static>,
+    register: inkwell::values::FunctionValue<'static>,
+    enum_variants: &[(Path, usize, String)],
+    field_templates: &[(Path, i64, i64, crate::TypeId)],
+    field_names: &[(Path, i64, String)],
+    print_objects: &[(typelisp_mem::TypeId, String)],
+    live: Option<&Live>,
+    writes: bool,
+    printer_globals: &[(&str, usize)],
+) -> Result<(), String> {
+    let builder = ctx.create_builder();
+    builder.position_at_end(ctx.append_basic_block(register, "entry"));
+    let word_ty = crate::compile::carriers::word();
+    // A `(pointer, length)` pair per string, from a module-level constant
+    // — no heap involved, so this can run before `rt_heap_init`.
+    let literal = |builder: &inkwell::builder::Builder<'static>, text: &str| -> Result<(inkwell::values::IntValue<'static>, inkwell::values::IntValue<'static>), String> {
+        let g = builder
+            .build_global_string_ptr(text, "print_reg_str")
+            .map_err(|e| format!("failed to build a printer-registration string: {}", e))?;
+        Ok((
+            g.as_pointer_value().const_to_int(word_ty),
+            word_ty.const_int(text.len() as u64, false),
+        ))
+    };
+    let call = |builder: &inkwell::builder::Builder<'static>, name: &str, words: &[inkwell::values::IntValue<'static>]| -> Result<(), String> {
+        call_shim(module, builder, name, words)
+    };
+    // The definitions and the field types, read out of the module's type
+    // table (`compile::type_table`): a type's id is this process's number,
+    // so the executable carries the shapes and its startup interns them.
+    let ty = |ty: crate::TypeId| crate::compile::type_table::load(&builder, module, ty);
+    let definition = |path: &Path| ty(typelisp_front::type_key::type_key_id(path, Vec::new()));
+    if let Some(live) = live {
+        for (path, variant, name) in enum_variants.iter().filter(|(path, ..)| live.has_definition(path)) {
+            let (name_ptr, name_len) = literal(&builder, name)?;
+            call(&builder, "rt_print_enum_variant", &[definition(path)?, word_ty.const_int(*variant as u64, false), name_ptr, name_len])?;
+        }
+        for (path, variant, index, template) in field_templates.iter().filter(|(path, ..)| live.has_definition(path)) {
+            call(
+                &builder,
+                "rt_print_field_template",
+                &[definition(path)?, word_ty.const_int(*variant as u64, true), word_ty.const_int(*index as u64, true), ty(*template)?],
+            )?;
+        }
+        for (path, index, name) in field_names.iter().filter(|(path, ..)| live.has_definition(path)) {
+            let (name_ptr, name_len) = literal(&builder, name)?;
+            call(&builder, "rt_print_field_name", &[definition(path)?, word_ty.const_int(*index as u64, true), name_ptr, name_len])?;
+        }
+        for ((receiver, symbol), live) in print_objects.iter().zip(&live.print_objects) {
+            // A type no value of can exist is registered with no method, so
+            // that printing one after all is a loud error rather than the
+            // default rendering.
+            let fn_ptr = if *live {
+                let target = module.get_function(symbol).ok_or_else(|| {
+                    format!("compile-file: `print-object` implementation `{}` was not compiled into this file", symbol)
+                })?;
+                classic_door(ctx, module, target)?
+            } else {
+                word_ty.const_zero()
+            };
+            call(&builder, "rt_print_object_method", &[ty(*receiver)?, fn_ptr])?;
+        }
+    }
+    if writes {
+        for (name, id) in printer_globals {
+            let (name_ptr, name_len) = literal(&builder, name)?;
+            call(&builder, "rt_print_global", &[name_ptr, name_len, word_ty.const_int(*id as u64, false)])?;
+        }
+    }
+    // Type names are written for the entry file's module, as the interpreter
+    // writes them — the view the checker publishes for it (`compile_file`).
+    let view = typelisp_print::shared::name_view();
+    let words = |name: &str, words: &[typelisp_mem::type_words::Word]| {
+        let (global, len) = crate::compile::type_table::constant_words(module, name, words);
+        (global.as_pointer_value().const_to_int(word_ty), word_ty.const_int(len as u64, false))
+    };
+    let (module_ptr, module_len) = words("print_name_module", &typelisp_mem::type_words::ns_words(view.module()));
+    // In the order of the names, so the executable is the same each time.
+    let mut imports: Vec<(&(typelisp_mem::NsId, typelisp_mem::symbols::SymRef), &&'static str)> = view.imports().iter().collect();
+    imports.sort_by_key(|(_, name)| **name);
+    // One table, which the runtime decodes only when a name is written
+    // (`typelisp_print::aot::rt_print_names`).
+    let mut table = vec![module_ptr, module_len, word_ty.const_int(imports.len() as u64, false)];
+    for (i, ((ns, sym), name)) in imports.into_iter().enumerate() {
+        let (def_ptr, def_len) =
+            words(&format!("print_name_import${}", i), &typelisp_mem::type_words::definition_words(*ns, *sym));
+        let (name_ptr, name_len) = literal(&builder, name)?;
+        table.extend([def_ptr, def_len, name_ptr, name_len]);
+    }
+    let names = module.add_global(word_ty.array_type(table.len() as u32), None, "print_names");
+    names.set_initializer(&word_ty.const_array(&table));
+    names.set_constant(true);
+    names.set_linkage(inkwell::module::Linkage::Private);
+    call(&builder, "rt_print_names", &[names.as_pointer_value().const_to_int(word_ty)])?;
+    builder.build_return(None).map_err(|e| format!("failed to build the printer registration's return: {}", e))?;
     Ok(())
 }
 
@@ -1249,6 +2120,11 @@ struct HeapInit {
     fixed: bool,
     max_memory: Option<usize>,
 }
+
+/// The cons-cell arena a board's executable starts with, which grows as the
+/// heap lets it: the native default (`1 << 16` cells) is 3 MiB, more than
+/// most boards have RAM.
+const BOARD_HEAP_CAPACITY: usize = 1 << 10;
 
 /// The cons-cell arena an `eval`-carrying executable asks `rt_heap_init` for.
 /// Its startup reads, checks and runs the whole prelude plus the program's own
@@ -1267,47 +2143,33 @@ const EVAL_HEAP_CAPACITY: usize = 1 << 18;
 /// function and asked to run it. The price is the same one `eval` pays.
 const EVAL_SHIMS: [&str; 3] = ["rt_eval", "rt_set_macro_character", "rt_set_dispatch_macro_character"];
 
-/// Emits one call to the `rt_*` shim `name` with `words` as its argument
-/// array — the startup-registration calling pattern, spelled once.
+/// Emits one call to the runtime function `name` with `words` — the
+/// startup-registration calling pattern, spelled once.
 fn call_shim(
-    ctx: &'static Context,
     module: &Module<'static>,
     builder: &inkwell::builder::Builder<'static>,
     name: &str,
     words: &[inkwell::values::IntValue<'static>],
 ) -> Result<(), String> {
-    let i64_ty = ctx.i64_type();
-    let f = module
-        .get_function(name)
-        .ok_or_else(|| format!("internal error: {} not declared in module", name))?;
-    let args_ptr = if words.is_empty() {
-        ctx.ptr_type(AddressSpace::default()).const_null()
-    } else {
-        let p = builder
-            .build_alloca(i64_ty.array_type(words.len() as u32), "shim_args")
-            .map_err(|e| format!("failed to alloca {} args: {}", name, e))?;
-        for (i, w) in words.iter().enumerate() {
-            let slot = unsafe {
-                builder
-                    .build_gep(i64_ty, p, &[i64_ty.const_int(i as u64, false)], "shim_arg_ptr")
-                    .map_err(|e| format!("failed to build {} gep: {}", name, e))?
-            };
-            builder.build_store(slot, *w).map_err(|e| format!("failed to store {} arg: {}", name, e))?;
-        }
-        p
-    };
-    builder
-        .build_call(f, &[args_ptr.into(), ctx.i32_type().const_int(words.len() as u64, false).into()], "shim_result")
-        .map_err(|e| format!("failed to build {} call: {}", name, e))?;
+    let words: Vec<inkwell::values::BasicValueEnum<'static>> = words.iter().map(|w| (*w).into()).collect();
+    crate::compile::runtime_abi::call(builder, module, name, &words)?;
     Ok(())
+}
+
+/// The program entry `name` (`rt_run_program` and its kind), declared under
+/// its signature.
+fn declare_entry(module: &Module<'static>, name: &str) -> Result<inkwell::values::FunctionValue<'static>, String> {
+    let sig = crate::compile::externs::runtime_sig(name).ok_or_else(|| format!("internal error: `{}` is not a program entry", name))?;
+    Ok(crate::compile::runtime_abi::declare(module, name, sig))
 }
 
 /// The names of the printing shims (`typelisp_print::shim`), which is what
 /// "this program prints" means at the IR level.
-const PRINT_SHIMS: [&str; 11] = [
-    "rt_format",
-    "rt_print",
-    "rt_println",
+const PRINT_SHIMS: [&str; 10] = [
+    // The two pieces of an expanded `format` that write any value: the
+    // others write a number, a string or text, and need neither table.
+    "rt_fmt_value",
+    "rt_fmt_integer_any",
     "rt_pprint",
     "rt_pprint_block_start",
     "rt_pprint_block_end",
@@ -1317,6 +2179,13 @@ const PRINT_SHIMS: [&str; 11] = [
     "rt_pprint_pop",
     "rt_pprint_list_exhausted",
 ];
+
+/// Whether the shim `name` writes through the printer (`typelisp_print::shim`:
+/// an expanded `format`'s pieces and the pretty printer's), which reads the
+/// printer control variables whatever it writes.
+fn writes_through_the_printer(name: &str) -> bool {
+    name.starts_with("rt_fmt_") || name.starts_with("rt_pprint")
+}
 
 /// Whether any compiled body in `module` calls one of `names`.
 ///
@@ -1370,62 +2239,40 @@ fn classic_door(
     module: &Module<'static>,
     target: inkwell::values::FunctionValue<'static>,
 ) -> Result<inkwell::values::IntValue<'static>, String> {
-    let i64_ty = ctx.i64_type();
+    let word_ty = crate::compile::carriers::word();
     if target.get_type() != crate::compile::llvm_builtins::coroutine_fn_type() {
-        return Ok(target.as_global_value().as_pointer_value().const_to_int(i64_ty));
+        return Ok(target.as_global_value().as_pointer_value().const_to_int(word_ty));
     }
     let name = format!("{}$classic", target.get_name().to_string_lossy());
     if let Some(existing) = module.get_function(&name) {
-        return Ok(existing.as_global_value().as_pointer_value().const_to_int(i64_ty));
+        return Ok(existing.as_global_value().as_pointer_value().const_to_int(word_ty));
     }
     let ptr_ty = ctx.ptr_type(AddressSpace::default());
-    let classic_ty = i64_ty.fn_type(&[ptr_ty.into(), ctx.i32_type().into()], false);
+    let classic_ty = word_ty.fn_type(&[ptr_ty.into(), ctx.i32_type().into()], false);
     let door = module.add_function(&name, classic_ty, None);
-    let drive = match module.get_function("rt_drive_body") {
-        Some(f) => f,
-        None => module.add_function("rt_drive_body", classic_ty, None),
-    };
     let builder = ctx.create_builder();
     builder.position_at_end(ctx.append_basic_block(door, "entry"));
-    let args = builder
-        .build_alloca(i64_ty.array_type(3), "drive_args")
-        .map_err(|e| format!("failed to alloca the driver arguments: {}", e))?;
     let words = [
-        target.as_global_value().as_pointer_value().const_to_int(i64_ty),
+        target.as_global_value().as_pointer_value().const_to_int(word_ty),
         builder
             .build_ptr_to_int(
                 door.get_nth_param(0).expect("the classic signature has two parameters").into_pointer_value(),
-                i64_ty,
+                word_ty,
                 "callee_args",
             )
             .map_err(|e| format!("failed to take the argument array's address: {}", e))?,
         builder
             .build_int_z_extend(
                 door.get_nth_param(1).expect("the classic signature has two parameters").into_int_value(),
-                i64_ty,
+                word_ty,
                 "callee_argc",
             )
             .map_err(|e| format!("failed to widen the argument count: {}", e))?,
     ];
-    for (i, w) in words.iter().enumerate() {
-        let p = unsafe {
-            builder
-                .build_gep(i64_ty, args, &[i64_ty.const_int(i as u64, false)], "drive_arg_ptr")
-                .map_err(|e| format!("failed to index the driver arguments: {}", e))?
-        };
-        builder.build_store(p, *w).map_err(|e| format!("failed to store a driver argument: {}", e))?;
-    }
-    let out = builder
-        .build_call(drive, &[args.into(), ctx.i32_type().const_int(3, false).into()], "drive_result")
-        .map_err(|e| format!("failed to build the rt_drive_body call: {}", e))?;
-    let out = match out.try_as_basic_value() {
-        inkwell::values::ValueKind::Basic(v) => v.into_int_value(),
-        inkwell::values::ValueKind::Instruction(_) => {
-            return Err("internal error: rt_drive_body produced no value".to_string())
-        }
-    };
+    let words = words.map(inkwell::values::BasicValueEnum::from);
+    let (_, out) = crate::compile::runtime_abi::call(&builder, module, "rt_drive_body", &words)?;
     builder.build_return(Some(&out)).map_err(|e| format!("failed to build the door's return: {}", e))?;
-    Ok(door.as_global_value().as_pointer_value().const_to_int(i64_ty))
+    Ok(door.as_global_value().as_pointer_value().const_to_int(word_ty))
 }
 
 
@@ -1521,30 +2368,25 @@ mod tests {
         let module = ctx.create_module("rt_ping_test");
 
         let ptr_ty = ctx.ptr_type(AddressSpace::default());
-        let fn_ty = ctx.i64_type().fn_type(&[ptr_ty.into(), ctx.i32_type().into()], false);
-        let rt_ping = module.add_function("rt_ping", fn_ty, None);
+        let fn_ty = crate::compile::carriers::word().fn_type(&[ptr_ty.into(), ctx.i32_type().into()], false);
         let tl_main = module.add_function("tl_main", fn_ty, None);
 
         let builder = ctx.create_builder();
         let entry = ctx.append_basic_block(tl_main, "entry");
         builder.position_at_end(entry);
-        let one_slot = builder.build_alloca(ctx.i64_type(), "one_slot").unwrap();
-        builder.build_store(one_slot, ctx.i64_type().const_int(41, false)).unwrap();
-        let argc_one = ctx.i32_type().const_int(1, false);
-        let call = builder.build_call(rt_ping, &[one_slot.into(), argc_one.into()], "rt_ping_result").unwrap();
-        let result = match call.try_as_basic_value() {
-            inkwell::values::ValueKind::Basic(v) => v.into_int_value(),
-            inkwell::values::ValueKind::Instruction(_) => panic!("rt_ping call produced no value"),
-        };
+        let forty_one = crate::compile::carriers::word().const_int(41, false);
+        let sig = crate::compile::runtime_abi::shim(typelisp_rt::rt_ping as unsafe extern "C" fn(typelisp_mem::Word) -> typelisp_mem::Word).sig;
+        let rt_ping = crate::compile::runtime_abi::declare(&module, "rt_ping", &sig);
+        let (_, result) = crate::compile::runtime_abi::call_declared(&builder, rt_ping, &sig, &[forty_one.into()]).unwrap();
         // A `main` that returns normally exits 0 whatever it answers
         // (`rt_run_entry`), so the answer leaves through `exit` instead.
         let exit_ty = ctx.void_type().fn_type(&[ctx.i32_type().into()], false);
         let exit = module.add_function("exit", exit_ty, None);
-        let code = builder.build_int_truncate(result, ctx.i32_type(), "code").unwrap();
+        let code = builder.build_int_truncate(result.into_int_value(), ctx.i32_type(), "code").unwrap();
         builder.build_call(exit, &[code.into()], "").unwrap();
         builder.build_unreachable().unwrap();
 
-        build_main_wrapper(ctx, &module, "tl_main", &[], &[], &[], &[], &[], &[], &[], &[], &[], &[], None, false, super::HeapInit { cells: typelisp_rt::DEFAULT_AOT_HEAP_CAPACITY, fixed: false, max_memory: None }).expect("build_main_wrapper failed");
+        build_main_wrapper(ctx, &module, "tl_main", None, &[], &super::Globals::default(), &[], &[], &[], &[], &[], &[], &[], &[], &[], None, false, super::Target::Host, super::HeapInit { cells: typelisp_rt::DEFAULT_AOT_HEAP_CAPACITY, fixed: false, max_memory: None }).expect("build_main_wrapper failed");
         module.verify().expect("module failed verification");
 
         let out_path = tmp_path("rt_ping_test");
@@ -1567,23 +2409,18 @@ mod tests {
         let module = ctx.create_module("rt_heap_init_test");
 
         let ptr_ty = ctx.ptr_type(AddressSpace::default());
-        let fn_ty = ctx.i64_type().fn_type(&[ptr_ty.into(), ctx.i32_type().into()], false);
-        let rt_heap_live_count = module.add_function("rt_heap_live_count", fn_ty, None);
+        let fn_ty = crate::compile::carriers::word().fn_type(&[ptr_ty.into(), ctx.i32_type().into()], false);
         let tl_main = module.add_function("tl_main", fn_ty, None);
 
         let builder = ctx.create_builder();
         let entry = ctx.append_basic_block(tl_main, "entry");
         builder.position_at_end(entry);
-        let null_args = ptr_ty.const_null();
-        let argc_zero = ctx.i32_type().const_int(0, false);
-        let call = builder.build_call(rt_heap_live_count, &[null_args.into(), argc_zero.into()], "live_count").unwrap();
-        let result = match call.try_as_basic_value() {
-            inkwell::values::ValueKind::Basic(v) => v.into_int_value(),
-            inkwell::values::ValueKind::Instruction(_) => panic!("rt_heap_live_count call produced no value"),
-        };
+        let sig = crate::compile::runtime_abi::shim(typelisp_rt::rt_heap_live_count as unsafe extern "C" fn() -> typelisp_mem::Word).sig;
+        let rt_heap_live_count = crate::compile::runtime_abi::declare(&module, "rt_heap_live_count", &sig);
+        let (_, result) = crate::compile::runtime_abi::call_declared(&builder, rt_heap_live_count, &sig, &[]).unwrap();
         builder.build_return(Some(&result)).unwrap();
 
-        build_main_wrapper(ctx, &module, "tl_main", &[], &[], &[], &[], &[], &[], &[], &[], &[], &[], None, false, super::HeapInit { cells: typelisp_rt::DEFAULT_AOT_HEAP_CAPACITY, fixed: false, max_memory: None }).expect("build_main_wrapper failed");
+        build_main_wrapper(ctx, &module, "tl_main", None, &[], &super::Globals::default(), &[], &[], &[], &[], &[], &[], &[], &[], &[], None, false, super::Target::Host, super::HeapInit { cells: typelisp_rt::DEFAULT_AOT_HEAP_CAPACITY, fixed: false, max_memory: None }).expect("build_main_wrapper failed");
         module.verify().expect("module failed verification");
 
         let out_path = tmp_path("rt_heap_init_test");

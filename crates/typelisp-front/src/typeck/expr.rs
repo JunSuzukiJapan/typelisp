@@ -23,7 +23,7 @@ use super::args::First;
 use super::bounds::{bound_method, meets, Meets};
 use crate::check::bound_message;
 use crate::typeck::registry::TraitBound;
-use super::{binding, block, call, catch, cast, collection_literal, control, dyn_trait, lambda, select, spawn, format, instance, looping, macros, matching, method, modify, path_call, list_form, quote, setf, sugar, tools, the, variant};
+use super::{binding, block, call, catch, cast, collection_literal, control, dyn_trait, lambda, select, spawn, format, instance, looping, macros, matching, method, modify, path_call, list_form, quote, setf, size_of, sugar, tools, the, variant};
 
 use super::type_syntax::mentions_raw_word;
 use crate::typeck::checker::MacroExpander;
@@ -712,6 +712,8 @@ fn check_list(cx: &Cx, heap: &mut Heap, locals: &Locals, v: Value, expected: Opt
         wk::IF => return control::check_if(cx, heap, locals, args, expected, loc),
         wk::AS => return cast::check_as(cx, heap, locals, args, false, loc),
         wk::TRY_AS => return cast::check_as(cx, heap, locals, args, true, loc),
+        wk::SIZE_OF => return size_of::check_size_of(cx, heap, args, loc),
+        wk::SIZE_OF_VAL => return size_of::check_size_of_val(cx, heap, locals, args, loc),
         wk::COMPILE => return tools::check_compile(cx, heap, args, loc),
         wk::DOCUMENTATION => return super::documentation::check_documentation(cx, heap, locals, args, loc),
         wk::TRACE | wk::UNTRACE => return tools::check_trace(cx, heap, head, args, loc),
@@ -762,6 +764,12 @@ fn check_list(cx: &Cx, heap: &mut Heap, locals: &Locals, v: Value, expected: Opt
         wk::C_ALLOC => return super::c_memory::check_c_alloc(cx, heap, locals, args, loc),
         wk::C_REF => return super::c_memory::check_c_ref(cx, heap, locals, args, loc),
         wk::C_DEREF => return super::c_memory::check_c_deref(cx, heap, locals, args, loc),
+        wk::VOLATILE_READ_U8 | wk::VOLATILE_READ_U16 | wk::VOLATILE_READ_U32 => {
+            return super::c_memory::check_volatile_read(cx, heap, locals, head.well_known(), args, loc)
+        }
+        wk::VOLATILE_WRITE_U8 | wk::VOLATILE_WRITE_U16 | wk::VOLATILE_WRITE_U32 => {
+            return super::c_memory::check_volatile_write(cx, heap, locals, head.well_known(), args, loc)
+        }
         wk::CATCH => return catch::check_catch(cx, heap, locals, args, expected, loc),
         wk::THROW => return catch::check_throw(cx, heap, locals, args, loc),
         wk::RETURN_FROM => return block::check_return_from(cx, heap, locals, args, loc),
@@ -1033,11 +1041,12 @@ pub const SPECIAL_FORM_HEADS: &[u32] = &[
     wk::INCF, wk::DECF, wk::ROTATEF, wk::SHIFTF, wk::LOOP, wk::BREAK,
     wk::RETURN, wk::BLOCK, wk::RETURN_FROM, wk::CATCH, wk::THROW, wk::UNWIND_PROTECT,
     wk::LIST, wk::LAMBDA, wk::LABELS, wk::MACROLET, wk::SYMBOL_MACROLET, wk::MATCH,
-    wk::PANIC, wk::THE, wk::AS, wk::TRY_AS, wk::COMPILE, wk::TASK,
+    wk::PANIC, wk::THE, wk::AS, wk::TRY_AS, wk::SIZE_OF, wk::SIZE_OF_VAL, wk::COMPILE, wk::TASK,
     wk::THREAD, wk::SELECT, wk::QUOTE, wk::QUASIQUOTE, wk::FORMAT, wk::PRINT,
     wk::PRINTLN, wk::EPRINT, wk::EPRINTLN, wk::SOURCE_FILE, wk::PPRINT, wk::PPRINT_FILL,
     wk::PPRINT_LINEAR, wk::PPRINT_TABULAR, wk::PPRINT_LOGICAL_BLOCK, wk::C_ALLOC, wk::C_REF, wk::C_DEREF,
-    wk::DEF_C_STRUCT, wk::DYN, wk::APPLY, wk::MAKE_INSTANCE, wk::DOCUMENTATION, wk::TRACE,
+    wk::VOLATILE_READ_U8, wk::VOLATILE_READ_U16, wk::VOLATILE_READ_U32, wk::VOLATILE_WRITE_U8,
+    wk::VOLATILE_WRITE_U16, wk::VOLATILE_WRITE_U32, wk::DEF_C_STRUCT, wk::DYN, wk::APPLY, wk::MAKE_INSTANCE, wk::DOCUMENTATION, wk::TRACE,
     wk::UNTRACE, wk::STEP, wk::DISASSEMBLE, wk::ED,
 ];
 

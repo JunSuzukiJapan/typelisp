@@ -7,7 +7,7 @@ use crate::{wk, Error, Heap, Loc, Value};
 use typelisp_mem::symbols::intern_in;
 use typelisp_mem::SymRef;
 
-use super::attribute::{check_attribute, is_attribute, Tests};
+use super::attribute::{check_attribute, is_attribute, Attributed};
 use super::define::Definer;
 use crate::typeck::attribute::TestForms;
 use super::macros::expand_toplevel;
@@ -45,14 +45,14 @@ pub(super) fn check_toplevel(
     loc: Option<Loc>,
     warnings: &mut Vec<String>,
     notes: &Notes,
-    tests: &mut Tests,
+    attributed: &mut Attributed,
 ) -> Result<(Value, Option<Type>, super::generic::Reached), Error> {
     let mut requests = Requests::default();
-    let (form, ty) = check_primary(reg, expander, heap, site, v, loc, &mut requests, warnings, notes, tests)?;
+    let (form, ty) = check_primary(reg, expander, heap, site, v, loc, &mut requests, warnings, notes, attributed)?;
     // Collecting tests, the program's own work is checked and left out: a
     // test run does not do it. A readtable registration still runs, since
     // the rest of the file cannot be read without it.
-    let form = match tests.forms == TestForms::Collect
+    let form = match attributed.forms == TestForms::Collect
         && crate::check::core::op_is(heap, form, wk::EXPR)
         && !crate::project::needs_immediate_exec(heap, form)
     {
@@ -107,11 +107,11 @@ fn check_primary(
     requests: &mut Requests,
     warnings: &mut Vec<String>,
     notes: &Notes,
-    tests: &mut Tests,
+    attributed: &mut Attributed,
 ) -> Result<(Value, Option<Type>), Error> {
     let ns = site.ns;
     if let Some(expanded) = expand_toplevel(reg, expander, heap, ns, v)? {
-        return check_primary(reg, expander, heap, site, expanded, loc, requests, warnings, notes, tests);
+        return check_primary(reg, expander, heap, site, expanded, loc, requests, warnings, notes, attributed);
     }
     if matches!(heap.car(v), Ok(Value::Symbol(h)) if h.is(wk::MODULE)) {
         let elems = heap.list_to_vec_locs(v)?;
@@ -131,7 +131,7 @@ fn check_primary(
                 publish_name_view(reg, inner.ns);
                 continue;
             }
-            let (checked, _) = check_primary(reg, expander, heap, inner, *form, form_loc.clone(), requests, warnings, notes, tests)?;
+            let (checked, _) = check_primary(reg, expander, heap, inner, *form, form_loc.clone(), requests, warnings, notes, attributed)?;
             heap.push_root(checked);
             // Run now, it runs with what it needs made.
             let checked = match crate::project::needs_immediate_exec(heap, checked) {
@@ -159,7 +159,7 @@ fn check_primary(
             _ => &all[..],
         };
         if is_attribute(heap, elems[0].0) {
-            return Ok((check_attribute(reg, d, heap, requests, tests, &elems[1..])?, None));
+            return Ok((check_attribute(reg, d, heap, requests, attributed, &elems[1..])?, None));
         }
         // `impl<T, U>` reads as `(%type-apply impl T U)`.
         if crate::types::is_type_application(heap, elems[0].0) {
@@ -250,7 +250,7 @@ fn pub_definition(inner: &[(Value, Option<Loc>)]) -> Result<&[(Value, Option<Loc
 /// their last segment.
 pub(super) fn publish_name_view(reg: &Registry, ns: typelisp_mem::NsId) {
     let is_type = |p: &Path| matches!(reg.types.get(p), Some(TypeEntry::Type(_) | TypeEntry::Trait(_)));
-    let mut imports = std::collections::HashMap::new();
+    let mut imports = typelisp_mem::collections::HashMap::new();
     let mut taken = std::collections::HashSet::new();
     for ((at, bare), target) in reg.imports.iter() {
         if *at == ns && is_type(target) {

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/numbers.md @ 676864f7e6cf8e950e51aadacecd49695c8545a8 -->
+<!-- translated-from: docs/ja/reference/functions/numbers.md @ 1b5dc6ac828d8e4a95800a91218b5e9dffe83f98 -->
 # Tal
 
 Operationer på heltal, flyttal, kvoter, komplexa tal och booleska värden, samt andra talrelaterade
@@ -71,11 +71,10 @@ en typ med bredd. `c-long` / `c-ulong` har bara konverteringar:
 | `int->i8` … `int->u32` | `(int->W x)` | `T→W` | Samma breddkonverteringar som i kapitel 1. Värden som inte ryms trunkeras |
 | `try-int->i8` … `try-int->u32` | `(try-int->W x)` | `T→Option<W>` | Samma konvertering som en fråga |
 | `int->c-long` `int->c-ulong` | `(int->W x)` | `T→W` | Vägen in, från det andra råa ordet och från heltalstyperna i kapitel 1 |
-| `try-int->c-long` `try-int->c-ulong` | `(try-int->W x)` | `T→Option<W>` | Som ovan |
 | `int->int` | `(int->int x)` | `T→int` | **Alltid exakt**. Det ärliga sättet att läsa en `size_t` som inte ryms i en `i32` |
 
 `(as i32 x)` / `(try-as i32 x)` / `(as int x)` / `(as c-ulong n)` är vad dessa gör, och konverteringarna
-finns för varje par med heltalstyperna i kapitel 1. `ptr` har inte ens den här tabellen: inget sätt
+finns för varje par med heltalstyperna i kapitel 1. Det finns ingen `try-`-form till ett rått ord: `Option<c-long>` skulle lägga ett rått ord inuti en annan typ, och det går inte att skriva. `ptr` har inte ens den här tabellen: inget sätt
 tillhandahålls att läsa en pekare som ett tal. Det är ett värde som bara skickas, tas emot och lämnas
 vidare till en annan C-funktion.
 
@@ -144,6 +143,7 @@ körning ("an integer argument does not fit a fixnum").
 | `log` (två argument) | `(log x base)` | `(f64,f64)→f64` | Logaritm med given bas. Expanderas till `(/ (log x) (log base))` (kapitel 8) |
 | `floor-div` `ceiling-div` `round-div` `truncate-div` | `(op a b)` | `(f64,f64)→cons-cell<f64,f64>` | Motsvarar CL:s versioner med två argument (`(floor 7.0 2.0)`→kvot 3, rest 1). Samma design som funktionerna med samma namn i kapitel 1 (`car`=kvot, `cdr`=rest) |
 | `float->int` | `(float->int x)` | `f64→int` | Konverterar till `int` genom att trunkera mot noll (CL:s `truncate`; exakt för ändliga värden av vilken storlek som helst). Ger panic vid oändlighet och NaN. För en fast bredd, använd `(as i32 x)` |
+| `float->i8` `float->i16` `float->i32` `float->u8` `float->u16` `float->u32` | `(op x)` | `f64→i8` | De låga bitarna av det `float->int` ger, som den typen (utan att gå via `int`). Oändligheten och NaN ger panic. Det som `(as i16 x)` bygger på |
 | `float->ratio` | `(float->ratio x)` | `f64→ratio` | Konverterar till en `ratio` som det exakta binära rationella talet (CL:s `rational`) |
 | `float->f32` `float->f64` | `(op x)` | `f64→f32` / `f64→f64` | Konverterar mellan flyttalsbredder. `float->f32` avrundar till närmaste, `float->f64` är alltid exakt. Det `(as f32 x)` gör |
 | `try-float->f32` `try-float->f64` | `(op x)` | `f64→Option<f32>` / `→Option<f64>` | Samma konvertering som en fråga. `None` om avrundningen ändrar värdet (vidgning till `f64` är alltid `Some`). Det `(try-as f32 x)` gör |
@@ -332,7 +332,7 @@ Konstanter för numeriska gränser (CLHS 12.1.4.2 / 12.1.3):
 
 | Namn | Typ | Beskrivning |
 |---|---|---|
-| `most-positive-fixnum` / `most-negative-fixnum` | `int` | Övre / nedre gränsen för ett omedelbart 63-bitarsvärde (2^62-1 / -2^62). Ett `int` bortom dem blir ett bignum |
+| `most-positive-fixnum` / `most-negative-fixnum` | `int` | Övre / nedre gränsen för ett omedelbart 63-bitarsvärde (2^62-1 / -2^62; på wasm32 och Cortex-M 31 bitar, 2^30-1 / -2^30). Ett `int` bortom dem blir ett bignum |
 | `most-positive-double-float` / `most-negative-double-float` | `f64` | De största / minsta ändliga värdena |
 | `least-positive-double-float` / `least-negative-double-float` | `f64` | Den minsta storleken skild från noll, inklusive subnormala tal |
 | `least-positive-normalized-double-float` / `least-negative-normalized-double-float` | `f64` | Detsamma, begränsat till normaliserade tal |

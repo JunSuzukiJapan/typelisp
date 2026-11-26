@@ -11,10 +11,11 @@
 //! and every table that holds one, including the ones filled before any heap
 //! exists (an interpreter's built-in types, an executable's startup).
 
-use std::collections::HashMap;
-use std::sync::OnceLock;
+use crate::prelude::*;
+use crate::collections::HashMap;
+use crate::sync::OnceLock;
 
-use parking_lot::RwLock;
+use crate::sync::RwLock;
 
 use crate::names::ConcreteNames;
 use crate::symbols::{ns_path, NsId, StdModule, SymRef};
@@ -178,8 +179,8 @@ pub fn type_shape(id: TypeId) -> TypeShape {
 /// The display of an interned type — for printing, `Debug`, and error
 /// messages. Not for comparison: compare the ids. A guard rather than a
 /// `&str` because the entry lives behind the table's lock.
-pub fn type_name(id: TypeId) -> parking_lot::MappedRwLockReadGuard<'static, str> {
-    parking_lot::RwLockReadGuard::map(table().read_recursive(), |t| t.types[id.0 as usize].1.as_str())
+pub fn type_name(id: TypeId) -> crate::sync::MappedRwLockReadGuard<'static, str> {
+    crate::sync::RwLockReadGuard::map(table().read_recursive(), |t| t.types[id.0 as usize].1.as_str())
 }
 
 impl TypeId {
@@ -196,12 +197,12 @@ impl TypeId {
 
     /// The id as compiled code holds it: a tagged fixnum, so that a frame
     /// slot or an argument holding one is a word the collector can read.
-    pub fn word(self) -> i64 {
+    pub fn word(self) -> crate::Word {
         crate::encode(crate::Value::Int(i64::from(self.0)))
     }
 
     /// The id a [`Self::word`] carried, or `None` when the word is not one.
-    pub fn from_word(w: i64) -> Option<TypeId> {
+    pub fn from_word(w: crate::Word) -> Option<TypeId> {
         if w & crate::tagged::FIXNUM_MASK != crate::tagged::FIXNUM_TAG {
             return None;
         }

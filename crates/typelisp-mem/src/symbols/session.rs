@@ -1,6 +1,7 @@
 //! `SessionNames`: what names mean in one session.
 
-use std::collections::{HashMap, HashSet};
+use crate::prelude::*;
+use crate::collections::{HashMap, HashSet};
 use super::{table, Import, NOT_WELL_KNOWN, NsId, PathStep, SymRef};
 
 /// What names mean in one session: which modules the session has, which

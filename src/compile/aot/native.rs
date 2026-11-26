@@ -83,6 +83,15 @@ const SYSTEM_LIBRARIES: &[&str] = &["-lgcc_s", "-lutil", "-lrt", "-lpthread", "-
 #[cfg(not(target_os = "linux"))]
 const SYSTEM_LIBRARIES: &[&str] = &[];
 
+/// Asks the linker to drop every function and datum `main` does not reach.
+/// Without it a hello world carried TLS, sockets and bignums: measured on
+/// macOS, its `__text` was 6,729,696 bytes without this and 1,776,448 with.
+#[cfg(target_os = "linux")]
+const DEAD_STRIP: &str = "-Wl,--gc-sections";
+
+#[cfg(not(target_os = "linux"))]
+const DEAD_STRIP: &str = "-Wl,-dead_strip";
+
 /// The minimum macOS version this build's static library was compiled for,
 /// which is what its objects claim — `compile-file` links for the same one
 /// rather than Apple clang's default (`build.rs` says why). `None` when
@@ -116,14 +125,6 @@ pub(crate) fn assembly_of(module: &Module<'static>) -> Result<String, String> {
 /// at `output_path` via the system `cc`. Must be called with
 /// [`crate::compile::COMPILE_LOCK`] held.
 pub(super) fn write_executable(module: &Module<'static>, output_path: &str, libraries: &[String], items: &[CompileTarget]) -> Result<(), String> {
-    // The whole program's IR, for reading. An AOT module is the one the
-    // island's output is hardest to see: it is neither `disassemble`'s
-    // single function nor a committed dump, and by the time anything is
-    // wrong it is machine code. `TYPELISP_AOT_IR=<path>` writes it here.
-    if let Ok(path) = std::env::var("TYPELISP_AOT_IR") {
-        std::fs::write(&path, module.print_to_string().to_string())
-            .map_err(|e| format!("failed to write {}: {}", path, e))?;
-    }
     crate::compile::codegen_prep::prepare(module)?;
     let target_machine = host_target_machine()?;
     crate::compile::optimize::run_llvm_passes(module, &target_machine)?;
@@ -160,6 +161,7 @@ pub(super) fn write_executable(module: &Module<'static>, output_path: &str, libr
         .arg(&archive)
         .args(libraries.iter().map(|l| format!("-l{}", l)))
         .args(SYSTEM_LIBRARIES)
+        .arg(DEAD_STRIP)
         .arg("-o")
         .arg(output_path)
         .status()

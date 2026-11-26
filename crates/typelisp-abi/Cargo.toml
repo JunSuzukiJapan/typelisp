@@ -17,3 +17,10 @@ name = "typelisp_abi"
 
 [dependencies]
 typelisp-mem.workspace = true
+
+# `std` (on by default) is what every host build has. Without it (a
+# microcontroller) the crate is `no_std` + `alloc`, and `dribble`, which
+# writes a file, is not there.
+[features]
+default = ["std"]
+std = ["typelisp-mem/std"]

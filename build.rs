@@ -1,7 +1,13 @@
+// The runtimes for a board, which `bundled_embedded` builds with `-p`: named
+// so that they are dependencies that are used. Both are empty for the host.
+extern crate typelisp_rt_embedded;
+extern crate typelisp_rt_semihosting;
+
 fn main() {
     println!("cargo:rerun-if-changed=build.rs");
     println!("cargo::rustc-check-cfg=cfg(typelisp_bundled_runtime)");
     println!("cargo::rustc-check-cfg=cfg(typelisp_bundled_wasm)");
+    println!("cargo::rustc-check-cfg=cfg(typelisp_bundled_embedded)");
     let deployment = deployment_target();
     bundled_runtime(deployment.as_deref());
     profile_dir();
@@ -117,6 +123,7 @@ fn bundled_runtime(deployment: Option<&str>) {
     let mut hasher = std::hash::DefaultHasher::new();
     std::hash::Hasher::write(&mut hasher, &bytes);
     bundled_wasm(&cargo, &manifest_dir, &target_dir, &mut hasher);
+    bundled_embedded(&cargo, &manifest_dir, &target_dir, &mut hasher);
     println!("cargo:rustc-env=TYPELISP_BUNDLED_STATICLIB_ID={:016x}", std::hash::Hasher::finish(&hasher));
     println!("cargo:rustc-cfg=typelisp_bundled_runtime");
 }
@@ -171,6 +178,84 @@ fn bundled_wasm(cargo: &str, manifest_dir: &std::path::Path, target_dir: &std::p
     bundle_file("TYPELISP_BUNDLED_WASIP1_CRT1", &self_contained.join("crt1-command.o"), hasher);
     bundle_file("TYPELISP_BUNDLED_WASIP1_LIBC", &self_contained.join("libc.a"), hasher);
     println!("cargo:rustc-cfg=typelisp_bundled_wasm");
+}
+
+// With the `embedded` feature, a release `typl` also carries what `typl -c
+// --target <board>` links a board's executable with, for each board's triple
+// (`BOARD_TRIPLES`): the runtime built for the triple twice, for a board that gives its functions as
+// C functions (`typelisp-rt-embedded`) and with them over semihosting
+// (`typelisp-rt-semihosting`), and `cortex-m-rt`'s linker script `link.x`,
+// which that build writes where its build script runs (`out_dir`, which the
+// build's messages say). Without the feature it carries none of it. Each
+// file is named to the crate by `TYPELISP_BUNDLED_EMBEDDED_<TRIPLE>_...`, the
+// triple in capitals with `_` for what is not a letter or digit.
+//
+// The linker is not carried, for the reason `bundled_wasm` gives.
+fn bundled_embedded(cargo: &str, manifest_dir: &std::path::Path, target_dir: &std::path::Path, hasher: &mut std::hash::DefaultHasher) {
+    if std::env::var_os("CARGO_FEATURE_EMBEDDED").is_none() {
+        return;
+    }
+    for triple in BOARD_TRIPLES {
+        bundled_board(cargo, manifest_dir, target_dir, triple, hasher);
+    }
+    println!("cargo:rustc-cfg=typelisp_bundled_embedded");
+}
+
+/// The triples of the boards `typl -c --target` builds for
+/// (`compile::aot::Target::BOARDS`).
+const BOARD_TRIPLES: [&str; 2] = ["thumbv7em-none-eabihf", "thumbv8m.main-none-eabihf"];
+
+/// What [`bundled_embedded`] carries for the board `triple`.
+fn bundled_board(cargo: &str, manifest_dir: &std::path::Path, target_dir: &std::path::Path, triple: &str, hasher: &mut std::hash::DefaultHasher) {
+    let triple_key: String = triple.chars().map(|c| if c.is_ascii_alphanumeric() { c.to_ascii_uppercase() } else { '_' }).collect();
+    let rustc = std::env::var("RUSTC").expect("cargo sets RUSTC");
+    let sysroot = std::process::Command::new(&rustc)
+        .args(["--print", "sysroot"])
+        .output()
+        .unwrap_or_else(|e| panic!("build.rs: failed to run {} --print sysroot: {}", rustc, e));
+    assert!(sysroot.status.success(), "build.rs: {} --print sysroot failed", rustc);
+    let sysroot = std::path::PathBuf::from(String::from_utf8_lossy(&sysroot.stdout).trim());
+    assert!(
+        sysroot.join("lib").join("rustlib").join(triple).is_dir(),
+        "build.rs: the `embedded` feature needs the {} target in the toolchain at {}: run `rustup target add {}`",
+        triple,
+        sysroot.display(),
+        triple
+    );
+    let mut link_x = None;
+    for (package, key) in [("typelisp-rt-embedded", "C"), ("typelisp-rt-semihosting", "SEMIHOSTING")] {
+        // Each in a target directory of its own, so that the two do not
+        // rebuild each other.
+        let dir = target_dir.join(package);
+        let out = std::process::Command::new(cargo)
+            .arg("build")
+            .arg("--release")
+            .arg("--locked")
+            .args(["-p", package])
+            .arg("--manifest-path")
+            .arg(manifest_dir.join("Cargo.toml"))
+            .arg("--target")
+            .arg(triple)
+            .arg("--target-dir")
+            .arg(&dir)
+            .arg("--message-format=json-render-diagnostics")
+            .stderr(std::process::Stdio::inherit())
+            .output()
+            .unwrap_or_else(|e| panic!("build.rs: failed to run {} to build {}: {}", cargo, package, e));
+        assert!(out.status.success(), "build.rs: building {} for {} failed ({})", package, triple, out.status);
+        let messages = String::from_utf8_lossy(&out.stdout);
+        let out_dir = messages
+            .lines()
+            .filter(|l| l.contains("\"reason\":\"build-script-executed\"") && l.contains("#cortex-m-rt@"))
+            .filter_map(|l| l.split("\"out_dir\":\"").nth(1).and_then(|rest| rest.split('"').next()))
+            .last()
+            .unwrap_or_else(|| panic!("build.rs: building {} did not say where cortex-m-rt wrote link.x", package));
+        link_x = Some(std::path::PathBuf::from(out_dir).join("link.x"));
+        let archive = dir.join(triple).join("release").join(format!("lib{}.a", package.replace('-', "_")));
+        bundle_file(&format!("TYPELISP_BUNDLED_EMBEDDED_{}_{}_STATICLIB", triple_key, key), &archive, hasher);
+    }
+    let link_x = link_x.expect("two runtimes were built");
+    bundle_file(&format!("TYPELISP_BUNDLED_EMBEDDED_{}_LINK_X", triple_key), &link_x, hasher);
 }
 
 // `path` for `include_bytes!(env!(name))`, and its bytes into the build id.

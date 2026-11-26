@@ -1,0 +1,29 @@
+[package]
+name = "typelisp-rt-semihosting"
+description = "The runtime typelisp links an executable for a board without an operating system with, its host functions over semihosting. Internal crate of typelisp; not meant to be used directly."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+readme = "README.md"
+keywords = ["lisp", "typelisp"]
+categories = ["compilers"]
+
+# `typelisp-rt-embedded` with the board's functions over semihosting, which
+# QEMU and a debugger answer (`typl -c --board-functions semihosting`), as one
+# static library of its own: two Rust static libraries cannot be linked into
+# one executable, since each carries `core`. Not a feature of that crate,
+# because a build from crates.io names the runtime with `-p` as a dependency,
+# and cargo takes no features for one.
+#
+# Only for a target without an operating system does it have dependencies or
+# anything in it, as `typelisp-rt-embedded`. An `rlib` as well, so that
+# `typelisp` can depend on it.
+[lib]
+name = "typelisp_rt_semihosting"
+crate-type = ["staticlib", "rlib"]
+
+[target.'cfg(target_os = "none")'.dependencies]
+typelisp-rt-embedded.workspace = true
+cortex-m = "0.7.10"
+cortex-m-semihosting = "0.6.0"

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ ac5a6b3adada21a0a55e0e1c4b0e1fabf4854908 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 1b5dc6ac828d8e4a95800a91218b5e9dffe83f98 -->
 # Referencja składni typelisp
 
 typelisp to statycznie typowany Lisp zapisywany w S-wyrażeniach. Listę funkcji wbudowanych i
@@ -81,7 +81,7 @@ a informacje o czytaniu komunikatów o błędach w [errors.md](errors.md).
   `#{string int}`). Krotka ma od 1 do 12 elementów. Każde obliczenie tworzy nową krotkę. Aby
   zbudować ją z obliczonych wartości, używa się `(tuple a b)`. Tam, gdzie oczekiwane są dane
   S-wyrażeń, jest to krotka, której wszystkie elementy są danymi: wariant `Tuple` typu `Sexpr`.
-- **Atrybuty**: `#[test]` to znacznik dołączony do następnej formy (zapisywany jak w Rust). Jedynym atrybutem jest na razie `test`, który umieszcza się na `defun` ([3.16 `#[test]`](#316-test--funkcje-testowe)). Odczytany przez `read` staje się listą `(%internal::attribute (test) form)`.
+- **Atrybuty**: `#[test]` to znacznik dołączany do następnej formy (zapisywany jak w Ruście). Są trzy atrybuty, `test`, `interrupt(N)` i `exception(NAME)`, a każdy umieszcza się na `defun` ([3.16 `#[test]`](#316-test--funkcje-testowe), [3.17 procedury obsługi przerwań](#317-interruptn--exceptionname--procedury-obsługi-przerwań)). Atrybut z argumentami zapisuje się z nawiasem tuż po nazwie. Odczytane przez `read`, stają się listami `(%internal::attribute (test) form)` i `(%internal::attribute ((interrupt 7)) form)`.
 - **Pusta lista `()`**: zależnie od kontekstu wartość typu `Unit` lub `None` z
   `Option<Sexpr>`. **`Sexpr` nie ma wariantu pustej listy**: `Sexpr` oznacza „niepuste S-wyrażenie",
   a typem danych w postaci S-wyrażeń jest `Option<Sexpr>` (zobacz „Wzorce dla `Option<Sexpr>`" w
@@ -365,7 +365,7 @@ dalej, więc jedynym poprawnym czasem życia jest czas życia procesu.
 #### ptr / c-long / c-ulong — surowe słowa maszynowe
 
 `ptr` to nieprzezroczysty wskaźnik (`void *`, `FILE *`, cokolwiek oznaczała deklaracja). `c-long` / `c-ulong` to
-`long` / `unsigned long` z C (także `size_t`, `int64_t` i `intptr_t`).
+`long` / `unsigned long` z C (także `size_t` i `intptr_t`).
 
 ```lisp
 (defffi (c-malloc "malloc") (c-ulong) ptr)
@@ -377,7 +377,7 @@ dalej, więc jedynym poprawnym czasem życia jest czas życia procesu.
 
 **Nienazywanie ich `i64` / `u64` jest zamierzone.** Ten język nie ma 64-bitowego typu całkowitego, ponieważ
 otagowana wartość natychmiastowa ma tylko 63 bity ([rozdział 2](#2-zapis-typów)). Nazwa `c-long` mówi „to jest
-słowo przekraczające granicę z C, a nie liczba całkowita tego języka".
+słowo przekraczające granicę z C, a nie liczba całkowita tego języka". Jego szerokość jest taka jak `long` w C na platformie docelowej (64 bity na 64-bitowym macOS i Linuksie, 32 bity na wasm32 i Cortex-M).
 
 **Nie mają arytmetyki.** `(+ x 1)` nie da się napisać. Można by to udostępnić, ale nie jest, aby żadne
 obliczenie nie działało na wartości, której nie można nigdzie przechować i która ma inną szerokość niż każda inna
@@ -385,7 +385,7 @@ liczba, z tego samego powodu, dla którego pominięto 64-bitowy typ całkowity. 
 
 ```lisp
 (as i32 (unsafe (c-strlen "hello")))         ; odczytaj to, co wróciło
-(as int (unsafe (c-strlen s)))               ; ta, aby odczytać dokładnie (int nie gubi 64 bitów)
+(as int (unsafe (c-strlen s)))               ; ta, aby odczytać dokładnie (int nie traci żadnej części wartości)
 (try-as i32 (unsafe (c-strlen s)))           ; zapytaj, czy się mieści
 (as c-ulong n)                               ; utwórz z innej liczby całkowitej
 ```
@@ -519,8 +519,7 @@ Deklaruje strukturę o takim samym układzie jak w C. Można ją zapisać tylko 
 
 Typy, które można zapisać dla pól, to `i8` `i16` `i32` `u8` `u16` `u32` `c-long` `c-ulong` `f32`
 `f64` `bool` `ptr`, typowane wskaźniki `(ptr T)` oraz inne `def-c-struct` (osadzane przez wartość). Układ
-(przesunięcie każdego pola oraz rozmiar i wyrównanie struktury) jest obliczany według reguł C (przy założeniu
-LP64). Można zapisać pole wskazujące na samą strukturę, ale struktura nie może osadzać samej siebie.
+(przesunięcie każdego pola oraz rozmiar i wyrównanie struktury) jest obliczany według reguł C (szerokości `c-long` i wskaźników oraz wyrównanie `f64` są takie jak w C platformy docelowej). Można zapisać pole wskazujące na samą strukturę, ale struktura nie może osadzać samej siebie.
 
 ```lisp
 (unsafe
@@ -544,6 +543,7 @@ Alokację, odczyt i zapis zapisuje się w następujących formach. Wszystkie mo�
 | `(c-alloc T)` / `(c-alloc T n)` | Alokuje `n` wartości typu `T` (1, jeśli pominięto). Zawartość jest wypełniona zerami. Zwraca `(ptr T)` |
 | `(c-ref p i)` | Wskaźnik na element `i` od `p`. Błąd, jeśli poza zaalokowanym zakresem |
 | `(c-deref p)` / `(setf (c-deref p) v)` | Odczytuje / zapisuje skalar, na który wskazuje `p` |
+| `(volatile-read-u32 addr)` / `(volatile-write-u32 addr v)` | Odczytuje lub zapisuje rejestr pod adresem `addr` (`int` albo liczba całkowita o stałej szerokości, np. `u16`), dokładnie raz, w tym miejscu. Tak samo `-u8` i `-u16` |
 | `p::field` / `(setf p::field v)` | Odczytuje / zapisuje pole struktury. Odczyt pola będącego osadzoną strukturą daje jej adres (`(ptr inner-type)`) |
 | `(as ptr p)` | Zapomina typ, tworząc `ptr` (do przekazania do czegoś takiego jak `void *` w `qsort`). Nie ma konwersji z powrotem |
 
@@ -1317,6 +1317,34 @@ test result: FAILED. 1 passed; 1 failed; 0 filtered out
 
 To, co test wypisuje przez `print`, trafia prosto na standardowe wyjście (nie jest przechwytywane). Do wyjścia służącego badaniu problemów są `eprint`/`eprintln` ([Wypisywanie](functions/printing.md)), które piszą na standardowe wyjście błędów i nie mieszają się z wyjściem programu.
 
+### 3.17 `#[interrupt(N)]` / `#[exception(NAME)]` — procedury obsługi przerwań
+
+```lisp
+(use std::board::enable-interrupt)
+(defvar (*received* int) 0)
+
+#[interrupt(7)]
+(defun on-uart () ()
+  (unsafe (volatile-write-u32 #x4000400C 1))   ; wyczyść przyczynę przerwania
+  (setf *received* (+ *received* 1))
+  ())
+
+(defun main () ()
+  (enable-interrupt 7)
+  ...)
+```
+
+W programie skompilowanym na mikrokontroler (sekcja 3.8 w [Kompilacji](../guide/compile.md)) są to funkcje wywoływane, gdy nadchodzi przerwanie. `#[interrupt(N)]` czyni funkcję procedurą obsługi przerwania peryferyjnego `N` (od 0 do 239), a `#[exception(NAME)]` wyjątku rdzenia `NAME`, jednego z `NonMaskableInt`, `MemoryManagement`, `BusFault`, `UsageFault`, `SVCall`, `DebugMonitor`, `PendSV`, `SysTick` (`HardFault` należy do środowiska uruchomieniowego i kończy program).
+
+- Dla Arduino Uno numeracja i sposób włączania są inne, a `#[exception(NAME)]` i `enable-interrupt` nie można używać ([Kompilacja](../guide/compile.md), rozdział 3.9). To, co niżej dotyczy środowiska uruchomieniowego, odnosi się do Cortex-M.
+- Umieszcza się je na `defun` najwyższego poziomu, które nic nie przyjmuje i zwraca `()` (bez parametrów typu). Jedno przerwanie ma jedną procedurę obsługi, a jedna funkcja obsługuje jedno przerwanie.
+- Przerwanie peryferyjne nie nadchodzi, dopóki `(enable-interrupt N)` go nie włączy (`(disable-interrupt N)` je zatrzymuje; zob. [System](functions/system.md)). Wyjątek taki jak SysTick nadchodzi, gdy rejestry zostaną ustawione tak, by go wywołać.
+- Procedura obsługi uruchamia się od razu, tam, gdzie nadeszło przerwanie. Jeśli przyjdzie w trakcie pracy środowiska uruchomieniowego (alokacji, odśmiecania, wyjścia, przełączania zadań itd.), procedura uruchamia się, gdy tylko ta praca się skończy. Procedury obsługi nie przerywają się nawzajem.
+- W procedurze obsługi nie zachodzi odśmiecanie (sterta rośnie w razie potrzeby). Stan programu, na przykład zmienne globalne, można czytać i zapisywać jak zwykle.
+- Procedura obsługi nie może czekać. Procedura obsługi używająca `sleep` to błąd kompilacji. Operacji, która czeka tylko czasem, jak odbiór z kanału, można używać, dopóki nie musi czekać; gdyby musiała, jest to panic.
+- `panic` lub `throw` opuszczające procedurę obsługi kończy program, tak jak nieprzechwycone.
+- W interpreterze i w programie skompilowanym na coś innego niż mikrokontroler żadne przerwanie nie nadchodzi. W interpreterze procedurę obsługi można wywołać jak zwykłą funkcję (do testów). `typl -c` na coś innego niż mikrokontroler odrzuca program z procedurą obsługi.
+
 ## 4. Wiązanie i instrukcje warunkowe
 
 ```lisp
@@ -1770,6 +1798,8 @@ dalej).
 (todo)                              ; rozwija się do (panic "todo"). defmacro
 (as Type expr)                      ; konwersja typu liczbowego/znakowego. konwersje, które mogą się nie powieść, powodują panic przy porażce
 (try-as Type expr)                  ; jak as, ale zwraca wynik jako Option<Type> (None przy porażce)
+(size-of Type)                      ; liczba bajtów wartości typu Type (int)
+(size-of-val expr)                  ; liczba bajtów wartości typu wyrażenia expr (int); expr nie jest obliczane
 (print control args...)             ; rozwija format i zapisuje na standardowe wyjście (bez nowej linii)
 (println control args...)           ; to samo (z nową linią na końcu)
 (format dest control args...)       ; format z CL. zwraca rozwinięty łańcuch
@@ -1817,6 +1847,30 @@ po nich wywoływane jest `int->W`. Jest to lukier rozwijający się do odpowiedn
 
 Z `rational` `as`/`try-as` konwertują do `int` (`as` obcina, `try-as` udaje się tylko dla liczby
 całkowitej), `ratio` i `f64`; z `int`/`ratio` do `rational`.
+
+`size-of`/`size-of-val` odpowiadają `sizeof` z C. Odpowiedź jest stałą ustalaną przy kompilacji: to rozmiar na platformie
+docelowej, na której działa kod:
+
+| Typ | Bajty |
+|---|---|
+| `i8` `u8` `bool` | 1 |
+| `i16` `u16` | 2 |
+| `i32` `u32` `f32` `char` | 4 |
+| `f64` | 8 |
+| `c-long` `c-ulong` | tyle co `long` w C na platformie docelowej |
+| `ptr` `(ptr T)` | tyle co wskaźnik platformy docelowej |
+| `def-c-struct` | tyle co struktura C (z wypełnieniem) |
+| `()` | 0 |
+| Wszystko inne (`int`, `string`, typ `defstruct` itd.) | jedno słowo (tyle co wskaźnik platformy docelowej): sama wartość albo miejsce, w którym się znajduje |
+
+```lisp
+(size-of u16)                       ; => 2
+(size-of-val (as i8 5))             ; => 1
+(let ((x 1.0)) (size-of-val x))     ; => 8
+```
+
+Można też napisać parametr typu funkcji generycznej; ustala go typ przy każdym wywołaniu. `!` nie ma wartości, więc jest
+błędem. Typ `def-c-struct` można napisać także poza `unsafe`.
 
 `documentation`, jak `quote`/`compile`, jest formą specjalną, która czyta `name` bez obliczania, jako
 nieobliczony goły symbol / ścieżkę `::`. W przeciwieństwie do `(documentation 'name 'function)` z CL nie przyjmuje argumentu
@@ -2207,10 +2261,9 @@ panic w rodzaju `` `recv` cannot block: ... ``, traktowany tak samo jak `(panic 
   skończyły, w następnym obliczeniu). Na końcu obliczenia czeka się, aż każdy wątek skończy swój
   bieżący krok, więc jeśli funkcja C (`defffi`) stale blokuje wewnątrz `thread`, obliczenie się nie kończy,
   dopóki nie wróci.
-- **Drukowanie na workerach**: interpretowane metody `print-object` oraz interpretowane funkcje i metody
-  wywoływane przez `~/name/` nie mogą działać w innych wątkach, więc drukowanie takich wartości w innym
-  wątku to panic traktowany tak samo jak `(panic ...)` (`(compile T::print-object)` albo drukowanie z
-  głównego zadania).
+- **Drukowanie na workerach**: interpretowane metody `print-object` nie mogą działać w innych wątkach,
+  więc drukowanie takich wartości w innym wątku to panic traktowany tak samo jak `(panic ...)`
+  (`(compile T::print-object)` albo drukowanie z głównego zadania).
 - **Wyścigi danych są niezdefiniowane** (to samo stanowisko co w Go). Wynik zmiany tej samej wartości przez kilka zadań
   bez użycia `Mutex<T>` / `Chan<T>` nie jest gwarantowany.
 - **`task` zwraca wartość.** W przeciwieństwie do instrukcji `go` z Go zwraca `Task<T>`, a `(wait t)` pobiera

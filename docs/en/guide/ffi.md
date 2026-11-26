@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/ffi.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
+<!-- translated-from: docs/ja/guide/ffi.md @ dff3b51792f6d9c49bb8802bd3d3fb6e168edd92 -->
 # C FFI (defffi)
 
 This guide explains how to call C functions from typelisp. The list of types that can be declared and
@@ -46,7 +46,7 @@ The intended use is to confine `unsafe` to one place and present an ordinary fun
 | `bool` | `bool` (`_Bool`) |
 | `()` | `void` |
 | `string` | `const char *` |
-| `c-long` / `c-ulong` | `long` / `unsigned long` (also `size_t`, `int64_t` and so on) |
+| `c-long` / `c-ulong` | `long` / `unsigned long` (also `size_t` and so on) |
 | `ptr` | Any pointer (`void *`, `FILE *` and so on) |
 | `(ptr T)` | A pointer to `T` ([section 7](#7-c-structs)) |
 
@@ -63,10 +63,10 @@ The intended use is to confine `unsafe` to one place and present an ordinary fun
 ### `c-long` / `c-ulong` / `ptr`
 
 These types exist only to pass values across the boundary with C, and **support no arithmetic**. To
-use one as a typelisp integer, convert it with `as`.
+use one as a typelisp integer, convert it with `as`. Their width is that of C on the machine the program runs on (64 bits for both `c-long` and pointers on 64-bit macOS and Linux, 32 bits when `--target` names wasm32 or a Cortex-M).
 
 ```lisp
-(as int (unsafe (c-strlen s)))      ; int does not lose any of the 64-bit value
+(as int (unsafe (c-strlen s)))      ; int loses none of the value
 (try-as i32 (unsafe (c-strlen s)))  ; None if it does not fit in an i32
 (unsafe (c-malloc 16))              ; integer literals can be passed as they are
 ```

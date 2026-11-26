@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/numbers.md @ 676864f7e6cf8e950e51aadacecd49695c8545a8 -->
+<!-- translated-from: docs/ja/reference/functions/numbers.md @ 1b5dc6ac828d8e4a95800a91218b5e9dffe83f98 -->
 # 數值
 
 整數、浮點數、有理數、複數、布林值的運算以及與數值相關的函式。呼叫形式的讀法見[內建函式](README.md)。
@@ -57,10 +57,9 @@ CL 的衍生目錄（`abs`/`signum`/`gcd`/`lcm`/`isqrt`/`expt` 以及第 9 章�
 | `int->i8` … `int->u32` | `(int->W x)` | `T→W` | 與第 1 章相同的寬度轉換。放不下的值會被截斷 |
 | `try-int->i8` … `try-int->u32` | `(try-int->W x)` | `T→Option<W>` | 把同樣的轉換當作詢問 |
 | `int->c-long` `int->c-ulong` | `(int->W x)` | `T→W` | 從原始字之間以及第 1 章的整數型別建立的入口 |
-| `try-int->c-long` `try-int->c-ulong` | `(try-int->W x)` | `T→Option<W>` | 同上 |
 | `int->int` | `(int->int x)` | `T→int` | **一律精確**。讀取放不進 `i32` 的 `size_t` 的正當方式 |
 
-`(as i32 x)` / `(try-as i32 x)` / `(as int x)` / `(as c-ulong n)` 就是它們，與第 1 章的所有整數型別之間都有轉換。`ptr` 連這張表都
+`(as i32 x)` / `(try-as i32 x)` / `(as int x)` / `(as c-ulong n)` 就是它們，與第 1 章的所有整數型別之間都有轉換。沒有轉為原始字的 `try-` 形式：`Option<c-long>` 會把原始字放進另一個型別裡，這是寫不出來的。`ptr` 連這張表都
 沒有——沒有提供把指標當作數讀取的途徑。它只是被傳遞、接收、再交給另一個 C 函式的值。
 
 **也不能列印。** `(println "~a" x)` 不接受原始字（它沒有 `Sexpr` 表示），請像 `(println "~a" (as int n))` 這樣先轉到有寬度的型別。
@@ -117,6 +116,7 @@ CL 的 `integer`，也就是這個語言的**整數**——未註記的整數字
 | `log`（雙引數） | `(log x base)` | `(f64,f64)→f64` | 指定底數的對數。展開為 `(/ (log x) (log base))`（第 8 章） |
 | `floor-div` `ceiling-div` `round-div` `truncate-div` | `(op a b)` | `(f64,f64)→cons-cell<f64,f64>` | 相當於 CL 的雙引數版本（`(floor 7.0 2.0)`→商 3、餘數 1）。與第 1 章同名函式的設計相同（`car`=商、`cdr`=餘數） |
 | `float->int` | `(float->int x)` | `f64→int` | 朝零截斷轉換為 `int`（CL 的 `truncate`；任何大小的有限值都是精確的）。無限大與 NaN 時 panic。需要固定寬度時用 `(as i32 x)` |
+| `float->i8` `float->i16` `float->i32` `float->u8` `float->u16` `float->u32` | `(op x)` | `f64→i8` | 將 `float->int` 結果的低位元轉為該型別（不經過 `int`）。無限大和 NaN 會 panic。是 `(as i16 x)` 的實體 |
 | `float->ratio` | `(float->ratio x)` | `f64→ratio` | 以精確的二進位有理數轉換為 `ratio`（CL 的 `rational`） |
 | `float->f32` `float->f64` | `(op x)` | `f64→f32` / `f64→f64` | 浮點寬度的轉換。`float->f32` 捨入到最近，`float->f64` 一律精確。`(as f32 x)` 的實質 |
 | `try-float->f32` `try-float->f64` | `(op x)` | `f64→Option<f32>` / `→Option<f64>` | 把同樣的轉換當作詢問。捨入會改變值時為 `None`（擴大到 `f64` 一律為 `Some`）。`(try-as f32 x)` 的實質 |
@@ -292,7 +292,7 @@ CL 的算術與比較是可變引數的，但方法只依接收者的型別解�
 
 | 名稱 | 型別 | 說明 |
 |---|---|---|
-| `most-positive-fixnum` / `most-negative-fixnum` | `int` | 63 位元立即值的上限／下限（2^62-1 / -2^62）。超過它們的 `int` 是多倍精度 |
+| `most-positive-fixnum` / `most-negative-fixnum` | `int` | 63 位元立即值的上限／下限（2^62-1 / -2^62；在 wasm32 和 Cortex-M 上是 31 位元，2^30-1 / -2^30）。超過它們的 `int` 是多倍精度 |
 | `most-positive-double-float` / `most-negative-double-float` | `f64` | 有限值中的最大／最小 |
 | `least-positive-double-float` / `least-negative-double-float` | `f64` | 包括非正規化數在內的非零最小絕對值 |
 | `least-positive-normalized-double-float` / `least-negative-normalized-double-float` | `f64` | 僅限正規化數的同一量 |

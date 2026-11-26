@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/option-result.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
+<!-- translated-from: docs/ja/reference/functions/option-result.md @ dff3b51792f6d9c49bb8802bd3d3fb6e168edd92 -->
 # Option, Result und Fehlertypen
 
 ## 1. `Option<T>` / `Result<T,E>`
@@ -67,7 +67,7 @@ Eine Box wird nur verwendet, wenn sich ein Wert von `T` nicht vom Wert der leere
 |---|---|---|
 | `Option<U>` (verschachtelt) | Box | Das innere `None` wäre derselbe Wert wie das äußere `None` |
 | `()` | Box | Der Wert von `()` ist der Wert der leeren Liste selbst |
-| `ptr` / `c-long` / `c-ulong` | Box | Alle 64 Bit sind Wert, es bleibt kein Platz, sie zu unterscheiden |
+| `ptr` / `c-long` / `c-ulong` | Box | Alle Bits sind Wert, es bleibt kein Platz, sie zu unterscheiden |
 | Alles andere | Keine Box | — |
 
 Die Darstellung wird allein durch den Typ bestimmt und lässt sich nicht aus einem Wert ablesen. Bei der

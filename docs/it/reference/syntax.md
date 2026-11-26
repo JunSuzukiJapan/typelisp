@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ ac5a6b3adada21a0a55e0e1c4b0e1fabf4854908 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 1b5dc6ac828d8e4a95800a91218b5e9dffe83f98 -->
 # Riferimento della sintassi di typelisp
 
 typelisp è un Lisp a tipizzazione statica, scritto in S-expression. Per l'elenco delle funzioni e dei
@@ -85,7 +85,7 @@ metodi predefiniti, si veda [Funzioni predefinite](functions/README.md); per l'e
   (`#{"foo" 123}` è `#{string int}`). Una tupla ha da 1 a 12 elementi. Ogni valutazione crea una
   nuova tupla. Per costruirne una da valori calcolati si usa `(tuple a b)`. Dove sono attesi dati
   S-espressione, è una tupla i cui elementi sono tutti dati: la variante `Tuple` di `Sexpr`.
-- **Attributi**: `#[test]` è un contrassegno attaccato alla forma successiva (scritto come in Rust). L'unico attributo per ora è `test`, che va su un `defun` ([3.16 `#[test]`](#316-test--funzioni-di-test)). Letto con `read`, diventa la lista `(%internal::attribute (test) form)`.
+- **Attributi**: `#[test]` è un segno posto sulla forma successiva (scritto come in Rust). Ci sono tre attributi, `test`, `interrupt(N)` ed `exception(NAME)`, ciascuno su un `defun` ([3.16 `#[test]`](#316-test--funzioni-di-test), [3.17 gestori di interrupt](#317-interruptn--exceptionname--gestori-di-interrupt)). Un attributo con argomenti si scrive con la parentesi subito dopo il nome. Letti con `read`, diventano le liste `(%internal::attribute (test) form)` e `(%internal::attribute ((interrupt 7)) form)`.
 - **La lista vuota `()`**: a seconda del contesto, il valore del tipo `Unit` o il `None` di
   `Option<Sexpr>`. **`Sexpr` non ha una variante lista vuota**: `Sexpr` significa "una S-expression non
   vuota", e il tipo dei dati S-expression è `Option<Sexpr>` (si veda "Pattern per `Option<Sexpr>`" in
@@ -383,7 +383,7 @@ processo.
 #### ptr / c-long / c-ulong — parole macchina grezze
 
 `ptr` è un puntatore opaco (`void *`, `FILE *`, qualunque cosa intendesse la dichiarazione).
-`c-long` / `c-ulong` sono i `long` / `unsigned long` di C (anche `size_t`, `int64_t` e `intptr_t`).
+`c-long` / `c-ulong` sono i `long` / `unsigned long` di C (anche `size_t` e `intptr_t`).
 
 ```lisp
 (defffi (c-malloc "malloc") (c-ulong) ptr)
@@ -395,7 +395,7 @@ processo.
 
 **Non chiamarli `i64` / `u64` è una scelta deliberata.** Questo linguaggio non ha un tipo intero a 64 bit,
 perché un immediato con tag ha solo 63 bit ([capitolo 2](#2-scrittura-dei-tipi)). Il nome `c-long` dice
-"questa è una parola che attraversa il confine con C, non un intero di questo linguaggio".
+"questa è una parola che attraversa il confine con C, non un intero di questo linguaggio". La sua larghezza è quella del `long` del C della destinazione (64 bit su macOS e Linux a 64 bit, 32 bit su wasm32 e Cortex-M).
 
 **Non hanno aritmetica.** `(+ x 1)` non si può scrivere. Si potrebbe fornire ma non lo si fa, in modo che
 nessun calcolo venga eseguito su un valore che non può essere memorizzato da nessuna parte e che ha una
@@ -404,7 +404,7 @@ escluso. Ci sono **solo conversioni**:
 
 ```lisp
 (as i32 (unsafe (c-strlen "hello")))         ; read what came back
-(as int (unsafe (c-strlen s)))               ; this one to read it exactly (int does not lose 64 bits)
+(as int (unsafe (c-strlen s)))               ; this one to read it exactly (int loses none of the value)
 (try-as i32 (unsafe (c-strlen s)))           ; ask whether it fits
 (as c-ulong n)                               ; make one from another integer
 ```
@@ -544,7 +544,7 @@ il nome.
 I tipi che si possono scrivere per i campi sono `i8` `i16` `i32` `u8` `u16` `u32` `c-long` `c-ulong` `f32`
 `f64` `bool` `ptr`, i puntatori tipizzati `(ptr T)` e altre `def-c-struct` (incorporate per valore). Il
 layout (l'offset di ciascun campo, e la dimensione e l'allineamento della struttura) viene calcolato con
-le regole di C (assumendo LP64). Si può scrivere un campo che punta alla struttura stessa, ma la
+le regole di C (le larghezze di `c-long` e dei puntatori e l'allineamento di `f64` seguono il C della destinazione). Si può scrivere un campo che punta alla struttura stessa, ma la
 struttura non può incorporare se stessa.
 
 ```lisp
@@ -570,6 +570,7 @@ dentro `unsafe`.
 | `(c-alloc T)` / `(c-alloc T n)` | Alloca `n` valori di `T` (1 se omesso). Il contenuto è riempito con 0. Restituisce un `(ptr T)` |
 | `(c-ref p i)` | Un puntatore all'elemento `i` a partire da `p`. Un errore se fuori dall'intervallo allocato |
 | `(c-deref p)` / `(setf (c-deref p) v)` | Legge / scrive lo scalare a cui punta `p` |
+| `(volatile-read-u32 addr)` / `(volatile-write-u32 addr v)` | Legge o scrive il registro all'indirizzo `addr` (un `int`, o un intero a larghezza fissa come `u16`), esattamente una volta, dove è scritto. Lo stesso per `-u8` e `-u16` |
 | `p::field` / `(setf p::field v)` | Legge / scrive un campo di una struttura. Leggere un campo che è una struttura incorporata dà il suo indirizzo (`(ptr inner-type)`) |
 | `(as ptr p)` | Dimentica il tipo, ottenendo un `ptr` (da passare a qualcosa come il `void *` di `qsort`). Non c'è conversione inversa |
 
@@ -1366,6 +1367,34 @@ test result: FAILED. 1 passed; 1 failed; 0 filtered out
 
 Ciò che un test stampa con `print` va direttamente sullo standard output (non viene catturato). Per l'output destinato all'indagine, `eprint`/`eprintln` ([Stampa](functions/printing.md)) scrivono sullo standard error e non si mescolano con l'output del programma.
 
+### 3.17 `#[interrupt(N)]` / `#[exception(NAME)]` — gestori di interrupt
+
+```lisp
+(use std::board::enable-interrupt)
+(defvar (*received* int) 0)
+
+#[interrupt(7)]
+(defun on-uart () ()
+  (unsafe (volatile-write-u32 #x4000400C 1))   ; cancellare ciò che ha sollevato l'interrupt
+  (setf *received* (+ *received* 1))
+  ())
+
+(defun main () ()
+  (enable-interrupt 7)
+  ...)
+```
+
+In un programma compilato per un microcontrollore (sezione 3.8 di [Compilare](../guide/compile.md)), sono le funzioni chiamate quando arriva un interrupt. `#[interrupt(N)]` rende una funzione il gestore dell'interrupt di periferica `N` (da 0 a 239), e `#[exception(NAME)]` quello dell'eccezione del core `NAME`, una tra `NonMaskableInt`, `MemoryManagement`, `BusFault`, `UsageFault`, `SVCall`, `DebugMonitor`, `PendSV`, `SysTick` (`HardFault` è del runtime, e termina il programma).
+
+- Per l'Arduino Uno la numerazione e l'abilitazione sono diverse, e `#[exception(NAME)]` e `enable-interrupt` non si possono usare ([Compilare](../guide/compile.md), sezione 3.9). Ciò che sotto riguarda il runtime vale per il Cortex-M.
+- Vanno su un `defun` di primo livello che non prende nulla e restituisce `()` (nemmeno parametri di tipo). Un interrupt ha un gestore, e una funzione gestisce un interrupt.
+- Un interrupt di periferica non arriva finché `(enable-interrupt N)` non lo abilita (`(disable-interrupt N)` lo ferma; vedi [Sistema](functions/system.md)). Un'eccezione come SysTick arriva appena i registri sono impostati per sollevarla.
+- Un gestore si esegue subito, dove è arrivato l'interrupt. Se arriva a metà del lavoro del runtime (allocazione, garbage collection, output, cambio di task e così via), il gestore si esegue appena quel lavoro è finito. I gestori non si interrompono a vicenda.
+- In un gestore non avviene garbage collection (l'heap cresce se serve). Lo stato del programma, come le variabili globali, si legge e si scrive come al solito.
+- Un gestore non può attendere. Un gestore che usa `sleep` è un errore di compilazione. Un'operazione che attende solo a volte, come ricevere da un canale, si può usare finché non deve attendere; se dovesse farlo, è un panic.
+- Un `panic` o un `throw` che esce da un gestore termina il programma, come uno non catturato.
+- Nell'interprete e in un programma compilato per qualcosa che non sia un microcontrollore non arriva alcun interrupt. Nell'interprete un gestore si può chiamare come una funzione ordinaria (per i test). `typl -c` per qualcosa che non sia un microcontrollore rifiuta un programma con un gestore.
+
 ## 4. Binding e condizionali
 
 ```lisp
@@ -1835,6 +1864,8 @@ ordine superiore e così via).
 (todo)                              ; expands to (panic "todo"). defmacro
 (as Type expr)                      ; numeric/character type conversion. conversions that can fail panic on failure
 (try-as Type expr)                  ; like as, but returns the result as Option<Type> (None on failure)
+(size-of Type)                      ; numero di byte di un valore di Type (int)
+(size-of-val expr)                  ; numero di byte di un valore del tipo di expr (int); expr non viene valutata
 (print control args...)             ; expands the format and writes to standard output (no newline)
 (println control args...)           ; the same (with a newline at the end)
 (format dest control args...)       ; CL's format. returns the expanded string
@@ -1886,6 +1917,30 @@ nei corrispondenti metodi di conversione (`int->char`/`int->int`/`int->W` e cos�
 
 Da `rational`, `as`/`try-as` convertono in `int` (`as` tronca, `try-as` riesce solo per un intero), in
 `ratio` e in `f64`; da `int`/`ratio`, in `rational`.
+
+`size-of`/`size-of-val` corrispondono al `sizeof` del C. La risposta è una costante decisa in compilazione: la dimensione
+sul target su cui gira il codice:
+
+| Tipo | Byte |
+|---|---|
+| `i8` `u8` `bool` | 1 |
+| `i16` `u16` | 2 |
+| `i32` `u32` `f32` `char` | 4 |
+| `f64` | 8 |
+| `c-long` `c-ulong` | come il `long` del C sul target |
+| `ptr` `(ptr T)` | come un puntatore del target |
+| `def-c-struct` | come la struttura C (riempimento incluso) |
+| `()` | 0 |
+| Tutto il resto (`int`, `string`, un tipo `defstruct` ecc.) | una parola (come un puntatore del target): il valore stesso, o il punto in cui si trova |
+
+```lisp
+(size-of u16)                       ; => 2
+(size-of-val (as i8 5))             ; => 1
+(let ((x 1.0)) (size-of-val x))     ; => 8
+```
+
+Si può scrivere anche un parametro di tipo di una funzione generica; lo decide il tipo di ogni chiamata. `!` non ha un
+valore, quindi è un errore. Un tipo `def-c-struct` si può scrivere anche fuori da `unsafe`.
 
 `documentation`, come `quote`/`compile`, è una forma speciale che legge `name` senza valutarlo, come
 simbolo semplice non valutato / percorso `::`. A differenza del `(documentation 'name 'function)` di CL,
@@ -2292,9 +2347,9 @@ all'istante, ma sono un panic come `` `recv` cannot block: ... ``, trattato come
   proseguono da dove si erano fermati nella valutazione successiva). Alla fine di una valutazione,
   attende che ogni thread termini il proprio passo corrente, quindi se una funzione C (`defffi`) continua
   a bloccarsi dentro un `thread`, la valutazione non termina finché non ritorna.
-- **Stampa sui worker**: i metodi `print-object` interpretati, e le funzioni e i metodi interpretati che
-  `~/name/` chiama, non possono girare su altri thread, quindi stampare tali valori su un altro thread è un
-  panic trattato come un `(panic ...)` (`(compile T::print-object)`, oppure stampa dal task principale).
+- **Stampa sui worker**: i metodi `print-object` interpretati non possono girare su altri thread, quindi
+  stampare tali valori su un altro thread è un panic trattato come un `(panic ...)`
+  (`(compile T::print-object)`, oppure stampa dal task principale).
 - **Le corse sui dati sono indefinite** (la stessa posizione di Go). Il risultato di più task che
   modificano lo stesso valore senza passare per `Mutex<T>` / `Chan<T>` non è garantito.
 - **`task` restituisce un valore.** A differenza dell'istruzione `go` di Go, restituisce un `Task<T>`, e

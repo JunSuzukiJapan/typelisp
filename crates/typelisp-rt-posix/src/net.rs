@@ -49,16 +49,17 @@
 //! and the prelude panics on them. The **peer's** — a reset connection, a
 //! TLS alert, a socket closed under a write — are not the program's fault
 //! and must not end a server that has other clients; they are recorded on
-//! the entry ([`Backend::Tcp`]'s `failed`), after which a read says end of
+//! the entry ([`NetBackend::Tcp`]'s `failed`), after which a read says end of
 //! input and a write is a no-op, and [`StreamTable::net_socket_error`] says
 //! what happened. Go's `bufio.Writer` keeps its first error the same way.
 
-use std::collections::VecDeque;
+use typelisp_mem::prelude::*;
+use alloc::collections::VecDeque;
 use std::io::{ErrorKind, Read, Write};
 use std::net::{SocketAddr, TcpListener, ToSocketAddrs, UdpSocket};
 use std::sync::{Arc, Mutex};
 
-use crate::stream::{Backend, Handle, Listen, ResolverAnswer, Sock, StreamObj, StreamResult, StreamTable};
+use typelisp_rt::stream::{ExtBackend, ExtParts, Handle, StreamObj, StreamResult, StreamTable};
 
 mod tls;
 pub(crate) use tls::*;
@@ -73,7 +74,7 @@ const FILL_CHUNK: usize = 16 * 1024;
 /// backend keeps (`unread-char`'s pushback, `fresh-line`'s last character).
 struct TcpParts<'a> {
     sock: &'a mut Sock,
-    tls: &'a mut Option<Box<rustls::Connection>>,
+    tls: &'a mut Option<TlsConn>,
     rbuf: &'a mut VecDeque<u8>,
     wbuf: &'a mut VecDeque<u8>,
     failed: &'a mut Option<String>,
@@ -81,35 +82,341 @@ struct TcpParts<'a> {
     last_written: &'a mut Option<char>,
 }
 
-/// A fresh entry for a connected socket, before anything has crossed it.
-fn tcp_entry(sock: Sock, tls: Option<Box<rustls::Connection>>) -> Backend {
-    Backend::Tcp { sock, tls, rbuf: VecDeque::new(), wbuf: VecDeque::new(), failed: None }
+/// A connected stream socket, whichever family. Everything above the
+/// descriptor is the same for the two — the buffers, the TLS layer, the
+/// wait loops in the prelude — which is why they share one [`NetBackend`] arm
+/// and one prelude type (`socket-stream`) rather than two of each. What
+/// differs is only how one is made and what its address looks like.
+pub(crate) enum Sock {
+    Tcp(std::net::TcpStream),
+    Unix(std::os::unix::net::UnixStream),
 }
 
-impl StreamTable {
+impl Read for Sock {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        match self {
+            Sock::Tcp(s) => s.read(buf),
+            Sock::Unix(s) => s.read(buf),
+        }
+    }
+}
+
+impl Write for Sock {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        match self {
+            Sock::Tcp(s) => s.write(buf),
+            Sock::Unix(s) => s.write(buf),
+        }
+    }
+    fn flush(&mut self) -> std::io::Result<()> {
+        match self {
+            Sock::Tcp(s) => s.flush(),
+            Sock::Unix(s) => s.flush(),
+        }
+    }
+}
+
+impl Sock {
+    pub(crate) fn set_nonblocking(&self, on: bool) -> std::io::Result<()> {
+        match self {
+            Sock::Tcp(s) => s.set_nonblocking(on),
+            Sock::Unix(s) => s.set_nonblocking(on),
+        }
+    }
+    pub(crate) fn take_error(&self) -> std::io::Result<Option<std::io::Error>> {
+        match self {
+            Sock::Tcp(s) => s.take_error(),
+            Sock::Unix(s) => s.take_error(),
+        }
+    }
+    pub(crate) fn shutdown(&self, how: std::net::Shutdown) -> std::io::Result<()> {
+        match self {
+            Sock::Tcp(s) => s.shutdown(how),
+            Sock::Unix(s) => s.shutdown(how),
+        }
+    }
+    /// This side's address: `ip:port`, or a Unix socket's path (an unbound
+    /// client end has none and says so).
+    pub(crate) fn local_address(&self) -> std::io::Result<String> {
+        match self {
+            Sock::Tcp(s) => s.local_addr().map(|a| a.to_string()),
+            Sock::Unix(s) => s.local_addr().map(|a| unix_addr_string(&a)),
+        }
+    }
+    pub(crate) fn peer_address(&self) -> std::io::Result<String> {
+        match self {
+            Sock::Tcp(s) => s.peer_addr().map(|a| a.to_string()),
+            Sock::Unix(s) => s.peer_addr().map(|a| unix_addr_string(&a)),
+        }
+    }
+    #[cfg(unix)]
+    pub(crate) fn raw_fd(&self) -> i32 {
+        use std::os::unix::io::AsRawFd;
+        match self {
+            Sock::Tcp(s) => s.as_raw_fd(),
+            Sock::Unix(s) => s.as_raw_fd(),
+        }
+    }
+}
+
+/// A Unix socket address as text: its path, or `(unnamed)` for the client
+/// end of a connection, which has no path of its own.
+pub(crate) fn unix_addr_string(a: &std::os::unix::net::SocketAddr) -> String {
+    match a.as_pathname() {
+        Some(p) => p.to_string_lossy().into_owned(),
+        None => "(unnamed)".to_string(),
+    }
+}
+
+/// A listening socket, whichever family. A Unix listener remembers its path
+/// so that closing it can remove the socket file — the file is the address,
+/// and a stale one would refuse the next `bind` (Go's listener does the
+/// same on `Close`).
+pub(crate) enum Listen {
+    Tcp(std::net::TcpListener),
+    Unix { listener: std::os::unix::net::UnixListener, path: std::path::PathBuf },
+}
+
+impl Listen {
+    #[cfg(unix)]
+    pub(crate) fn raw_fd(&self) -> i32 {
+        use std::os::unix::io::AsRawFd;
+        match self {
+            Listen::Tcp(l) => l.as_raw_fd(),
+            Listen::Unix { listener, .. } => listener.as_raw_fd(),
+        }
+    }
+    pub(crate) fn local_address(&self) -> std::io::Result<String> {
+        match self {
+            Listen::Tcp(l) => l.local_addr().map(|a| a.to_string()),
+            Listen::Unix { listener, .. } => listener.local_addr().map(|a| unix_addr_string(&a)),
+        }
+    }
+}
+
+/// Where a resolver thread leaves what it found: every address the name
+/// has, or why there is none. Shared with the thread, hence the lock.
+pub(crate) type ResolverAnswer = Arc<Mutex<Option<Result<Vec<std::net::SocketAddr>, String>>>>;
+
+
+/// A socket in the stream table: what the socket builtins put there and reach
+/// again through [`Sockets`].
+pub(crate) enum NetBackend {
+    /// A connected stream socket — TCP or Unix-domain, see [`Sock`] —
+    /// **non-blocking**, with its own buffers on both sides. The stream
+    /// table's character/byte operations never touch it: a socket is read
+    /// and written through the `net-*` builtins, each of which does only
+    /// what can be done *now* and reports "not yet" as an answer, so that the
+    /// wait — the scheduler parking the task — happens in typelisp. A
+    /// blocking `read` would stop every task.
+    ///
+    /// `rbuf` holds what has been received and not yet consumed; `wbuf`
+    /// what has been written and not yet sent. With `tls` present the two
+    /// buffers hold *plaintext* and the connection object between them and
+    /// the socket does the ciphering (the TLS section below) — a client
+    /// connection made by `tls-connect`, or a server one that a `tls-listen`
+    /// listener put on the socket it accepted.
+    ///
+    /// `failed` is set once the *peer* has broken the connection — reset it,
+    /// sent a TLS alert, closed it under a write — and from then on reading
+    /// says end of input and writing is a no-op, the way Go's `bufio.Writer`
+    /// keeps its first error and refuses further writes. The stream traits
+    /// have no error channel (`read-item` is an `Option`), and a peer's
+    /// failure is not the program's, so it must not be a panic: a server
+    /// would die with its first misbehaving client. `net-socket-error`
+    /// reads it back.
+    Tcp {
+        sock: Sock,
+        tls: Option<TlsConn>,
+        rbuf: VecDeque<u8>,
+        wbuf: VecDeque<u8>,
+        failed: Option<String>,
+    },
+    /// A listening socket, non-blocking for the same reason. Neither an
+    /// input nor an output stream: it yields connections, not items. With
+    /// `tls` present (`tls-listen`), every connection it accepts gets a
+    /// server-side TLS connection over it, sharing this configuration —
+    /// the certificate and key loaded once when the listener was made,
+    /// plus any added since for other names ([`TlsServer`]).
+    Listener { listen: Listen, tls: Option<TlsServer> },
+    /// A UDP socket, non-blocking. Datagrams, not a stream: it is neither an
+    /// input nor an output stream, and it is spoken to in whole messages.
+    /// `last_from` is who sent the datagram most recently received.
+    Udp { sock: UdpSocket, last_from: Option<SocketAddr> },
+    /// A name resolution in flight on a helper thread. What the table holds
+    /// is the read end of a pipe the thread writes one byte to when it is
+    /// done — a descriptor `poll` can wait on like any socket's — and the
+    /// slot the thread leaves its answer in.
+    Resolver { pipe: std::io::PipeReader, answer: ResolverAnswer },
+}
+
+impl ExtBackend for NetBackend {
+    // Not a fallback to a blocking read: a socket is read through
+    // `net-pop-char`/`net-fill`, which never wait. The others are not input
+    // streams, which the table refuses before asking.
+    fn read_char(&mut self) -> StreamResult<Option<char>> {
+        match self {
+            NetBackend::Tcp { .. } => Err("read-char: a socket is read through net-pop-char".to_string()),
+            NetBackend::Listener { .. } | NetBackend::Udp { .. } | NetBackend::Resolver { .. } => {
+                Err("the stream is not an input stream".to_string())
+            }
+        }
+    }
+
+    fn read_byte(&mut self) -> StreamResult<Option<u8>> {
+        match self {
+            NetBackend::Tcp { .. } => Err("read-byte: a socket is read through net-pop-byte".to_string()),
+            NetBackend::Listener { .. } | NetBackend::Udp { .. } | NetBackend::Resolver { .. } => {
+                Err("read-byte: the stream is not a byte input stream".to_string())
+            }
+        }
+    }
+
+    fn write_byte(&mut self, _b: u8) -> StreamResult<()> {
+        match self {
+            NetBackend::Tcp { .. } => Err("write-byte: a socket is written through net-push-byte".to_string()),
+            NetBackend::Listener { .. } | NetBackend::Udp { .. } | NetBackend::Resolver { .. } => {
+                Err("write-byte: the stream is not a byte output stream".to_string())
+            }
+        }
+    }
+
+    fn write_str(&mut self, _text: &str) -> StreamResult<()> {
+        match self {
+            NetBackend::Tcp { .. } => Err("write: a socket is written through net-push-string".to_string()),
+            NetBackend::Listener { .. } | NetBackend::Udp { .. } | NetBackend::Resolver { .. } => {
+                Err("the stream is not an output stream".to_string())
+            }
+        }
+    }
+
+    fn finish_output(&mut self) -> StreamResult<()> {
+        match self {
+            NetBackend::Tcp { .. } => Err("finish-output: a socket is flushed through net-flush".to_string()),
+            NetBackend::Listener { .. } | NetBackend::Udp { .. } | NetBackend::Resolver { .. } => Ok(()),
+        }
+    }
+
+    /// Already received and sitting in the buffer: no OS read needed.
+    fn listen(&self) -> bool {
+        match self {
+            NetBackend::Tcp { rbuf, .. } => !rbuf.is_empty(),
+            NetBackend::Listener { .. } | NetBackend::Udp { .. } | NetBackend::Resolver { .. } => false,
+        }
+    }
+
+    fn close(&mut self) -> StreamResult<()> {
+        match self {
+            // A socket gets one non-blocking attempt at what is still
+            // buffered. Waiting for the rest is not this layer's to do: the
+            // prelude's `close` calls `finish-output` first, which parks the
+            // task until the buffer is empty, so this attempt is normally a
+            // no-op.
+            NetBackend::Tcp { sock, tls: None, wbuf, .. } => {
+                let (front, _) = wbuf.as_slices();
+                if !front.is_empty() {
+                    let _ = sock.write(front);
+                }
+            }
+            // A TLS connection tells the peer it is closing (`close_notify`),
+            // best effort and without waiting, so the peer can tell a clean
+            // end from a cut connection.
+            NetBackend::Tcp { sock, tls: Some(conn), .. } => conn.close(sock),
+            // The socket file is the listener's address: gone with the
+            // listener.
+            NetBackend::Listener { listen: Listen::Unix { path, .. }, .. } => {
+                let _ = std::fs::remove_file(path);
+            }
+            NetBackend::Listener { listen: Listen::Tcp(_), .. } | NetBackend::Udp { .. } | NetBackend::Resolver { .. } => {}
+        }
+        Ok(())
+    }
+
+    /// The way SBCL names it inside `#<...>`: `for "socket local, peer:
+    /// remote"` for a connected socket's stream, `local, fd: N` for a socket
+    /// object. A connection whose peer has gone has no peer address any more;
+    /// it is described by what it still has.
+    fn describe(&self) -> StreamResult<String> {
+        let io = |e: std::io::Error| format!("describe: {}", e);
+        Ok(match self {
+            NetBackend::Tcp { sock, .. } => match sock.peer_address() {
+                Ok(peer) => format!("for \"socket {}, peer: {}\"", sock.local_address().map_err(io)?, peer),
+                Err(_) => format!("for \"socket {}\"", sock.local_address().map_err(io)?),
+            },
+            NetBackend::Listener { listen, .. } => format!("{}, fd: {}", listen.local_address().map_err(io)?, listen.raw_fd()),
+            NetBackend::Udp { sock, .. } => {
+                use std::os::unix::io::AsRawFd;
+                format!("{}, fd: {}", sock.local_addr().map_err(io)?, sock.as_raw_fd())
+            }
+            NetBackend::Resolver { .. } => String::new(),
+        })
+    }
+
+    fn wait_fd(&self) -> StreamResult<(i32, typelisp_rt::sched::PollerRef)> {
+        use std::os::unix::io::AsRawFd;
+        let fd = match self {
+            NetBackend::Tcp { sock, .. } => sock.raw_fd(),
+            NetBackend::Listener { listen, .. } => listen.raw_fd(),
+            NetBackend::Udp { sock, .. } => sock.as_raw_fd(),
+            NetBackend::Resolver { pipe, .. } => pipe.as_raw_fd(),
+        };
+        Ok((fd, typelisp_rt::sched::PollerRef(&crate::os::POLLER)))
+    }
+}
+
+/// The socket builtins' view of the stream table: the operations on the
+/// sockets in it.
+pub struct Sockets<'a>(pub &'a mut StreamTable);
+
+/// A fresh stream for a connected socket, before anything has crossed it.
+fn tcp_entry(sock: Sock, tls: Option<TlsConn>) -> StreamObj {
+    let backend = NetBackend::Tcp { sock, tls, rbuf: VecDeque::new(), wbuf: VecDeque::new(), failed: None };
+    StreamObj::ext(Box::new(backend), true, true, None)
+}
+
+/// A stream for a socket that is neither read nor written as a stream.
+fn other_entry(backend: NetBackend) -> StreamObj {
+    StreamObj::ext(Box::new(backend), false, false, None)
+}
+
+impl Sockets<'_> {
     /// The socket behind `h`, or the same errors `readable`/`writable` give
     /// for a closed or wrong handle.
     fn tcp(&mut self, h: Handle, who: &str) -> StreamResult<TcpParts<'_>> {
-        let s = self.get(h)?;
-        match &mut s.backend {
-            Backend::Tcp { sock, tls, rbuf, wbuf, failed } => Ok(TcpParts {
-                sock,
-                tls,
-                rbuf,
-                wbuf,
-                failed,
-                pushback: &mut s.pushback,
-                last_written: &mut s.last_written,
-            }),
-            Backend::Closed => Err(format!("{}: the stream is closed", who)),
+        let s = self.0.get(h)?;
+        if s.is_closed() {
+            return Err(format!("{}: the stream is closed", who));
+        }
+        match s.ext_parts::<NetBackend>() {
+            Some(ExtParts { backend: NetBackend::Tcp { sock, tls, rbuf, wbuf, failed }, pushback, last_written }) => {
+                Ok(TcpParts { sock, tls, rbuf, wbuf, failed, pushback, last_written })
+            }
             _ => Err(format!("{}: not a TCP stream", who)),
         }
     }
 
+    /// The socket backend under `h`, or `None` when it is closed or not a
+    /// socket.
+    fn net(&mut self, h: Handle) -> StreamResult<Option<&mut NetBackend>> {
+        let s = self.0.get(h)?;
+        if s.is_closed() {
+            return Ok(None);
+        }
+        Ok(s.ext_parts::<NetBackend>().map(|p| p.backend))
+    }
+
+    /// Whether `h` is a closed stream: what tells "closed" from "not a
+    /// socket" in the refusals below.
+    fn closed(&mut self, h: Handle) -> StreamResult<bool> {
+        Ok(self.0.get(h)?.is_closed())
+    }
+
     fn listener(&mut self, h: Handle, who: &str) -> StreamResult<(&mut Listen, &Option<TlsServer>)> {
-        match &mut self.get(h)?.backend {
-            Backend::Listener { listen, tls } => Ok((listen, tls)),
-            Backend::Closed => Err(format!("{}: the listener is closed", who)),
+        if self.closed(h)? {
+            return Err(format!("{}: the listener is closed", who));
+        }
+        match self.net(h)? {
+            Some(NetBackend::Listener { listen, tls }) => Ok((listen, tls)),
             _ => Err(format!("{}: not a TCP listener", who)),
         }
     }
@@ -125,7 +432,7 @@ impl StreamTable {
     pub fn net_connect_begin(&mut self, addr: &str) -> StreamResult<Handle> {
         let addr: SocketAddr = addr.parse().map_err(|_| format!("tcp-connect: {} is not an ip:port address", addr))?;
         let sock = crate::os::tcp_connect_begin(addr).map_err(|e| format!("tcp-connect: {}: {}", addr, e))?;
-        Ok(self.insert(StreamObj::new(tcp_entry(Sock::Tcp(sock), None), true, true)))
+        Ok(self.0.insert(tcp_entry(Sock::Tcp(sock), None)))
     }
 
     /// Connects to the Unix-domain socket at `path`. Complete on return:
@@ -138,7 +445,7 @@ impl StreamTable {
     pub fn net_unix_connect(&mut self, path: &str) -> StreamResult<Handle> {
         let sock = std::os::unix::net::UnixStream::connect(path).map_err(|e| format!("unix-connect: {}: {}", path, e))?;
         sock.set_nonblocking(true).map_err(|e| format!("unix-connect: {}", e))?;
-        Ok(self.insert(StreamObj::new(tcp_entry(Sock::Unix(sock), None), true, true)))
+        Ok(self.0.insert(tcp_entry(Sock::Unix(sock), None)))
     }
 
     /// A listening Unix-domain socket at `path`. The file must not exist:
@@ -150,7 +457,7 @@ impl StreamTable {
         l.set_nonblocking(true).map_err(|e| format!("unix-listen: {}", e))?;
         let path = std::path::PathBuf::from(path);
         let listen = Listen::Unix { listener: l, path };
-        Ok(self.insert(StreamObj::new(Backend::Listener { listen, tls: None }, false, false)))
+        Ok(self.0.insert(other_entry(NetBackend::Listener { listen, tls: None })))
     }
 
     /// Starts resolving `host:port` on a helper thread and returns a handle
@@ -196,7 +503,7 @@ impl StreamTable {
                 let _ = writer.write_all(&[1]);
             })
             .map_err(|e| format!("resolve: cannot start a resolver thread: {}", e))?;
-        Ok(self.insert(StreamObj::new(Backend::Resolver { pipe: reader, answer }, false, false)))
+        Ok(self.0.insert(other_entry(NetBackend::Resolver { pipe: reader, answer })))
     }
 
     /// The resolver's answer — **every** address the name has, each as
@@ -208,19 +515,20 @@ impl StreamTable {
     /// Closes the handle once there is an answer — a resolution is used
     /// exactly once.
     pub fn net_resolve_finish(&mut self, h: Handle) -> StreamResult<Option<Vec<String>>> {
-        let s = self.get(h)?;
-        let taken = match &s.backend {
-            Backend::Resolver { answer, .. } => match answer.lock() {
+        if self.closed(h)? {
+            return Err("resolve: the handle is closed".to_string());
+        }
+        let taken = match self.net(h)? {
+            Some(NetBackend::Resolver { answer, .. }) => match answer.lock() {
                 Ok(mut a) => a.take(),
                 Err(_) => return Err("resolve: the resolver thread panicked".to_string()),
             },
-            Backend::Closed => return Err("resolve: the handle is closed".to_string()),
             _ => return Err("resolve: not a resolver handle".to_string()),
         };
         match taken {
             None => Ok(None),
             Some(result) => {
-                s.backend = Backend::Closed;
+                self.0.get(h)?.set_closed();
                 result.map(|all| Some(all.iter().map(|a| a.to_string()).collect()))
             }
         }
@@ -284,14 +592,14 @@ impl StreamTable {
         rustls::server::ParsedCertificate::try_from(end_entity)
             .and_then(|cert| rustls::client::verify_server_name(&cert, &server_name))
             .map_err(|e| format!("tls-add-certificate: {} is not for {}: {}", cert_file, name, e))?;
-        server.add_certificate(dns.as_ref().to_ascii_lowercase(), ck).map_err(|e| format!("tls-add-certificate: {}", e))
+        server.state().add_certificate(dns.as_ref().to_ascii_lowercase(), ck).map_err(|e| format!("tls-add-certificate: {}", e))
     }
 
     fn listen_with(&mut self, host: &str, port: i64, tls: Option<TlsServer>, who: &str) -> StreamResult<Handle> {
         let port = u16::try_from(port).map_err(|_| format!("{}: {} is not a port number (0..65535)", who, port))?;
         let l = TcpListener::bind((host, port)).map_err(|e| format!("{}: {}:{}: {}", who, host, port, e))?;
         l.set_nonblocking(true).map_err(|e| format!("{}: {}", who, e))?;
-        Ok(self.insert(StreamObj::new(Backend::Listener { listen: Listen::Tcp(l), tls }, false, false)))
+        Ok(self.0.insert(other_entry(NetBackend::Listener { listen: Listen::Tcp(l), tls })))
     }
 
     /// The next connection waiting on listener `h`, or `None` if nobody is
@@ -314,12 +622,12 @@ impl StreamTable {
         sock.set_nonblocking(true).map_err(|e| format!("accept: {}", e))?;
         let conn = match tls {
             None => None,
-            Some(TlsServer { config, .. }) => {
-                let server = rustls::ServerConnection::new(Arc::clone(config)).map_err(|e| format!("accept: tls: {}", e))?;
-                Some(Box::new(rustls::Connection::Server(server)))
+            Some(server) => {
+                let server = rustls::ServerConnection::new(Arc::clone(&server.state().config)).map_err(|e| format!("accept: tls: {}", e))?;
+                Some(TlsConn::new(rustls::Connection::Server(server)))
             }
         };
-        Ok(Some(self.insert(StreamObj::new(tcp_entry(sock, conn), true, true))))
+        Ok(Some(self.0.insert(tcp_entry(sock, conn))))
     }
 
     /// Receives what the OS has into the read buffer: `Some(n)` bytes were
@@ -343,6 +651,7 @@ impl StreamTable {
                 Err(e) => Ok(Some(peer_failed(failed, format!("read: {}", e)))),
             };
         };
+        let conn = conn.get();
         // TLS: anything the connection wants to send first (a handshake
         // message, an alert) goes out, best effort — a handshake's writes
         // are small and fit the socket buffer, so this does not wait for
@@ -403,7 +712,7 @@ impl StreamTable {
         let Some(conn) = tls else {
             return Err("tls-connect: not a TLS connection".to_string());
         };
-        tls_handshake_step(conn, sock).map_err(|e| format!("tls-connect: {}", e))
+        tls_handshake_step(conn.get(), sock).map_err(|e| format!("tls-connect: {}", e))
     }
 
     /// Puts a TLS client connection on a connected socket, for `server_name`
@@ -438,7 +747,7 @@ impl StreamTable {
         let name = rustls::pki_types::ServerName::try_from(server_name.to_string())
             .map_err(|_| format!("tls-connect: {} is not a valid server name", server_name))?;
         let conn = rustls::ClientConnection::new(config, name).map_err(|e| format!("tls-connect: {}", e))?;
-        *tls = Some(Box::new(rustls::Connection::Client(conn)));
+        *tls = Some(TlsConn::new(rustls::Connection::Client(conn)));
         Ok(())
     }
 
@@ -453,7 +762,7 @@ impl StreamTable {
         let Some(conn) = tls else {
             return Ok(None);
         };
-        match conn.peer_certificates().and_then(|chain| chain.first()) {
+        match conn.get().peer_certificates().and_then(|chain| chain.first()) {
             None => Ok(None),
             Some(cert) => crate::x509::subject(cert.as_ref()).map(Some).map_err(|e| format!("peer-subject: {}", e)),
         }
@@ -466,7 +775,7 @@ impl StreamTable {
     /// the client sent no name (it connected by address).
     pub fn net_server_name(&mut self, h: Handle) -> StreamResult<Option<String>> {
         let TcpParts { tls, .. } = self.tcp(h, "requested-server-name")?;
-        Ok(match tls.as_deref() {
+        Ok(match tls.as_ref().map(TlsConn::peek) {
             Some(rustls::Connection::Server(server)) => server.server_name().map(str::to_string),
             _ => None,
         })
@@ -553,7 +862,7 @@ impl StreamTable {
             return Ok(None);
         }
         let bytes: Vec<u8> = rbuf.iter().take(need).copied().collect();
-        let c = std::str::from_utf8(&bytes)
+        let c = core::str::from_utf8(&bytes)
             .map_err(|_| "invalid UTF-8 in input".to_string())?
             .chars()
             .next()
@@ -600,6 +909,7 @@ impl StreamTable {
             return Ok(None);
         }
         if let Some(conn) = tls {
+            let conn = conn.get();
             if conn.is_handshaking() {
                 match tls_handshake_step(conn, sock) {
                     Ok(None) => {}
@@ -660,6 +970,7 @@ impl StreamTable {
             return Ok(());
         }
         if let Some(conn) = tls {
+            let conn = conn.get();
             // TLS has its own end-of-stream message, and the peer needs it to
             // tell a finished request from a truncated one.
             conn.send_close_notify();
@@ -681,13 +992,15 @@ impl StreamTable {
         let port = u16::try_from(port).map_err(|_| format!("udp-bind: {} is not a port number (0..65535)", port))?;
         let sock = UdpSocket::bind((host, port)).map_err(|e| format!("udp-bind: {}:{}: {}", host, port, e))?;
         sock.set_nonblocking(true).map_err(|e| format!("udp-bind: {}", e))?;
-        Ok(self.insert(StreamObj::new(Backend::Udp { sock, last_from: None }, false, false)))
+        Ok(self.0.insert(other_entry(NetBackend::Udp { sock, last_from: None })))
     }
 
     fn udp(&mut self, h: Handle, who: &str) -> StreamResult<(&mut UdpSocket, &mut Option<SocketAddr>)> {
-        match &mut self.get(h)?.backend {
-            Backend::Udp { sock, last_from } => Ok((sock, last_from)),
-            Backend::Closed => Err(format!("{}: the socket is closed", who)),
+        if self.closed(h)? {
+            return Err(format!("{}: the socket is closed", who));
+        }
+        match self.net(h)? {
+            Some(NetBackend::Udp { sock, last_from }) => Ok((sock, last_from)),
             _ => Err(format!("{}: not a UDP socket", who)),
         }
     }
@@ -735,12 +1048,14 @@ impl StreamTable {
     /// This side's address as `host:port` — a socket's or a listener's. For
     /// a listener bound to port 0 this is how the chosen port is learned.
     pub fn net_local_address(&mut self, h: Handle) -> StreamResult<String> {
-        let addr = match &self.get(h)?.backend {
-            Backend::Tcp { sock, .. } => sock.local_address(),
-            Backend::Listener { listen, .. } => listen.local_address(),
-            Backend::Udp { sock, .. } => sock.local_addr().map(|a| a.to_string()),
-            Backend::Closed => return Err("local-address: the stream is closed".to_string()),
-            _ => return Err("local-address: not a socket".to_string()),
+        if self.closed(h)? {
+            return Err("local-address: the stream is closed".to_string());
+        }
+        let addr = match self.net(h)? {
+            Some(NetBackend::Tcp { sock, .. }) => sock.local_address(),
+            Some(NetBackend::Listener { listen, .. }) => listen.local_address(),
+            Some(NetBackend::Udp { sock, .. }) => sock.local_addr().map(|a| a.to_string()),
+            Some(NetBackend::Resolver { .. }) | None => return Err("local-address: not a socket".to_string()),
         };
         addr.map_err(|e| format!("local-address: {}", e))
     }
@@ -786,28 +1101,33 @@ fn utf8_width(first: u8) -> Option<usize> {
 mod tests {
     use super::*;
 
+    /// The socket operations on `t`.
+    fn sk(t: &mut StreamTable) -> Sockets<'_> {
+        Sockets(t)
+    }
+
     /// A loopback pair, connected. The connect is driven to completion here
-    /// the way the prelude does it: wait for writable, then ask.
+    /// The way the prelude does it: wait for writable, then ask.
     fn connected_pair(t: &mut StreamTable) -> (Handle, Handle) {
-        let l = t.net_listen("127.0.0.1", 0).unwrap();
-        let addr = t.net_local_address(l).unwrap();
-        let c = t.net_connect_begin(&addr).unwrap();
-        let cfd = t.raw_fd(c).unwrap();
-        crate::os::poll_ready(&[(cfd, crate::os::Interest::Writable)], Some(std::time::Duration::from_secs(5))).unwrap();
-        t.net_connect_finish(c).unwrap();
-        let lfd = t.raw_fd(l).unwrap();
-        crate::os::poll_ready(&[(lfd, crate::os::Interest::Readable)], Some(std::time::Duration::from_secs(5))).unwrap();
-        let s = t.net_accept(l).unwrap().expect("a connection was waiting");
+        let l = sk(t).net_listen("127.0.0.1", 0).unwrap();
+        let addr = sk(t).net_local_address(l).unwrap();
+        let c = sk(t).net_connect_begin(&addr).unwrap();
+        let cfd = t.raw_fd(c).unwrap().0;
+        crate::os::poll_ready(&[(cfd, typelisp_rt::sched::Interest::Writable)], Some(core::time::Duration::from_secs(5))).unwrap();
+        sk(t).net_connect_finish(c).unwrap();
+        let lfd = t.raw_fd(l).unwrap().0;
+        crate::os::poll_ready(&[(lfd, typelisp_rt::sched::Interest::Readable)], Some(core::time::Duration::from_secs(5))).unwrap();
+        let s = sk(t).net_accept(l).unwrap().expect("a connection was waiting");
         (c, s)
     }
 
     fn fill_until_some(t: &mut StreamTable, h: Handle) -> usize {
-        let fd = t.raw_fd(h).unwrap();
+        let fd = t.raw_fd(h).unwrap().0;
         loop {
-            if let Some(n) = t.net_fill(h).unwrap() {
+            if let Some(n) = sk(t).net_fill(h).unwrap() {
                 return n;
             }
-            crate::os::poll_ready(&[(fd, crate::os::Interest::Readable)], Some(std::time::Duration::from_secs(5))).unwrap();
+            crate::os::poll_ready(&[(fd, typelisp_rt::sched::Interest::Readable)], Some(core::time::Duration::from_secs(5))).unwrap();
         }
     }
 
@@ -815,11 +1135,11 @@ mod tests {
     fn a_line_crosses_the_loopback() {
         let mut t = StreamTable::default();
         let (c, s) = connected_pair(&mut t);
-        t.net_push_string(c, "héllo\n").unwrap();
-        assert_eq!(t.net_flush(c).unwrap(), None);
+        sk(&mut t).net_push_string(c, "héllo\n").unwrap();
+        assert_eq!(sk(&mut t).net_flush(c).unwrap(), None);
         assert!(fill_until_some(&mut t, s) > 0);
         let mut got = String::new();
-        while let Some(ch) = t.net_pop_char(s).unwrap() {
+        while let Some(ch) = sk(&mut t).net_pop_char(s).unwrap() {
             got.push(ch);
         }
         assert_eq!(got, "héllo\n");
@@ -830,14 +1150,14 @@ mod tests {
         let mut t = StreamTable::default();
         let (c, s) = connected_pair(&mut t);
         // "é" is C3 A9. Send only the first byte.
-        t.net_push_byte(c, 0xC3).unwrap();
-        assert_eq!(t.net_flush(c).unwrap(), None);
+        sk(&mut t).net_push_byte(c, 0xC3).unwrap();
+        assert_eq!(sk(&mut t).net_flush(c).unwrap(), None);
         fill_until_some(&mut t, s);
-        assert_eq!(t.net_pop_char(s).unwrap(), None);
-        t.net_push_byte(c, 0xA9).unwrap();
-        assert_eq!(t.net_flush(c).unwrap(), None);
+        assert_eq!(sk(&mut t).net_pop_char(s).unwrap(), None);
+        sk(&mut t).net_push_byte(c, 0xA9).unwrap();
+        assert_eq!(sk(&mut t).net_flush(c).unwrap(), None);
         fill_until_some(&mut t, s);
-        assert_eq!(t.net_pop_char(s).unwrap(), Some('é'));
+        assert_eq!(sk(&mut t).net_pop_char(s).unwrap(), Some('é'));
     }
 
     #[test]
@@ -853,23 +1173,23 @@ mod tests {
         let mut t = StreamTable::default();
         let (_c, s) = connected_pair(&mut t);
         t.unread_char(s, 'x').unwrap();
-        assert!(t.net_pop_byte(s).unwrap_err().contains("unread character"));
-        assert_eq!(t.net_pop_char(s).unwrap(), Some('x'));
+        assert!(sk(&mut t).net_pop_byte(s).unwrap_err().contains("unread character"));
+        assert_eq!(sk(&mut t).net_pop_char(s).unwrap(), Some('x'));
     }
 
     #[test]
     fn a_refused_connect_reports_it_after_the_wait() {
         let mut t = StreamTable::default();
         // A port nobody listens on: bind one, learn it, close it.
-        let l = t.net_listen("127.0.0.1", 0).unwrap();
-        let addr = t.net_local_address(l).unwrap();
+        let l = sk(&mut t).net_listen("127.0.0.1", 0).unwrap();
+        let addr = sk(&mut t).net_local_address(l).unwrap();
         t.close(l).unwrap();
-        let outcome = match t.net_connect_begin(&addr) {
+        let outcome = match sk(&mut t).net_connect_begin(&addr) {
             Err(e) => Err(e),
             Ok(c) => {
-                let fd = t.raw_fd(c).unwrap();
-                crate::os::poll_ready(&[(fd, crate::os::Interest::Writable)], Some(std::time::Duration::from_secs(5))).unwrap();
-                t.net_connect_finish(c)
+                let fd = t.raw_fd(c).unwrap().0;
+                crate::os::poll_ready(&[(fd, typelisp_rt::sched::Interest::Writable)], Some(core::time::Duration::from_secs(5))).unwrap();
+                sk(&mut t).net_connect_finish(c)
             }
         };
         assert!(outcome.is_err(), "connecting to a closed port succeeded");
@@ -878,17 +1198,17 @@ mod tests {
     #[test]
     fn a_bad_port_is_an_error_not_a_panic() {
         let mut t = StreamTable::default();
-        assert!(t.net_listen("127.0.0.1", 70000).is_err());
-        assert!(t.net_resolve_begin("127.0.0.1", -1).is_err());
-        assert!(t.net_connect_begin("not an address").is_err());
+        assert!(sk(&mut t).net_listen("127.0.0.1", 70000).is_err());
+        assert!(sk(&mut t).net_resolve_begin("127.0.0.1", -1).is_err());
+        assert!(sk(&mut t).net_connect_begin("not an address").is_err());
     }
 
     fn resolve(t: &mut StreamTable, host: &str, port: i64) -> Result<Vec<String>, String> {
-        let r = t.net_resolve_begin(host, port)?;
-        let fd = t.raw_fd(r).unwrap();
+        let r = sk(t).net_resolve_begin(host, port)?;
+        let fd = t.raw_fd(r).unwrap().0;
         loop {
-            crate::os::poll_ready(&[(fd, crate::os::Interest::Readable)], Some(std::time::Duration::from_secs(10))).unwrap();
-            if let Some(a) = t.net_resolve_finish(r)? {
+            crate::os::poll_ready(&[(fd, typelisp_rt::sched::Interest::Readable)], Some(core::time::Duration::from_secs(10))).unwrap();
+            if let Some(a) = sk(t).net_resolve_finish(r)? {
                 return Ok(a);
             }
         }
@@ -907,15 +1227,15 @@ mod tests {
     #[test]
     fn a_datagram_crosses_the_loopback() {
         let mut t = StreamTable::default();
-        let a = t.net_udp_bind("127.0.0.1", 0).unwrap();
-        let b = t.net_udp_bind("127.0.0.1", 0).unwrap();
-        let to = t.net_local_address(b).unwrap();
-        assert!(t.net_udp_send_to(a, &to, b"ping").unwrap());
-        let fd = t.raw_fd(b).unwrap();
-        crate::os::poll_ready(&[(fd, crate::os::Interest::Readable)], Some(std::time::Duration::from_secs(5))).unwrap();
-        assert_eq!(t.net_udp_recv(b).unwrap(), Some(b"ping".to_vec()));
-        assert_eq!(t.net_udp_last_sender(b).unwrap(), t.net_local_address(a).unwrap());
-        assert_eq!(t.net_udp_recv(b).unwrap(), None);
+        let a = sk(&mut t).net_udp_bind("127.0.0.1", 0).unwrap();
+        let b = sk(&mut t).net_udp_bind("127.0.0.1", 0).unwrap();
+        let to = sk(&mut t).net_local_address(b).unwrap();
+        assert!(sk(&mut t).net_udp_send_to(a, &to, b"ping").unwrap());
+        let fd = t.raw_fd(b).unwrap().0;
+        crate::os::poll_ready(&[(fd, typelisp_rt::sched::Interest::Readable)], Some(core::time::Duration::from_secs(5))).unwrap();
+        assert_eq!(sk(&mut t).net_udp_recv(b).unwrap(), Some(b"ping".to_vec()));
+        assert_eq!(sk(&mut t).net_udp_last_sender(b).unwrap(), sk(&mut t).net_local_address(a).unwrap());
+        assert_eq!(sk(&mut t).net_udp_recv(b).unwrap(), None);
     }
 
     #[test]
@@ -924,25 +1244,25 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("typelisp-unix-{}", std::process::id()));
         let _ = std::fs::remove_file(&dir);
         let path = dir.to_string_lossy().into_owned();
-        let l = t.net_unix_listen(&path).unwrap();
-        assert_eq!(t.net_local_address(l).unwrap(), path);
-        assert!(t.net_unix_listen(&path).is_err(), "a second bind on a live socket file succeeded");
-        let c = t.net_unix_connect(&path).unwrap();
-        let lfd = t.raw_fd(l).unwrap();
-        crate::os::poll_ready(&[(lfd, crate::os::Interest::Readable)], Some(std::time::Duration::from_secs(5))).unwrap();
-        let s = t.net_accept(l).unwrap().expect("a connection was waiting");
-        assert_eq!(t.net_peer_address(s).unwrap(), "(unnamed)");
-        t.net_push_string(c, "over unix\n").unwrap();
-        assert_eq!(t.net_flush(c).unwrap(), None);
+        let l = sk(&mut t).net_unix_listen(&path).unwrap();
+        assert_eq!(sk(&mut t).net_local_address(l).unwrap(), path);
+        assert!(sk(&mut t).net_unix_listen(&path).is_err(), "a second bind on a live socket file succeeded");
+        let c = sk(&mut t).net_unix_connect(&path).unwrap();
+        let lfd = t.raw_fd(l).unwrap().0;
+        crate::os::poll_ready(&[(lfd, typelisp_rt::sched::Interest::Readable)], Some(core::time::Duration::from_secs(5))).unwrap();
+        let s = sk(&mut t).net_accept(l).unwrap().expect("a connection was waiting");
+        assert_eq!(sk(&mut t).net_peer_address(s).unwrap(), "(unnamed)");
+        sk(&mut t).net_push_string(c, "over unix\n").unwrap();
+        assert_eq!(sk(&mut t).net_flush(c).unwrap(), None);
         assert!(fill_until_some(&mut t, s) > 0);
         let mut got = String::new();
-        while let Some(ch) = t.net_pop_char(s).unwrap() {
+        while let Some(ch) = sk(&mut t).net_pop_char(s).unwrap() {
             got.push(ch);
         }
         assert_eq!(got, "over unix\n");
         t.close(l).unwrap();
         assert!(!dir.exists(), "closing the listener left the socket file behind");
-        assert!(t.net_unix_connect(&path).is_err());
+        assert!(sk(&mut t).net_unix_connect(&path).is_err());
     }
 
     /// A small PKI in PEM files: a CA, a server certificate for `localhost`
@@ -1015,7 +1335,7 @@ mod tests {
         identity: Option<(&str, &str)>,
         client_ca: Option<&str>,
     ) -> (Result<Handle, String>, Handle) {
-        let l = t.net_tls_listen("127.0.0.1", 0, &pki.cert, &pki.key, client_ca).unwrap();
+        let l = sk(t).net_tls_listen("127.0.0.1", 0, &pki.cert, &pki.key, client_ca).unwrap();
         tls_pair_on(t, l, pki, "localhost", trust, identity)
     }
 
@@ -1027,29 +1347,29 @@ mod tests {
         trust: Option<&str>,
         identity: Option<(&str, &str)>,
     ) -> (Result<Handle, String>, Handle) {
-        let addr = t.net_local_address(l).unwrap();
-        let c = t.net_connect_begin(&addr).unwrap();
-        let cfd = t.raw_fd(c).unwrap();
-        crate::os::poll_ready(&[(cfd, crate::os::Interest::Writable)], Some(std::time::Duration::from_secs(5))).unwrap();
-        t.net_connect_finish(c).unwrap();
-        t.net_tls_start(c, server_name, trust, identity.map(|i| i.0), identity.map(|i| i.1)).unwrap();
-        let lfd = t.raw_fd(l).unwrap();
-        crate::os::poll_ready(&[(lfd, crate::os::Interest::Readable)], Some(std::time::Duration::from_secs(5))).unwrap();
-        let s = t.net_accept(l).unwrap().expect("a connection was waiting");
-        let sfd = t.raw_fd(s).unwrap();
+        let addr = sk(t).net_local_address(l).unwrap();
+        let c = sk(t).net_connect_begin(&addr).unwrap();
+        let cfd = t.raw_fd(c).unwrap().0;
+        crate::os::poll_ready(&[(cfd, typelisp_rt::sched::Interest::Writable)], Some(core::time::Duration::from_secs(5))).unwrap();
+        sk(t).net_connect_finish(c).unwrap();
+        sk(t).net_tls_start(c, server_name, trust, identity.map(|i| i.0), identity.map(|i| i.1)).unwrap();
+        let lfd = t.raw_fd(l).unwrap().0;
+        crate::os::poll_ready(&[(lfd, typelisp_rt::sched::Interest::Readable)], Some(core::time::Duration::from_secs(5))).unwrap();
+        let s = sk(t).net_accept(l).unwrap().expect("a connection was waiting");
+        let sfd = t.raw_fd(s).unwrap().0;
         let client = loop {
-            match t.net_tls_handshake(c) {
+            match sk(t).net_tls_handshake(c) {
                 Ok(None) => break Ok(c),
                 Err(e) => break Err(e),
                 Ok(Some(i)) => {
-                    let interest = if i == 1 { crate::os::Interest::Writable } else { crate::os::Interest::Readable };
-                    crate::os::poll_ready(&[(cfd, interest)], Some(std::time::Duration::from_millis(200))).unwrap();
+                    let interest = if i == 1 { typelisp_rt::sched::Interest::Writable } else { typelisp_rt::sched::Interest::Readable };
+                    crate::os::poll_ready(&[(cfd, interest)], Some(core::time::Duration::from_millis(200))).unwrap();
                 }
             }
             // The server's turn, the way its task would take it: a read
             // that finds a handshake record answers "again", not data.
-            crate::os::poll_ready(&[(sfd, crate::os::Interest::Readable)], Some(std::time::Duration::from_millis(200))).unwrap();
-            let _ = t.net_fill(s).unwrap();
+            crate::os::poll_ready(&[(sfd, typelisp_rt::sched::Interest::Readable)], Some(core::time::Duration::from_millis(200))).unwrap();
+            let _ = sk(t).net_fill(s).unwrap();
         };
         (client, s)
     }
@@ -1060,26 +1380,26 @@ mod tests {
         let pki = test_pki();
         let (c, s) = tls_pair(&mut t, &pki, Some(&pki.ca), None, None);
         let c = c.expect("the client trusts the CA it was given");
-        t.net_push_string(c, "over tls\n").unwrap();
-        assert_eq!(t.net_flush(c).unwrap(), None);
+        sk(&mut t).net_push_string(c, "over tls\n").unwrap();
+        assert_eq!(sk(&mut t).net_flush(c).unwrap(), None);
         assert!(fill_until_some(&mut t, s) > 0);
         let mut got = String::new();
-        while let Some(ch) = t.net_pop_char(s).unwrap() {
+        while let Some(ch) = sk(&mut t).net_pop_char(s).unwrap() {
             got.push(ch);
         }
         assert_eq!(got, "over tls\n");
         // And back: the server writes after its handshake completed in
         // the reads above.
-        t.net_push_string(s, "and back\n").unwrap();
-        assert_eq!(t.net_flush(s).unwrap(), None);
+        sk(&mut t).net_push_string(s, "and back\n").unwrap();
+        assert_eq!(sk(&mut t).net_flush(s).unwrap(), None);
         assert!(fill_until_some(&mut t, c) > 0);
         let mut got = String::new();
-        while let Some(ch) = t.net_pop_char(c).unwrap() {
+        while let Some(ch) = sk(&mut t).net_pop_char(c).unwrap() {
             got.push(ch);
         }
         assert_eq!(got, "and back\n");
-        assert_eq!(t.net_socket_error(s).unwrap(), None);
-        assert_eq!(t.net_socket_error(c).unwrap(), None);
+        assert_eq!(sk(&mut t).net_socket_error(s).unwrap(), None);
+        assert_eq!(sk(&mut t).net_socket_error(c).unwrap(), None);
     }
 
     #[test]
@@ -1089,46 +1409,46 @@ mod tests {
         // the client, and send the greeting once it is done.
         let mut t = StreamTable::default();
         let pki = test_pki();
-        let l = t.net_tls_listen("127.0.0.1", 0, &pki.cert, &pki.key, None).unwrap();
-        let addr = t.net_local_address(l).unwrap();
-        let c = t.net_connect_begin(&addr).unwrap();
-        let cfd = t.raw_fd(c).unwrap();
-        crate::os::poll_ready(&[(cfd, crate::os::Interest::Writable)], Some(std::time::Duration::from_secs(5))).unwrap();
-        t.net_connect_finish(c).unwrap();
-        t.net_tls_start(c, "localhost", Some(&pki.ca), None, None).unwrap();
-        let lfd = t.raw_fd(l).unwrap();
-        crate::os::poll_ready(&[(lfd, crate::os::Interest::Readable)], Some(std::time::Duration::from_secs(5))).unwrap();
-        let s = t.net_accept(l).unwrap().unwrap();
-        let sfd = t.raw_fd(s).unwrap();
-        t.net_push_string(s, "220 hello\n").unwrap();
+        let l = sk(&mut t).net_tls_listen("127.0.0.1", 0, &pki.cert, &pki.key, None).unwrap();
+        let addr = sk(&mut t).net_local_address(l).unwrap();
+        let c = sk(&mut t).net_connect_begin(&addr).unwrap();
+        let cfd = t.raw_fd(c).unwrap().0;
+        crate::os::poll_ready(&[(cfd, typelisp_rt::sched::Interest::Writable)], Some(core::time::Duration::from_secs(5))).unwrap();
+        sk(&mut t).net_connect_finish(c).unwrap();
+        sk(&mut t).net_tls_start(c, "localhost", Some(&pki.ca), None, None).unwrap();
+        let lfd = t.raw_fd(l).unwrap().0;
+        crate::os::poll_ready(&[(lfd, typelisp_rt::sched::Interest::Readable)], Some(core::time::Duration::from_secs(5))).unwrap();
+        let s = sk(&mut t).net_accept(l).unwrap().unwrap();
+        let sfd = t.raw_fd(s).unwrap().0;
+        sk(&mut t).net_push_string(s, "220 hello\n").unwrap();
         let mut asked_readable = false;
         let mut client_done = false;
         for _ in 0..50 {
-            match t.net_flush(s).unwrap() {
+            match sk(&mut t).net_flush(s).unwrap() {
                 None => break,
                 Some(0) => {
                     asked_readable = true;
-                    crate::os::poll_ready(&[(sfd, crate::os::Interest::Readable)], Some(std::time::Duration::from_millis(200))).unwrap();
+                    crate::os::poll_ready(&[(sfd, typelisp_rt::sched::Interest::Readable)], Some(core::time::Duration::from_millis(200))).unwrap();
                 }
                 Some(_) => {
-                    crate::os::poll_ready(&[(sfd, crate::os::Interest::Writable)], Some(std::time::Duration::from_millis(200))).unwrap();
+                    crate::os::poll_ready(&[(sfd, typelisp_rt::sched::Interest::Writable)], Some(core::time::Duration::from_millis(200))).unwrap();
                 }
             }
             if !client_done {
-                match t.net_tls_handshake(c).unwrap() {
+                match sk(&mut t).net_tls_handshake(c).unwrap() {
                     None => client_done = true,
                     Some(i) => {
-                        let interest = if i == 1 { crate::os::Interest::Writable } else { crate::os::Interest::Readable };
-                        crate::os::poll_ready(&[(cfd, interest)], Some(std::time::Duration::from_millis(200))).unwrap();
+                        let interest = if i == 1 { typelisp_rt::sched::Interest::Writable } else { typelisp_rt::sched::Interest::Readable };
+                        crate::os::poll_ready(&[(cfd, interest)], Some(core::time::Duration::from_millis(200))).unwrap();
                     }
                 }
             }
         }
         assert!(asked_readable, "the flush never had to wait for the client's handshake message");
-        assert_eq!(t.net_flush(s).unwrap(), None);
+        assert_eq!(sk(&mut t).net_flush(s).unwrap(), None);
         assert!(fill_until_some(&mut t, c) > 0);
         let mut got = String::new();
-        while let Some(ch) = t.net_pop_char(c).unwrap() {
+        while let Some(ch) = sk(&mut t).net_pop_char(c).unwrap() {
             got.push(ch);
         }
         assert_eq!(got, "220 hello\n");
@@ -1146,9 +1466,9 @@ mod tests {
         // nowhere, and neither is an error — a task serving this connection
         // ends normally, and `socket-error` says why.
         assert_eq!(fill_until_some(&mut t, s), 0);
-        t.net_push_string(s, "unheard\n").unwrap();
-        assert_eq!(t.net_flush(s).unwrap(), None);
-        let why = t.net_socket_error(s).unwrap().expect("the server did not record the client's alert");
+        sk(&mut t).net_push_string(s, "unheard\n").unwrap();
+        assert_eq!(sk(&mut t).net_flush(s).unwrap(), None);
+        let why = sk(&mut t).net_socket_error(s).unwrap().expect("the server did not record the client's alert");
         assert!(why.contains("tls") || why.contains("read"), "{}", why);
     }
 
@@ -1166,21 +1486,21 @@ mod tests {
         // until a deadline rather than a fixed number of times — and sleeps
         // between writes: waiting for the socket to be writable does not
         // wait at all, since it is.
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        let deadline = typelisp_mem::host::Instant::now() + core::time::Duration::from_secs(5);
         let mut failed = None;
-        while failed.is_none() && std::time::Instant::now() < deadline {
-            t.net_push_string(s, "into the void\n").unwrap();
-            let _ = t.net_flush(s).unwrap();
-            failed = t.net_socket_error(s).unwrap();
+        while failed.is_none() && typelisp_mem::host::Instant::now() < deadline {
+            sk(&mut t).net_push_string(s, "into the void\n").unwrap();
+            let _ = sk(&mut t).net_flush(s).unwrap();
+            failed = sk(&mut t).net_socket_error(s).unwrap();
             if failed.is_none() {
-                std::thread::sleep(std::time::Duration::from_millis(10));
+                std::thread::sleep(core::time::Duration::from_millis(10));
             }
         }
         let why = failed.expect("writing to a closed peer was never noticed");
         assert!(why.starts_with("write:"), "{}", why);
-        assert_eq!(t.net_flush(s).unwrap(), None);
-        assert_eq!(t.net_fill(s).unwrap(), Some(0));
-        t.net_shutdown_write(s).unwrap();
+        assert_eq!(sk(&mut t).net_flush(s).unwrap(), None);
+        assert_eq!(sk(&mut t).net_fill(s).unwrap(), Some(0));
+        sk(&mut t).net_shutdown_write(s).unwrap();
     }
 
     #[test]
@@ -1190,10 +1510,10 @@ mod tests {
         // With one: the handshake completes and a line crosses.
         let (c, s) = tls_pair(&mut t, &pki, Some(&pki.ca), Some((&pki.client_cert, &pki.client_key)), Some(&pki.ca));
         let c = c.expect("a client certificate the CA issued was refused");
-        t.net_push_string(c, "authenticated\n").unwrap();
-        assert_eq!(t.net_flush(c).unwrap(), None);
+        sk(&mut t).net_push_string(c, "authenticated\n").unwrap();
+        assert_eq!(sk(&mut t).net_flush(c).unwrap(), None);
         assert!(fill_until_some(&mut t, s) > 0);
-        assert_eq!(t.net_socket_error(s).unwrap(), None);
+        assert_eq!(sk(&mut t).net_socket_error(s).unwrap(), None);
         // Without one: the server ends the handshake; the client sees it
         // as an error of `tls-connect`, the server as a marked socket.
         let (c, s) = tls_pair(&mut t, &pki, Some(&pki.ca), None, Some(&pki.ca));
@@ -1202,10 +1522,10 @@ mod tests {
         // not `tls-connect`'s to see: the server's first read is what
         // processes the client's last flight and answers with the alert.
         assert_eq!(fill_until_some(&mut t, s), 0);
-        assert!(t.net_socket_error(s).unwrap().is_some(), "the server accepted a client without a certificate");
+        assert!(sk(&mut t).net_socket_error(s).unwrap().is_some(), "the server accepted a client without a certificate");
         let refused = match c {
             Err(_) => true,
-            Ok(c) => fill_until_some(&mut t, c) == 0 && t.net_socket_error(c).unwrap().is_some(),
+            Ok(c) => fill_until_some(&mut t, c) == 0 && sk(&mut t).net_socket_error(c).unwrap().is_some(),
         };
         assert!(refused, "a client without a certificate got through");
     }
@@ -1218,56 +1538,56 @@ mod tests {
         let c = c.unwrap();
         // The client sees the server's certificate after its handshake; the
         // server sees the client's once its first read has processed it.
-        assert_eq!(t.net_peer_subject(c).unwrap().as_deref(), Some("CN=localhost"));
-        t.net_push_string(c, "hi\n").unwrap();
-        assert_eq!(t.net_flush(c).unwrap(), None);
+        assert_eq!(sk(&mut t).net_peer_subject(c).unwrap().as_deref(), Some("CN=localhost"));
+        sk(&mut t).net_push_string(c, "hi\n").unwrap();
+        assert_eq!(sk(&mut t).net_flush(c).unwrap(), None);
         assert!(fill_until_some(&mut t, s) > 0);
-        assert_eq!(t.net_peer_subject(s).unwrap().as_deref(), Some("CN=client,O=Example"));
-        assert_eq!(t.net_server_name(s).unwrap().as_deref(), Some("localhost"));
-        assert_eq!(t.net_server_name(c).unwrap(), None);
+        assert_eq!(sk(&mut t).net_peer_subject(s).unwrap().as_deref(), Some("CN=client,O=Example"));
+        assert_eq!(sk(&mut t).net_server_name(s).unwrap().as_deref(), Some("localhost"));
+        assert_eq!(sk(&mut t).net_server_name(c).unwrap(), None);
         // A plain connection has neither.
         let (p, _) = connected_pair(&mut t);
-        assert_eq!(t.net_peer_subject(p).unwrap(), None);
-        assert_eq!(t.net_server_name(p).unwrap(), None);
+        assert_eq!(sk(&mut t).net_peer_subject(p).unwrap(), None);
+        assert_eq!(sk(&mut t).net_server_name(p).unwrap(), None);
     }
 
     #[test]
     fn a_listener_serves_a_second_name_with_its_own_certificate() {
         let mut t = StreamTable::default();
         let pki = test_pki();
-        let l = t.net_tls_listen("127.0.0.1", 0, &pki.cert, &pki.key, None).unwrap();
+        let l = sk(&mut t).net_tls_listen("127.0.0.1", 0, &pki.cert, &pki.key, None).unwrap();
         // The wrong file for the name is refused up front.
-        let err = t.net_tls_add_certificate(l, "alt.test", &pki.cert, &pki.key).unwrap_err();
+        let err = sk(&mut t).net_tls_add_certificate(l, "alt.test", &pki.cert, &pki.key).unwrap_err();
         assert!(err.contains("not for alt.test"), "{}", err);
-        t.net_tls_add_certificate(l, "alt.test", &pki.alt_cert, &pki.alt_key).unwrap();
+        sk(&mut t).net_tls_add_certificate(l, "alt.test", &pki.alt_cert, &pki.alt_key).unwrap();
         // Asking for alt.test gets alt's certificate...
         let (c, s) = tls_pair_on(&mut t, l, &pki, "alt.test", Some(&pki.ca), None);
         let c = c.expect("the certificate added for alt.test was not presented");
-        assert_eq!(t.net_peer_subject(c).unwrap().as_deref(), Some("CN=alt.test"));
+        assert_eq!(sk(&mut t).net_peer_subject(c).unwrap().as_deref(), Some("CN=alt.test"));
         let _ = s;
         // ...and localhost still gets the listener's own.
         let (c, _) = tls_pair_on(&mut t, l, &pki, "localhost", Some(&pki.ca), None);
-        assert_eq!(t.net_peer_subject(c.unwrap()).unwrap().as_deref(), Some("CN=localhost"));
+        assert_eq!(sk(&mut t).net_peer_subject(c.unwrap()).unwrap().as_deref(), Some("CN=localhost"));
         // A plain listener has nothing to add to.
-        let plain = t.net_listen("127.0.0.1", 0).unwrap();
-        assert!(t.net_tls_add_certificate(plain, "alt.test", &pki.alt_cert, &pki.alt_key).is_err());
+        let plain = sk(&mut t).net_listen("127.0.0.1", 0).unwrap();
+        assert!(sk(&mut t).net_tls_add_certificate(plain, "alt.test", &pki.alt_cert, &pki.alt_key).is_err());
     }
 
     #[test]
     fn socket_options_are_set_on_tcp_and_refused_where_meaningless() {
         let mut t = StreamTable::default();
         let (c, _) = connected_pair(&mut t);
-        t.net_set_nodelay(c, true).unwrap();
-        t.net_set_keepalive(c, true).unwrap();
-        t.net_set_keepalive_period(c, 15).unwrap();
-        assert!(t.net_set_keepalive_period(c, 0).is_err());
+        sk(&mut t).net_set_nodelay(c, true).unwrap();
+        sk(&mut t).net_set_keepalive(c, true).unwrap();
+        sk(&mut t).net_set_keepalive_period(c, 15).unwrap();
+        assert!(sk(&mut t).net_set_keepalive_period(c, 0).is_err());
         let dir = std::env::temp_dir().join(format!("typelisp-unix-opts-{}", std::process::id()));
         let _ = std::fs::remove_file(&dir);
         let path = dir.to_string_lossy().into_owned();
-        let l = t.net_unix_listen(&path).unwrap();
-        let u = t.net_unix_connect(&path).unwrap();
-        t.net_set_nodelay(u, true).unwrap();
-        assert!(t.net_set_keepalive(u, true).is_err());
+        let l = sk(&mut t).net_unix_listen(&path).unwrap();
+        let u = sk(&mut t).net_unix_connect(&path).unwrap();
+        sk(&mut t).net_set_nodelay(u, true).unwrap();
+        assert!(sk(&mut t).net_set_keepalive(u, true).is_err());
         t.close(l).unwrap();
     }
 
@@ -1275,15 +1595,15 @@ mod tests {
     fn tls_listen_checks_its_files_up_front() {
         let mut t = StreamTable::default();
         let pki = test_pki();
-        let err = t.net_tls_listen("127.0.0.1", 0, &pki.key, &pki.cert, None).unwrap_err();
+        let err = sk(&mut t).net_tls_listen("127.0.0.1", 0, &pki.key, &pki.cert, None).unwrap_err();
         assert!(err.starts_with("tls-listen:"), "{}", err);
-        let err = t.net_tls_listen("127.0.0.1", 0, "/no/such/cert.pem", &pki.key, None).unwrap_err();
+        let err = sk(&mut t).net_tls_listen("127.0.0.1", 0, "/no/such/cert.pem", &pki.key, None).unwrap_err();
         assert!(err.contains("/no/such/cert.pem"), "{}", err);
-        let err = t.net_tls_listen("127.0.0.1", 0, &pki.cert, &pki.key, Some("/no/such/ca.pem")).unwrap_err();
+        let err = sk(&mut t).net_tls_listen("127.0.0.1", 0, &pki.cert, &pki.key, Some("/no/such/ca.pem")).unwrap_err();
         assert!(err.contains("/no/such/ca.pem"), "{}", err);
         let (c, s) = connected_pair(&mut t);
         let _ = s;
-        let err = t.net_tls_start(c, "localhost", None, Some(&pki.client_cert), None).unwrap_err();
+        let err = sk(&mut t).net_tls_start(c, "localhost", None, Some(&pki.client_cert), None).unwrap_err();
         assert!(err.contains("both"), "{}", err);
     }
 
@@ -1293,32 +1613,32 @@ mod tests {
         // handshake must fail with an error, not hang or succeed.
         let mut t = StreamTable::default();
         let (c, s) = connected_pair(&mut t);
-        t.net_tls_start(c, "localhost", None, None, None).unwrap();
-        let cfd = t.raw_fd(c).unwrap();
-        let sfd = t.raw_fd(s).unwrap();
+        sk(&mut t).net_tls_start(c, "localhost", None, None, None).unwrap();
+        let cfd = t.raw_fd(c).unwrap().0;
+        let sfd = t.raw_fd(s).unwrap().0;
         let outcome = loop {
-            match t.net_tls_handshake(c) {
+            match sk(&mut t).net_tls_handshake(c) {
                 Ok(None) => break Ok(()),
                 Err(e) => break Err(e),
                 Ok(Some(i)) => {
-                    let interest = if i == 1 { crate::os::Interest::Writable } else { crate::os::Interest::Readable };
-                    crate::os::poll_ready(&[(cfd, interest)], Some(std::time::Duration::from_millis(200))).unwrap();
+                    let interest = if i == 1 { typelisp_rt::sched::Interest::Writable } else { typelisp_rt::sched::Interest::Readable };
+                    crate::os::poll_ready(&[(cfd, interest)], Some(core::time::Duration::from_millis(200))).unwrap();
                 }
             }
             // The peer echoes whatever it got.
-            crate::os::poll_ready(&[(sfd, crate::os::Interest::Readable)], Some(std::time::Duration::from_millis(200))).unwrap();
-            if let Some(n) = t.net_fill(s).unwrap() {
+            crate::os::poll_ready(&[(sfd, typelisp_rt::sched::Interest::Readable)], Some(core::time::Duration::from_millis(200))).unwrap();
+            if let Some(n) = sk(&mut t).net_fill(s).unwrap() {
                 if n == 0 {
                     break Err("peer closed".to_string());
                 }
                 let mut bytes = Vec::new();
-                while let Some(b) = t.net_pop_byte(s).unwrap() {
+                while let Some(b) = sk(&mut t).net_pop_byte(s).unwrap() {
                     bytes.push(b);
                 }
                 for b in bytes {
-                    t.net_push_byte(s, b).unwrap();
+                    sk(&mut t).net_push_byte(s, b).unwrap();
                 }
-                t.net_flush(s).unwrap();
+                sk(&mut t).net_flush(s).unwrap();
             }
         };
         assert!(outcome.is_err(), "a TLS handshake against an echo peer succeeded");

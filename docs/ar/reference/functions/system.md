@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/system.md @ 7622044725db7d28dabb691d82e592367d9284e8 -->
+<!-- translated-from: docs/ja/reference/functions/system.md @ b01477a6134617bbcef066ff2065d17245132754 -->
 # الزمن والبيئة والتنفيذ
 
 دوال الزمن والاستعلام عن بيئة التشغيل وأدوات التنفيذ وتحليل النصوص وتقييمها والسلاسل التوثيقية والماكرو.
@@ -352,3 +352,32 @@ time-zone is supplied, daylight saving time information is ignored*).
 | `with-standard-io-syntax` | `(with-standard-io-syntax body...)` | — | تنفّذ `body` وكل متغير تحكم في الطابعة عند قيمته القياسية و`*read-eval*` مضبوط على `true` ([الطباعة](printing.md#6-التحكم-في-مقدار-ما-يطبع)) |
 | `exit` | `(exit code)` | `int→!` | تنهي العملية |
 | `dump` | `(dump path)` | `string→bool` | تكتب البيئة الراهنة (معلومات الأنواع مع الأجسام المترجمة) إلى ملف واحد. ويبدأ `typl --image <path>` منها من جديد. خاصة بالمفسِّر فقط ([مرجع الصياغة 10.1](../syntax.md#101-ملفات-الـ-dump)) |
+
+## 11. مقاطعات المتحكم الدقيق (`std::board`)
+
+تُجلب بـ `use`، مثل `(use std::board::enable-interrupt)`. طريقة كتابة معالج المقاطعة في [مرجع الصياغة 3.17](../syntax.md#317-interruptn--exceptionname--معالجات-المقاطعات).
+
+| الاسم | الشكل | النوع | الوصف |
+|---|---|---|---|
+| `enable-interrupt` | `(enable-interrupt n)` | `int→()` | يجعل مقاطعة الطرفية `n` (من 0 إلى 239) تصل. خارج المتحكم الدقيق خطأ وقت التشغيل (وخطأ ترجمة مع `typl -c`) |
+| `disable-interrupt` | `(disable-interrupt n)` | `int→()` | يجعل المقاطعة `n` تتوقف عن الوصول. خارج المتحكم الدقيق كـ `enable-interrupt` |
+
+## 12. التنقيح (`std::dbg`)
+
+تُستورد بـ `use`، كما في `(use std::dbg::llvm-size-of)`.
+
+| الاسم | الشكل | النوع | الوصف |
+|---|---|---|---|
+| `llvm-size-of` | `(llvm-size-of expr)` | `A→u32` | كم بايتًا يحفظ فيه الكود المترجم قيمة `expr`. يحسب LLVM حجم نوع LLVM الذي أعطاه المترجم للقيمة، للهدف الذي يعمل عليه الكود. تُقيَّم `expr`. إذا نفّذها المفسّر فهي خطأ وقت التشغيل |
+
+تجيب `size-of-val` بالحجم الذي يحدده النوع، وتجيب `llvm-size-of` بالحجم الذي يستعمله الكود المترجم فعلًا. إذا اختلفا فالمترجم مخطئ في عرض القيمة.
+
+```lisp
+(use std::dbg::llvm-size-of)
+(defun widths ((x i8)) ()
+  (println "~a ~a ~a" (llvm-size-of x) (llvm-size-of (as u32 x)) (llvm-size-of (< x 0))))
+(compile widths)
+(widths 1)                          ; تطبع 1 4 1
+```
+
+القيمة في الكومة (`string` ونوع `defstruct` وما إلى ذلك) و`int` تأخذ كلمة واحدة تدل على مكان القيمة أو على القيمة نفسها.

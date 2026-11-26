@@ -32,8 +32,10 @@ use super::type_syntax::{parse_raw, TypeCx};
 const C_TYPES: &str = "i8, i16, i32, u8, u16, u32, c-long, c-ulong, f32, f64, bool, ptr, \
                        a typed pointer (ptr T), or a def-c-struct";
 
-/// The load/store kind of a C scalar type, `ptr` or a typed pointer.
+/// The load/store kind of a C scalar type, `ptr` or a typed pointer. A raw
+/// word's kind is its width on the target ([`raw_word_kind`]).
 fn c_kind(ty: &Type) -> Option<i64> {
+    let model = typelisp_mem::target::DataModel::current();
     Some(match ty {
         Type::I8 => c_mem::KIND_I8,
         Type::I16 => c_mem::KIND_I16,
@@ -41,14 +43,25 @@ fn c_kind(ty: &Type) -> Option<i64> {
         Type::U8 => c_mem::KIND_U8,
         Type::U16 => c_mem::KIND_U16,
         Type::U32 => c_mem::KIND_U32,
-        Type::CLong => c_mem::KIND_C_LONG,
-        Type::CULong => c_mem::KIND_C_ULONG,
+        Type::CLong => raw_word_kind(model.c_long_bits(), true),
+        Type::CULong => raw_word_kind(model.c_long_bits(), false),
         Type::F32 => c_mem::KIND_F32,
         Type::F64 => c_mem::KIND_F64,
         Type::Bool => c_mem::KIND_BOOL,
-        Type::Ptr | Type::PtrTo(_) => c_mem::KIND_PTR,
+        Type::Ptr | Type::PtrTo(_) => raw_word_kind(model.pointer_bits(), false),
         _ => return None,
     })
+}
+
+/// The kind of a raw word `bits` wide: the load extends a 32-bit one by its
+/// sign or not, and a 64-bit one is all of the compiled code's word.
+fn raw_word_kind(bits: u32, signed: bool) -> i64 {
+    match (bits, signed) {
+        (32, true) => c_mem::KIND_RAW_I32,
+        (32, false) => c_mem::KIND_RAW_U32,
+        (64, _) => c_mem::KIND_RAW_64,
+        _ => unimplemented!("a {}-bit raw word in C memory", bits),
+    }
 }
 
 /// Whether `ty` is, or holds, a typed pointer.
@@ -61,7 +74,7 @@ pub(crate) fn mentions_typed_ptr(ty: &Type) -> bool {
 // ---- types -------------------------------------------------------------------
 
 /// The `def-c-struct` the name `v` (a symbol or a `::` path) names here.
-fn c_struct_named<'r>(heap: &Heap, reg: &'r Registry, ns: typelisp_mem::NsId, v: Value) -> Option<&'r CStructDef> {
+pub(crate) fn c_struct_named<'r>(heap: &Heap, reg: &'r Registry, ns: typelisp_mem::NsId, v: Value) -> Option<&'r CStructDef> {
     let entry = match v {
         Value::Symbol(id) => find_named(reg, ns, id, |n, key| reg.types.get(&Path::of_symbol(n, key))).map(|(_, e)| e),
         Value::Path(_) => written_path(heap, ns, v).ok().and_then(|p| reg.types.get(&p)),
@@ -93,13 +106,17 @@ fn c_struct_def<'r>(reg: &'r Registry, path: &Path) -> Result<&'r CStructDef, Er
     }
 }
 
-/// `(sizeof, _Alignof)` of a C type on LP64.
-fn c_layout(reg: &Registry, ty: &Type) -> Result<(u64, u64), Error> {
+/// `(sizeof, _Alignof)` of a C type, by the target's data model.
+pub(crate) fn c_layout(reg: &Registry, ty: &Type) -> Result<(u64, u64), Error> {
+    let model = typelisp_mem::target::DataModel::current();
+    let scalar = |size: u64| (size, size.min(u64::from(model.max_align)));
     Ok(match ty {
-        Type::I8 | Type::U8 | Type::Bool => (1, 1),
-        Type::I16 | Type::U16 => (2, 2),
-        Type::I32 | Type::U32 | Type::F32 => (4, 4),
-        Type::CLong | Type::CULong | Type::F64 | Type::Ptr | Type::PtrTo(_) => (8, 8),
+        Type::I8 | Type::U8 | Type::Bool => scalar(1),
+        Type::I16 | Type::U16 => scalar(2),
+        Type::I32 | Type::U32 | Type::F32 => scalar(4),
+        Type::CLong | Type::CULong => scalar(u64::from(model.c_long_bytes)),
+        Type::Ptr | Type::PtrTo(_) => scalar(u64::from(model.pointer_bytes)),
+        Type::F64 => scalar(8),
         Type::CStruct(p) => {
             let d = c_struct_def(reg, p)?;
             (d.size, d.align)
@@ -288,6 +305,31 @@ fn int_arg(cx: &Cx, heap: &mut Heap, locals: &Locals, (v, loc): &(Value, Option<
     Ok(Typed { node: Node::UntagInt { value: Box::new(n) }, ty: Type::I32, loc: None })
 }
 
+/// An integer argument that is an address: an `int`, or one of a fixed
+/// width, which is widened or narrowed to the unsigned type as wide as a
+/// pointer — the same word as a `ptr`.
+fn address_arg(cx: &Cx, heap: &mut Heap, locals: &Locals, (v, loc): &(Value, Option<Loc>)) -> Result<Typed, Error> {
+    let mut n = check_expr(cx, heap, locals, *v, None, loc.clone())?;
+    // A number literal no type decided is an `int`.
+    cx.decide(&n.ty);
+    let ty = cx.resolve(&n.ty);
+    if ty == Type::Int {
+        return Ok(builtin(b::ADDRESS, vec![n], Type::Ptr));
+    }
+    if !ty.is_int_family() {
+        return Err(Error::TypeError(format!("an address is an integer, and this is a `{}`", ty)));
+    }
+    let word = match typelisp_mem::target::DataModel::current().pointer_bits() {
+        16 => Type::U16,
+        32 => Type::U32,
+        _ => Type::CULong,
+    };
+    n.ty = ty.clone();
+    let mut address = if ty == word { n } else { super::cast::width_cast(cx, heap, locals, n, &word, false, loc.clone())? };
+    address.ty = Type::Ptr;
+    Ok(address)
+}
+
 /// A typed pointer argument, and what it points at.
 fn ptr_arg(cx: &Cx, heap: &mut Heap, locals: &Locals, (v, loc): &(Value, Option<Loc>), who: &str) -> Result<(Typed, Type), Error> {
     let p = check_expr(cx, heap, locals, *v, None, loc.clone())?;
@@ -366,6 +408,66 @@ pub(crate) fn set_c_deref(cx: &Cx, heap: &mut Heap, locals: &Locals, place_args:
     let (p, pointee) = ptr_arg(cx, heap, locals, p, "c-deref")?;
     let v = check_expr(cx, heap, locals, value, Some(&pointee), value_loc)?;
     let mut t = store(cx, heap, p, 0, &pointee, v)?;
+    t.loc = loc;
+    Ok(t)
+}
+
+/// The type a `volatile-read-*`/`volatile-write-*` form reads or writes, and
+/// its spelling: the head says which.
+fn register_type(head: u32) -> (Type, &'static str) {
+    match head {
+        wk::VOLATILE_READ_U8 => (Type::U8, "volatile-read-u8"),
+        wk::VOLATILE_READ_U16 => (Type::U16, "volatile-read-u16"),
+        wk::VOLATILE_READ_U32 => (Type::U32, "volatile-read-u32"),
+        wk::VOLATILE_WRITE_U8 => (Type::U8, "volatile-write-u8"),
+        wk::VOLATILE_WRITE_U16 => (Type::U16, "volatile-write-u16"),
+        wk::VOLATILE_WRITE_U32 => (Type::U32, "volatile-write-u32"),
+        _ => unreachable!("the special-form dispatch sends only the volatile forms here"),
+    }
+}
+
+/// A volatile access is to memory nothing here can check: a register's
+/// address is a number the program takes on in an `(unsafe ...)`.
+fn require_unsafe(cx: &Cx, who: &str) -> Result<(), Error> {
+    if cx.in_unsafe() {
+        return Ok(());
+    }
+    Err(Error::TypeError(format!(
+        "`{}` reads or writes whatever is at the address it is given, so it needs `(unsafe ...)` — \
+         nothing here can check that the address is a register of that width",
+        who
+    )))
+}
+
+/// `(volatile-read-u8 addr)` and the other widths — `head` the form's head,
+/// `args` without it: the register at the address `addr` (an `int`), read
+/// once, where it is written.
+pub(crate) fn check_volatile_read(cx: &Cx, heap: &mut Heap, locals: &Locals, head: u32, args: &[(Value, Option<Loc>)], loc: Option<Loc>) -> Result<Typed, Error> {
+    let (ty, who) = register_type(head);
+    let [addr] = args else {
+        return Err(Error::TypeError(format!("{}: ({} address)", who, who)));
+    };
+    require_unsafe(cx, who)?;
+    let addr = address_arg(cx, heap, locals, addr)?;
+    let kind = c_kind(&ty).expect("a register is a C scalar");
+    let mut t = builtin(b::VOLATILE_LOAD, vec![addr, word(heap, kind as u64)?], ty);
+    t.loc = loc;
+    Ok(t)
+}
+
+/// `(volatile-write-u8 addr value)` and the other widths: `value` written to
+/// the register at `addr`, once, where it is written. Answers `()`: the
+/// register need not read back what was written to it.
+pub(crate) fn check_volatile_write(cx: &Cx, heap: &mut Heap, locals: &Locals, head: u32, args: &[(Value, Option<Loc>)], loc: Option<Loc>) -> Result<Typed, Error> {
+    let (ty, who) = register_type(head);
+    let [addr, (value, value_loc)] = args else {
+        return Err(Error::TypeError(format!("{}: ({} address value)", who, who)));
+    };
+    require_unsafe(cx, who)?;
+    let addr = address_arg(cx, heap, locals, addr)?;
+    let value = check_expr(cx, heap, locals, *value, Some(&ty), value_loc.clone())?;
+    let kind = c_kind(&ty).expect("a register is a C scalar");
+    let mut t = builtin(b::VOLATILE_STORE, vec![addr, word(heap, kind as u64)?, value], Type::Unit);
     t.loc = loc;
     Ok(t)
 }

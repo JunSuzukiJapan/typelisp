@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/format.md @ 59f6f286d9081f10d4e2d72836362c3efc3e42af -->
+<!-- translated-from: docs/ja/reference/functions/format.md @ 9657f5a39527be80deea76fe60ecc58ab1752689 -->
 # Format Directives
 
 The directives written in the control strings of `print`/`println`/`format`. They cover nearly all of
@@ -108,13 +108,13 @@ whether the directive carries `:` and `@`.
 - Name resolution is the same as for a call ([Syntax Reference 3.10](../syntax.md#310-module--use--namespaces)). If the argument's type
   has a method `name`, that is called; otherwise the visible function `name`. A function in a module
   can be named by its path (`~/m::shout/`).
-- What can be called is a function or method written in typelisp that takes the argument, `colon` and
-  `at` as they are and returns a `string`. Built-in functions cannot be called.
+- What is called is a function or method that takes the argument, `colon` and `at` and returns a
+  `string`. Built-in ones can be called too.
 - **What to call is settled at check time.** The checker finds every argument that can reach the
   `~/name/`, taking moves by `~*` and `~[` into account, and resolves the name for each one's type. If
-  one of them cannot be resolved, it is a check-time error, and so is the case where the arguments that
-  can reach it would call two different definitions. No name is looked up at run time, so it works the
-  same in AOT executables.
+  one of them cannot be resolved, it is a check-time error. The arguments that can reach it may call
+  different definitions by their types; at run time, the one for the type of the argument actually
+  reached is called. No name is looked up at run time, so it works the same in AOT executables.
 - **It cannot be used inside `~{`, `~:{`, `~:@{` or `~<...~:>`** (a check-time error). The type of a list
   argument's elements is `Sexpr`, which cannot settle what to call. `~@{` goes round the call's
   remaining arguments, whose types are known, so it can be used there.

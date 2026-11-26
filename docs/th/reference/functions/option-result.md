@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/option-result.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
+<!-- translated-from: docs/ja/reference/functions/option-result.md @ dff3b51792f6d9c49bb8802bd3d3fb6e168edd92 -->
 # Option, Result และชนิดข้อผิดพลาด
 
 ## 1. `Option<T>` / `Result<T,E>`
@@ -61,7 +61,7 @@
 |---|---|---|
 | `Option<U>` (ซ้อนกัน) | กล่อง | `None` ภายในจะเป็นค่าเดียวกับ `None` ภายนอก |
 | `()` | กล่อง | ค่าของ `()` คือค่าลิสต์ว่างเอง |
-| `ptr` / `c-long` / `c-ulong` | กล่อง | ทั้ง 64 บิตเป็นค่า ไม่เหลือที่ให้แยกความแตกต่าง |
+| `ptr` / `c-long` / `c-ulong` | กล่อง | ทุกบิตเป็นค่า ไม่เหลือที่ให้แยกความแตกต่าง |
 | อย่างอื่นทั้งหมด | ไม่มีกล่อง | — |
 
 การแสดงผลถูกกำหนดโดยชนิดเพียงอย่างเดียวและอ่านจากค่าไม่ได้ ตอนพิมพ์

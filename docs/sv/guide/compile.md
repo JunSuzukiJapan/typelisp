@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ 7622044725db7d28dabb691d82e592367d9284e8 -->
+<!-- translated-from: docs/ja/guide/compile.md @ 1b5dc6ac828d8e4a95800a91218b5e9dffe83f98 -->
 # Kompilering
 
 Om du inte gör något annat körs typelisp-program i tolken. Dessutom finns två sätt att kompilera till
@@ -223,7 +223,148 @@ const code = await run({ write: (fd, text) => { /* visa den på sidan, till exem
 - I en webbläsare ska `hello.wasm` serveras över HTTP från samma ställe som `hello.mjs` (den kan inte laddas från `file://`).
 - `sleep` väntar med `Atomics.wait`. En webbläsare tillåter det bara i en Worker på en cross-origin-isolerad sida, så kör ett program som använder `sleep` i en Worker.
 - Lokal tid (`decode-universal-time` utan `zone` och så vidare) beräknas med den tidszon som JavaScripts `Date` rapporterar.
-- Utöver det som inte kan användas i avsnitt 3.6 är fil- och katalogoperationer ett **kompileringsfel**. Standard in läses som tom, och `(command-line-args)` är en tom vektor.
+- Utöver det som inte kan användas i avsnitt 3.6 är fil- och katalogoperationer, miljövariabler, `(command-line-args)`, hemkatalogen och `dribble` ett **kompileringsfel**. Standardindata läses som tom.
+
+### 3.8 Kompilera för en mikrokontroller (Cortex-M)
+
+Med `--target thumbv7em-none-eabihf` skapar `typl -c` en körbar fil (ELF) för ett Cortex-M4F- eller M7-kort utan operativsystem. Utan `-o` får den källans namn med `.typl` utbytt mot `.elf`. Med `--target thumbv8m.main-none-eabihf` är den för ett Cortex-M33-kort.
+
+```sh
+$ typl -c hello.typl --target thumbv7em-none-eabihf          # skapar hello.elf
+$ qemu-system-arm -M mps2-an386 -nographic \
+    -semihosting-config enable=on,target=native -kernel hello.elf   # kör den på QEMU:s Cortex-M4
+$ typl -c hello.typl --target thumbv8m.main-none-eabihf
+$ qemu-system-arm -M mps2-an505 -nographic \
+    -semihosting-config enable=on,target=native -kernel hello.elf   # kör den på QEMU:s Cortex-M33
+```
+
+- En `typl` installerad med `install.sh` kan användas som den är. För att installera med `cargo install`, kör `rustup target add thumbv7em-none-eabihf thumbv8m.main-none-eabihf` och installera sedan med `--features embedded` (`--features wasm,embedded` för båda). Med en debugbygge av `typl` i förrådet, kör `scripts/build-embedded-runtime.sh`. Länkningen använder länkaren i rustup-verktygskedjan.
+- Ange kortets minne med `--linker-script FILE`. Den skrivs som `cortex-m-rt`:s `memory.x`: adresser och storlekar för FLASH och RAM. En rad som `_typelisp_stack_size = 32K;` anger hur mycket av RAM som stacken tar (64KiB om inget anges); resten av RAM är heapen. Utan flaggan används layouten för QEMU:s `mps2-an386` (`mps2-an505` för en Cortex-M33).
+
+  ```
+  MEMORY
+  {
+    FLASH : ORIGIN = 0x08000000, LENGTH = 512K
+    RAM : ORIGIN = 0x20000000, LENGTH = 128K
+  }
+  _typelisp_stack_size = 16K;
+  ```
+
+- `--board-functions` väljer vem som ger utdata, indata, avslut och klockan (kortets funktioner).
+  - `semihosting` (standard): via semihosting, för körning under QEMU (`-semihosting-config enable=on`) eller en debugger.
+  - `c`: kortet ger dem som C-funktioner. Skicka med `--link FILE` ett objekt eller statiskt bibliotek som definierar funktionerna nedan (`--link` kan upprepas; ett leverantörsbibliotek som `defffi` anropar skickas på samma sätt).
+
+  ```c
+  void     typelisp_host_write(int32_t fd, const uint8_t *p, size_t len); // fd 1 är standardutdata, 2 standardfel
+  size_t   typelisp_host_read(int32_t fd, uint8_t *p, size_t len);        // fd 0; lästa byte, 0 vid slutet
+  void     typelisp_host_exit(int32_t code);                              // återvänder inte
+  uint64_t typelisp_host_now_us(void);                                    // mikrosekunder på en klocka som aldrig går bakåt
+  int64_t  typelisp_host_unix_us(void);                                   // mikrosekunder sedan 1970-01-01
+  void     typelisp_host_sleep_us(uint64_t us);                           // väntar us mikrosekunder
+  ```
+
+- Ett korts register (kringutrustning mappad i minnet) läses med `volatile-read-u8`, `volatile-read-u16` och `volatile-read-u32` och skrivs med `volatile-write-u8`, `volatile-write-u16` och `volatile-write-u32`. Adressen är en `int` eller ett heltal av fast bredd som `u16`, och det lästa värdet har breddens typ (`u8` och så vidare). Var och en läser eller skriver exakt en gång, där den står; kompilatorn varken utelämnar eller flyttar den. Alla kan bara användas inuti `unsafe`. En adress som är negativ, eller inte en multipel av bredden, är ett körtidsfel innan något läses eller skrivs.
+
+  ```lisp
+  ;; UART 0 på QEMU:s mps2-an386: data 0x40004000, status 0x40004004, styrning 0x40004008
+  (defun put-byte ((c u32)) ()
+    (unsafe
+      (loop (when (= (logand (volatile-read-u32 #x40004004) 1) 0) (break)))   ; vänta medan den sänder
+      (volatile-write-u32 #x40004000 c)))
+
+  (defun main () ()
+    (unsafe (volatile-write-u32 #x40004008 1))                               ; slå på sändning
+    (put-byte 104) (put-byte 105) (put-byte 10))                             ; "hi" och en radbrytning
+  ```
+
+- Skriv funktionen som anropas när ett avbrott kommer som en `defun` med attributet `#[interrupt(N)]` (kringutrustningsavbrottet `N`) eller ett som `#[exception(SysTick)]`. Slå på ett avbrott med `(enable-interrupt N)`. En hanterare körs genast; bara när den kommer mitt i körtidsmiljöns arbete körs den efter att arbetet är klart. En hanterare kan inte vänta (`sleep` är ett kompileringsfel). Detaljerna finns i avsnitt 3.17 i [syntaxreferensen](../reference/syntax.md).
+
+  ```lisp
+  (use std::board::enable-interrupt)
+
+  #[interrupt(5)]
+  (defun on-five () ()
+    (println "interrupt 5"))
+
+  (defun main () ()
+    (enable-interrupt 5)
+    (unsafe (volatile-write-u32 #xE000E200 (as u32 32))))   ; utlös avbrott 5 själv (NVIC:s register för väntande avbrott)
+  ```
+
+- Körmiljön startar programmet (vektortabellen och förberedelsen av RAM) och allokerar minne. Ett HardFault eller ett obehandlat avbrott avslutar programmet med en panics slutkod (1).
+- `throw`/`catch`/`panic`, bignums, bråk och flyttal samt uppgifter, kanaler och `sleep` beter sig som i den körbara filen. Uppgifter körs i tur och ordning på den enda kärnan. C-funktioner (`defffi`) kan användas.
+- Ett program som använder det kortet inte har är ett **kompileringsfel**: utöver det som inte kan användas i avsnitt 3.7, `eval` och `macroexpand`. Lokal tid är okänd (som i avsnitt 3.6).
+- Cons-arenan börjar med 1024 celler och växer vid behov. `--heap-cells`, `--max-memory`, `--no-cons`, `-O<N>` och `--release` fungerar som de är.
+
+### 3.9 Kompilera för Arduino Uno (AVR)
+
+Med `--target avr-atmega328p` skapas en körbar fil (ELF) för mikrokontrollern i Arduino Uno (ATmega328P). Följande program får kortets lysdiod att blinka.
+
+```lisp
+(defconstant (PINB int) #x23)
+(defconstant (DDRB int) #x24)
+(defconstant (LED u8) 32)                         ; PB5
+
+(defun wait-a-bit () ()
+  (let ((i (the u32 0)))
+    (while (< i (the u32 400000))
+      (unsafe (volatile-read-u8 PINB))
+      (setf i (+ i 1)))
+    ()))
+
+(defun main () ()
+  (unsafe (volatile-write-u8 DDRB LED))           ; gör till utgång
+  (while true
+    (unsafe (volatile-write-u8 PINB LED))         ; växla
+    (wait-a-bit)))
+```
+
+```sh
+$ typl -c blink.typl --target avr-atmega328p -O2   # skapar blink.elf
+$ qemu-system-avr -M uno -display none -serial stdio -bios blink.elf   # kör i QEMU
+```
+
+- Det finns ingen runtime, så ett program som använder den ger ett **kompileringsfel**. Felet anger vad som behövs och genom vilka funktioner det nås. Det som kan användas är beräkningar med heltal av fast bredd (`i8` till `u32`), `f32`, `f64`, `bool` och `char`, funktionsanrop (även rekursiva), villkor, loopar, `defvar` och `defconstant` med sådana värden, `volatile-read-u8` med flera samt anrop av C-funktioner.
+- Det som inte kan användas är värden i heapen, till exempel strängar, listor och strukturer; `catch` och anrop av funktionsvärden; anrop av C-funktioner som tar en sträng eller en funktion; matematiska funktioner av flyttal som `sin` och `expt` (`sqrt` och avrundning som `floor` kan användas).
+- En avbrottshanterare skrivs `#[interrupt(N)]` ([Syntax](../reference/syntax.md), avsnitt 3.17). `N` är avbrottets nummer på ATmega328P, 1 till 25 med återställning räknad som 0 (spill i timer 1 är 13). Se exemplet nedan.
+- Division med 0 stoppar mikrokontrollern på stället (inga fler avbrott kommer heller). Detsamma gäller `/` av det minsta värdet med tecken med `-1`.
+- En `int` kan inte användas (det ger ett kompileringsfel), eftersom den saknar fast bredd. Använd en typ av fast bredd, som `i16` eller `u16`. Även adresser kan beräknas med heltal av fast bredd. Det som bestäms vid kompileringen kan användas, som en adress skriven som ett tal och en `int` i en `defconstant`.
+- Om stacken tar slut vid rekursion stannar mikrokontrollern.
+- Deklarera en C-funktion med `defffi` och skicka med en objektfil kompilerad för AVR med `--link FILE`.
+- En loop som inte gör något tas bort från och med `-O1`. Läs till exempel ett register i en vänteloop.
+- När `main` är klar stannar mikrokontrollern.
+- Minnets placering ändras med `--linker-script FILE`. Utan den är det 32 KiB flash minus de sista 512 byten, som är startladdarens, och 2 KiB RAM. RAM-adresser skrivs med `0x800000` adderat, till exempel `0x800100`.
+- Beräkningar med `f32` och `f64` görs av hjälpfunktioner. De som används hamnar i flashminnet (de för `f64` är större).
+- Länkningen använder länkaren i rustups verktygskedja, som i avsnitt 3.8.
+
+Ett exempel som blinkar lysdioden med ett timeravbrott. Ett avbrott slås på i enhetens eget register.
+
+```lisp
+(defconstant (PINB int) #x23)
+(defconstant (DDRB int) #x24)
+(defconstant (LED u8) 32)
+(defconstant (TIMSK1 int) #x6F)
+(defconstant (TCCR1B int) #x81)
+(defvar (ticks u16) 0)
+
+#[interrupt(13)]                                  ; spill i timer 1
+(defun on-overflow () ()
+  (unsafe (volatile-write-u8 PINB LED))           ; växla
+  (setf ticks (+ ticks 1))
+  ())
+
+(defun main () ()
+  (unsafe (volatile-write-u8 DDRB LED)
+          (volatile-write-u8 TIMSK1 1)            ; slå på spillavbrottet
+          (volatile-write-u8 TCCR1B 3))           ; räkna med 1/64 av klockan
+  (while true))
+```
+
+- Ett program med en hanterare släpper fram avbrott så snart de globala variablerna är initierade. Ställ in enheterna i början av `main`.
+- `enable-interrupt` och `#[exception(NAME)]` kan inte användas (kompileringsfel).
+- Medan en hanterare körs väntar andra avbrott. Som alla andra funktioner kan en hanterare inte använda körtidsmiljön.
+- En enskild läsning eller skrivning av en global variabel avbryts inte av en hanterare, inte ens för värden på två byte eller mer. För detta stängs avbrott av när en variabel som en hanterare skriver läses och när en variabel som en hanterare läser eller skriver skrivs, och en varning vid kompileringen anger variabeln. Mellan läsningen och skrivningen i en uppdatering (`(setf n (+ n 1))`) kan ett avbrott komma. För att uppdatera en variabel som en hanterare också skriver, läs och spara statusregistret (adress `#x5F`), skriv 0 i det för att stoppa avbrott och skriv sedan tillbaka det sparade värdet.
+- Ett avbrott utan hanterare stoppar mikrokontrollern.
 
 ## 4. Dumpar
 

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ ac5a6b3adada21a0a55e0e1c4b0e1fabf4854908 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 1b5dc6ac828d8e4a95800a91218b5e9dffe83f98 -->
 # Referensi Sintaks typelisp
 
 typelisp adalah Lisp dengan tipe statis, ditulis dalam S-expression. Untuk daftar fungsi bawaan dan
@@ -84,7 +84,7 @@ untuk membaca pesan kesalahan, [errors.md](errors.md).
   adalah `#{string int}`). Tuple memiliki 1 sampai 12 elemen. Setiap evaluasi membuat tuple baru.
   Untuk membangunnya dari nilai yang dihitung, gunakan `(tuple a b)`. Di tempat yang mengharapkan
   data S-ekspresi, ia menjadi tuple yang semua elemennya data: varian `Tuple` dari `Sexpr`.
-- **Atribut**: `#[test]` adalah tanda yang melekat pada bentuk berikutnya (ditulis seperti di Rust). Satu-satunya atribut sejauh ini adalah `test`, dan dipasang pada `defun` ([3.16 `#[test]`](#316-test--fungsi-uji)). Jika dibaca dengan `read`, ia menjadi daftar `(%internal::attribute (test) form)`.
+- **Atribut**: `#[test]` adalah tanda yang dipasang pada form berikutnya (ditulis seperti di Rust). Ada tiga atribut, `test`, `interrupt(N)`, dan `exception(NAME)`, masing-masing dipasang pada `defun` ([3.16 `#[test]`](#316-test--fungsi-uji), [3.17 penangan interupsi](#317-interruptn--exceptionname--penangan-interupsi)). Atribut dengan argumen ditulis dengan tanda kurung tepat setelah namanya. Dibaca dengan `read`, keduanya menjadi daftar `(%internal::attribute (test) form)` dan `(%internal::attribute ((interrupt 7)) form)`.
 - **Daftar kosong `()`**: tergantung konteks, nilai tipe `Unit` atau `None` pada `Option<Sexpr>`.
   **`Sexpr` tidak memiliki varian daftar kosong**: `Sexpr` berarti "S-expression tak kosong", dan
   tipe data S-expression adalah `Option<Sexpr>` (lihat "Pola untuk `Option<Sexpr>`" pada
@@ -382,7 +382,7 @@ terus berjalan, sehingga satu-satunya masa hidup yang benar adalah masa hidup pr
 #### ptr / c-long / c-ulong — word mesin mentah
 
 `ptr` adalah pointer buram (`void *`, `FILE *`, apa pun maksud deklarasinya). `c-long` / `c-ulong`
-adalah `long` / `unsigned long` pada C (juga `size_t`, `int64_t`, dan `intptr_t`).
+adalah `long` / `unsigned long` pada C (juga `size_t`, dan `intptr_t`).
 
 ```lisp
 (defffi (c-malloc "malloc") (c-ulong) ptr)
@@ -394,7 +394,7 @@ adalah `long` / `unsigned long` pada C (juga `size_t`, `int64_t`, dan `intptr_t`
 
 **Tidak menamainya `i64` / `u64` adalah disengaja.** Bahasa ini tidak memiliki tipe bilangan bulat 64
 bit, karena nilai langsung bertag hanya memiliki 63 bit ([bab 2](#2-menulis-tipe)). Nama `c-long`
-mengatakan "ini adalah word yang menyeberangi batas dengan C, bukan bilangan bulat bahasa ini".
+mengatakan "ini adalah word yang menyeberangi batas dengan C, bukan bilangan bulat bahasa ini". Lebarnya sama dengan `long` C pada target (64 bit pada macOS dan Linux 64 bit, 32 bit pada wasm32 dan Cortex-M).
 
 **Tipe ini tidak memiliki aritmetika.** `(+ x 1)` tidak dapat ditulis. Ia dapat disediakan tetapi
 tidak, agar tidak ada komputasi yang berjalan pada nilai yang tidak dapat disimpan di mana pun dan
@@ -403,7 +403,7 @@ ditiadakan. Yang ada **hanya konversi**:
 
 ```lisp
 (as i32 (unsafe (c-strlen "hello")))         ; read what came back
-(as int (unsafe (c-strlen s)))               ; this one to read it exactly (int does not lose 64 bits)
+(as int (unsafe (c-strlen s)))               ; this one to read it exactly (int loses none of the value)
 (try-as i32 (unsafe (c-strlen s)))           ; ask whether it fits
 (as c-ulong n)                               ; make one from another integer
 ```
@@ -543,8 +543,7 @@ ditaruh tepat setelah nama.
 
 Tipe yang dapat ditulis untuk field adalah `i8` `i16` `i32` `u8` `u16` `u32` `c-long` `c-ulong` `f32`
 `f64` `bool` `ptr`, pointer bertipe `(ptr T)`, dan `def-c-struct` lain (disematkan secara nilai).
-Tata letak (offset tiap field, serta ukuran dan alignment struct) dihitung dengan aturan C (dengan
-asumsi LP64). Field yang menunjuk struct itu sendiri dapat ditulis, tetapi struct tidak dapat
+Tata letak (offset tiap field, serta ukuran dan alignment struct) dihitung dengan aturan C (lebar `c-long` dan pointer serta perataan `f64` mengikuti C pada target). Field yang menunjuk struct itu sendiri dapat ditulis, tetapi struct tidak dapat
 menyematkan dirinya sendiri.
 
 ```lisp
@@ -570,6 +569,7 @@ Alokasi, pembacaan, dan penulisan ditulis dalam bentuk berikut. Semuanya hanya d
 | `(c-alloc T)` / `(c-alloc T n)` | Mengalokasikan `n` nilai `T` (1 jika dihilangkan). Isinya diisi 0. Mengembalikan `(ptr T)` |
 | `(c-ref p i)` | Pointer ke elemen `i` dari `p`. Kesalahan jika di luar rentang yang dialokasikan |
 | `(c-deref p)` / `(setf (c-deref p) v)` | Membaca / menulis skalar yang ditunjuk `p` |
+| `(volatile-read-u32 addr)` / `(volatile-write-u32 addr v)` | Membaca atau menulis register di alamat `addr` (sebuah `int`, atau bilangan bulat berlebar tetap seperti `u16`), tepat sekali, di tempat ia ditulis. Sama untuk `-u8` dan `-u16` |
 | `p::field` / `(setf p::field v)` | Membaca / menulis field sebuah struct. Membaca field yang berupa struct tersemat memberikan alamatnya (`(ptr inner-type)`) |
 | `(as ptr p)` | Melupakan tipe, menjadikannya `ptr` (untuk diserahkan ke sesuatu seperti `void *` pada `qsort`). Tidak ada konversi balik |
 
@@ -1364,6 +1364,34 @@ test result: FAILED. 1 passed; 1 failed; 0 filtered out
 
 Apa yang dicetak pengujian dengan `print` langsung masuk ke keluaran standar (tidak ditangkap). Untuk keluaran yang dimaksudkan untuk menyelidiki masalah, `eprint`/`eprintln` ([Pencetakan](functions/printing.md)) menulis ke galat standar dan tidak bercampur dengan keluaran program.
 
+### 3.17 `#[interrupt(N)]` / `#[exception(NAME)]` — penangan interupsi
+
+```lisp
+(use std::board::enable-interrupt)
+(defvar (*received* int) 0)
+
+#[interrupt(7)]
+(defun on-uart () ()
+  (unsafe (volatile-write-u32 #x4000400C 1))   ; hapus penyebab interupsi
+  (setf *received* (+ *received* 1))
+  ())
+
+(defun main () ()
+  (enable-interrupt 7)
+  ...)
+```
+
+Dalam program yang dikompilasi untuk mikrokontroler (bagian 3.8 dari [Kompilasi](../guide/compile.md)), inilah fungsi yang dipanggil saat interupsi datang. `#[interrupt(N)]` menjadikan fungsi penangan interupsi periferal `N` (0 sampai 239), dan `#[exception(NAME)]` penangan eksepsi inti `NAME`, salah satu dari `NonMaskableInt`, `MemoryManagement`, `BusFault`, `UsageFault`, `SVCall`, `DebugMonitor`, `PendSV`, `SysTick` (`HardFault` milik runtime, dan mengakhiri program).
+
+- Untuk Arduino Uno penomoran dan cara mengaktifkannya berbeda, dan `#[exception(NAME)]` serta `enable-interrupt` tidak dapat dipakai ([Kompilasi](../guide/compile.md), bagian 3.9). Yang disebut tentang runtime di bawah berlaku untuk Cortex-M.
+- Dipasang pada `defun` tingkat atas yang tidak menerima apa pun dan mengembalikan `()` (tanpa parameter tipe juga). Satu interupsi punya satu penangan, dan satu fungsi menangani satu interupsi.
+- Interupsi periferal tidak datang sampai `(enable-interrupt N)` mengaktifkannya (`(disable-interrupt N)` menghentikannya; lihat [Sistem](functions/system.md)). Eksepsi seperti SysTick datang begitu register diatur untuk memicunya.
+- Penangan berjalan saat itu juga, di tempat interupsi datang. Jika datang di tengah pekerjaan runtime (alokasi, pengumpulan sampah, keluaran, pergantian tugas, dan sebagainya), penangan berjalan begitu pekerjaan itu selesai. Penangan tidak saling menginterupsi.
+- Tidak ada pengumpulan sampah di dalam penangan (heap membesar jika perlu). Keadaan program, seperti variabel global, dapat dibaca dan ditulis seperti biasa.
+- Penangan tidak dapat menunggu. Penangan yang memakai `sleep` adalah galat kompilasi. Operasi yang hanya kadang menunggu, seperti menerima dari kanal, dapat dipakai selama tidak perlu menunggu; jika harus menunggu, itu panic.
+- `panic` atau `throw` yang keluar dari penangan mengakhiri program, seperti yang tidak tertangkap.
+- Tidak ada interupsi di interpreter atau di program yang dikompilasi untuk selain mikrokontroler. Di interpreter, penangan dapat dipanggil sebagai fungsi biasa (untuk pengujian). `typl -c` untuk selain mikrokontroler menolak program yang punya penangan.
+
 ## 4. Pengikatan dan percabangan
 
 ```lisp
@@ -1831,6 +1859,8 @@ dan sebagainya).
 (todo)                              ; expands to (panic "todo"). defmacro
 (as Type expr)                      ; numeric/character type conversion. conversions that can fail panic on failure
 (try-as Type expr)                  ; like as, but returns the result as Option<Type> (None on failure)
+(size-of Type)                      ; jumlah byte sebuah nilai Type (int)
+(size-of-val expr)                  ; jumlah byte sebuah nilai bertipe expr (int); expr tidak dievaluasi
 (print control args...)             ; expands the format and writes to standard output (no newline)
 (println control args...)           ; the same (with a newline at the end)
 (format dest control args...)       ; CL's format. returns the expanded string
@@ -1882,6 +1912,30 @@ setelahnya. Ini adalah gula sintaks yang diekspansi menjadi metode konversi yang
 
 Dari `rational`, `as`/`try-as` mengonversi ke `int` (`as` memotong, `try-as` hanya berhasil untuk
 bilangan bulat), `ratio`, dan `f64`; dari `int`/`ratio` ke `rational`.
+
+`size-of`/`size-of-val` sepadan dengan `sizeof` di C. Jawabannya adalah konstanta yang ditentukan saat kompilasi: ukuran
+pada target tempat kode berjalan:
+
+| Tipe | Byte |
+|---|---|
+| `i8` `u8` `bool` | 1 |
+| `i16` `u16` | 2 |
+| `i32` `u32` `f32` `char` | 4 |
+| `f64` | 8 |
+| `c-long` `c-ulong` | sama dengan `long` C pada target |
+| `ptr` `(ptr T)` | sama dengan pointer target |
+| `def-c-struct` | sama dengan struktur C (termasuk padding) |
+| `()` | 0 |
+| Selebihnya (`int`, `string`, tipe `defstruct`, dan sebagainya) | satu kata (sama dengan pointer target): nilai itu sendiri, atau tempat nilai itu berada |
+
+```lisp
+(size-of u16)                       ; => 2
+(size-of-val (as i8 5))             ; => 1
+(let ((x 1.0)) (size-of-val x))     ; => 8
+```
+
+Parameter tipe sebuah fungsi generik juga boleh ditulis; tipenya ditentukan pada setiap pemanggilan. `!` tidak punya nilai,
+jadi merupakan galat. Tipe `def-c-struct` juga boleh ditulis di luar `unsafe`.
 
 `documentation`, seperti `quote`/`compile`, adalah bentuk khusus yang membaca `name` tanpa
 mengevaluasinya, sebagai simbol polos / path `::` yang tidak dievaluasi. Tidak seperti
@@ -2292,10 +2346,9 @@ adalah kesalahan** (bukan menghentikan proses saat itu juga, tetapi panic sepert
   dari tempat berhenti pada evaluasi berikutnya). Di akhir evaluasi, ia menunggu setiap thread
   menyelesaikan langkahnya saat ini, sehingga jika fungsi C (`defffi`) terus memblokir di dalam
   `thread`, evaluasi tidak berakhir sampai ia kembali.
-- **Mencetak di worker**: metode `print-object` yang diinterpretasikan, serta fungsi dan metode
-  terinterpretasi yang dipanggil `~/name/`, tidak dapat berjalan di thread lain, sehingga mencetak nilai
-  seperti itu di thread lain adalah panic yang diperlakukan sama dengan `(panic ...)`
-  (`(compile T::print-object)`, atau cetak dari tugas utama).
+- **Mencetak di worker**: metode `print-object` yang diinterpretasikan tidak dapat berjalan di thread
+  lain, sehingga mencetak nilai seperti itu di thread lain adalah panic yang diperlakukan sama dengan
+  `(panic ...)` (`(compile T::print-object)`, atau cetak dari tugas utama).
 - **Data race tidak terdefinisi** (posisi yang sama seperti Go). Hasil beberapa task yang mengubah
   nilai yang sama tanpa melalui `Mutex<T>` / `Chan<T>` tidak dijamin.
 - **`task` mengembalikan nilai.** Tidak seperti pernyataan `go` pada Go, ia mengembalikan `Task<T>`,

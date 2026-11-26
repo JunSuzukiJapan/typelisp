@@ -256,8 +256,180 @@ const code = await run({ write: (fd, text) => { /* 画面に出すなど */ } })
   ページの Worker の中だけなので、`sleep` を使うプログラムは Worker で実行してください。
 - 地方時（`zone` を省いた `decode-universal-time` など）は、JavaScript の `Date` が報告する
   時間帯で求めます。
-- 3.6 節で使えないものに加えて、ファイルとディレクトリの操作が**コンパイルエラー**になります。
-  標準入力は空として読まれ、`(command-line-args)` は空のベクタです。
+- 3.6 節で使えないものに加えて、ファイルとディレクトリの操作、環境変数、`(command-line-args)`、
+  ホームディレクトリ、`dribble` が**コンパイルエラー**になります。標準入力は空として読まれます。
+
+### 3.8 マイコン（Cortex-M）向けにコンパイルする
+
+`--target thumbv7em-none-eabihf` を付けると、OS の無い Cortex-M4F・M7 のボード向けの実行ファイル
+（ELF）を作ります。`--target thumbv8m.main-none-eabihf` なら Cortex-M33 のボード向けです。`-o` を
+省くと、ソースの `.typl` を `.elf` に変えた名前になります。
+
+```sh
+$ typl -c hello.typl --target thumbv7em-none-eabihf          # hello.elf ができる
+$ qemu-system-arm -M mps2-an386 -nographic \
+    -semihosting-config enable=on,target=native -kernel hello.elf   # QEMU の Cortex-M4 で実行する
+$ typl -c hello.typl --target thumbv8m.main-none-eabihf
+$ qemu-system-arm -M mps2-an505 -nographic \
+    -semihosting-config enable=on,target=native -kernel hello.elf   # QEMU の Cortex-M33 で実行する
+```
+
+- `install.sh` で入れた `typl` はそのまま使えます。`cargo install` で入れるときは、
+  `rustup target add thumbv7em-none-eabihf thumbv8m.main-none-eabihf` を実行してから `--features embedded` を付けてインストールします
+  （wasm と両方なら `--features wasm,embedded`）。リポジトリのデバッグビルドの `typl` では
+  `scripts/build-embedded-runtime.sh` を実行します。リンクには rustup の toolchain のリンカを使います。
+- ボードのメモリの配置は `--linker-script FILE` で渡します。書き方は `cortex-m-rt` の `memory.x` と同じで、
+  FLASH と RAM の番地と大きさを書きます。`_typelisp_stack_size = 32K;` のように書くと、RAM のうちスタックに
+  使う大きさになります（書かなければ 64KiB）。RAM の残りがヒープです。省いたときは QEMU の `mps2-an386`（Cortex-M33 では `mps2-an505`）
+  の配置になります。
+
+  ```
+  MEMORY
+  {
+    FLASH : ORIGIN = 0x08000000, LENGTH = 512K
+    RAM : ORIGIN = 0x20000000, LENGTH = 128K
+  }
+  _typelisp_stack_size = 16K;
+  ```
+
+- 出力・入力・終了・時刻（ボードの関数）を誰が与えるかは `--board-functions` で選びます。
+  - `semihosting`（既定）: semihosting で与えます。QEMU（`-semihosting-config enable=on`）やデバッガで動かすときに使います。
+  - `c`: ボードが C の関数で与えます。次の関数を定義したオブジェクトか静的ライブラリを `--link FILE` で渡します
+    （`--link` は何度でも書けます。`defffi` で呼ぶベンダーのライブラリも同じように渡します）。
+
+  ```c
+  void     typelisp_host_write(int32_t fd, const uint8_t *p, size_t len); // fd 1 は標準出力、2 は標準エラー
+  size_t   typelisp_host_read(int32_t fd, uint8_t *p, size_t len);        // fd 0、読んだバイト数、終わりなら 0
+  void     typelisp_host_exit(int32_t code);                              // 戻らない
+  uint64_t typelisp_host_now_us(void);                                    // 逆戻りしない時計のマイクロ秒
+  int64_t  typelisp_host_unix_us(void);                                   // 1970-01-01 からのマイクロ秒
+  void     typelisp_host_sleep_us(uint64_t us);                           // us マイクロ秒待つ
+  ```
+
+- ボードのレジスタ（メモリに割り当てられた周辺機器）は `volatile-read-u8`・`volatile-read-u16`・
+  `volatile-read-u32` で読み、`volatile-write-u8`・`volatile-write-u16`・`volatile-write-u32` で書きます。
+  番地は `int` か、`u16` などの幅のある整数で渡し、読んだ値はその幅の型（`u8` など）になります。書いた式の場所で必ず 1 回読み書きし、
+  コンパイラは省いたり並べ替えたりしません。どれも `unsafe` の中でだけ使えます。番地が負のときと、
+  幅の倍数でないときは、読み書きの前に実行時エラーになります。
+
+  ```lisp
+  ;; QEMU の mps2-an386 の UART 0: データ 0x40004000、状態 0x40004004、制御 0x40004008
+  (defun put-byte ((c u32)) ()
+    (unsafe
+      (loop (when (= (logand (volatile-read-u32 #x40004004) 1) 0) (break)))   ; 送信中なら待つ
+      (volatile-write-u32 #x40004000 c)))
+
+  (defun main () ()
+    (unsafe (volatile-write-u32 #x40004008 1))                               ; 送信を有効にする
+    (put-byte 104) (put-byte 105) (put-byte 10))                             ; "hi" と改行
+  ```
+
+- 割り込みが来たときに呼ばれる関数は、`defun` に `#[interrupt(N)]`（周辺機器の割り込み `N`）か
+  `#[exception(SysTick)]` のような属性を付けて書きます。割り込みは `(enable-interrupt N)` で有効にします。
+  ハンドラはその場で実行され、ランタイムの処理の途中に来たときだけ、その処理が終わってから実行されます。
+  ハンドラの中では待てません（`sleep` はコンパイルエラーです）。詳しくは
+  [構文リファレンス](../reference/syntax.md) の 3.17 節にあります。
+
+  ```lisp
+  (use std::board::enable-interrupt)
+
+  #[interrupt(5)]
+  (defun on-five () ()
+    (println "interrupt 5"))
+
+  (defun main () ()
+    (enable-interrupt 5)
+    (unsafe (volatile-write-u32 #xE000E200 (as u32 32))))   ; 割り込み 5 を自分で起こす（NVIC の保留レジスタ）
+  ```
+
+- 起動（ベクタテーブルと、RAM の準備）とメモリの確保はランタイムが行います。HardFault や処理されない
+  割り込みが起きると、panic と同じ終了コード（1）で終わります。
+- `throw`/`catch`/`panic`、bignum・ratio・浮動小数、タスク・チャネル・`sleep` は実行ファイルと同じに
+  振る舞います。タスクは 1 つのコアで順に実行されます。C の関数（`defffi`）も使えます。
+- ボードにないものを使うプログラムは**コンパイルエラー**になります。3.7 節で使えないものに加えて、
+  `eval`・`macroexpand` が使えません。地方時は分かりません（3.6 節と同じ）。
+- cons アリーナは 1024 セルから始まり、足りなければ伸びます。`--heap-cells`、`--max-memory`、`--no-cons`、
+  `-O<N>`、`--release` はそのまま使えます。
+
+### 3.9 Arduino Uno（AVR）向けにコンパイルする
+
+`--target avr-atmega328p` を付けると、Arduino Uno のマイコン（ATmega328P）向けの実行ファイル（ELF）を
+作ります。次のプログラムは、ボードの LED を点滅させます。
+
+```lisp
+(defconstant (PINB int) #x23)
+(defconstant (DDRB int) #x24)
+(defconstant (LED u8) 32)                         ; PB5
+
+(defun wait-a-bit () ()
+  (let ((i (the u32 0)))
+    (while (< i (the u32 400000))
+      (unsafe (volatile-read-u8 PINB))
+      (setf i (+ i 1)))
+    ()))
+
+(defun main () ()
+  (unsafe (volatile-write-u8 DDRB LED))           ; 出力にする
+  (while true
+    (unsafe (volatile-write-u8 PINB LED))         ; 反転する
+    (wait-a-bit)))
+```
+
+```sh
+$ typl -c blink.typl --target avr-atmega328p -O2   # blink.elf ができる
+$ qemu-system-avr -M uno -display none -serial stdio -bios blink.elf   # QEMU で実行する
+```
+
+- ランタイムが無いので、ランタイムを使うプログラムは**コンパイルエラー**になります。エラーには、
+  何が必要で、どの関数から届くのかが出ます。使えるのは、固定幅の整数（`i8` から `u32`）、`f32`、`f64`、`bool`、`char` の計算、
+  関数呼び出し（再帰も）、条件分岐、ループ、それらの値を持つ `defvar` と `defconstant`、`volatile-read-u8` など、C の関数の呼び出しです。
+- 使えないもの: 文字列・リスト・構造体など、ヒープに置く値。`catch`、関数値の呼び出し。文字列や関数を渡す C の関数の呼び出し。
+  `sin` や `expt` など、浮動小数の数学関数（`sqrt` と、`floor` などの丸めは使えます）。
+- 割り込みのハンドラは `#[interrupt(N)]` で書きます（[構文](../reference/syntax.md) の 3.17 節）。`N` は ATmega328P の
+  割り込みの番号で、リセットを 0 と数えた 1〜25 です（タイマ 1 のオーバーフローは 13）。下の例を見てください。
+- 0 で割ると、その場でマイコンが止まります（割り込みも来なくなります）。符号付きの最小値を `-1` で割る `/` も同じです。
+- `int` は幅が決まっていないので使えません（コンパイルエラー）。`i16` や `u16` などの幅のある型を使ってください。
+  番地も幅のある整数で計算できます。数で書いた番地や `defconstant` の `int` のように、コンパイル時に値が決まるものは使えます。
+- 再帰でスタックが足りなくなると、マイコンが止まります。
+- C の関数は `defffi` で宣言し、AVR 用にコンパイルしたオブジェクトファイルを `--link FILE` で渡します。
+- 何もしないループは `-O1` 以上で消えます。待つループの中では、レジスタを読むなどしてください。
+- `main` が終わると、マイコンは止まります。
+- メモリの配置は `--linker-script FILE` で変えられます。省いたときは、フラッシュ 32KiB から末尾のブートローダの
+  512 バイトを除いた分と、RAM 2KiB です。RAM の番地は `0x800100` のように `0x800000` を足して書きます。
+- `f32` と `f64` の計算は補助関数が行います。使った分だけ、その補助関数がフラッシュに入ります（`f64` の方が大きくなります）。
+- リンクには 3.8 節と同じ、rustup の toolchain のリンカを使います。
+
+タイマの割り込みで LED を点滅させる例です。割り込みは、周辺機器のレジスタで有効にします。
+
+```lisp
+(defconstant (PINB int) #x23)
+(defconstant (DDRB int) #x24)
+(defconstant (LED u8) 32)
+(defconstant (TIMSK1 int) #x6F)
+(defconstant (TCCR1B int) #x81)
+(defvar (ticks u16) 0)
+
+#[interrupt(13)]                                  ; タイマ 1 のオーバーフロー
+(defun on-overflow () ()
+  (unsafe (volatile-write-u8 PINB LED))           ; 反転する
+  (setf ticks (+ ticks 1))
+  ())
+
+(defun main () ()
+  (unsafe (volatile-write-u8 DDRB LED)
+          (volatile-write-u8 TIMSK1 1)            ; オーバーフローの割り込みを有効にする
+          (volatile-write-u8 TCCR1B 3))           ; クロックの 64 分の 1 で数え始める
+  (while true))
+```
+
+- ハンドラがあるプログラムは、大域変数の初期化が終わると割り込みを受け付けます。`main` の初めで周辺機器を設定してください。
+- `enable-interrupt` と `#[exception(NAME)]` は使えません（コンパイルエラー）。
+- ハンドラの実行中は、ほかの割り込みは待たされます。ハンドラは普通の関数と同じく、ランタイムを使えません。
+- 大域変数の 1 回の読み書きは、2 バイト以上の値でも途中でハンドラに割り込まれません。そのための割り込み禁止は、
+  ハンドラが書く変数を読むときと、ハンドラが読み書きする変数を書くときに行い、その変数をコンパイル時に警告で示します。読んでから書く更新
+  （`(setf n (+ n 1))`）の間には割り込みが来ます。ハンドラも書く変数を更新するときは、状態レジスタ（`#x5F` 番地）を
+  読んで取っておき、0 を書いて割り込みを止め、終わったら元の値を書き戻してください。
+- ハンドラの無い割り込みが来ると、マイコンは止まります。
 
 ## 4. ダンプ
 

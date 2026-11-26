@@ -2,17 +2,16 @@
 //!
 //! # The problem this solves
 //!
-//! Everything compiled in this workspace shares one signature —
-//! `i64 f(const i64 *args, u32 argc)`, [`compiled_fn_type`] — and every
-//! `rt_*` shim is written to match it. A C function is not written to match
-//! it. `strlen` takes a pointer and answers with a `size_t`; `sqrt` takes and
-//! answers with a `double` (in a floating-point register, which the shared
-//! signature has no way to name at all).
+//! A compiled call site names its callee to the driver, so every callee
+//! answers the coroutine ABI (`llvm_builtins::coroutine_fn_type`): it finds
+//! its arguments where the driver left them and leaves its answer in its
+//! frame. A C function is not written that way. `strlen` takes a pointer and
+//! answers with a `size_t`; `sqrt` takes and answers with a `double`.
 //!
-//! So each declaration gets a **thunk**: a function *in* the shared signature
-//! whose body unpacks `args`, converts each word to the C type declared for
-//! it, calls the real function under its real signature, and converts the
-//! answer back. One function, emitted here, in LLVM IR.
+//! So each declaration gets a **thunk**: a coroutine-ABI function whose body
+//! takes the argument words, converts them to the C types declared for them,
+//! calls the real function under its real signature, and converts the answer
+//! back. One function, emitted here, in LLVM IR.
 //!
 //! # Why that makes the rest of the compiler unaware of the FFI
 //!
@@ -25,8 +24,8 @@
 //!   body over walking forms.
 //! - **The self-hosted compiler needs no changes.** A compiled call site asks
 //!   `symbols::callee_symbol_name` for the callee's symbol and emits a call to
-//!   it; for an FFI declaration that is the thunk's own name, in the shared
-//!   signature the island always emits. The island never learns that C is
+//!   it; for an FFI declaration that is the thunk's own name, under the
+//!   ABI the island always calls. The island never learns that C is
 //!   involved, so `src/compiler.rs` — and the artifact built from it — is
 //!   untouched by any of this.
 //!
@@ -51,16 +50,18 @@ use typelisp_front::ffi_callback::CallbackSig;
 use typelisp_front::Type;
 use typelisp_mem::{ConcreteNames, TypeId, TypeShape};
 
-use crate::compile::llvm_builtins::compiled_fn_type;
+use crate::compile::carriers::{self, Carrier};
+use crate::compile::direct::DirectSig;
+use crate::compile::llvm_builtins::{pending_words, store_words};
 use crate::compile::{llvm_context, CompiledFn, COMPILE_LOCK};
 
 /// A type as the C side of the boundary sees it.
 ///
-/// A second vocabulary beside `Repr`, and the reason is [`Repr::Narrow`]: it
-/// folds all six integer widths into one, because how a value crosses the
-/// compiled boundary is the same for all of them (a sign-extended machine
-/// word). The thunk needs the other answer — `i8` really is one byte to the C
-/// function, and getting there is a `trunc`.
+/// A second vocabulary beside `Repr`, and the reason is `Repr::RawWord`: it
+/// folds `ptr`, `c-long` and `c-ulong` into one, because how a value crosses
+/// the compiled boundary is the same for all of them (an untagged word). The
+/// thunk needs the other answer — C's `long` is as wide as the target says,
+/// and a pointer is a pointer to the C function.
 ///
 /// **This enum is the one list of what the FFI can spell.** The checker
 /// deliberately does not keep a second one: it parses the declared types like
@@ -82,7 +83,7 @@ enum CType {
     /// string for one call and copied back out of one — see
     /// `typelisp_rt::rt_ffi_cstring_new` and its two siblings.
     Str,
-    /// An opaque pointer. Crosses as a raw 64-bit word in both directions —
+    /// An opaque pointer. Crosses as a raw word in both directions —
     /// see [`typelisp_front::check::repr::Repr::RawWord`] for why it may not
     /// be stored anywhere that tags what it holds.
     Ptr,
@@ -108,7 +109,7 @@ impl CType {
             _ => return None,
         };
         // Covers the six widths *and* `c-long`/`c-ulong`, which that function
-        // answers 64 for — the one place the LP64 assumption is written down.
+        // answers the target's C `long` width for.
         if let Some((bits, signed)) = typelisp_front::types::int_width_signed(&scalar) {
             return Some(CType::Int { bits, signed });
         }
@@ -122,24 +123,12 @@ impl CType {
         }
     }
 
-    /// This width as an LLVM integer type. Only the four the declarable
-    /// widths use, so there is no custom-width case to get wrong.
-    fn int_type(bits: u32) -> inkwell::types::IntType<'static> {
-        let ctx = llvm_context();
-        match bits {
-            8 => ctx.i8_type(),
-            16 => ctx.i16_type(),
-            32 => ctx.i32_type(),
-            _ => ctx.i64_type(),
-        }
-    }
-
     /// What a value of this type is, as an LLVM type — `None` for `Void`,
     /// which is not a value.
     fn llvm(self) -> Option<BasicTypeEnum<'static>> {
         let ctx = llvm_context();
         Some(match self {
-            CType::Int { bits, .. } => CType::int_type(bits).into(),
+            CType::Int { bits, .. } => crate::compile::carriers::int(bits).into(),
             CType::F32 => ctx.f32_type().into(),
             CType::F64 => ctx.f64_type().into(),
             CType::Bool => ctx.bool_type().into(),
@@ -167,24 +156,75 @@ impl CType {
     }
 }
 
-/// Emit `decl`'s thunk into `module` and answer with it.
-///
-/// The C function is declared here too, by its own name and its own
-/// signature; who resolves that name to an address is the caller's business
-/// (the JIT maps it eagerly, an AOT build leaves it to the linker).
-pub(crate) fn emit_thunk(module: &Module<'static>, decl: &FfiDecl) -> Result<FunctionValue<'static>, String> {
-    let ctx = llvm_context();
-    let builder = ctx.create_builder();
+/// The signature of `decl`'s thunk where it is a direct function
+/// ([`emit_direct_thunk`]).
+pub(crate) fn direct_sig(decl: &FfiDecl) -> Result<DirectSig, String> {
+    let carrier = |c: CType| match c {
+        CType::Int { bits, signed } => Carrier::Int { bits, signed },
+        CType::F32 => Carrier::F32,
+        CType::F64 => Carrier::F64,
+        CType::Bool => Carrier::Bool,
+        CType::Void => Carrier::Unit,
+        CType::Str | CType::Ptr => Carrier::Word,
+    };
+    let ret = CType::from_type(decl.ret).ok_or_else(|| unspellable(decl.ret, "a return type", decl))?;
+    Ok(DirectSig { params: ctypes(&decl.params, decl)?.into_iter().map(carrier).collect(), ret: carrier(ret) })
+}
 
+/// Emit `decl`'s thunk into `module` as a direct function, for a target with
+/// no runtime: a call of the C function, at the C types of its values.
+pub(crate) fn emit_direct_thunk(module: &Module<'static>, decl: &FfiDecl) -> Result<(), String> {
+    let ctx = llvm_context();
+    let b = ctx.create_builder();
+    let e = |e: inkwell::builder::BuilderError| format!("ffi: the thunk of `{}`: {}", decl.path, e);
+    let (params, ret, c_fn) = c_function(module, decl)?;
+    let thunk = module.add_function(&thunk_name(module, decl)?, direct_sig(decl)?.fn_type(), None);
+    b.position_at_end(ctx.append_basic_block(thunk, "entry"));
+    let ptr = ctx.ptr_type(inkwell::AddressSpace::default());
+    let mut args: Vec<BasicMetadataValueEnum<'static>> = Vec::with_capacity(params.len());
+    for (c, v) in params.iter().zip(thunk.get_params()) {
+        args.push(match c {
+            CType::Str => b.build_int_to_ptr(call_shim(&b, module, "rt_ffi_cstring_new", &[v.into_int_value()])?, ptr, "cstr").map_err(e)?.into(),
+            CType::Ptr => b.build_int_to_ptr(v.into_int_value(), ptr, "ptr").map_err(e)?.into(),
+            _ => v.into(),
+        });
+    }
+    let call = b.build_call(c_fn, &args, "ffi_call").map_err(e)?;
+    match call.try_as_basic_value() {
+        inkwell::values::ValueKind::Instruction(_) => b.build_return(None).map_err(e)?,
+        inkwell::values::ValueKind::Basic(v) => {
+            let v: BasicValueEnum<'static> = match ret {
+                CType::Str | CType::Ptr => {
+                    let at = b.build_ptr_to_int(v.into_pointer_value(), carriers::word(), "address").map_err(e)?;
+                    if ret == CType::Str { call_shim(&b, module, "rt_ffi_string_from_cstr", &[at])? } else { at }.into()
+                }
+                _ => v,
+            };
+            b.build_return(Some(&v)).map_err(e)?
+        }
+    };
+    Ok(())
+}
+
+/// The name of `decl`'s thunk, which `module` must not have yet.
+fn thunk_name(module: &Module<'static>, decl: &FfiDecl) -> Result<String, String> {
+    let name = ConcreteNames::symbol(&decl.path.to_string());
+    if module.get_function(&name).is_some() {
+        return Err(format!("internal error: `{}` is already defined in this module", name));
+    }
+    Ok(name)
+}
+
+/// The C function `decl` names, declared in `module` under its real
+/// signature, with its C parameter and return types.
+fn c_function(module: &Module<'static>, decl: &FfiDecl) -> Result<(Vec<CType>, CType, FunctionValue<'static>), String> {
     let params = ctypes(&decl.params, decl)?;
     let ret = CType::from_type(decl.ret).ok_or_else(|| unspellable(decl.ret, "a return type", decl))?;
-
-    // ---- the C function, under its real signature ----
     let arg_tys: Vec<BasicMetadataTypeEnum<'static>> =
         params.iter().map(|c| c.llvm().expect("a parameter is never void").into()).collect();
     let c_fn_ty = match ret.llvm() {
         Some(t) => t.fn_type(&arg_tys, false),
-        None => ctx.void_type().fn_type(&arg_tys, false),
+        None => llvm_context().void_type().fn_type(&arg_tys, false),
     };
     // Reusing an existing declaration is right when two `defffi`s name the
     // same C function, and wrong when the name is already taken by something
@@ -212,78 +252,78 @@ pub(crate) fn emit_thunk(module: &Module<'static>, decl: &FfiDecl) -> Result<Fun
     if let Some(attr) = ret.extension_attribute() {
         add_attribute(c_fn, inkwell::attributes::AttributeLoc::Return, attr);
     }
+    Ok((params, ret, c_fn))
+}
 
-    // ---- the thunk, under the shared signature ----
-    let name = ConcreteNames::symbol(&decl.path.to_string());
-    if module.get_function(&name).is_some() {
-        return Err(format!("internal error: `{}` is already defined in this module", name));
-    }
-    // The marshalling body keeps the shared `(args, argc)` signature -- it
-    // reads its arguments out of that array and returns a value, which is all
-    // a call into C ever needs. What changed in C2d is who calls *it*: a
-    // compiled Lisp caller now names its callee to the driver, so the symbol
-    // the *Lisp* name resolves to has to answer the coroutine ABI. So the
-    // body moves to a name of its own and `name` becomes a coroutine entry
-    // that copies the pending arguments into an array and calls it
-    // (`emit_coroutine_entry` below). One boundary, in one place, instead of
-    // teaching every call site which of its callees is a `defffi`.
-    let body_name = format!("{}$ffi", name);
-    let thunk = module.add_function(&body_name, compiled_fn_type(), None);
+/// Emit `decl`'s thunk into `module` and answer with it.
+///
+/// The C function is declared here too, by its own name and its own
+/// signature; who resolves that name to an address is the caller's business
+/// (the JIT maps it eagerly, an AOT build leaves it to the linker).
+pub(crate) fn emit_thunk(module: &Module<'static>, decl: &FfiDecl) -> Result<FunctionValue<'static>, String> {
+    let ctx = llvm_context();
+    let builder = ctx.create_builder();
+
+    let (params, ret, c_fn) = c_function(module, decl)?;
+
+    // ---- the thunk ----
+    let name = thunk_name(module, decl)?;
+    // A coroutine-ABI function like any other compiled one, with no `pc`
+    // dispatch and no resume block: it makes its frame, runs to completion and
+    // answers in the frame's value slot. The frame is still required — the
+    // driver takes the frame `rt_frame_open` publishes on the way back, and
+    // asks its handler slot about an unwind.
+    let thunk = module.add_function(&name, crate::compile::llvm_builtins::coroutine_fn_type(), None);
     let entry = ctx.append_basic_block(thunk, "entry");
     builder.position_at_end(entry);
 
-    let i64_ty = ctx.i64_type();
-    let args_ptr = thunk.get_nth_param(0).expect("the shared signature has two parameters").into_pointer_value();
-
-    // One scratch slot, reused: every shim call below takes exactly one word
-    // and consumes it before the next is stored. In the entry block because
-    // that is where LLVM wants an `alloca`.
-    let scratch = builder
-        .build_alloca(i64_ty, "ffi_scratch")
-        .map_err(|e| format!("ffi: failed to reserve the shim argument slot: {}", e))?;
-    let one = ctx.i32_type().const_int(1, false);
-    let shim = |name: &str| match module.get_function(name) {
-        Some(f) => f,
-        None => module.add_function(name, compiled_fn_type(), None),
-    };
+    let word_ty = carriers::word();
+    // The driver protocol's own slots, and nothing else: no locals, so no slot
+    // is rooted and there is no mask.
+    let value_words = carriers::value_words();
+    let frame = call_shim(
+        &builder,
+        module,
+        "rt_frame_open",
+        &[word_ty.const_int(typelisp_abi::frame_reserved_slots(value_words) as u64, false), word_ty.const_zero()],
+    )?;
 
     let mut call_args: Vec<BasicMetadataValueEnum<'static>> = Vec::with_capacity(params.len());
     // The C strings made for this call, to be freed once it has returned.
     let mut owned_cstrings: Vec<IntValue<'static>> = Vec::new();
-    for (i, c) in params.iter().enumerate() {
-        // `args[i]`, the word the caller put there. Its shape is the
-        // *declared* one — `encode_crossing_args` was driven by the same
-        // signature this thunk was built from.
-        let slot = unsafe {
-            builder
-                .build_gep(i64_ty, args_ptr, &[i64_ty.const_int(i as u64, false)], "arg_slot")
-                .map_err(|e| format!("ffi: failed to index the argument array: {}", e))?
-        };
-        let word = builder
-            .build_load(i64_ty, slot, "arg_word")
-            .map_err(|e| format!("ffi: failed to load an argument: {}", e))?
-            .into_int_value();
+    let mut arg_words: Vec<Vec<IntValue<'static>>> = Vec::with_capacity(params.len());
+    let mut at = 0;
+    for c in &params {
+        // The words the caller passed. Their shape is the *declared* one —
+        // `encode_crossing_args` was driven by the same signature this thunk
+        // was built from. All of them are read before anything
+        // else runs.
+        let n = c.llvm().map_or(1, carriers::words_of);
+        let words = pending_words(&builder, module, "rt_pending_arg", at, n).map_err(|e| format!("ffi: {}", e))?;
+        at += n;
+        arg_words.push(words);
+    }
+    for (c, words) in params.iter().zip(arg_words) {
         if *c == CType::Str {
-            let made = call_shim(&builder, shim("rt_ffi_cstring_new"), scratch, one, word, "cstr")?;
+            let made = call_shim(&builder, module, "rt_ffi_cstring_new", &words)?;
             owned_cstrings.push(made);
             let p = builder
                 .build_int_to_ptr(made, ctx.ptr_type(inkwell::AddressSpace::default()), "cstr_ptr")
                 .map_err(|e| format!("ffi: failed to make a pointer from a C string: {}", e))?;
             call_args.push(p.into());
         } else {
-            call_args.push(word_to_c(&builder, word, *c)?.into());
+            call_args.push(words_to_c(&builder, &words, *c)?.into());
         }
     }
 
     // Native for exactly the C call: everything it is given is a C value
     // by now, and nothing it answers is a Lisp one yet — see
     // `typelisp_rt::rt_ffi_enter_native`.
-    let zero = i64_ty.const_zero();
-    call_shim(&builder, shim("rt_ffi_enter_native"), scratch, one, zero, "native")?;
+    call_shim(&builder, module, "rt_ffi_enter_native", &[])?;
     let call = builder
         .build_call(c_fn, &call_args, "ffi_call")
         .map_err(|e| format!("ffi: failed to build the call to `{}`: {}", decl.c_symbol, e))?;
-    call_shim(&builder, shim("rt_ffi_leave_native"), scratch, one, zero, "running")?;
+    call_shim(&builder, module, "rt_ffi_leave_native", &[])?;
     let out = match call.try_as_basic_value() {
         inkwell::values::ValueKind::Basic(v) if ret == CType::Str => {
             // Copied *before* the arguments are freed: a C function that
@@ -293,146 +333,40 @@ pub(crate) fn emit_thunk(module: &Module<'static>, decl: &FfiDecl) -> Result<Fun
             // bytes that are not UTF-8 — leaks the argument strings, on a
             // path that is ending the call anyway.
             let raw = builder
-                .build_ptr_to_int(v.into_pointer_value(), i64_ty, "ret_cstr")
+                .build_ptr_to_int(v.into_pointer_value(), word_ty, "ret_cstr")
                 .map_err(|e| format!("ffi: failed to take the address of a string result: {}", e))?;
-            call_shim(&builder, shim("rt_ffi_string_from_cstr"), scratch, one, raw, "ret_str")?
+            vec![call_shim(&builder, module, "rt_ffi_string_from_cstr", &[raw])?]
         }
-        inkwell::values::ValueKind::Basic(v) => c_to_word(&builder, v, ret)?,
-        // A `void` C function still has to answer with a word, because the
-        // shared signature says so. `Repr::Unit` crosses as 0, so this is the
+        inkwell::values::ValueKind::Basic(v) => c_to_words(&builder, v, ret)?,
+        // A `void` C function still has to answer with a word. `Repr::Unit` crosses as 0, so this is the
         // same placeholder every other unit-valued call produces.
-        inkwell::values::ValueKind::Instruction(_) => i64_ty.const_zero(),
+        inkwell::values::ValueKind::Instruction(_) => vec![word_ty.const_zero()],
     };
     for made in owned_cstrings {
-        call_shim(&builder, shim("rt_ffi_cstring_free"), scratch, one, made, "freed")?;
+        call_shim(&builder, module, "rt_ffi_cstring_free", &[made])?;
     }
-    builder.build_return(Some(&out)).map_err(|e| format!("ffi: failed to build the return: {}", e))?;
-
-    emit_coroutine_entry(module, &name, thunk, params.len())
-}
-
-/// A coroutine-ABI entry point for a classic body: `i64 f(i64 frame)` that
-/// makes a frame, copies the pending arguments into an array, calls `body`
-/// under the shared `(args, argc)` signature, leaves its answer in the
-/// frame's value slot and returns `STATUS_RETURN`.
-///
-/// There is no `pc` dispatch and no resume block, because there is nothing to
-/// resume: the body runs to completion by construction. The frame is still
-/// required — the driver takes the frame `rt_frame_open` publishes on the way
-/// back, and a caller that never published one is a protocol break, not a
-/// shortcut.
-fn emit_coroutine_entry(
-    module: &Module<'static>,
-    name: &str,
-    body: FunctionValue<'static>,
-    argc: usize,
-) -> Result<FunctionValue<'static>, String> {
-    let ctx = llvm_context();
-    let i64_ty = ctx.i64_type();
-    let entry_fn = module.add_function(name, crate::compile::llvm_builtins::coroutine_fn_type(), None);
-    let builder = ctx.create_builder();
-    builder.position_at_end(ctx.append_basic_block(entry_fn, "entry"));
-
-    let shim = |n: &str| match module.get_function(n) {
-        Some(f) => f,
-        None => module.add_function(n, compiled_fn_type(), None),
-    };
-    let scratch = builder
-        .build_alloca(i64_ty, "ffi_entry_scratch")
-        .map_err(|e| format!("ffi: failed to reserve the entry scratch slot: {}", e))?;
-    let one = ctx.i32_type().const_int(1, false);
-
-    // The driver protocol's own slots, and nothing else: this entry has no
-    // locals, but a frame the driver cannot read the handler slot of is a
-    // frame it cannot ask about an unwind. No slot is rooted, so no mask.
-    let open_args = builder
-        .build_alloca(i64_ty.array_type(2), "ffi_frame_open_args")
-        .map_err(|e| format!("ffi: failed to reserve the frame's arguments: {}", e))?;
-    for (i, word) in [typelisp_abi::FRAME_RESERVED_SLOTS as u64, 0].into_iter().enumerate() {
-        let slot = unsafe {
-            builder
-                .build_gep(i64_ty, open_args, &[i64_ty.const_int(i as u64, false)], "ffi_frame_open_arg")
-                .map_err(|e| format!("ffi: failed to index the frame's arguments: {}", e))?
-        };
-        builder
-            .build_store(slot, i64_ty.const_int(word, false))
-            .map_err(|e| format!("ffi: failed to store a frame argument: {}", e))?;
-    }
-    let data = builder
-        .build_call(shim("rt_frame_open"), &[open_args.into(), ctx.i32_type().const_int(2, false).into()], "ffi_frame")
-        .map_err(|e| format!("ffi: failed to open the frame: {}", e))?;
-    let data = match data.try_as_basic_value() {
-        inkwell::values::ValueKind::Basic(v) => v.into_int_value(),
-        inkwell::values::ValueKind::Instruction(_) => return Err("internal error: rt_frame_open produced no value".to_string()),
-    };
-
-    let args = builder
-        .build_alloca(i64_ty.array_type(argc.max(1) as u32), "ffi_entry_args")
-        .map_err(|e| format!("ffi: failed to reserve the entry argument array: {}", e))?;
-    for i in 0..argc {
-        let word = call_shim(
-            &builder,
-            shim("rt_pending_arg"),
-            scratch,
-            one,
-            i64_ty.const_int(i as u64, false),
-            "ffi_pending",
-        )?;
-        let slot = unsafe {
-            builder
-                .build_gep(i64_ty, args, &[i64_ty.const_int(i as u64, false)], "ffi_entry_arg_ptr")
-                .map_err(|e| format!("ffi: failed to index the entry argument array: {}", e))?
-        };
-        builder.build_store(slot, word).map_err(|e| format!("ffi: failed to store an entry argument: {}", e))?;
-    }
-
-    let out = builder
-        .build_call(body, &[args.into(), ctx.i32_type().const_int(argc as u64, false).into()], "ffi_body")
-        .map_err(|e| format!("ffi: failed to call the marshalling body: {}", e))?;
-    crate::compile::raise_check::after_call(&builder, body).map_err(|e| format!("ffi: {}", e))?;
-    let out = match out.try_as_basic_value() {
-        inkwell::values::ValueKind::Basic(v) => v.into_int_value(),
-        inkwell::values::ValueKind::Instruction(_) => {
-            return Err("internal error: the marshalling body produced no value".to_string())
-        }
-    };
-
-    let data = builder
-        .build_int_to_ptr(data, ctx.ptr_type(inkwell::AddressSpace::default()), "ffi_frame_ptr")
-        .map_err(|e| format!("ffi: failed to take the frame's data pointer: {}", e))?;
-    let value_slot = unsafe {
-        builder
-            .build_gep(i64_ty, data, &[i64_ty.const_zero()], "ffi_value_slot")
-            .map_err(|e| format!("ffi: failed to index the frame's value slot: {}", e))?
-    };
-    builder.build_store(value_slot, out).map_err(|e| format!("ffi: failed to store the result: {}", e))?;
+    let frame = builder
+        .build_int_to_ptr(frame, ctx.ptr_type(inkwell::AddressSpace::default()), "ffi_frame")
+        .map_err(|e| format!("ffi: failed to take the frame's address: {}", e))?;
+    store_words(&builder, frame, typelisp_abi::FRAME_VALUE_SLOT, &out, "ffi_value_slot").map_err(|e| format!("ffi: failed to store the result: {}", e))?;
     builder
-        .build_return(Some(&i64_ty.const_zero()))
-        .map_err(|e| format!("ffi: failed to build the entry return: {}", e))?;
-    Ok(entry_fn)
+        .build_return(Some(&word_ty.const_int(typelisp_abi::STATUS_RETURN as u64, false)))
+        .map_err(|e| format!("ffi: failed to build the return: {}", e))?;
+    Ok(thunk)
 }
 
-/// Call a one-word `rt_*` shim: store `word` in `scratch` and call under the
-/// shared signature, which is what every shim is written to.
+/// Calls the runtime function `name` with `args` and answers its word,
+/// leaving the current function if it raised.
 fn call_shim(
     builder: &inkwell::builder::Builder<'static>,
-    f: FunctionValue<'static>,
-    scratch: inkwell::values::PointerValue<'static>,
-    one: IntValue<'static>,
-    word: IntValue<'static>,
+    module: &Module<'static>,
     name: &str,
+    args: &[IntValue<'static>],
 ) -> Result<IntValue<'static>, String> {
-    builder.build_store(scratch, word).map_err(|e| format!("ffi: failed to store a shim argument: {}", e))?;
-    let call = builder
-        .build_call(f, &[scratch.into(), one.into()], name)
-        .map_err(|e| format!("ffi: failed to call a runtime shim: {}", e))?;
+    let args: Vec<BasicValueEnum<'static>> = args.iter().map(|a| (*a).into()).collect();
+    let (f, v) = crate::compile::runtime_abi::call_word(builder, module, name, &args).map_err(|e| format!("ffi: {}", e))?;
     crate::compile::raise_check::after_call(builder, f).map_err(|e| format!("ffi: {}", e))?;
-    match call.try_as_basic_value() {
-        inkwell::values::ValueKind::Basic(v) => Ok(v.into_int_value()),
-        inkwell::values::ValueKind::Instruction(_) => {
-            Err("internal error: a runtime shim produced no value".to_string())
-        }
-    }
+    Ok(v)
 }
 
 /// Every declared parameter as a [`CType`], or an error naming the first one
@@ -467,100 +401,51 @@ fn unspellable(ty: TypeId, where_: &str, decl: &FfiDecl) -> String {
     )
 }
 
-/// The i64 the shared signature carries, as the C type the declaration named.
-fn word_to_c(
+/// The words an argument or an answer crosses in, as the C type the
+/// declaration named.
+fn words_to_c(
     builder: &inkwell::builder::Builder<'static>,
-    word: IntValue<'static>,
+    words: &[IntValue<'static>],
     c: CType,
 ) -> Result<BasicValueEnum<'static>, String> {
     let ctx = llvm_context();
-    Ok(match c {
+    let [word, ..] = words else { return Err("internal error: an argument in no words".to_string()) };
+    let carrier = match c {
         // A `ptr` is already the whole word; it only has to become a pointer.
-        CType::Ptr => builder
-            .build_int_to_ptr(word, ctx.ptr_type(inkwell::AddressSpace::default()), "arg_ptr")
-            .map_err(|e| format!("ffi: failed to make a pointer argument: {}", e))?
-            .into(),
-        CType::Int { bits: 64, .. } => word.into(),
-        CType::Int { bits, .. } => builder
-            .build_int_truncate(word, CType::int_type(bits), "arg_narrow")
-            .map_err(|e| format!("ffi: failed to narrow an integer argument: {}", e))?
-            .into(),
-        CType::Bool => builder
-            .build_int_truncate(word, ctx.bool_type(), "arg_bool")
-            .map_err(|e| format!("ffi: failed to narrow a bool argument: {}", e))?
-            .into(),
-        // A float crosses as the bits of its `f64` — that is what
-        // `encode_crossing_value` puts in the word, for `f32` too.
-        CType::F64 => builder
-            .build_bit_cast(word, ctx.f64_type(), "arg_f64")
-            .map_err(|e| format!("ffi: failed to reinterpret an f64 argument: {}", e))?,
-        CType::F32 => {
-            let wide = builder
-                .build_bit_cast(word, ctx.f64_type(), "arg_f32_wide")
-                .map_err(|e| format!("ffi: failed to reinterpret an f32 argument: {}", e))?
-                .into_float_value();
-            builder
-                .build_float_trunc(wide, ctx.f32_type(), "arg_f32")
-                .map_err(|e| format!("ffi: failed to narrow an f32 argument: {}", e))?
-                .into()
+        CType::Ptr => {
+            return Ok(builder
+                .build_int_to_ptr(*word, ctx.ptr_type(inkwell::AddressSpace::default()), "arg_ptr")
+                .map_err(|e| format!("ffi: failed to make a pointer argument: {}", e))?
+                .into())
         }
+        CType::Int { bits, signed } => Carrier::Int { bits, signed },
+        CType::Bool => Carrier::Bool,
+        CType::F32 => Carrier::F32,
+        CType::F64 => Carrier::F64,
         // Both of these are handled in `emit_thunk`, beside the runtime shims
         // they need and this converter cannot reach.
-        CType::Str | CType::Void => {
-            Err(format!("internal error: {:?} reached the scalar argument converter", c))?
-        }
-    })
+        CType::Str | CType::Void => return Err(format!("internal error: {:?} reached the scalar argument converter", c)),
+    };
+    carrier.from_words(builder, words).map_err(|e| format!("ffi: failed to convert an argument: {}", e))
 }
 
-/// What the C function answered with, as the i64 the shared signature returns.
-fn c_to_word(
+/// What the C function answered with, as the words it crosses in.
+fn c_to_words(
     builder: &inkwell::builder::Builder<'static>,
     v: BasicValueEnum<'static>,
     c: CType,
-) -> Result<IntValue<'static>, String> {
-    let ctx = llvm_context();
-    let i64_ty = ctx.i64_type();
-    Ok(match c {
-        CType::Ptr => builder
-            .build_ptr_to_int(v.into_pointer_value(), i64_ty, "ret_ptr")
-            .map_err(|e| format!("ffi: failed to take the address of a pointer result: {}", e))?,
-        CType::Int { bits, signed } => {
-            let n = v.into_int_value();
-            if bits == 64 {
-                n
-            } else if signed {
-                builder
-                    .build_int_s_extend(n, i64_ty, "ret_sext")
-                    .map_err(|e| format!("ffi: failed to widen a signed result: {}", e))?
-            } else {
-                builder
-                    .build_int_z_extend(n, i64_ty, "ret_zext")
-                    .map_err(|e| format!("ffi: failed to widen an unsigned result: {}", e))?
-            }
-        }
-        // `false`/`true` cross as 0/1, so the one bit is zero-extended.
-        CType::Bool => builder
-            .build_int_z_extend(v.into_int_value(), i64_ty, "ret_bool")
-            .map_err(|e| format!("ffi: failed to widen a bool result: {}", e))?,
-        CType::F64 => builder
-            .build_bit_cast(v.into_float_value(), i64_ty, "ret_f64")
-            .map_err(|e| format!("ffi: failed to reinterpret an f64 result: {}", e))?
-            .into_int_value(),
-        // Widened to `f64` before its bits are taken, because that is the
-        // shape the boundary carries an `f32` in — see `Repr::F32`.
-        CType::F32 => {
-            let wide = builder
-                .build_float_ext(v.into_float_value(), ctx.f64_type(), "ret_f32_wide")
-                .map_err(|e| format!("ffi: failed to widen an f32 result: {}", e))?;
-            builder
-                .build_bit_cast(wide, i64_ty, "ret_f32")
-                .map_err(|e| format!("ffi: failed to reinterpret an f32 result: {}", e))?
-                .into_int_value()
-        }
-        CType::Str | CType::Void => {
-            Err(format!("internal error: {:?} reached the scalar result converter", c))?
-        }
-    })
+) -> Result<Vec<IntValue<'static>>, String> {
+    let word_ty = carriers::word();
+    let v = match c {
+        // A `c-long` narrower than a word is the whole word here.
+        CType::Int { bits, signed: true } if bits < word_ty.get_bit_width() => builder
+            .build_int_s_extend(v.into_int_value(), word_ty, "ret_sext")
+            .map_err(|e| format!("ffi: failed to widen a signed result: {}", e))?
+            .into(),
+        CType::Str | CType::Void => return Err(format!("internal error: {:?} reached the scalar result converter", c)),
+        _ => v,
+    };
+    carriers::to_words(builder, v).map_err(|e| format!("ffi: failed to convert a result: {}", e))
 }
 
 fn add_attribute(f: FunctionValue<'static>, loc: inkwell::attributes::AttributeLoc, name: &str) {
@@ -571,18 +456,68 @@ fn add_attribute(f: FunctionValue<'static>, loc: inkwell::attributes::AttributeL
 
 /// Libraries opened so far, by the name the declaration wrote.
 ///
-/// Here rather than in `typelisp_rt::os`, which is a safe wrapper over one C
+/// Here rather than in `typelisp_rt_posix::os`, which is a safe wrapper over one C
 /// call per function and has no business holding process-wide state. Never
-/// emptied: see [`typelisp_rt::os::dl_open`] for why nothing is ever closed.
+/// emptied: see [`typelisp_rt_posix::os::dl_open`] for why nothing is ever closed.
 static OPEN_LIBS: Mutex<Option<HashMap<String, usize>>> = Mutex::new(None);
+
+thread_local! {
+    /// Whether the C functions `defffi` names are the compiled program's
+    /// target's and not this process's: set while a program for another
+    /// machine compiles on this thread ([`CFunctionsOn::target`]).
+    static C_FUNCTIONS_ON_TARGET: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// While it lives, `defffi` on this thread does not look its C function up
+/// in this process: the function is the target's, which only the
+/// executable's link finds. The interpreter's thunk then calls [`not_here`] instead.
+pub(crate) struct CFunctionsOn {
+    before: bool,
+}
+
+impl CFunctionsOn {
+    /// `on_target`: the C functions are the target's.
+    pub(crate) fn target(on_target: bool) -> CFunctionsOn {
+        CFunctionsOn { before: C_FUNCTIONS_ON_TARGET.with(|c| c.replace(on_target)) }
+    }
+}
+
+impl Drop for CFunctionsOn {
+    fn drop(&mut self) {
+        C_FUNCTIONS_ON_TARGET.with(|c| c.set(self.before));
+    }
+}
+
+/// The names of the C functions [`not_here`] stands in for, for its message:
+/// it is one function for all of them, so it cannot tell which was called.
+static NOT_HERE_NAMES: Mutex<Vec<String>> = Mutex::new(Vec::new());
+
+/// What the interpreter's thunk calls in place of the target's C function
+/// while the target's program compiles: running it here, at compile time
+/// (from a macro, say), cannot be done, and nothing it could answer would be
+/// the target's. Ends `typl` with the reason; called with whatever the C
+/// signature passes, which it reads none of.
+extern "C" fn not_here() {
+    let names = NOT_HERE_NAMES.lock().unwrap_or_else(|e| e.into_inner()).join("`, `");
+    eprintln!(
+        "error: one of the target's C functions (`{}`) was called while typl compiled the program for the \
+         target; they run only on the target",
+        names
+    );
+    std::process::exit(1)
+}
 
 /// The address `decl` names, or an error saying what was looked for and where.
 fn resolve(decl: &FfiDecl) -> Result<usize, String> {
+    if C_FUNCTIONS_ON_TARGET.with(|c| c.get()) {
+        NOT_HERE_NAMES.lock().unwrap_or_else(|e| e.into_inner()).push(decl.c_symbol.clone());
+        return Ok(not_here as *const () as usize);
+    }
     let handle = match &decl.library {
         None => 0,
         Some(lib) => open_library(lib)?,
     };
-    typelisp_rt::os::dl_sym(handle, &decl.c_symbol).ok_or_else(|| match &decl.library {
+    typelisp_rt_posix::os::dl_sym(handle, &decl.c_symbol).ok_or_else(|| match &decl.library {
         Some(lib) => format!(
             "defffi: `{}` has no symbol `{}` — the library opened, so the name is what is wrong",
             lib, decl.c_symbol
@@ -604,7 +539,7 @@ fn open_library(name: &str) -> Result<usize, String> {
     }
     let candidates = library_candidates(name);
     for c in &candidates {
-        if let Some(h) = typelisp_rt::os::dl_open(c) {
+        if let Some(h) = typelisp_rt_posix::os::dl_open(c) {
             cache.insert(name.to_string(), h);
             return Ok(h);
         }
@@ -643,13 +578,6 @@ impl CompiledBody for FfiThunk {
         self.addr
     }
 
-    /// The address is the coroutine entry `emit_thunk` puts under the Lisp
-    /// name, not the marshalling body behind it — so an interpreted caller
-    /// has to drive it like any other compiled body. Reporting classic here
-    /// made `CompiledBody::call` hand it `(args, argc)`, which the entry
-    /// answers by reading arguments that were never put in `call_state`
-    /// ("rt_pending_arg: argument 0 was not passed").
-    ///
     /// Deferred to the `CompiledFn` that resolved that entry, so the answer
     /// is stated once, where the symbol was looked up.
     fn body_abi(&self) -> u8 {
@@ -695,9 +623,6 @@ pub fn define_ffi(_interp: &Interp, decl: &FfiDecl) -> Result<Rc<dyn CompiledBod
     // it is asked to map — the same filter `driver`'s bitcode path uses.
     let mut externals: Vec<(String, usize)> = vec![(decl.c_symbol.clone(), addr)];
     externals.extend(crate::compile::runtime_externals(&module));
-    // `name` is the coroutine entry `emit_thunk` put under the Lisp name, not
-    // the classic marshalling body behind it — so that is the ABI recorded
-    // here, and `FfiThunk` reads it back rather than restating it.
     let code = CompiledFn::new(&module, &name, &externals, typelisp_abi::BODY_ABI_COROUTINE)
         .map_err(|e| format!("ffi: failed to JIT the thunk for `{}`: {}", decl.c_symbol, e))?;
     let addr = code.address();
@@ -759,7 +684,7 @@ fn emit_callback_entry(
     ret: CType,
 ) -> Result<FunctionValue<'static>, String> {
     let ctx = llvm_context();
-    let i64_ty = ctx.i64_type();
+    let word_ty = carriers::word();
     let builder = ctx.create_builder();
     let arg_tys: Vec<BasicMetadataTypeEnum<'static>> =
         params.iter().map(|c| c.llvm().expect("a callback parameter is never void").into()).collect();
@@ -780,44 +705,22 @@ fn emit_callback_entry(
         add_attribute(entry, inkwell::attributes::AttributeLoc::Return, attr);
     }
     builder.position_at_end(ctx.append_basic_block(entry, "entry"));
-    let shim = |n: &str| match module.get_function(n) {
-        Some(f) => f,
-        None => module.add_function(n, compiled_fn_type(), None),
-    };
-    let scratch = builder
-        .build_alloca(i64_ty, "cb_scratch")
-        .map_err(|e| format!("ffi: failed to reserve the callback scratch slot: {}", e))?;
-    let one = ctx.i32_type().const_int(1, false);
-    let zero = i64_ty.const_zero();
+    let zero = word_ty.const_zero();
 
-    call_shim(&builder, shim("rt_ffi_callback_enter"), scratch, one, zero, "cb_enter")?;
+    call_shim(&builder, module, "rt_ffi_callback_enter", &[])?;
 
     // `[target, n, kind0, word0, aux0, ...]` — see `rt_ffi_callback_invoke`.
-    let len = 2 + 3 * params.len();
-    let words = builder
-        .build_alloca(i64_ty.array_type(len as u32), "cb_args")
-        .map_err(|e| format!("ffi: failed to reserve the callback argument array: {}", e))?;
-    let store = |i: usize, w: IntValue<'static>| -> Result<(), String> {
-        let slot = unsafe {
-            builder
-                .build_gep(i64_ty, words, &[i64_ty.const_int(i as u64, false)], "cb_arg_slot")
-                .map_err(|e| format!("ffi: failed to index the callback argument array: {}", e))?
-        };
-        builder.build_store(slot, w).map_err(|e| format!("ffi: failed to store a callback argument: {}", e))?;
-        Ok(())
-    };
-    store(0, target)?;
-    store(1, i64_ty.const_int(params.len() as u64, false))?;
+    let mut triples: Vec<IntValue<'static>> = Vec::with_capacity(3 * params.len());
     for (i, c) in params.iter().enumerate() {
         let v = entry.get_nth_param(i as u32).expect("the entry has one parameter per declared type");
-        let (kind, word, aux) = match (c, pointees.get(i).copied().flatten()) {
+        let (kind, words, aux) = match (c, pointees.get(i).copied().flatten()) {
             // Copied into a typelisp string by the runtime, where a bad one
             // can fail inside the callback rather than here.
             (CType::Str, _) => (
                 1,
-                builder
-                    .build_ptr_to_int(v.into_pointer_value(), i64_ty, "cb_cstr")
-                    .map_err(|e| format!("ffi: failed to take a string argument's address: {}", e))?,
+                vec![builder
+                    .build_ptr_to_int(v.into_pointer_value(), word_ty, "cb_cstr")
+                    .map_err(|e| format!("ffi: failed to take a string argument's address: {}", e))?],
                 zero,
             ),
             // A typed pointer, checked by the runtime against the memory
@@ -825,34 +728,39 @@ fn emit_callback_entry(
             // the module's type table.
             (_, Some(pointee)) => {
                 let pointee = crate::compile::type_table::load(&builder, module, pointee)?;
-                (2, c_to_word(&builder, v, *c)?, pointee)
+                (2, c_to_words(&builder, v, *c)?, pointee)
             }
-            _ => (0, c_to_word(&builder, v, *c)?, zero),
+            _ => (0, c_to_words(&builder, v, *c)?, zero),
         };
-        store(2 + 3 * i, i64_ty.const_int(kind, false))?;
-        store(3 + 3 * i, word)?;
-        store(4 + 3 * i, aux)?;
-    }
-    let call = builder
-        .build_call(
-            shim("rt_ffi_callback_invoke"),
-            &[words.into(), ctx.i32_type().const_int(len as u64, false).into()],
-            "cb_value",
-        )
-        .map_err(|e| format!("ffi: failed to call the callback: {}", e))?;
-    let value = match call.try_as_basic_value() {
-        inkwell::values::ValueKind::Basic(v) => v.into_int_value(),
-        inkwell::values::ValueKind::Instruction(_) => {
-            return Err("internal error: the callback runner produced no value".to_string())
+        for word in words {
+            triples.extend([word_ty.const_int(kind, false), word, aux]);
         }
-    };
+    }
+    let mut given = vec![target, word_ty.const_int(triples.len() as u64 / 3, false)];
+    given.extend(triples);
+    let len = given.len();
+    let words = builder
+        .build_alloca(word_ty.array_type(len as u32), "cb_args")
+        .map_err(|e| format!("ffi: failed to reserve the callback argument array: {}", e))?;
+    store_words(&builder, words, 0, &given, "cb_arg_slot").map_err(|e| format!("ffi: failed to store the callback arguments: {}", e))?;
+    let (_, value) = crate::compile::runtime_abi::call(
+        &builder,
+        module,
+        "rt_ffi_callback_invoke",
+        &[words.into(), ctx.i32_type().const_int(len as u64, false).into()],
+    )
+    .map_err(|e| format!("ffi: failed to call the callback: {}", e))?;
     // Converted before the native section is re-entered, though it touches
     // no heap: every step after `rt_ffi_callback_leave` is C's.
     let out = match ret {
         CType::Void => None,
-        _ => Some(word_to_c(&builder, value, ret)?),
+        _ => {
+            let n = ret.llvm().map_or(1, carriers::words_of);
+            let words = carriers::to_words(&builder, value).map_err(|e| format!("ffi: failed to split the callback's answer: {}", e))?;
+            Some(words_to_c(&builder, &words[..n], ret)?)
+        }
     };
-    call_shim(&builder, shim("rt_ffi_callback_leave"), scratch, one, zero, "cb_leave")?;
+    call_shim(&builder, module, "rt_ffi_callback_leave", &[])?;
     match out {
         Some(v) => builder.build_return(Some(&v)),
         None => builder.build_return(None),
@@ -874,7 +782,7 @@ pub(crate) fn emit_callback_entry_in_module(
     let body = module
         .get_function(&symbol)
         .ok_or_else(|| format!("compile-file: `{}` is passed to C as a callback but was not compiled", sig.function))?;
-    let target = body.as_global_value().as_pointer_value().const_to_int(llvm_context().i64_type());
+    let target = body.as_global_value().as_pointer_value().const_to_int(crate::compile::carriers::word());
     emit_callback_entry(module, name, target, &ctypes, &pointees(&params), cret)
 }
 
@@ -919,7 +827,7 @@ pub fn callback_entry(
 
     let _guard = COMPILE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let module = llvm_context().create_module("ffi_callback");
-    let target = llvm_context().i64_type().const_int(body.address() as u64, false);
+    let target = crate::compile::carriers::word().const_int(body.address() as u64, false);
     let entry = emit_callback_entry(&module, "ffi_callback_entry", target, &ctypes, &pointees(&params), cret)?;
     let name = entry.get_name().to_str().map_err(|e| format!("ffi: entry name: {}", e))?.to_string();
     module

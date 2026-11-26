@@ -16,6 +16,7 @@
 //! printer must answer identically, and the AOT tier cannot see
 //! `typelisp-front`.
 
+use crate::prelude::*;
 use crate::{Heap, TypeId, TypeShape, Value};
 
 /// The payload `P` of `ty` when `ty` is an `Option<P>`.

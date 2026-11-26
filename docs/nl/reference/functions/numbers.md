@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/numbers.md @ 676864f7e6cf8e950e51aadacecd49695c8545a8 -->
+<!-- translated-from: docs/ja/reference/functions/numbers.md @ 1b5dc6ac828d8e4a95800a91218b5e9dffe83f98 -->
 # Getallen
 
 Bewerkingen op gehele getallen, drijvendekommagetallen, rationale getallen, complexe getallen en
@@ -73,11 +73,10 @@ ga om te rekenen over naar een type met een breedte. `c-long` / `c-ulong` hebben
 | `int->i8` … `int->u32` | `(int->W x)` | `T→W` | Dezelfde breedteconversies als hoofdstuk 1. Waarden die niet passen worden afgekapt |
 | `try-int->i8` … `try-int->u32` | `(try-int->W x)` | `T→Option<W>` | Dezelfde conversie als vraag |
 | `int->c-long` `int->c-ulong` | `(int->W x)` | `T→W` | De weg naar binnen, vanuit het andere ruwe woord en vanuit de gehele types van hoofdstuk 1 |
-| `try-int->c-long` `try-int->c-ulong` | `(try-int->W x)` | `T→Option<W>` | Idem |
 | `int->int` | `(int->int x)` | `T→int` | **Altijd exact**. De eerlijke manier om een `size_t` te lezen die niet in een `i32` past |
 
 `(as i32 x)` / `(try-as i32 x)` / `(as int x)` / `(as c-ulong n)` zijn wat deze doen, en de
-conversies bestaan voor elk paar met de gehele types van hoofdstuk 1. `ptr` heeft deze tabel niet
+conversies bestaan voor elk paar met de gehele types van hoofdstuk 1. Er is geen `try-`-vorm naar een ruw woord: `Option<c-long>` zou een ruw woord in een ander type stoppen, en dat kan niet worden geschreven. `ptr` heeft deze tabel niet
 eens: er is geen manier om een pointer als getal te lezen. Het is een waarde die alleen wordt
 doorgegeven, ontvangen en aan een andere C-functie overgedragen.
 
@@ -146,6 +145,7 @@ fixnum past is een runtimefout ("an integer argument does not fit a fixnum").
 | `log` (twee argumenten) | `(log x base)` | `(f64,f64)→f64` | Logaritme met een gegeven grondtal. Wordt uitgebreid tot `(/ (log x) (log base))` (hoofdstuk 8) |
 | `floor-div` `ceiling-div` `round-div` `truncate-div` | `(op a b)` | `(f64,f64)→cons-cell<f64,f64>` | Komen overeen met de versies met twee argumenten van CL (`(floor 7.0 2.0)`→quotiënt 3, rest 1). Hetzelfde ontwerp als de functies met dezelfde naam in hoofdstuk 1 (`car`=quotiënt, `cdr`=rest) |
 | `float->int` | `(float->int x)` | `f64→int` | Converteert naar `int` door af te kappen richting nul (`truncate` van CL; exact voor eindige waarden van elke grootte). Geeft een panic bij oneindig en NaN. Gebruik voor een vaste breedte `(as i32 x)` |
+| `float->i8` `float->i16` `float->i32` `float->u8` `float->u16` `float->u32` | `(op x)` | `f64→i8` | De lage bits van wat `float->int` geeft, als dat type (zonder omweg via `int`). Oneindig en NaN geven een panic. Wat `(as i16 x)` is |
 | `float->ratio` | `(float->ratio x)` | `f64→ratio` | Converteert naar een `ratio` als het exacte binaire rationale getal (`rational` van CL) |
 | `float->f32` `float->f64` | `(op x)` | `f64→f32` / `f64→f64` | Converteert tussen drijvendekommabreedtes. `float->f32` rondt af naar het dichtstbijzijnde, `float->f64` is altijd exact. Wat `(as f32 x)` doet |
 | `try-float->f32` `try-float->f64` | `(op x)` | `f64→Option<f32>` / `→Option<f64>` | Dezelfde conversie als vraag. `None` als afronden de waarde verandert (verbreden naar `f64` is altijd `Some`). Wat `(try-as f32 x)` doet |
@@ -339,7 +339,7 @@ Constanten voor numerieke grenzen (CLHS 12.1.4.2 / 12.1.3):
 
 | Naam | Type | Beschrijving |
 |---|---|---|
-| `most-positive-fixnum` / `most-negative-fixnum` | `int` | De boven- / ondergrens van een directe waarde van 63 bits (2^62-1 / -2^62). Een `int` daarbuiten wordt een bignum |
+| `most-positive-fixnum` / `most-negative-fixnum` | `int` | De boven- / ondergrens van een directe waarde van 63 bits (2^62-1 / -2^62; op wasm32 en Cortex-M 31 bits, 2^30-1 / -2^30). Een `int` daarbuiten wordt een bignum |
 | `most-positive-double-float` / `most-negative-double-float` | `f64` | De grootste / kleinste eindige waarden |
 | `least-positive-double-float` / `least-negative-double-float` | `f64` | De kleinste grootte ongelijk aan nul, inclusief subnormale getallen |
 | `least-positive-normalized-double-float` / `least-negative-normalized-double-float` | `f64` | Hetzelfde, beperkt tot genormaliseerde getallen |

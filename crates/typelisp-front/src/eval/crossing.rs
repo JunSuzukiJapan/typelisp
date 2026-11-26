@@ -166,7 +166,7 @@ pub fn park_for_compiled(error: EvalError) {
 /// interpreted error would answer no and travel straight past a `catch` that
 /// should have claimed it. Parking it as a throw is what makes "the throw
 /// crossed an interpreted frame on its way" invisible to the catcher, which is
-/// the whole point of a dynamic exit.
+/// The whole point of a dynamic exit.
 ///
 /// Only `Interp`'s `rt_apply_interpreted`/`rt_dyn_slot_closure` hooks call
 /// this.

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/ffi.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
+<!-- translated-from: docs/ja/guide/ffi.md @ dff3b51792f6d9c49bb8802bd3d3fb6e168edd92 -->
 # C FFI（defffi）
 
 本指南说明如何从 typelisp 调用 C 函数。可以声明的类型和限制一览见
@@ -45,7 +45,7 @@
 | `bool` | `bool`（`_Bool`） |
 | `()` | `void` |
 | `string` | `const char *` |
-| `c-long` / `c-ulong` | `long` / `unsigned long`（也包括 `size_t`、`int64_t` 等） |
+| `c-long` / `c-ulong` | `long` / `unsigned long`（也包括 `size_t` 等） |
 | `ptr` | 任意指针（`void *`、`FILE *` 等） |
 | `(ptr T)` | 指向 `T` 的指针（[第 7 节](#7-c-结构体)） |
 
@@ -58,10 +58,10 @@
 
 ### `c-long` / `c-ulong` / `ptr`
 
-这些类型只用于跨越与 C 的边界传值，**不能进行算术运算**。要作为 typelisp 的整数使用时，用 `as` 转换。
+这些类型只用于跨越与 C 的边界传值，**不能进行算术运算**。要作为 typelisp 的整数使用时，用 `as` 转换。宽度与程序运行所在机器上的 C 相同（在 64 位的 macOS 和 Linux 上，`c-long` 和指针都是 64 位；`--target` 指定 wasm32 或 Cortex-M 时为 32 位）。
 
 ```lisp
-(as int (unsafe (c-strlen s)))      ; int 不会丢失 64 位的值
+(as int (unsafe (c-strlen s)))      ; int 不会丢失值
 (try-as i32 (unsafe (c-strlen s)))  ; 放不进 i32 时为 None
 (unsafe (c-malloc 16))              ; 整数字面量可以直接传递
 ```

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/format.md @ 59f6f286d9081f10d4e2d72836362c3efc3e42af -->
+<!-- translated-from: docs/ja/reference/functions/format.md @ 9657f5a39527be80deea76fe60ecc58ab1752689 -->
 # Directivas de formato
 
 Las directivas que se escriben en las cadenas de control de `print`/`println`/`format`. Cubren casi todas
@@ -109,13 +109,14 @@ indican si la directiva lleva `:` y `@`.
 - La resolución del nombre es la misma que la de una llamada ([Referencia de sintaxis 3.10](../syntax.md#310-module--use--espacios-de-nombres)). Si
   el tipo del argumento tiene un método `name`, se llama a ese; si no, a la función visible `name`. Una
   función de un módulo se puede nombrar por su ruta (`~/m::shout/`).
-- Lo que se puede llamar es una función o un método escrito en typelisp que recibe el argumento, `colon`
-  y `at` tal cual y devuelve un `string`. No se pueden llamar funciones incorporadas.
+- Lo que se llama es una función o un método que recibe el argumento, `colon` y `at` y devuelve un
+  `string`. También se pueden llamar los incorporados.
 - **A qué se llama se decide al comprobar.** El comprobador busca todos los argumentos que pueden llegar
   a ese `~/name/`, teniendo en cuenta los movimientos de `~*` y `~[`, y resuelve el nombre con el tipo de
-  cada uno. Si alguno no se puede resolver es un error al comprobar, y también lo es el caso en que los
-  argumentos que pueden llegar llamarían a dos definiciones distintas. En ejecución no se busca ningún
-  nombre, así que funciona igual en los ejecutables AOT.
+  cada uno. Si alguno no se puede resolver es un error al comprobar. Los argumentos que pueden llegar
+  pueden llamar a definiciones distintas según su tipo; en ejecución se llama a la del tipo del argumento
+  que llega de verdad. En ejecución no se busca ningún nombre, así que funciona igual en los ejecutables
+  AOT.
 - **No se puede usar dentro de `~{`, `~:{`, `~:@{` ni `~<...~:>`** (error al comprobar). El tipo de los
   elementos de un argumento lista es `Sexpr`, que no sirve para decidir a qué llamar. `~@{` recorre los
   argumentos restantes de la llamada, cuyos tipos se conocen, así que ahí sí se puede usar.

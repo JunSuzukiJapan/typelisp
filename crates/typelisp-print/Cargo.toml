@@ -24,9 +24,12 @@ name = "typelisp_print"
 [dependencies]
 # `~r`/`~d`'s radix printing and `~f`/`~e`/`~$`'s float formatting reach for
 # `ToPrimitive`; nothing else here needs the numeric stack.
-num-traits = "0.2"
+num-traits = { version = "0.2", default-features = false }
 typelisp-abi.workspace = true
 typelisp-mem.workspace = true
-# `PrintShared`'s lock (`docs/dev/os-threads-design.md` §5/Phase 1d) —
-# non-poisoning, same as `typelisp-mem`'s `HeapShared` already uses.
-parking_lot = "0.12"
+
+# `std` (on by default) is what every host build has. Without it (a
+# microcontroller) the crate is `no_std` + `alloc`.
+[features]
+default = ["std"]
+std = ["typelisp-abi/std", "typelisp-mem/std", "num-traits/std"]

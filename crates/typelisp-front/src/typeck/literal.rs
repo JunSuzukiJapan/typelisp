@@ -115,8 +115,9 @@ fn int_lit_ty(expected: Option<&Type>) -> Type {
 /// program states a number and a type independently, so it is refused here
 /// rather than cut: a cut is spelled `(as u8 300)`.
 fn int_lit_in_range(n: i64, ty: &Type) -> bool {
-    match crate::types::int_width_signed(ty) {
-        Some((width, signed)) => crate::types::normalize_int(n, width, signed) == n,
+    use typelisp_mem::fixed::{Fixed, FixedType};
+    match crate::types::int_width_signed(ty).and_then(|(width, signed)| FixedType::of(width, signed)) {
+        Some(t) => typelisp_mem::with_fixed!(t, T => T::from_i128(i128::from(n)).is_some()),
         None => true,
     }
 }

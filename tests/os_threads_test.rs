@@ -247,14 +247,16 @@ fn tasks_started_by_an_initialiser_are_there_for_main() {
     );
 }
 
-/// `TYPELISP_THREADS` that is not a thread count stops the program before it
-/// runs, rather than being quietly replaced by some other number.
+/// `TYPELISP_THREADS` that is not a thread count stops a program that has
+/// tasks to step before it runs, rather than being quietly replaced by some
+/// other number. (A program with no task runs without a scheduler, and has
+/// no threads to count.)
 #[test]
 fn a_thread_count_that_is_not_one_is_refused() {
     let dir = tmp_dir();
     let src_path = dir.join("threads_bad_env.typl");
     let out_path = dir.join("threads_bad_env");
-    std::fs::write(&src_path, "(defun main () int (progn (println \"ran\") 0))").unwrap();
+    std::fs::write(&src_path, "(defun one () int 1) (defun main () int (progn (println \"ran ~a\" (wait (task (one)))) 0))").unwrap();
     typelisp::compile::aot::compile_file(src_path.to_str().unwrap(), out_path.to_str().unwrap())
         .expect("compile_file failed");
     for bad in ["0", "four", "-1"] {

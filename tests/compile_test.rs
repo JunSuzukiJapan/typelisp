@@ -7,6 +7,7 @@
 //! exercises `HashTable<K,V>`.
 
 extern crate typelisp;
+mod common;
 use typelisp::compile::orc::JitCode;
 use inkwell::module::Module;
 use std::cell::RefCell;
@@ -30,7 +31,7 @@ use typelisp::{load_compiler, load_prelude, Checker, Error, EvalError, Heap, Int
 fn run_coroutine_entry(engine: &JitCode, heap: &mut Heap, name: &str, args: &[i64]) -> i64 {
     let entry = unsafe { function::<typelisp::compile::coroutine::CoroutineFn>(engine, name) };
     let mut stack = typelisp::compile::coroutine::FrameStack::new();
-    stack.run(heap, entry, args).expect("the chain ran to an answer")
+    stack.run(heap, entry, &args.iter().map(|a| *a as typelisp_mem::Word).collect::<Vec<_>>()).expect("the chain ran to an answer")
 }
 
 fn run(src: &str) -> Result<Value, EvalError> {
@@ -433,14 +434,14 @@ fn a_freshly_built_module_verifies_successfully() {
 
 /// The self-hosted compiler body (`src/compiler.rs`'s `compile-value`/
 /// `compile-function`) compiling the exact shape `ast_bridge::ast_to_sexpr`
-/// produces for `Expr::Int` — `'(int-any-width 0 42)` here stands in for what the bridge
+/// produces for `Expr::Int` — `'(int-any-width 0 0 42)` here stands in for what the bridge
 /// would build from the real typed AST (the Rust-side `ast_bridge` unit
 /// tests already cover that translation in isolation; this covers the
 /// compiler body consuming it). No parameters, hence the empty `'()`.
 #[test]
 fn the_compiler_body_compiles_an_int_literal_node() {
     let ir = eval_string_in_island(
-        r#"(to-string (compile-function (llvm-module::create "mod") "answer" '() '(int-any-width 0 42)))"#,
+        r#"(to-string (compile-function (llvm-module::create "mod") "answer" '() '(int-any-width 0 0 42)))"#,
     );
     assert!(ir.contains("define i64 @answer(i64"), "IR was:\n{}", ir);
     // The value goes into the frame's slot 0 and the function returns a
@@ -470,7 +471,7 @@ fn the_compiler_body_compiles_an_int_literal_node() {
 #[test]
 fn the_compiler_body_compiles_a_two_parameter_addition() {
     let module = expect_llvm_module(eval_ok_in_island(
-        r#"(compile-function (llvm-module::create "mod") "add2" '((a . 0) (b . 0)) '(assoc i32 "+" true "tl_std::primitive::i32''+" (0 var "a" false) (0 var "b" false)))"#,
+        r#"(compile-function (llvm-module::create "mod") "add2" '((a . -65) (b . -65)) '(assoc i32 "+" true "tl_std::primitive::i32''+" 65 (0 var "a" false) (0 var "b" false)))"#,
     ));
     // See `compile::COMPILE_LOCK`'s doc comment — every LLVM-Context-touching
     // call, even from a test driving the raw builtins directly rather than
@@ -496,7 +497,7 @@ fn the_compiler_body_compiles_a_two_parameter_addition() {
 #[test]
 fn the_compiler_body_compiles_a_labels_form_with_a_sibling_call() {
     let module = expect_llvm_module(eval_ok_in_island(
-        r#"(compile-function (llvm-module::create "mod") "outer" '() '(labels () (("f" ((x . 0)) (apply "g" (0 var "x" false))) ("g" ((n . 0)) (var "n" false))) (apply "f" (0 int-any-width 0 5))))"#,
+        r#"(compile-function (llvm-module::create "mod") "outer" '() '(labels () (("f" ((x . 0)) (apply "g" 0 (0 var "x" false))) ("g" ((n . 0)) (var "n" false))) (apply "f" 0 (0 int-any-width 0 0 5))))"#,
     ));
     let _guard = COMPILE_LOCK.lock().unwrap();
     // Every compiled function allocates its activation record on the GC heap
@@ -513,7 +514,7 @@ fn the_compiler_body_compiles_a_labels_form_with_a_sibling_call() {
 /// captured list (`"offset"`, `outer`'s own first parameter) — through
 /// `declare-labels-siblings`'s `add-function-with-env` branch,
 /// `compile-labels-bodies`'s `bind-captures`, and `compile-apply`'s
-/// `build-call-with-env` branch, none of which the Stage 1 sibling-call
+/// `coroutine-call-env` branch, none of which the Stage 1 sibling-call
 /// test above exercises (its captured list is always empty).
 #[test]
 fn the_compiler_body_compiles_a_labels_form_that_captures_an_outer_scope_value() {
@@ -531,7 +532,7 @@ fn the_compiler_body_compiles_a_labels_form_that_captures_an_outer_scope_value()
     let module = expect_llvm_module(eval_ok_in_island(
         r#"(let ((m (llvm-module::create "mod")))
              (let ((ignored (add-function m "rt_push_sexpr_root"))) ())
-             (compile-function m "outer" '((offset . 0) (n . 0)) '(labels ((offset . 0)) (("rec" ((k . 0)) (assoc i32 "+" true "tl_std::primitive::i32''+" (0 var "k" false) (0 var "offset" false)))) (apply "rec" (0 var "n" false)))))"#,
+             (compile-function m "outer" '((offset . -65) (n . -65)) '(labels ((offset . -65)) (("rec" ((k . -65)) (assoc i32 "+" true "tl_std::primitive::i32''+" 65 (0 var "k" false) (0 var "offset" false)))) (apply "rec" 65 (0 var "n" false)))))"#,
     ));
     let _guard = COMPILE_LOCK.lock().unwrap();
     // Every compiled function allocates its activation record on the GC heap
@@ -598,7 +599,7 @@ fn a_function_using_load_arg_and_build_add_computes_correctly() {
     assert_eq!(unsafe { add2(argv.as_ptr(), argv.len() as u32) }, 7);
 }
 
-/// `get-function`/`alloca-args`/`store-arg`/`build-call`: a direct call from
+/// `get-function`/`arg-list`/`slot-set`/`build-call`: a direct call from
 /// one compiled function to another *already declared in the same module*
 /// — the primitive every statically-resolvable call (self-recursion,
 /// `labels` siblings, top-level `defun`-to-`defun`) is built on (labels
@@ -623,12 +624,12 @@ fn a_function_can_directly_call_another_function_in_the_same_module() {
                   (let ((builder2 (%core::llvm-builder::create)))
                     (position-at-end builder2 b2)
                     (let ((n (load-arg builder2 quad-fn 0)))
-                      (let ((args1 (alloca-args builder2 1)))
-                        (store-arg builder2 args1 0 n)
-                        (let ((doubled (build-call builder2 (get-function m "double") args1 1)))
-                          (let ((args2 (alloca-args builder2 1)))
-                            (store-arg builder2 args2 0 doubled)
-                            (build-ret builder2 (build-call builder2 (get-function m "double") args2 1))))))))
+                      (let ((args1 (arg-list builder2 1)))
+                        (slot-set builder2 args1 0 n)
+                        (let ((doubled (build-call builder2 (get-function m "double") args1)))
+                          (let ((args2 (arg-list builder2 1)))
+                            (slot-set builder2 args2 0 doubled)
+                            (build-ret builder2 (build-call builder2 (get-function m "double") args2))))))))
                 m))))
         (build-quadruple-module)
     "#;
@@ -643,8 +644,7 @@ fn a_function_can_directly_call_another_function_in_the_same_module() {
 /// `build-make-closure`/`coroutine-apply`: a `BoxedObj::CompiledClosure`
 /// wrapping a capturing function (`add_offset`, declared via
 /// `add-function-with-env`, adding its one logical argument to a captured
-/// value), called *indirectly* through the closure value rather than
-/// `build-call-with-env`'s direct, statically-known-target path
+/// value), called *indirectly* through the closure value
 /// (labels/closures Stage 4) — no `ast_bridge`/`compiler.rs` involvement,
 /// raw builtins only, the same way Phase 0/1's and Stage 1's own raw-builtin
 /// tests preceded their self-hosted-compiler-body counterparts.
@@ -696,16 +696,16 @@ fn a_closure_made_from_a_capturing_function_can_be_called_indirectly() {
               (position-at-end builder2 b2)
               (coroutine-begin builder2 m caller-fn)
               (let* ((closure-slot (frame-slot builder2))
-                     (env-arr (alloca-args builder2 1))
-                     (args-arr (alloca-args builder2 1)))
-                (store-arg builder2 env-arr 0 (const-word builder2 100))
-                (store-arg builder2 closure-slot 0
-                           (build-make-closure builder2 m add-offset-fn env-arr 1 0 0))
-                (store-arg builder2 args-arr 0 (const-word builder2 5))
+                     (env-arr (arg-list builder2 1))
+                     (args-arr (arg-list builder2 1)))
+                (slot-set builder2 env-arr 0 (const-word builder2 100))
+                (slot-set builder2 closure-slot 0
+                           (build-make-closure builder2 m add-offset-fn env-arr 0 0))
+                (slot-set builder2 args-arr 0 (const-word builder2 5))
                 (coroutine-end builder2 m
                                (coroutine-apply builder2 m
-                                                (load-raw builder2 closure-slot 0)
-                                                args-arr 1))))
+                                                (slot-get builder2 closure-slot 0)
+                                                args-arr 0))))
             m))
         (build-and-run-closure-module)
     "#;
@@ -742,6 +742,17 @@ fn compile_dispatches_a_defun_call_to_native_code() {
         Value::Int(n) => assert_eq!(n, 42),
         other => panic!("expected an Int, got {:?}", other),
     }
+}
+
+/// A quoted float keeps its value and its width in compiled code.
+#[test]
+fn a_compiled_quoted_float_is_the_float() {
+    let src = r#"
+        (defun f () Option<Sexpr> (quote (1.5 2)))
+        (compile f)
+        (equal (f) (quote (1.5 2)))
+    "#;
+    assert!(expect_bool(eval_ok_with_compiler(src)));
 }
 
 /// A quoted symbol keeps the module that owns it when it crosses into
@@ -961,8 +972,8 @@ fn the_compiler_body_compiles_a_call_to_another_compiled_function() {
     let module = expect_llvm_module(eval_ok_in_island(
         r#"
         (let ((m (llvm-module::create "mod")))
-          (compile-function m "double" '((x . 0)) '(assoc i32 "+" true "tl_std::primitive::i32''+" (0 var "x" false) (0 var "x" false)))
-          (compile-function m "quadruple" '((n . 0)) '(call "double" (0 call "double" (0 var "n" false)))))
+          (compile-function m "double" '((x . -65)) '(assoc i32 "+" true "tl_std::primitive::i32''+" 65 (0 var "x" false) (0 var "x" false)))
+          (compile-function m "quadruple" '((n . -65)) '(call "double" 65 (0 call "double" 65 (0 var "n" false)))))
         "#,
     ));
     let _guard = COMPILE_LOCK.lock().unwrap();
@@ -986,7 +997,7 @@ fn the_compiler_body_compiles_a_call_to_another_compiled_function() {
 #[test]
 fn the_compiler_body_compiles_a_self_referencing_call() {
     let ir = eval_string_in_island(
-        r#"(to-string (compile-function (llvm-module::create "mod") "f" '((n . 0)) '(call "f" (0 var "n" false))))"#,
+        r#"(to-string (compile-function (llvm-module::create "mod") "f" '((n . -65)) '(call "f" 65 (0 var "n" false))))"#,
     );
     assert!(ir.contains("define i64 @f(i64"), "IR was:\n{}", ir);
     // The self-call is no longer an LLVM `call` at all: it names `f` to the
@@ -1590,7 +1601,7 @@ fn the_compiler_body_boxes_a_bare_labels_sibling_reference() {
     let module = expect_llvm_module(eval_ok_in_island(
         r#"(let ((m (llvm-module::create "mod")))
              (let ((ignored-new (add-function m "rt_coroutine_closure_new"))) ())
-             (compile-function m "outer" '() '(labels () (("f" ((n . 0)) (var "n" false))) (apply-indirect (var "f" true) (0 int-any-width 0 5)))))"#,
+             (compile-function m "outer" '() '(labels () (("f" ((n . 0)) (var "n" false))) (apply-indirect (var "f" true) 0 (0 int-any-width 0 0 5)))))"#,
     ));
     let _guard = COMPILE_LOCK.lock().unwrap();
     let engine = jit(&module);
@@ -1617,7 +1628,7 @@ fn the_compiler_body_boxes_a_bare_labels_sibling_reference_that_captures_an_oute
     let module = expect_llvm_module(eval_ok_in_island(
         r#"(let ((m (llvm-module::create "mod")))
              (let ((ignored-new (add-function m "rt_coroutine_closure_new"))) ())
-             (compile-function m "outer" '((offset . 0) (n . 0)) '(labels ((offset . 0)) (("rec" ((k . 0)) (assoc i32 "+" true "tl_std::primitive::i32''+" (0 var "k" false) (0 var "offset" false)))) (apply-indirect (var "rec" true) (0 int-any-width 0 5)))))"#,
+             (compile-function m "outer" '((offset . -65) (n . -65)) '(labels ((offset . -65)) (("rec" ((k . -65)) (assoc i32 "+" true "tl_std::primitive::i32''+" 65 (0 var "k" false) (0 var "offset" false)))) (apply-indirect (var "rec" true) 65 (0 int-any-width 65 0 5)))))"#,
     ));
     let _guard = COMPILE_LOCK.lock().unwrap();
     let engine = jit(&module);
@@ -1645,7 +1656,7 @@ fn the_compiler_body_boxes_a_labels_sibling_that_bare_references_itself() {
     let ir = eval_string_in_island(
         r#"(let ((m (llvm-module::create "mod")))
              (let ((ignored (add-function m "rt_coroutine_closure_new"))) ())
-             (to-string (compile-function m "outer" '() '(labels () (("f" () (var "f" true))) (apply "f")))))"#,
+             (to-string (compile-function m "outer" '() '(labels () (("f" () (var "f" true))) (apply "f" 0)))))"#,
     );
     assert!(ir.contains("call i64 @rt_coroutine_closure_new"), "IR was:\n{}", ir);
 }
@@ -1920,8 +1931,8 @@ fn the_compiler_body_compiles_a_bool_literal_node() {
 #[test]
 fn the_compiler_body_compiles_an_integer_comparison() {
     let module = expect_llvm_module(eval_ok_in_island(
-        r#"(compile-function (llvm-module::create "mod") "lt" '((a . 0) (b . 0))
-              '(assoc i32 "<" true "tl_i32''<" (0 var "a" false) (0 var "b" false)))"#,
+        r#"(compile-function (llvm-module::create "mod") "lt" '((a . -65) (b . -65))
+              '(assoc i32 "<" true "tl_i32''<" 65 (0 var "a" false) (0 var "b" false)))"#,
     ));
     let _guard = COMPILE_LOCK.lock().unwrap();
     // Every compiled function allocates its activation record on the GC heap
@@ -1959,9 +1970,9 @@ fn the_compiler_body_compiles_an_integer_comparison() {
 #[test]
 fn the_compiler_body_compiles_an_if_expression() {
     let module = expect_llvm_module(eval_ok_in_island(
-        r#"(compile-function (llvm-module::create "mod") "maxab" '((a . 0) (b . 0))
+        r#"(compile-function (llvm-module::create "mod") "maxab" '((a . -65) (b . -65))
               '(if false
-                   (assoc i32 ">" true "tl_i32''>" (0 var "a" false) (0 var "b" false))
+                   (assoc i32 ">" true "tl_i32''>" 65 (0 var "a" false) (0 var "b" false))
                    (var "a" false)
                    (var "b" false)))"#,
     ));
@@ -1984,9 +1995,9 @@ fn the_compiler_body_compiles_an_if_expression() {
 #[test]
 fn let_shadowing_is_correctly_restored_after_the_let_ends() {
     let module = expect_llvm_module(eval_ok_in_island(
-        r#"(compile-function (llvm-module::create "mod") "shadow_test" '((x . 0))
-              '(assoc i32 "+" true "tl_i32''+"
-                 (0 let (((x . 0) . (int-any-width 0 99))) (var "x" false))
+        r#"(compile-function (llvm-module::create "mod") "shadow_test" '((x . -65))
+              '(assoc i32 "+" true "tl_i32''+" 65
+                 (0 let (((x . 0) . (int-any-width 65 0 99))) (var "x" false))
                  (0 var "x" false)))"#,
     ));
     let _guard = COMPILE_LOCK.lock().unwrap();
@@ -2838,8 +2849,8 @@ fn compile_transitively_compiles_a_called_user_method() {
 ///
 /// `ash`'s distance became an `int` (from "another value of the receiver's
 /// type", which made right shift unwritable on unsigned widths). Nothing in
-/// the island changed — the distance was always passed as a raw word and
-/// `rt_int_ash` always read it as signed — and this test is what says so
+/// the island changed — the distance is passed as a raw word and read as
+/// signed (`build-fixed-binop`'s `ash`) — and this test is what says so
 /// rather than assuming it.
 #[test]
 fn a_negative_shift_distance_lowers_at_every_width() {
@@ -3469,14 +3480,13 @@ fn compile_dispatches_a_user_method_on_a_primitive_receiver() {
     assert_eq!(v, Value::Bool(true));
 }
 
-/// The same on a narrow integer: the prelude's `i8::rem` (body
-/// `(- self (* b (/ self b)))`) compiles natively and a compiled caller
-/// reaches it through `compile-assoc-user`'s mangled-name call.
+/// `rem` on a narrow integer is a built-in method, lowered in place at the
+/// receiver's width (`build-fixed-binop`): truncated, so `7 rem 3` is `1`
+/// and `-8 rem 3` is `-2`.
 #[test]
 fn compile_dispatches_rem_on_a_narrow_integer_receiver() {
     let v = run_with_compiler_and_prelude(
         r#"
-        (compile i8::rem)
         (defun rem-sum ((a i8) (b i8) (c i8)) i8 (+ (rem a c) (rem b c)))
         (compile rem-sum)
         (rem-sum (the i8 7) (the i8 -8) (the i8 3))
@@ -3486,22 +3496,20 @@ fn compile_dispatches_rem_on_a_narrow_integer_receiver() {
     assert_eq!(v, Value::Int(-1));
 }
 
-/// A user method on a *primitive* receiver (the prelude's `u8::rem`) is
-/// transitively compiled too: `(compile run)` pulls in `u8::rem` on demand.
-/// Its own body is native arithmetic (lowered in-place by `compile-assoc`,
-/// no further call), so the recursion bottoms out immediately.
+/// A prelude method on a *primitive* receiver (`i32::gcd`) is transitively
+/// compiled too: `(compile run)` pulls it in on demand.
 #[test]
 fn compile_transitively_compiles_a_called_primitive_receiver_method() {
     let v = run_with_compiler_and_prelude(
         r#"
-        (defun rem2 ((a u8) (b u8)) u8 (rem a b))
-        (defun run () int (if (= (rem2 (the u8 7) (the u8 3)) (the u8 1)) (if (= (rem2 (the u8 6) (the u8 3)) (the u8 0)) 1 0) 0))
+        (defun gcd2 ((a i32) (b i32)) i32 (gcd a b))
+        (defun run () int (if (= (gcd2 (the i32 12) (the i32 18)) (the i32 6)) (if (= (gcd2 (the i32 7) (the i32 0)) (the i32 7)) 1 0) 0))
         (compile run)
         (run)
         "#,
     )
-    .expect("transitive compile of `u8::rem` should succeed");
-    assert_eq!(v, Value::Int(1), "rem2(7,3) is 1 and rem2(6,3) is 0, with `u8::rem` auto-compiled");
+    .expect("transitive compile of `i32::gcd` should succeed");
+    assert_eq!(v, Value::Int(1), "gcd2(12,18) is 6 and gcd2(7,0) is 7, with `i32::gcd` auto-compiled");
 }
 
 /// `string`'s builtin `equal` (content comparison, `rt_str_eq`) and `<`
@@ -3895,7 +3903,7 @@ fn compile_match_distinguishes_float_bignum_and_ratio_boxes() {
 /// round-trips each one's value back out.
 ///
 /// Both halves are new machinery: `compile-construct-sexpr` boxes through
-/// `rt_narrow_new` with a `wsig` constant taken from the *variant*, and
+/// the box shim of the type the *variant* names (`rt_u8_box`), and
 /// `compile-sexpr-tag-test` asks `rt_box_kind` which box it got. Neither can
 /// be derived from the value — `100` is the same machine word in all six
 /// types — which is exactly why the box exists.
@@ -4951,9 +4959,8 @@ fn compile_dispatches_hashtable_remove_to_native_code() {
 }
 
 /// `get`/`remove` over a `HashTable<i64,string>` — a passthrough (kind `6`)
-/// value type — exercises the `push-permanent-sexpr-root`ed branch of
-/// `compile-hashtable-op`'s decode (a heap-referencing `Str` surviving
-/// inside the never-GC-scanned `Option` box).
+/// value type: `compile-hashtable-op`'s decode of a heap-referencing `Str`,
+/// which has to survive inside the `Option` box.
 #[test]
 fn compile_dispatches_hashtable_get_of_a_passthrough_string_value_to_native_code() {
     let v = run_with_compiler_and_prelude(
@@ -5018,20 +5025,19 @@ fn compile_dispatches_string_equalp() {
 // ---- `f64` arithmetic/comparison methods, compiled -------------------------
 //
 // A compiled `f64` is its raw `f64::to_bits` pattern carried in an `i64`
-// register (`compile-float`); `compile-assoc`'s f64 branch lowers arithmetic
-// to `build-fadd`/... (each bitcasts to `double` and back), comparisons to
-// `build-fcmp-*`, the transcendental/rounding family (`sqrt`/`floor`/
-// `ceiling`/`round`/`truncate`/`expt`) to the matching LLVM intrinsic
-// (`build-fsqrt`/.../`build-fpow`), and `float->int` to a single `fptosi`
-// instruction (`build-fptosi`). The JIT boundary encodes an `f64` argument as
+// register (`compile-float`); `compile-assoc`'s float branch lowers
+// arithmetic, comparisons and `expt` through `build-float-binop` and the
+// transcendental/rounding family (`sqrt`/`floor`/`ceiling`/`round`/
+// `truncate`) through `build-float-unary` (each bitcasts to `double` and
+// back, at the receiver's width), and `float->int` to `rt_float_to_int`. The JIT boundary encodes an `f64` argument as
 // its bits and decodes an `f64` result back (`Interp::call_compiled`) — an
 // `f64` is a `BoxedObj::Float64` on the interpreter side since the scalar
 // unification, but the compiled side still keeps one in a native register,
 // so the boundary is where the two representations meet.
 
 /// f64 arithmetic returning an `f64` across the JIT boundary — exercises
-/// `build-fadd`/`build-fsub`/`build-fmul`/`build-fdiv` and the `f64`
-/// argument/return marshaling.
+/// `build-float-binop`'s `+`/`-`/`*`/`/` and the `f64` argument/return
+/// marshaling.
 #[test]
 fn compile_dispatches_f64_arithmetic() {
     let v = run_f64(
@@ -5061,8 +5067,8 @@ fn compile_dispatches_i32_floored_mod_and_agrees_with_the_interpreter() {
 }
 
 /// `mod`/`rem` on `f64` are CL-conformant (`mod` floored, `rem` truncated) and
-/// — unlike the earlier truncating `build-frem` lowering — are `prelude.rs`
-/// methods (`a - b*floor|truncate(a/b)`) compiled the normal way. This locks
+/// are `prelude.rs` methods (`a - b*floor|truncate(a/b)`) compiled the normal
+/// way. This locks
 /// the compiled path to the interpreter for a negative dividend, where floored
 /// and truncated diverge.
 #[test]
@@ -5112,14 +5118,12 @@ fn compile_dispatches_numeric_helpers_and_agrees_with_the_interpreter() {
 }
 
 /// A user `defun` whose name matches a libm symbol that an LLVM float
-/// intrinsic lowers to (here `pow`, which `expt`'s `build-fpow` emits) must
+/// intrinsic lowers to (here `pow`, which `expt`'s `llvm.pow.f64` becomes) must
 /// not collide with libm once compiled: the `tl_` symbol prefix
 /// (`ConcreteNames::symbol`) means the user
 /// `pow`'s own symbol is `tl_pow`, never bare `pow`, so the JIT's resolver
 /// binds `expt`'s lowered `pow` call to libm and the user `pow` to its own
-/// body. (This regression previously fired via `mod`->`frem`->`fmod`; `mod` no
-/// longer lowers to `frem`, but the same protection covers every libm-named
-/// intrinsic target.)
+/// body. The same protection covers every libm-named intrinsic target.
 #[test]
 fn compile_of_a_user_function_named_like_a_libm_symbol_does_not_collide() {
     let v = run_with_compiler_and_prelude(
@@ -5137,8 +5141,8 @@ fn compile_of_a_user_function_named_like_a_libm_symbol_does_not_collide() {
     assert_eq!(v, Value::Int(15));
 }
 
-/// f64 comparisons lower to `build-fcmp-*` (ordered `<`/`<=`/`>`/`>=`/`=`,
-/// unordered `/=`) — a `bool` result crosses the boundary. Agrees with the
+/// f64 comparisons lower to `build-float-binop`'s `fcmp` (ordered
+/// `<`/`<=`/`>`/`>=`/`=`, unordered `/=`) — a `bool` result crosses the boundary. Agrees with the
 /// interpreter for the same source.
 #[test]
 fn compile_dispatches_f64_comparisons_and_agrees_with_the_interpreter() {
@@ -5161,7 +5165,7 @@ fn compile_dispatches_f64_comparisons_and_agrees_with_the_interpreter() {
 
 /// The unary transcendental/rounding family (`sqrt`/`floor`/`ceiling`/
 /// `round`/`truncate`) each lower to their own LLVM intrinsic
-/// (`build-fsqrt`/...) — this exercises all five in one compiled function
+/// (`build-float-unary`) — this exercises all five in one compiled function
 /// and checks the JIT result against the interpreter's.
 #[test]
 fn compile_dispatches_f64_transcendentals_and_agrees_with_the_interpreter() {
@@ -5179,7 +5183,7 @@ fn compile_dispatches_f64_transcendentals_and_agrees_with_the_interpreter() {
 
 /// The `f64` trigonometric/hyperbolic/exponential family added alongside
 /// `sqrt`/`floor`/etc: `sin`/`cos`/`exp`/`log` lower to LLVM intrinsics
-/// (`build-fsin`/...) like `sqrt` does; `tan`/`asin`/`acos`/`atan`/`sinh`/
+/// (`build-float-unary`) like `sqrt` does; `tan`/`asin`/`acos`/`atan`/`sinh`/
 /// `cosh`/`tanh`/`asinh`/`acosh`/`atanh` have no LLVM intrinsic in the
 /// version this project pins, so they lower to `rt_f64_*` shims instead —
 /// this exercises both codegen paths in one compiled function.
@@ -5343,7 +5347,7 @@ fn compile_dispatches_variadic_arithmetic_and_comparison_sugar() {
     assert_eq!(compiled, Value::Bool(true));
 }
 
-/// `expt` (binary, `f64,f64->f64`) lowers to `build-fpow` (`llvm.pow.f64`).
+/// `expt` (binary, `f64,f64->f64`) lowers to `llvm.pow.f64` (`build-float-binop`).
 #[test]
 fn compile_dispatches_f64_expt_and_agrees_with_the_interpreter() {
     let src = r#"
@@ -5355,8 +5359,8 @@ fn compile_dispatches_f64_expt_and_agrees_with_the_interpreter() {
     assert_eq!(compiled, interpreted, "compiled expt agrees with the interpreter");
 }
 
-/// `float->int` lowers to the saturating `llvm.fptosi.sat` intrinsic
-/// (`build-fptosi`), no heap allocation involved.
+/// `float->int` answers an `int` (`rt_float_to_int`), and agrees with the
+/// interpreter.
 #[test]
 fn compile_dispatches_float_to_int_and_agrees_with_the_interpreter() {
     let src = r#"
@@ -6326,14 +6330,14 @@ fn bridge_to_island_text_with(defs: &[&str], core_src: &str) -> String {
 /// node, which is a later stage. Only the *body* is bridged here.
 #[test]
 fn the_island_compiles_a_body_the_new_bridge_produced() {
-    let body = bridge_to_island_text("(assoc ::std::primitive::i32 + true int-any-width (int-any-width int-any-width) (type-named ::std::primitive::i32) (var a) (var b))");
+    let body = bridge_to_island_text("(assoc ::std::primitive::i32 + true i32 (i32 i32) (type-named ::std::primitive::i32) (var a) (var b))");
     // The bridge reproduces exactly the text the hand-written test above
     // feeds `compile-function` — the two are checked against each other here
     // rather than only against the island, so a change to either is visible.
-    assert_eq!(body, r#"(assoc i32 "+" true "tl_std::primitive::i32''+" (0 var "a" false) (0 var "b" false))"#);
+    assert_eq!(body, r#"(assoc i32 "+" true "tl_std::primitive::i32''+" 65 (0 var "a" false) (0 var "b" false))"#);
 
     let module = expect_llvm_module(eval_ok_in_island(&format!(
-        r#"(compile-function (llvm-module::create "mod") "add2" '((a . 0) (b . 0)) '{})"#,
+        r#"(compile-function (llvm-module::create "mod") "add2" '((a . -65) (b . -65)) '{})"#,
         body
     )));
     let _guard = COMPILE_LOCK.lock().unwrap();
@@ -6352,13 +6356,13 @@ fn the_island_compiles_a_body_the_new_bridge_produced() {
 #[test]
 fn the_island_compiles_a_bridged_let_and_if() {
     let body = bridge_to_island_text(
-        "(let ((d int-any-width (assoc ::std::primitive::i32 - true int-any-width (int-any-width int-any-width) (type-named ::std::primitive::i32) (var a) (var b))))
-           (if (assoc ::std::primitive::i32 < true bool (int-any-width int-any-width) (type-named ::std::primitive::bool) (var d) (int-any-width 0))
-               (assoc ::std::primitive::i32 - true int-any-width (int-any-width int-any-width) (type-named ::std::primitive::i32) (int-any-width 0) (var d))
+        "(let ((d i32 (assoc ::std::primitive::i32 - true i32 (i32 i32) (type-named ::std::primitive::i32) (var a) (var b))))
+           (if (assoc ::std::primitive::i32 < true bool (i32 i32) (type-named ::std::primitive::bool) (var d) (int-any-width 0 i32))
+               (assoc ::std::primitive::i32 - true i32 (i32 i32) (type-named ::std::primitive::i32) (int-any-width 0 i32) (var d))
                (var d)))",
     );
     let module = expect_llvm_module(eval_ok_in_island(&format!(
-        r#"(compile-function (llvm-module::create "mod") "absdiff" '((a . 0) (b . 0)) '{})"#,
+        r#"(compile-function (llvm-module::create "mod") "absdiff" '((a . -65) (b . -65)) '{})"#,
         body
     )));
     let _guard = COMPILE_LOCK.lock().unwrap();
@@ -6401,15 +6405,15 @@ fn compile_function_source(name: &str, params: &str, body: &str) -> String {
 /// LLVM validated the module that came out.
 #[test]
 fn the_island_accepts_a_bridged_construct_field_and_match() {
-    let defs = ["(defstruct ::point (int-any-width int-any-width))", "(defenum ::maybe-int (None Some) (() (int-any-width)))"];
+    let defs = ["(defstruct ::point (i32 i32))", "(defenum ::maybe-int (None Some) (() (i32)))"];
     let body = bridge_to_island_text_with(
         &defs,
-        "(let ((p struct (construct ::point (type-named ::point) 0 true (int-any-width int-any-width) (var a) (var b))))
-           (match (construct ::maybe-int (type-named ::maybe-int) 1 false (int-any-width) (field-get (var p) 1 int-any-width)) enum
-             ((pat-ctor ::maybe-int (type-named ::maybe-int) 0 false ()) (int-any-width -1))
-             ((pat-ctor ::maybe-int (type-named ::maybe-int) 1 false (int-any-width) (pat-bind x)) (var x))))",
+        "(let ((p struct (construct ::point (type-named ::point) 0 true (i32 i32) (var a) (var b))))
+           (match (construct ::maybe-int (type-named ::maybe-int) 1 false (i32) (field-get (var p) 1 i32)) enum
+             ((pat-ctor ::maybe-int (type-named ::maybe-int) 0 false ()) (int-any-width -1 i32))
+             ((pat-ctor ::maybe-int (type-named ::maybe-int) 1 false (i32) (pat-bind x)) (var x))))",
     );
-    let src = compile_function_source("second", "((a . 0) (b . 0))", &body);
+    let src = compile_function_source("second", "((a . -65) (b . -65))", &body);
     let ir = eval_string_in_island(&format!("(to-string {})", src));
     // The struct is built and read, and the enum box is built and tested —
     // i.e. the island really took each of the three tags, rather than
@@ -6435,18 +6439,18 @@ fn the_island_accepts_a_bridged_construct_field_and_match() {
 #[test]
 fn the_island_runs_a_bridged_loop() {
     let body = bridge_to_island_text(
-        "(let ((acc int-any-width (int-any-width 0)) (i int-any-width (int-any-width 0)))
+        "(let ((acc i32 (int-any-width 0 i32)) (i i32 (int-any-width 0 i32)))
            (loop unit
-             (if (assoc ::std::primitive::i32 < true bool (int-any-width int-any-width) (type-named ::std::primitive::bool) (var i) (var b))
+             (if (assoc ::std::primitive::i32 < true bool (i32 i32) (type-named ::std::primitive::bool) (var i) (var b))
                  (unit)
                  (break))
-             (set acc (assoc ::std::primitive::i32 + true int-any-width (int-any-width int-any-width) (type-named ::std::primitive::i32) (var acc) (var a)))
-             (set i (assoc ::std::primitive::i32 + true int-any-width (int-any-width int-any-width) (type-named ::std::primitive::i32) (var i) (int-any-width 1))))
+             (set acc (assoc ::std::primitive::i32 + true i32 (i32 i32) (type-named ::std::primitive::i32) (var acc) (var a)))
+             (set i (assoc ::std::primitive::i32 + true i32 (i32 i32) (type-named ::std::primitive::i32) (var i) (int-any-width 1 i32))))
            (var acc))",
     );
     let module = expect_llvm_module(eval_ok_in_island(&compile_function_source(
         "mul",
-        "((a . 0) (b . 0))",
+        "((a . -65) (b . -65))",
         &body,
     )));
     let _guard = COMPILE_LOCK.lock().unwrap();
@@ -6460,7 +6464,7 @@ fn the_island_runs_a_bridged_loop() {
     let mut heap = Heap::with_capacity(1 << 12);
     typelisp::compile::runtime::set_active_heap(&mut heap as *mut Heap);
     for (a, b) in [(6i64, 7i64), (0, 5), (3, 0), (-4, 3)] {
-        assert_eq!(run_coroutine_entry(&engine, &mut heap, "mul", &[a, b]), a * b.max(0), "a={} b={}", a, b);
+        assert_eq!(i64::from(run_coroutine_entry(&engine, &mut heap, "mul", &[a, b]) as i32), a * b.max(0), "a={} b={}", a, b);
     }
 }
 
@@ -6473,17 +6477,17 @@ fn the_island_runs_a_bridged_loop() {
 #[test]
 fn the_island_runs_a_bridged_labels_block() {
     let body = bridge_to_island_text(
-        "(labels ((rec ((n int-any-width) (acc int-any-width)) int-any-width
-                    (if (assoc ::std::primitive::i32 < true bool (int-any-width int-any-width) (type-named ::std::primitive::bool) (var n) (int-any-width 1))
+        "(labels ((rec ((n i32) (acc i32)) i32
+                    (if (assoc ::std::primitive::i32 < true bool (i32 i32) (type-named ::std::primitive::bool) (var n) (int-any-width 1 i32))
                         (var acc)
-                        (apply (var rec) int-any-width (int-any-width int-any-width)
-                          (assoc ::std::primitive::i32 - true int-any-width (int-any-width int-any-width) (type-named ::std::primitive::i32) (var n) (int-any-width 1))
-                          (assoc ::std::primitive::i32 * true int-any-width (int-any-width int-any-width) (type-named ::std::primitive::i32) (var acc) (var n))))))
-           (apply (var rec) int-any-width (int-any-width int-any-width) (var a) (int-any-width 1)))",
+                        (apply (var rec) i32 (i32 i32)
+                          (assoc ::std::primitive::i32 - true i32 (i32 i32) (type-named ::std::primitive::i32) (var n) (int-any-width 1 i32))
+                          (assoc ::std::primitive::i32 * true i32 (i32 i32) (type-named ::std::primitive::i32) (var acc) (var n))))))
+           (apply (var rec) i32 (i32 i32) (var a) (int-any-width 1 i32)))",
     );
     let module = expect_llvm_module(eval_ok_in_island(&compile_function_source(
         "fact",
-        "((a . 0))",
+        "((a . -65))",
         &body,
     )));
     let _guard = COMPILE_LOCK.lock().unwrap();
@@ -6509,18 +6513,18 @@ fn the_island_runs_a_bridged_labels_block() {
 #[test]
 fn the_island_accepts_a_bridged_escaping_closure() {
     let body = bridge_to_island_text(
-        "(let ((n int-any-width (var a)))
-           (let ((f fn (lambda ((x int-any-width)) int-any-width (assoc ::std::primitive::i32 + true int-any-width (int-any-width int-any-width) (type-named ::std::primitive::i32) (var x) (var n)))))
-             (apply (var f) int-any-width (int-any-width) (int-any-width 1))))",
+        "(let ((n i32 (var a)))
+           (let ((f fn (lambda ((x i32)) i32 (assoc ::std::primitive::i32 + true i32 (i32 i32) (type-named ::std::primitive::i32) (var x) (var n)))))
+             (apply (var f) i32 (i32) (int-any-width 1 i32))))",
     );
     // The capture really is a cell on both sides of the boundary.
-    assert!(body.contains("(n . 11)"), "the captured binding should be a cell: {}", body);
+    assert!(body.contains("(n . 275)"), "the captured binding should be a cell: {}", body);
     // No leading paren in the pattern: this reference sits in an argument
-    // position, so it is spelled `(0 cellvar "n" 1)` — the kind, then the node.
-    assert!(body.contains(r#"cellvar "n" 1"#), "the closure should read through it: {}", body);
+    // position, so it is spelled `(0 cellvar "n" 265)` — the kind, then the node.
+    assert!(body.contains(r#"cellvar "n" 265"#), "the closure should read through it: {}", body);
     assert!(body.contains("apply-indirect"), "the closure should be applied through its value: {}", body);
 
-    let src = compile_function_source("addn", "((a . 0))", &body);
+    let src = compile_function_source("addn", "((a . -65))", &body);
     let ir = eval_string_in_island(&format!("(to-string {})", src));
     for expected in ["rt_cell_new", "rt_cell_get", "define i64 @addn"] {
         assert!(ir.contains(expected), "expected {} in the IR:\n{}", expected, ir);
@@ -6572,10 +6576,10 @@ fn the_island_runs_a_whole_bridged_defun() {
     let globals = HashMap::new();
     let form = read_core(
             &mut h,
-            "(defun ::m::clamp ((x int-any-width) (lo int-any-width) (hi int-any-width)) int-any-width
-               (if (assoc ::std::primitive::i32 < true bool (int-any-width int-any-width) (type-named ::std::primitive::bool) (var x) (var lo))
+            "(defun ::m::clamp ((x i32) (lo i32) (hi i32)) i32
+               (if (assoc ::std::primitive::i32 < true bool (i32 i32) (type-named ::std::primitive::bool) (var x) (var lo))
                    (var lo)
-                   (if (assoc ::std::primitive::i32 < true bool (int-any-width int-any-width) (type-named ::std::primitive::bool) (var hi) (var x))
+                   (if (assoc ::std::primitive::i32 < true bool (i32 i32) (type-named ::std::primitive::bool) (var hi) (var x))
                        (var hi)
                        (var x))))",
         )
@@ -7008,9 +7012,9 @@ fn a_compiled_function_suspends_and_resumes_with_its_local_intact() {
             (position-at-end builder entry)
             (coroutine-begin builder m f)
             (let ((slot (frame-slot builder)))
-              (store-arg builder slot 0 (const-word builder 40))
+              (slot-set builder slot 0 (const-word builder 40))
               (let ((woken (coroutine-suspend builder m)))
-                (coroutine-end builder m (build-add builder (load-raw builder slot 0) woken))))
+                (coroutine-end builder m (build-add builder (slot-get builder slot 0) woken))))
             m))
         (build-suspending-module)
     "#;
@@ -7075,30 +7079,30 @@ fn a_compiled_recursion_runs_two_hundred_thousand_frames_deep() {
             ;; storage that outlives a suspension.
             (let* ((n-slot (frame-slot builder))
                    (r-slot (frame-slot builder))
-                   (arg0 (alloca-args builder 1)))
-              (store-arg builder arg0 0 (const-word builder 0))
-              (store-arg builder n-slot 0 (build-call builder (get-function m "rt_pending_arg") arg0 1))
+                   (arg0 (arg-list builder 1)))
+              (slot-set builder arg0 0 (const-word builder 0))
+              (slot-set builder n-slot 0 (build-call builder (get-function m "rt_pending_arg") arg0))
               (build-cond-br builder
-                             (build-icmp-eq builder (load-raw builder n-slot 0) (const-word builder 0))
+                             (build-icmp-eq builder (slot-get builder n-slot 0) (const-word builder 0))
                              base rec)
 
               (position-at-end builder base)
-              (store-arg builder r-slot 0 (const-word builder 0))
+              (slot-set builder r-slot 0 (const-word builder 0))
               (build-br builder merge)
 
               ;; The recursive step. `coroutine-call` splits the block: what
               ;; follows it is emitted into a resume block the driver branches
               ;; to once the callee has an answer.
               (position-at-end builder rec)
-              (let ((call-args (alloca-args builder 1)))
-                (store-arg builder call-args 0
-                           (build-sub builder (load-raw builder n-slot 0) (const-word builder 1)))
-                (let ((below (coroutine-call builder m (build-fn-address builder f) call-args 1)))
-                  (store-arg builder r-slot 0 (build-add builder (load-raw builder n-slot 0) below))
+              (let ((call-args (arg-list builder 1)))
+                (slot-set builder call-args 0
+                           (build-sub builder (slot-get builder n-slot 0) (const-word builder 1)))
+                (let ((below (coroutine-call builder m (build-fn-address builder f) call-args 0)))
+                  (slot-set builder r-slot 0 (build-add builder (slot-get builder n-slot 0) below))
                   (build-br builder merge)))
 
               (position-at-end builder merge)
-              (coroutine-end builder m (load-raw builder r-slot 0)))
+              (coroutine-end builder m (slot-get builder r-slot 0)))
             m))
         (build-deep-module)
     "#;
@@ -7120,8 +7124,23 @@ fn a_compiled_recursion_runs_two_hundred_thousand_frames_deep() {
     let mut stack = typelisp::compile::coroutine::FrameStack::new();
     let entry: typelisp::compile::coroutine::CoroutineFn = unsafe { std::mem::transmute(sum_to as *const ()) };
     let n: i64 = 200_000;
-    let answer = stack.run(&mut heap, entry, &[n]).expect("the recursion ran to an answer");
+    let answer = stack.run(&mut heap, entry, &[n as typelisp_mem::Word]).expect("the recursion ran to an answer");
     assert_eq!(answer, n * (n + 1) / 2, "every frame added its own n on the way back up");
     assert_eq!(stack.depth(), 0, "and every frame was popped");
 }
 
+
+/// A variable a `lambda` captures is in a cell, and what a `labels` block's
+/// body hands one of its functions is what the cell holds — also when no
+/// function of the block captures it.
+#[test]
+fn a_captured_variable_is_handed_to_a_labels_function() {
+    let src = r#"
+        (defun f ((v string)) string
+          (let ((k (lambda () string v)))
+            (append (k) (labels ((inner ((x string)) string x)) (inner v)))))
+        (compile f)
+        (f "ab")
+    "#;
+    assert_eq!(common::eval_string_compiled(src), "abab");
+}

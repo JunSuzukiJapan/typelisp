@@ -1,7 +1,8 @@
 //! The upper bound on what a process allocates (`typl -c --max-memory`).
 //!
 //! Every allocation of the process goes through [`CountingAlloc`], which
-//! keeps the number of bytes currently allocated. Everything counts: the cons
+//! keeps the number of bytes currently allocated ([`typelisp_mem::memory`],
+//! where the heap reads when to collect). Everything counts: the cons
 //! arena, the string and box stores, and the runtime's own Rust values. The
 //! bound is unset (unbounded) until [`set_memory_limit`] gives one; an
 //! executable's `main` sets it through `rt_heap_init` before anything else
@@ -13,52 +14,54 @@
 //! allowed — and it must not allocate while it reports, since allocating is
 //! what just failed.
 
-use std::alloc::{GlobalAlloc, Layout, System};
-use std::sync::atomic::{AtomicUsize, Ordering};
+use core::alloc::{GlobalAlloc, Layout};
+use typelisp_mem::memory;
 
-/// The process's allocator: [`System`], counted.
+/// The process's allocator: [`INNER`], counted.
 pub struct CountingAlloc;
+
+/// Where the memory comes from: the operating system's allocator, or without
+/// std the board's.
+#[cfg(feature = "std")]
+const INNER: std::alloc::System = std::alloc::System;
+
+#[cfg(not(feature = "std"))]
+const INNER: typelisp_mem::host::board::BoardAlloc = typelisp_mem::host::board::BoardAlloc;
 
 #[global_allocator]
 static ALLOCATOR: CountingAlloc = CountingAlloc;
-
-/// Bytes currently allocated.
-static IN_USE: AtomicUsize = AtomicUsize::new(0);
-
-/// The bound on [`IN_USE`]; `usize::MAX` is no bound.
-static LIMIT: AtomicUsize = AtomicUsize::new(usize::MAX);
 
 /// Bounds the process's allocations at `bytes` from now on. Must be called
 /// before the bound matters: what is already allocated counts toward it, so a
 /// bound below the current use fails the next allocation.
 pub fn set_memory_limit(bytes: usize) {
-    LIMIT.store(bytes, Ordering::Relaxed);
+    memory::set_limit(bytes);
 }
 
 /// Bytes the process has allocated and not freed.
 pub fn memory_in_use() -> usize {
-    IN_USE.load(Ordering::Relaxed)
+    memory::in_use()
 }
 
-/// Takes `size` more bytes into [`IN_USE`], or does not and reports why the
+/// Takes `size` more bytes into the count, or does not and reports why the
 /// bound refuses them.
 fn reserve(size: usize) {
-    let before = IN_USE.fetch_add(size, Ordering::Relaxed);
-    let limit = LIMIT.load(Ordering::Relaxed);
+    let before = memory::taken(size);
+    let limit = memory::limit();
     if before.checked_add(size).is_none_or(|after| after > limit) {
-        IN_USE.fetch_sub(size, Ordering::Relaxed);
+        memory::given_back(size);
         exceeded(size, before, limit);
     }
 }
 
 fn release(size: usize) {
-    IN_USE.fetch_sub(size, Ordering::Relaxed);
+    memory::given_back(size);
 }
 
 unsafe impl GlobalAlloc for CountingAlloc {
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
         reserve(layout.size());
-        let p = System.alloc(layout);
+        let p = INNER.alloc(layout);
         if p.is_null() {
             release(layout.size());
         }
@@ -67,7 +70,7 @@ unsafe impl GlobalAlloc for CountingAlloc {
 
     unsafe fn alloc_zeroed(&self, layout: Layout) -> *mut u8 {
         reserve(layout.size());
-        let p = System.alloc_zeroed(layout);
+        let p = INNER.alloc_zeroed(layout);
         if p.is_null() {
             release(layout.size());
         }
@@ -75,7 +78,7 @@ unsafe impl GlobalAlloc for CountingAlloc {
     }
 
     unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
-        System.dealloc(ptr, layout);
+        INNER.dealloc(ptr, layout);
         release(layout.size());
     }
 
@@ -84,7 +87,7 @@ unsafe impl GlobalAlloc for CountingAlloc {
         if new_size > old_size {
             reserve(new_size - old_size);
         }
-        let p = System.realloc(ptr, layout, new_size);
+        let p = INNER.realloc(ptr, layout, new_size);
         if p.is_null() {
             if new_size > old_size {
                 release(new_size - old_size);
@@ -112,29 +115,7 @@ fn exceeded(size: usize, in_use: usize, limit: usize) -> ! {
     ] {
         len += part.write(&mut buf[len..]);
     }
-    // The host's own write and exit, which allocate nothing on this side.
-    #[cfg(all(target_family = "wasm", target_os = "unknown"))]
-    {
-        let _ = typelisp_mem::host::write_stderr(&buf[..len]);
-        typelisp_mem::host::exit(crate::program::EXIT_CODE_PANIC as i32)
-    }
-    // Straight to the descriptor: `std::io::stderr()`'s lock asks for the
-    // current thread's identity, whose first use allocates — which comes
-    // back here. Likewise `process::exit` runs the C library's exit handlers,
-    // which may allocate; `_exit` ends the process at once.
-    #[cfg(not(all(target_family = "wasm", target_os = "unknown")))]
-    let mut written = 0;
-    #[cfg(not(all(target_family = "wasm", target_os = "unknown")))]
-    {
-        while written < len {
-            let n = unsafe { libc::write(2, buf[written..len].as_ptr().cast(), len - written) };
-            if n <= 0 {
-                break;
-            }
-            written += n as usize;
-        }
-        unsafe { libc::_exit(crate::program::EXIT_CODE_PANIC as libc::c_int) }
-    }
+    typelisp_mem::host::die_without_allocating(&buf[..len], crate::program::EXIT_CODE_PANIC as i32)
 }
 
 enum Part {

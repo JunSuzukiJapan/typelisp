@@ -23,10 +23,12 @@
 //! again the moment the C function returns ([`resume_pending`], from
 //! `rt_ffi_leave_native`).
 
-use std::any::Any;
-use std::cell::RefCell;
-use std::collections::HashMap;
-use std::sync::{Mutex, OnceLock};
+use typelisp_mem::Word;
+use typelisp_mem::prelude::*;
+use core::any::Any;
+use core::cell::RefCell;
+use typelisp_mem::collections::HashMap;
+use typelisp_mem::sync::{Mutex, OnceLock};
 
 use typelisp_abi::{active_heap, fatal, raise, Raised};
 use typelisp_mem::{NsId, SymRef, TypeId, Value};
@@ -49,7 +51,7 @@ static ENTRIES: Mutex<Option<HashMap<Callback, usize>>> = Mutex::new(None);
 /// at startup.
 static FACTORY: OnceLock<fn(Callback) -> Result<usize, String>> = OnceLock::new();
 
-thread_local! {
+typelisp_mem::thread_local! {
     /// A callback's failure, waiting for the C call around it to return —
     /// see the module comment.
     static PENDING: RefCell<Option<Box<dyn Any + Send>>> = const { RefCell::new(None) };
@@ -57,13 +59,13 @@ thread_local! {
 
 /// The entry registered for `callback`, if any.
 pub fn lookup(callback: Callback) -> Option<usize> {
-    let guard = ENTRIES.lock().unwrap_or_else(|e| e.into_inner());
+    let guard = ENTRIES.lock();
     guard.as_ref().and_then(|m| m.get(&callback).copied())
 }
 
 /// Records the entry for `callback` — an executable's, at startup.
 pub fn register(callback: Callback, addr: usize) {
-    let mut guard = ENTRIES.lock().unwrap_or_else(|e| e.into_inner());
+    let mut guard = ENTRIES.lock();
     guard.get_or_insert_with(HashMap::new).insert(callback, addr);
 }
 
@@ -85,32 +87,29 @@ pub fn resume_pending() -> Result<(), Raised> {
 }
 
 /// `(" ffi-callback-address" PATH TYPE)`: the address of the entry for the
-/// function the path `args[0]` names, called at the function type `args[1]`,
+/// function the path `path` names, called at the function type `ty`,
 /// as a raw word.
 ///
 /// # Safety
 ///
-/// `args` must point to at least two readable `i64`s, and a `Heap` must be
+/// The words must be valid, and a `Heap` must be
 /// registered on this thread.
 #[no_mangle]
-pub unsafe extern "C-unwind" fn rt_ffi_callback_address(args: *const i64, argc: u32) -> i64 {
-    if argc < 2 {
-        fatal("rt_ffi_callback_address: expected 2 arguments");
-    }
-    let (ns, sym) = match decode(*args) {
+pub unsafe extern "C-unwind" fn rt_ffi_callback_address(path: Word, ty: Word) -> Word {
+    let (ns, sym) = match decode(path) {
         Value::Symbol(sym) => (sym.home(), sym),
         other => fatal(&format!("rt_ffi_callback_address: the function is not a symbol, got {:?}", other)),
     };
-    let ty = TypeId::from_word(*args.add(1))
+    let ty = TypeId::from_word(ty)
         .unwrap_or_else(|| fatal("rt_ffi_callback_address: the function type is not a type"));
     if let Some(addr) = lookup((ns, sym, ty)) {
-        return addr as i64;
+        return addr as Word;
     }
     match FACTORY.get() {
         // The session keeps its own entries (they run code it compiled), so
         // nothing is registered here.
         Some(make) => match make((ns, sym, ty)) {
-            Ok(addr) => addr as i64,
+            Ok(addr) => addr as Word,
             Err(msg) => raise(msg).into_word(),
         },
         None => fatal("rt_ffi_callback_address: no entry was registered for this callback at startup"),
@@ -125,18 +124,15 @@ pub unsafe extern "C-unwind" fn rt_ffi_callback_address(args: *const i64, argc: 
 ///
 /// # Safety
 ///
-/// `args` must point to four readable `i64`s; the last two must describe
-/// the words of a definition, whose strings are constants.
+/// The words must be valid; the last two must describe
+/// The words of a definition, whose strings are constants.
 #[no_mangle]
-pub unsafe extern "C" fn rt_ffi_callback_register(args: *const i64, argc: u32) -> i64 {
-    if argc < 4 {
-        fatal("rt_ffi_callback_register: expected 4 arguments");
-    }
-    let ty = TypeId::from_word(*args.add(1))
+pub unsafe extern "C" fn rt_ffi_callback_register(entry: Word, ty: Word, words: Word, words_len: Word) -> Word {
+    let ty = TypeId::from_word(ty)
         .unwrap_or_else(|| fatal("rt_ffi_callback_register: the function type is not a type"));
-    let words = std::slice::from_raw_parts(*args.add(2) as usize as *const i64, *args.add(3) as usize);
+    let words = core::slice::from_raw_parts(words as usize as *const Word, words_len as usize);
     let (ns, sym) = typelisp_mem::type_words::read_definition(words);
-    register((ns, sym, ty), *args as usize);
+    register((ns, sym, ty), entry as usize);
     0
 }
 
@@ -153,7 +149,7 @@ pub unsafe extern "C" fn rt_ffi_callback_register(args: *const i64, argc: u32) -
 ///
 /// Called only from an entry, as its first action.
 #[no_mangle]
-pub unsafe extern "C" fn rt_ffi_callback_enter(_args: *const i64, _argc: u32) -> i64 {
+pub unsafe extern "C" fn rt_ffi_callback_enter() -> Word {
     if !typelisp_abi::heap_registered() {
         fatal(
             "a C callback was called on a thread that is not running typelisp — a callback can \
@@ -179,14 +175,15 @@ pub unsafe extern "C" fn rt_ffi_callback_enter(_args: *const i64, _argc: u32) ->
 ///
 /// Called only from an entry, after [`rt_ffi_callback_enter`].
 #[no_mangle]
-pub unsafe extern "C" fn rt_ffi_callback_leave(_args: *const i64, _argc: u32) -> i64 {
+pub unsafe extern "C" fn rt_ffi_callback_leave() -> Word {
     active_heap().enter_native();
     0
 }
 
 /// Runs the callback: `args` is `[function address, n, kind0, word0, aux0,
 /// ..., kind(n-1), word(n-1), aux(n-1)]`, the function a coroutine-ABI body.
-/// A kind of `0` is a word already in the function's own representation; `1`
+/// A kind of `0` is a word already in the function's own representation (a
+/// value wider than a word is several of them, the low one first); `1`
 /// is a C string's address, copied into a typelisp string here; `2` is a
 /// typed pointer, whose `aux` is its pointee type (a `TypeId::word`) — it
 /// has to point at such an object in memory an `unsafe`
@@ -202,19 +199,19 @@ pub unsafe extern "C" fn rt_ffi_callback_leave(_args: *const i64, _argc: u32) ->
 /// words given, and run between [`rt_ffi_callback_enter`] and
 /// [`rt_ffi_callback_leave`].
 #[no_mangle]
-pub unsafe extern "C" fn rt_ffi_callback_invoke(args: *const i64, argc: u32) -> i64 {
+pub unsafe extern "C" fn rt_ffi_callback_invoke(args: *const Word, argc: u32) -> i64 {
     if argc < 2 {
         fatal("rt_ffi_callback_invoke: expected the function and its argument count");
     }
     if PENDING.with(|p| p.borrow().is_some()) {
         return 0;
     }
-    let f: crate::coroutine::CoroutineFn = std::mem::transmute(*args as usize);
+    let f: crate::coroutine::CoroutineFn = core::mem::transmute(*args as usize);
     let n = *args.add(1) as usize;
     if argc as usize != 2 + 3 * n {
         fatal("rt_ffi_callback_invoke: the argument count does not match the words given");
     }
-    let triples: Vec<(i64, i64, i64)> =
+    let triples: Vec<(Word, Word, Word)> =
         (0..n).map(|i| (*args.add(2 + 3 * i), *args.add(3 + 3 * i), *args.add(4 + 3 * i))).collect();
     let run = || -> Result<i64, Raised> {
         let mut words = Vec::with_capacity(n);
@@ -252,7 +249,7 @@ pub unsafe extern "C" fn rt_ffi_callback_invoke(args: *const i64, argc: u32) -> 
 /// A C string a callback was handed, copied onto the heap as a tagged string.
 /// Raises — inside the callback, where it is kept like any other failure —
 /// if it is null or not UTF-8.
-unsafe fn callback_string(p: i64) -> Result<i64, Raised> {
+unsafe fn callback_string(p: Word) -> Result<Word, Raised> {
     if p == 0 {
         return Err(raise(
             "ffi: C passed a callback a null pointer where a `string` was declared. Declare the \
@@ -260,8 +257,8 @@ unsafe fn callback_string(p: i64) -> Result<i64, Raised> {
                 .to_string(),
         ));
     }
-    let bytes = std::ffi::CStr::from_ptr(p as usize as *const std::ffi::c_char).to_bytes();
-    match std::str::from_utf8(bytes) {
+    let bytes = core::ffi::CStr::from_ptr(p as usize as *const core::ffi::c_char).to_bytes();
+    match core::str::from_utf8(bytes) {
         Ok(s) => {
             let s = s.to_string();
             Ok(crate::encode(active_heap().alloc_string(s)))

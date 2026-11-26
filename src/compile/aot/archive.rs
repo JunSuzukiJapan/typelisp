@@ -296,6 +296,109 @@ pub(super) fn wasm_runtime_dir(triple: &str) -> Result<std::path::PathBuf, Strin
     }
 }
 
+/// The folder `typl -c --target <triple>` links an executable for a board
+/// from: `cortex-m-rt`'s linker script (`link.x`) and the runtime built for
+/// the triple, once for a board that gives its functions as C functions and
+/// once with them over semihosting (`BoardFunctions::archive`).
+///
+/// Where it is depends on how `typl` was built, as for WebAssembly
+/// ([`wasm_runtime_dir`]):
+///
+/// - A release build with the `embedded` feature carries them and writes
+///   them out once, to `$TYPELISP_HOME/lib/<build id>/<triple>/`.
+/// - A release build without it carries none, and `--target` is refused.
+/// - A debug build links the ones `scripts/build-embedded-runtime.sh` built
+///   in its tree, `<target dir>/embedded-runtime/<profile>/<triple>/`, beside
+///   which the script also links the toolchain's linker ([`embedded_linker`]).
+pub(super) fn embedded_runtime_dir(triple: &str) -> Result<std::path::PathBuf, String> {
+    use super::BoardFunctions;
+    #[cfg(typelisp_bundled_embedded)]
+    {
+        let dir = bundled_archive_dir()?.join(triple);
+        let [link_x, c, semihosting]: [&[u8]; 3] = match triple {
+            "thumbv7em-none-eabihf" => [
+                include_bytes!(env!("TYPELISP_BUNDLED_EMBEDDED_THUMBV7EM_NONE_EABIHF_LINK_X")),
+                include_bytes!(env!("TYPELISP_BUNDLED_EMBEDDED_THUMBV7EM_NONE_EABIHF_C_STATICLIB")),
+                include_bytes!(env!("TYPELISP_BUNDLED_EMBEDDED_THUMBV7EM_NONE_EABIHF_SEMIHOSTING_STATICLIB")),
+            ],
+            "thumbv8m.main-none-eabihf" => [
+                include_bytes!(env!("TYPELISP_BUNDLED_EMBEDDED_THUMBV8M_MAIN_NONE_EABIHF_LINK_X")),
+                include_bytes!(env!("TYPELISP_BUNDLED_EMBEDDED_THUMBV8M_MAIN_NONE_EABIHF_C_STATICLIB")),
+                include_bytes!(env!("TYPELISP_BUNDLED_EMBEDDED_THUMBV8M_MAIN_NONE_EABIHF_SEMIHOSTING_STATICLIB")),
+            ],
+            _ => return Err(format!("internal error: no runtime for a board for {}", triple)),
+        };
+        write_file_once(&dir, "link.x", link_x)?;
+        write_file_once(&dir, BoardFunctions::C.archive(), c)?;
+        write_file_once(&dir, BoardFunctions::Semihosting.archive(), semihosting)?;
+        Ok(dir)
+    }
+    #[cfg(all(typelisp_bundled_runtime, not(typelisp_bundled_embedded)))]
+    {
+        Err(format!(
+            "this typl was built without support for boards: --target {} needs one built with \
+             `--features embedded` (`cargo install --features embedded ...`)",
+            triple
+        ))
+    }
+    #[cfg(not(typelisp_bundled_runtime))]
+    {
+        let profile_dir = std::path::Path::new(env!("TYPELISP_PROFILE_DIR"));
+        let (Some(target_dir), Some(profile)) = (profile_dir.parent(), profile_dir.file_name()) else {
+            return Err(format!("internal error: {} is not <target dir>/<profile>", profile_dir.display()));
+        };
+        let dir = target_dir.join("embedded-runtime").join(profile).join(triple);
+        for file in ["link.x", "ld.lld", BoardFunctions::C.archive(), BoardFunctions::Semihosting.archive()] {
+            if !dir.join(file).exists() {
+                return Err(format!(
+                    "{} has no {}; build the runtime for a board with scripts/build-embedded-runtime.sh {}",
+                    dir.display(),
+                    file,
+                    profile.to_string_lossy()
+                ));
+            }
+        }
+        Ok(dir)
+    }
+}
+
+/// The linker for a board whose runtime is in `runtime`
+/// ([`embedded_runtime_dir`]), run with `-flavor gnu`: the one the debug
+/// build's script put beside the runtime, or a release build's rustup's
+/// ([`rustup_lld`]).
+pub(super) fn embedded_linker(runtime: &std::path::Path) -> Result<std::path::PathBuf, String> {
+    if !cfg!(typelisp_bundled_runtime) {
+        return Ok(runtime.join("ld.lld"));
+    }
+    rustup_lld("a board")
+}
+
+/// The linker for a board that has no runtime ([`embedded_linker`] is for one
+/// that has): the same one. A debug build's is in
+/// `<target dir>/embedded-runtime/<profile>/`.
+pub(super) fn board_linker() -> Result<std::path::PathBuf, String> {
+    #[cfg(typelisp_bundled_runtime)]
+    {
+        rustup_lld("a board")
+    }
+    #[cfg(not(typelisp_bundled_runtime))]
+    {
+        let profile_dir = std::path::Path::new(env!("TYPELISP_PROFILE_DIR"));
+        let (Some(target_dir), Some(profile)) = (profile_dir.parent(), profile_dir.file_name()) else {
+            return Err(format!("internal error: {} is not <target dir>/<profile>", profile_dir.display()));
+        };
+        let linker = target_dir.join("embedded-runtime").join(profile).join("ld.lld");
+        if !linker.exists() {
+            return Err(format!(
+                "there is no {}; scripts/build-embedded-runtime.sh {} puts it there",
+                linker.display(),
+                profile.to_string_lossy()
+            ));
+        }
+        Ok(linker)
+    }
+}
+
 /// The linker for a WebAssembly module whose runtime is in `runtime`
 /// ([`wasm_runtime_dir`]), run with `-flavor wasm`.
 ///
@@ -309,6 +412,12 @@ pub(super) fn wasm_linker(runtime: &std::path::Path) -> Result<std::path::PathBu
     if !cfg!(typelisp_bundled_runtime) {
         return Ok(runtime.join("wasm-ld"));
     }
+    rustup_lld("WebAssembly")
+}
+
+/// The `rust-lld` of rustup's default toolchain, for a release build, which
+/// carries no linker; `what` names what it links, for the error.
+fn rustup_lld(what: &str) -> Result<std::path::PathBuf, String> {
     let run = |cmd: &mut std::process::Command, what: &str| -> Result<String, String> {
         let out = cmd.output().map_err(|e| format!("--target needs rustup to find its linker (rust-lld): {}: {}", what, e))?;
         if !out.status.success() {
@@ -321,7 +430,7 @@ pub(super) fn wasm_linker(runtime: &std::path::Path) -> Result<std::path::PathBu
     let host = run(std::process::Command::new(&rustc).args(["--print", "host-tuple"]), "rustc --print host-tuple")?;
     let lld = std::path::Path::new(&sysroot).join("lib").join("rustlib").join(&host).join("bin").join("rust-lld");
     if !lld.is_file() {
-        return Err(format!("the rustup toolchain at {} has no linker for WebAssembly ({})", sysroot, lld.display()));
+        return Err(format!("the rustup toolchain at {} has no linker for {} ({})", sysroot, what, lld.display()));
     }
     Ok(lld)
 }

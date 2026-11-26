@@ -9,13 +9,20 @@
 /// What is left on the stack before it is grown: more than whatever runs
 /// between two levels of a walk needs — a reader macro or a macro's
 /// expansion among it, which are interpreted or compiled code of their own.
+#[cfg(feature = "std")]
 const RED_ZONE: usize = 1024 * 1024;
 
 /// How much stack each growth adds.
+#[cfg(feature = "std")]
 const GROWTH: usize = 8 * 1024 * 1024;
 
 /// Run `f`, on a fresh stack segment if this one is close to running out.
 #[inline]
 pub fn grow_stack<R>(f: impl FnOnce() -> R) -> R {
-    stacker::maybe_grow(RED_ZONE, GROWTH, f)
+    #[cfg(feature = "std")]
+    return stacker::maybe_grow(RED_ZONE, GROWTH, f);
+    // Without std there is no way to grow it: a microcontroller's one stack
+    // is the size the board gave it.
+    #[cfg(not(feature = "std"))]
+    f()
 }

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/ffi.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
+<!-- translated-from: docs/ja/guide/ffi.md @ dff3b51792f6d9c49bb8802bd3d3fb6e168edd92 -->
 # FFI C (defffi)
 
 Panduan ini menjelaskan cara memanggil fungsi C dari typelisp. Daftar tipe yang dapat dideklarasikan
@@ -47,7 +47,7 @@ luar.
 | `bool` | `bool` (`_Bool`) |
 | `()` | `void` |
 | `string` | `const char *` |
-| `c-long` / `c-ulong` | `long` / `unsigned long` (juga `size_t`, `int64_t`, dan sebagainya) |
+| `c-long` / `c-ulong` | `long` / `unsigned long` (juga `size_t`, dan sebagainya) |
 | `ptr` | Pointer apa pun (`void *`, `FILE *`, dan sebagainya) |
 | `(ptr T)` | Pointer ke `T` ([bagian 7](#7-struct-c)) |
 
@@ -64,10 +64,10 @@ luar.
 ### `c-long` / `c-ulong` / `ptr`
 
 Tipe-tipe ini ada hanya untuk menyeberangkan nilai melewati batas dengan C, dan **tidak mendukung
-aritmetika**. Untuk memakainya sebagai bilangan bulat typelisp, konversikan dengan `as`.
+aritmetika**. Untuk memakainya sebagai bilangan bulat typelisp, konversikan dengan `as`. Lebarnya sama dengan C pada mesin tempat program berjalan (64 bit untuk `c-long` maupun pointer pada macOS dan Linux 64 bit, 32 bit bila `--target` menyebut wasm32 atau Cortex-M).
 
 ```lisp
-(as int (unsafe (c-strlen s)))      ; int does not lose any of the 64-bit value
+(as int (unsafe (c-strlen s)))      ; int loses none of the value
 (try-as i32 (unsafe (c-strlen s)))  ; None if it does not fit in an i32
 (unsafe (c-malloc 16))              ; integer literals can be passed as they are
 ```

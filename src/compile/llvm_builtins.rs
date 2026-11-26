@@ -49,9 +49,16 @@ use crate::eval::interp::{expect_str, str_rt, EvalError};
 use crate::types::Path;
 
 mod coroutine;
+pub(crate) mod globals;
 mod handles;
+mod numeric;
+mod slots;
+mod values;
 
 use coroutine::*;
+pub(crate) use coroutine::{pending_words, store_words};
+use slots::{all_of, expect_slots, operand};
+use values::value_or_return;
 pub use handles::*;
 
 /// The (typelisp-hosted) compiler's view of LLVM — `llvm-module`/
@@ -71,6 +78,7 @@ pub(crate) fn eval_llvm_builtin_method(heap: &mut Heap, type_name: &Path, method
             wk::M_VERIFY => Some(llvm_module_verify(args)),
             wk::M_TO_STRING => Some(llvm_module_to_string(heap, args)),
             wk::M_GET_FUNCTION => Some(llvm_module_get_function(heap, args)),
+            wk::M_C_LONG_BITS => Some(Ok(Value::Int(i64::from(typelisp_mem::target::DataModel::current().c_long_bits())))),
             wk::M_ADD_FUNCTION_WITH_ENV => Some(llvm_module_add_function_with_env(heap, args)),
             wk::M_ADD_COROUTINE_FUNCTION => Some(llvm_module_add_coroutine_function(heap, args)),
             _ => None,
@@ -100,46 +108,39 @@ pub(crate) fn eval_llvm_builtin_method(heap: &mut Heap, type_name: &Path, method
             wk::M_BUILD_SHL => Some(llvm_builder_build_int_op(args, "shl", Builder::build_left_shift)),
             wk::M_BUILD_LSHR => Some(llvm_builder_build_int_op(args, "lshr", |b, lhs, rhs, name| b.build_right_shift(lhs, rhs, false, name))),
             wk::M_BUILD_ASHR => Some(llvm_builder_build_int_op(args, "ashr", |b, lhs, rhs, name| b.build_right_shift(lhs, rhs, true, name))),
-            wk::M_BUILD_FADD => Some(llvm_builder_build_float_op(args, "fadd", Builder::build_float_add)),
-            wk::M_BUILD_FSUB => Some(llvm_builder_build_float_op(args, "fsub", Builder::build_float_sub)),
-            wk::M_BUILD_FMUL => Some(llvm_builder_build_float_op(args, "fmul", Builder::build_float_mul)),
-            wk::M_BUILD_FDIV => Some(llvm_builder_build_float_op(args, "fdiv", Builder::build_float_div)),
-            wk::M_BUILD_FREM => Some(llvm_builder_build_float_op(args, "frem", Builder::build_float_rem)),
-            wk::M_BUILD_FCMP_LT => Some(llvm_builder_build_fcmp(args, "fcmp_lt", inkwell::FloatPredicate::OLT)),
-            wk::M_BUILD_FCMP_LE => Some(llvm_builder_build_fcmp(args, "fcmp_le", inkwell::FloatPredicate::OLE)),
-            wk::M_BUILD_FCMP_GT => Some(llvm_builder_build_fcmp(args, "fcmp_gt", inkwell::FloatPredicate::OGT)),
-            wk::M_BUILD_FCMP_GE => Some(llvm_builder_build_fcmp(args, "fcmp_ge", inkwell::FloatPredicate::OGE)),
-            wk::M_BUILD_FCMP_EQ => Some(llvm_builder_build_fcmp(args, "fcmp_eq", inkwell::FloatPredicate::OEQ)),
-            wk::M_BUILD_FCMP_NE => Some(llvm_builder_build_fcmp(args, "fcmp_ne", inkwell::FloatPredicate::UNE)),
-            wk::M_BUILD_FSQRT => Some(llvm_builder_build_float_unary_intrinsic(args, "fsqrt", "llvm.sqrt.f64")),
-            wk::M_BUILD_FFLOOR => Some(llvm_builder_build_float_unary_intrinsic(args, "ffloor", "llvm.floor.f64")),
-            wk::M_BUILD_FCEIL => Some(llvm_builder_build_float_unary_intrinsic(args, "fceil", "llvm.ceil.f64")),
-            wk::M_BUILD_FROUND => Some(llvm_builder_build_float_unary_intrinsic(args, "fround", "llvm.rint.f64")),
-            wk::M_BUILD_FTRUNC => Some(llvm_builder_build_float_unary_intrinsic(args, "ftrunc", "llvm.trunc.f64")),
-            wk::M_BUILD_FPOW => Some(llvm_builder_build_fpow(args)),
-            wk::M_BUILD_FMAXNUM => Some(llvm_builder_build_float_binary_intrinsic(args, "fmaxnum", "llvm.maxnum.f64")),
-            wk::M_BUILD_FMINNUM => Some(llvm_builder_build_float_binary_intrinsic(args, "fminnum", "llvm.minnum.f64")),
-            wk::M_BUILD_FSIN => Some(llvm_builder_build_float_unary_intrinsic(args, "fsin", "llvm.sin.f64")),
-            wk::M_BUILD_FCOS => Some(llvm_builder_build_float_unary_intrinsic(args, "fcos", "llvm.cos.f64")),
-            wk::M_BUILD_FEXP => Some(llvm_builder_build_float_unary_intrinsic(args, "fexp", "llvm.exp.f64")),
-            wk::M_BUILD_FLOG => Some(llvm_builder_build_float_unary_intrinsic(args, "flog", "llvm.log.f64")),
-            wk::M_BUILD_FPTOSI => Some(llvm_builder_build_fptosi(args)),
-            wk::M_BUILD_SITOFP => Some(llvm_builder_build_sitofp(args)),
-            wk::M_BUILD_FROUND32 => Some(llvm_builder_build_fround32(args)),
+            wk::M_BUILD_FIXED_BINOP => Some(numeric::build_fixed_binop(heap, args)),
+            wk::M_BUILD_FIXED_UNARY => Some(numeric::build_fixed_unary(heap, args)),
+            wk::M_BUILD_FIXED_DIV_CHECK => Some(numeric::build_fixed_div_check(heap, args)),
+            wk::M_BUILD_FLOAT_BINOP => Some(numeric::build_float_binop(heap, args)),
+            wk::M_BUILD_FLOAT_UNARY => Some(numeric::build_float_unary(heap, args)),
             wk::M_BUILD_SADD_OVERFLOW => Some(llvm_builder_build_int_overflow(args, "sadd", "llvm.sadd.with.overflow")),
             wk::M_BUILD_SSUB_OVERFLOW => Some(llvm_builder_build_int_overflow(args, "ssub", "llvm.ssub.with.overflow")),
             wk::M_BUILD_SMUL_OVERFLOW => Some(llvm_builder_build_int_overflow(args, "smul", "llvm.smul.with.overflow")),
-            wk::M_ALLOCA_ARGS => Some(llvm_builder_alloca_args(args)),
-            wk::M_STORE_ARG => Some(llvm_builder_store_arg(args)),
-            wk::M_SCRATCH_SLOT => Some(llvm_builder_scratch_slot(args)),
+            wk::M_NO_VALUE => Some(slots::no_value()),
+            wk::M_CONST_VALUE => Some(values::const_value(args)),
+            wk::M_CONST_LIKE => Some(values::const_like(args)),
+            wk::M_CONVERT => Some(values::convert(args)),
+            wk::M_COERCE => Some(values::coerce(args)),
+            wk::M_BUILD_NOT => Some(values::build_not(args)),
+            wk::M_BUILD_SIZE_OF => Some(values::build_size_of(args)),
+            wk::M_TAG_FIELD => Some(values::tag_field(args)),
+            wk::M_UNTAG_FIELD => Some(values::untag_field(args)),
+            wk::M_GLOBAL_GET => Some(globals::global_get(args)),
+            wk::M_GLOBAL_PUT => Some(globals::global_put(args)),
+            wk::M_GLOBAL_NEW => Some(globals::global_new(args)),
+            wk::M_ARG_LIST => Some(slots::arg_list(args)),
+            wk::M_TEMP_SLOT => Some(slots::temp_slot()),
+            wk::M_SCRATCH_SLOT => Some(slots::scratch_slot(args)),
+            wk::M_FRAME_SLOTS => Some(slots::frame_slots()),
+            wk::M_FRAME_SLOT => Some(slots::frame_slot(false)),
+            wk::M_FRAME_SLOT_ROOTED => Some(slots::frame_slot(true)),
+            wk::M_ADD_FRAME_SLOT => Some(slots::add_frame_slot(args, false)),
+            wk::M_ADD_FRAME_SLOT_ROOTED => Some(slots::add_frame_slot(args, true)),
+            wk::M_SLOT_SET => Some(slots::slot_set(args)),
+            wk::M_SLOT_GET => Some(slots::slot_get(args)),
             wk::M_BUILD_CALL => Some(llvm_builder_build_call(args)),
             wk::M_LOAD_ENV => Some(llvm_builder_load_env(args)),
-            wk::M_BUILD_CALL_WITH_ENV => Some(llvm_builder_build_call_with_env(args)),
             wk::M_BUILD_MAKE_CLOSURE => Some(llvm_builder_build_make_closure(args)),
-            wk::M_LOAD_RAW => Some(llvm_builder_load_raw(args)),
-            wk::M_BUILD_SLOT_PTR => Some(llvm_builder_build_slot_ptr(args)),
-            wk::M_FRAME_SLOT => Some(llvm_builder_frame_slot(args)),
-            wk::M_FRAME_SLOT_ROOTED => Some(llvm_builder_frame_slot_rooted(args)),
             wk::M_COROUTINE_BEGIN => Some(llvm_builder_coroutine_begin(args)),
             wk::M_COROUTINE_CALL => Some(llvm_builder_coroutine_call(args)),
             wk::M_COROUTINE_SUSPEND => Some(llvm_builder_coroutine_suspend(args)),
@@ -150,6 +151,9 @@ pub(crate) fn eval_llvm_builtin_method(heap: &mut Heap, type_name: &Path, method
             wk::M_COROUTINE_APPLY => Some(llvm_builder_coroutine_apply(args)),
             wk::M_COROUTINE_DYN_CALL => Some(llvm_builder_coroutine_dyn_call(args)),
             wk::M_COROUTINE_END => Some(llvm_builder_coroutine_end(args)),
+            wk::M_ENTRY_VALUE => Some(coroutine::llvm_builder_entry_value(heap, args)),
+            wk::M_ENTRY_SAFEPOINT => Some(coroutine::llvm_builder_entry_safepoint(args)),
+            wk::M_LOOP_SAFEPOINT => Some(coroutine::llvm_builder_loop_safepoint(args)),
             wk::M_BUILD_ICMP_LT => Some(llvm_builder_build_icmp(args, "icmp_lt", inkwell::IntPredicate::SLT)),
             wk::M_BUILD_ICMP_LE => Some(llvm_builder_build_icmp(args, "icmp_le", inkwell::IntPredicate::SLE)),
             wk::M_BUILD_ICMP_GT => Some(llvm_builder_build_icmp(args, "icmp_gt", inkwell::IntPredicate::SGT)),
@@ -159,10 +163,6 @@ pub(crate) fn eval_llvm_builtin_method(heap: &mut Heap, type_name: &Path, method
             wk::M_BUILD_COND_BR => Some(llvm_builder_build_cond_br(args)),
             wk::M_BUILD_BR => Some(llvm_builder_build_br(args)),
             wk::M_BLOCK_TERMINATED_P => Some(llvm_builder_block_terminated(args)),
-            wk::M_BUILD_MALLOC => Some(llvm_builder_build_malloc(args)),
-            wk::M_BUILD_FREE => Some(llvm_builder_build_free(args)),
-            wk::M_BUILD_INT_TO_PTR => Some(llvm_builder_build_int_to_ptr(args)),
-            wk::M_BUILD_PTR_TO_INT => Some(llvm_builder_build_ptr_to_int(args)),
             wk::M_BUILD_FN_ADDRESS => Some(llvm_builder_build_fn_address(args)),
             wk::M_LOAD_TYPE => Some(llvm_builder_load_type(args)),
             _ => None,
@@ -228,9 +228,8 @@ fn i64_word_ptr(
     name: &str,
     who: &str,
 ) -> Result<PointerValue<'static>, EvalError> {
-    let ctx = crate::compile::llvm_context();
-    let idx_val = ctx.i64_type().const_int(index, false);
-    unsafe { b.build_gep(ctx.i64_type(), array_ptr, &[idx_val], name) }
+    let idx_val = crate::compile::carriers::word().const_int(index, false);
+    unsafe { b.build_gep(crate::compile::carriers::word(), array_ptr, &[idx_val], name) }
         .map_err(|e| EvalError::Internal(format!("{}: {}", who, e)))
 }
 
@@ -243,8 +242,7 @@ fn load_i64_word(
     who: &str,
 ) -> Result<BasicValueEnum<'static>, EvalError> {
     let elem_ptr = i64_word_ptr(b, array_ptr, index, names.0, who)?;
-    let ctx = crate::compile::llvm_context();
-    b.build_load(ctx.i64_type(), elem_ptr, names.1).map_err(|e| EvalError::Internal(format!("{}: {}", who, e)))
+    b.build_load(crate::compile::carriers::word(), elem_ptr, names.1).map_err(|e| EvalError::Internal(format!("{}: {}", who, e)))
 }
 
 fn llvm_module_create(heap: &Heap, args: &[Value]) -> Result<Value, EvalError> {
@@ -259,17 +257,17 @@ fn llvm_module_create(heap: &Heap, args: &[Value]) -> Result<Value, EvalError> {
 /// reads a logical parameter back out of `args`. LLVM 22 has only opaque
 /// pointers, so the parameter type is `Context::ptr_type`, not
 /// `IntType::ptr_type`.
-/// Shared by [`llvm_module_add_function`] and [`declare_external_function`]
+/// Shared by [`llvm_module_add_function`] and [`declare_external_compiled_function`]
 /// (labels/closures Stage 3's JIT-only forward declarations) — both declare
 /// a function under this exact same signature, just with or without a body.
 pub(crate) fn compiled_fn_type() -> inkwell::types::FunctionType<'static> {
     let ctx = crate::compile::llvm_context();
     let ptr_ty = ctx.ptr_type(AddressSpace::default());
-    ctx.i64_type().fn_type(&[ptr_ty.into(), ctx.i32_type().into()], false)
+    crate::compile::carriers::word().fn_type(&[ptr_ty.into(), ctx.i32_type().into()], false)
 }
 
 /// Get-or-create: reuses an existing declaration under `name` (a bodyless
-/// forward declaration — [`declare_external_function`] or an earlier call to
+/// forward declaration — [`declare_external_compiled_function`] or an earlier call to
 /// this very builtin) instead of always minting a fresh one. LLVM's own
 /// `LLVMAddFunction` does *not* do this — a second call with a colliding
 /// name silently gets uniquified (`"name.1"`), never merged with the first —
@@ -286,6 +284,10 @@ pub(crate) fn compiled_fn_type() -> inkwell::types::FunctionType<'static> {
 fn llvm_module_add_function(heap: &Heap, args: &[Value]) -> Result<Value, EvalError> {
     let module = expect_llvm_module(&args[0])?;
     let name = expect_str(heap, &args[1])?;
+    // A runtime function has the one signature its definition gives it.
+    if let Some(sig) = crate::compile::externs::runtime_sig(&name) {
+        return Ok(llvm_function_value(crate::compile::runtime_abi::declare(&module.borrow(), &name, sig)));
+    }
     let existing = module.borrow().get_function(&name);
     let function = existing.unwrap_or_else(|| module.borrow_mut().add_function(&name, compiled_fn_type(), None));
     Ok(llvm_function_value(function))
@@ -302,8 +304,7 @@ fn llvm_module_add_function(heap: &Heap, args: &[Value]) -> Result<Value, EvalEr
 /// What comes back is a **status word**, not the value. The value is in the
 /// frame, which is what makes stopping in the middle sayable at all.
 pub(crate) fn coroutine_fn_type() -> inkwell::types::FunctionType<'static> {
-    let ctx = crate::compile::llvm_context();
-    ctx.i64_type().fn_type(&[ctx.i64_type().into()], false)
+    crate::compile::carriers::word().fn_type(&[crate::compile::carriers::word().into()], false)
 }
 
 /// `(add-coroutine-function m name)` — get-or-create a function under
@@ -313,7 +314,9 @@ fn llvm_module_add_coroutine_function(heap: &Heap, args: &[Value]) -> Result<Val
     let module = expect_llvm_module(&args[0])?;
     let name = expect_str(heap, &args[1])?;
     let existing = module.borrow().get_function(&name);
-    let function = existing.unwrap_or_else(|| module.borrow_mut().add_function(&name, coroutine_fn_type(), None));
+    // A direct function (`crate::compile::direct`) has a signature of its own.
+    let ty = crate::compile::direct::sig_of(&name).map_or_else(coroutine_fn_type, |sig| sig.fn_type());
+    let function = existing.unwrap_or_else(|| module.borrow_mut().add_function(&name, ty, None));
     Ok(llvm_function_value(function))
 }
 
@@ -334,23 +337,8 @@ fn llvm_function_param(args: &[Value]) -> Result<Value, EvalError> {
         .ok_or_else(|| EvalError::Internal(format!("function-param: no parameter {}", idx)))
 }
 
-/// Forward-declares `name` in `module` with the standard compiled-function
-/// ABI but **no body** — [`crate::compile::driver::compile_function`]'s JIT-only step
-/// (labels/closures Stage 3, `call` to a different top-level function)
-/// that lets `compiler.rs`'s `compile-call` find an already-`compile`d
-/// function via `get-function` before the real call target's address is supplied
-/// when this declaration's own module is JIT-compiled (see that method's doc
-/// comment). Not exposed as an
-/// `llvm-*` builtin — unlike [`llvm_module_add_function`], the typelisp
-/// compiler body itself never needs to call this; only the Rust-side JIT
-/// orchestration above does. Must be called with
-/// [`crate::compile::COMPILE_LOCK`] held.
-pub(crate) fn declare_external_function(module: &Rc<RefCell<Module<'static>>>, name: &str) {
-    module.borrow_mut().add_function(name, compiled_fn_type(), None);
-}
-
-/// [`declare_external_function`] for a **compiled Lisp** function rather than
-/// an `rt_*` entry point: declared under whichever ABI this process emits.
+/// Forward-declares the **compiled Lisp** function `name` in `module`, with
+/// no body, under whichever ABI this process emits.
 ///
 /// The two cannot share one signature any more. A forward declaration is
 /// matched to its definition by name, and `add-coroutine-function` is
@@ -380,7 +368,7 @@ pub(crate) fn declare_external_compiled_function(module: &Rc<RefCell<Module<'sta
 fn compiled_fn_type_with_env() -> inkwell::types::FunctionType<'static> {
     let ctx = crate::compile::llvm_context();
     let ptr_ty = ctx.ptr_type(AddressSpace::default());
-    ctx.i64_type().fn_type(&[ptr_ty.into(), ctx.i32_type().into(), ptr_ty.into(), ctx.i32_type().into()], false)
+    crate::compile::carriers::word().fn_type(&[ptr_ty.into(), ctx.i32_type().into(), ptr_ty.into(), ctx.i32_type().into()], false)
 }
 
 /// `llvm-builder::load-env` reads a logical captured slot back out of `env`,
@@ -436,18 +424,12 @@ fn llvm_builder_position_at_end(args: &[Value]) -> Result<Value, EvalError> {
     Ok(Value::Empty)
 }
 
-/// `(const-word builder n)`: an LLVM 64-bit integer constant.
-///
-/// The *generated* code's word is 64 bits whatever the source language's
-/// integer types are, which is why this outlived `i64` (the source type it
-/// used to be named for). `n` is an `i32` and is sign-extended, so a caller
-/// passing `-1` gets the all-ones word it means; the two places that need a
-/// constant wider than `i32` (`compile-int`/`compile-float`) shift two halves
-/// together in IR rather than asking for one here.
+/// `(const-word builder n)`: the word `n`, sign-extended, so a caller
+/// passing `-1` gets the all-ones word it means.
 fn llvm_builder_const_word(args: &[Value]) -> Result<Value, EvalError> {
     let _builder = expect_llvm_builder(&args[0])?;
     let n = expect_int(&args[1])?;
-    let value = crate::compile::llvm_context().i64_type().const_int(n as u64, false);
+    let value = crate::compile::carriers::word().const_int(n as u64, false);
     Ok(llvm_value_value(value.into()))
 }
 
@@ -494,256 +476,50 @@ fn llvm_builder_load_env(args: &[Value]) -> Result<Value, EvalError> {
     Ok(llvm_value_value(loaded))
 }
 
-/// Shared by `build-add`/`build-sub`/`build-mul`: unwrap both `llvm-value`
-/// operands to `IntValue`s, apply `op` (one of `Builder::build_int_add`/
-/// `_sub`/`_mul`), and re-wrap the result.
+/// Two operands of one integer type, which a builder of one instruction
+/// takes: `None` when either is no value.
+fn int_pair(a: &Value, b: &Value, what: &str) -> Result<Option<(inkwell::values::IntValue<'static>, inkwell::values::IntValue<'static>)>, EvalError> {
+    match (operand(a)?, operand(b)?) {
+        (Some(BasicValueEnum::IntValue(a)), Some(BasicValueEnum::IntValue(b))) if a.get_type() == b.get_type() => Ok(Some((a, b))),
+        (None, _) | (_, None) => Ok(None),
+        (Some(a), Some(b)) => Err(EvalError::Internal(format!(
+            "{}: a {} and a {}",
+            what,
+            a.get_type().print_to_string(),
+            b.get_type().print_to_string()
+        ))),
+    }
+}
+
+/// An instruction on two integers of one type.
 fn llvm_builder_build_int_op(
     args: &[Value],
     name: &str,
     op: impl FnOnce(&Builder<'static>, inkwell::values::IntValue<'static>, inkwell::values::IntValue<'static>, &str) -> Result<inkwell::values::IntValue<'static>, inkwell::builder::BuilderError>,
 ) -> Result<Value, EvalError> {
     let builder = expect_llvm_builder(&args[0])?;
-    let a = expect_llvm_value(&args[1])?.into_int_value();
-    let b = expect_llvm_value(&args[2])?.into_int_value();
+    let Some((a, b)) = int_pair(&args[1], &args[2], name)? else { return slots::no_value() };
     let result = op(&builder.borrow(), a, b, name).map_err(|e| EvalError::Internal(format!("build-{}: {}", name, e)))?;
     Ok(llvm_value_value(result.into()))
 }
 
-/// Shared by `build-fadd`/`build-fsub`/`build-fmul`/`build-fdiv`/`build-frem`
-/// (compiled `f64` arithmetic). A compiled `f64` value is its raw `f64::to_bits`
-/// pattern carried in an `i64` register (`compile-float`'s convention — "every
-/// compiled value is a plain `i64`"), so each operand is `bitcast`ed `i64` ->
-/// `double` here, the `op` applied, and the `double` result `bitcast`ed back to
-/// `i64` — the whole float-ness stays contained in this one instruction from
-/// the surrounding IR's point of view, exactly the way a `char`'s code point
-/// stays a plain `i64` everywhere but the `char->int`/`int->char` edges.
-fn llvm_builder_build_float_op(
-    args: &[Value],
-    name: &str,
-    op: impl FnOnce(&Builder<'static>, inkwell::values::FloatValue<'static>, inkwell::values::FloatValue<'static>, &str) -> Result<inkwell::values::FloatValue<'static>, inkwell::builder::BuilderError>,
-) -> Result<Value, EvalError> {
-    let builder = expect_llvm_builder(&args[0])?;
-    let a_bits = expect_llvm_value(&args[1])?.into_int_value();
-    let b_bits = expect_llvm_value(&args[2])?.into_int_value();
-    let bld = builder.borrow();
-    let ctx = crate::compile::llvm_context();
-    let f64_ty = ctx.f64_type();
-    let err = |e: inkwell::builder::BuilderError| EvalError::Internal(format!("build-{}: {}", name, e));
-    let a = bld.build_bit_cast(a_bits, f64_ty, "a_f").map_err(err)?.into_float_value();
-    let b = bld.build_bit_cast(b_bits, f64_ty, "b_f").map_err(err)?.into_float_value();
-    let result = op(&bld, a, b, name).map_err(err)?;
-    let bits = bld.build_bit_cast(result, ctx.i64_type(), name).map_err(err)?;
-    Ok(llvm_value_value(bits))
-}
-
-/// The `f64` comparison counterpart of [`llvm_builder_build_int_op`]/
-/// [`llvm_builder_build_icmp`] combined: `bitcast` both `i64`-carried operands
-/// to `double`, `fcmp` with `predicate`, then zero-extend the `i1` result to
-/// the `i64` every compiled value is (`build-icmp`'s own widening step).
-/// `<`/`<=`/`>`/`>=` use the *ordered* predicates (`OLT`/... — false if either
-/// operand is NaN, matching Rust's `<`/... the interpreter's `eval_float_builtin`
-/// uses); `=`/`eq`/`eql`/`equal`/`equalp` use `OEQ` (NaN never equals NaN) and
-/// `/=` uses `UNE` (Rust's `!=` is `!(a == b)`, true when either is NaN).
-fn llvm_builder_build_fcmp(args: &[Value], name: &str, predicate: inkwell::FloatPredicate) -> Result<Value, EvalError> {
-    let builder = expect_llvm_builder(&args[0])?;
-    let a_bits = expect_llvm_value(&args[1])?.into_int_value();
-    let b_bits = expect_llvm_value(&args[2])?.into_int_value();
-    let bld = builder.borrow();
-    let ctx = crate::compile::llvm_context();
-    let f64_ty = ctx.f64_type();
-    let err = |e: inkwell::builder::BuilderError| EvalError::Internal(format!("{}: {}", name, e));
-    let a = bld.build_bit_cast(a_bits, f64_ty, "a_f").map_err(err)?.into_float_value();
-    let b = bld.build_bit_cast(b_bits, f64_ty, "b_f").map_err(err)?.into_float_value();
-    let cmp = bld.build_float_compare(predicate, a, b, name).map_err(err)?;
-    let widened = bld.build_int_z_extend(cmp, ctx.i64_type(), name).map_err(err)?;
-    Ok(llvm_value_value(widened.into()))
-}
-
-/// The unary transcendental/rounding counterpart of
-/// [`llvm_builder_build_float_op`]: `bitcast` the single `i64`-carried
-/// operand to `double`, call the named LLVM intrinsic (`llvm.sqrt.f64`/
-/// `llvm.floor.f64`/`llvm.ceil.f64`/`llvm.rint.f64`/`llvm.trunc.f64`), then
-/// `bitcast` the `double` result back. Unlike `build-fadd`/... (plain LLVM
-/// instructions), these have no dedicated IR opcode, so they go through
-/// `module`'s intrinsic declaration (`Intrinsic::get_declaration`, itself
-/// idempotent — safe to call again for a later use of the same op in the
-/// same module, same as `get-function` finding an already-declared `rt_*`
-/// shim) rather than `get-function`'s fixed-ABI `rt_*` lookup. `round`
-/// matches Rust's `f64::round_ties_even` (`float-native-method?`'s uncompiled
-/// fallback, kept in sync by `tests/compile_test.rs`): both round halfway
-/// cases to even, as CL's `round` does. `round` is `llvm.rint` in the
-/// default rounding mode (nearest, ties to even) rather than
-/// `llvm.roundeven`, which some targets lower to a `roundeven` libcall that
-/// macOS's libm does not have. `sqrt`/`floor`/`ceil`/`trunc` are
-/// exact IEEE-754 operations with no rounding-mode ambiguity to begin with.
-fn llvm_builder_build_float_unary_intrinsic(args: &[Value], name: &str, intrinsic_name: &str) -> Result<Value, EvalError> {
-    let builder = expect_llvm_builder(&args[0])?;
-    let module = expect_llvm_module(&args[1])?;
-    let x_bits = expect_llvm_value(&args[2])?.into_int_value();
-    let bld = builder.borrow();
-    let ctx = crate::compile::llvm_context();
-    let f64_ty = ctx.f64_type();
-    let err = |e: String| EvalError::Internal(format!("build-{}: {}", name, e));
-    let x = bld.build_bit_cast(x_bits, f64_ty, "x_f").map_err(|e| err(e.to_string()))?.into_float_value();
-    let intrinsic = inkwell::intrinsics::Intrinsic::find(intrinsic_name)
-        .ok_or_else(|| err(format!("no such LLVM intrinsic {}", intrinsic_name)))?;
-    let decl = intrinsic
-        .get_declaration(&module.borrow(), &[f64_ty.into()])
-        .ok_or_else(|| err(format!("failed to declare {}", intrinsic_name)))?;
-    let call = bld.build_call(decl, &[x.into()], name).map_err(|e| err(e.to_string()))?;
-    let result = match call.try_as_basic_value() {
-        inkwell::values::ValueKind::Basic(v) => v.into_float_value(),
-        inkwell::values::ValueKind::Instruction(_) => return Err(err(format!("{} produced no value", intrinsic_name))),
-    };
-    let bits = bld.build_bit_cast(result, ctx.i64_type(), name).map_err(|e| err(e.to_string()))?;
-    Ok(llvm_value_value(bits))
-}
-
-/// `expt` (`f64,f64->f64`): the binary counterpart of
-/// [`llvm_builder_build_float_unary_intrinsic`], `llvm.pow.f64` — matches
-/// the interpreter's `f64::powf` (`float_expt`), both ultimately the
-/// platform libm `pow` either way.
-/// Shared by `build-fpow`/`build-fmaxnum`/`build-fminnum` — every binary
-/// `f64` LLVM intrinsic this project uses. Each `i64`-carried operand is
-/// `bitcast`ed to `double`, the intrinsic (overloaded on its `f64` operand
-/// type, hence the `module` parameter — same reason
-/// [`llvm_builder_build_float_unary_intrinsic`] takes one) applied, and the
-/// `double` result `bitcast`ed back to `i64`.
-fn llvm_builder_build_float_binary_intrinsic(args: &[Value], name: &str, intrinsic_name: &str) -> Result<Value, EvalError> {
-    let builder = expect_llvm_builder(&args[0])?;
-    let module = expect_llvm_module(&args[1])?;
-    let a_bits = expect_llvm_value(&args[2])?.into_int_value();
-    let b_bits = expect_llvm_value(&args[3])?.into_int_value();
-    let bld = builder.borrow();
-    let ctx = crate::compile::llvm_context();
-    let f64_ty = ctx.f64_type();
-    let err = |e: String| EvalError::Internal(format!("build-{}: {}", name, e));
-    let a = bld.build_bit_cast(a_bits, f64_ty, "a_f").map_err(|e| err(e.to_string()))?.into_float_value();
-    let b = bld.build_bit_cast(b_bits, f64_ty, "b_f").map_err(|e| err(e.to_string()))?.into_float_value();
-    let intrinsic = inkwell::intrinsics::Intrinsic::find(intrinsic_name).ok_or_else(|| err(format!("no such LLVM intrinsic {}", intrinsic_name)))?;
-    let decl = intrinsic
-        .get_declaration(&module.borrow(), &[f64_ty.into()])
-        .ok_or_else(|| err(format!("failed to declare {}", intrinsic_name)))?;
-    let call = bld.build_call(decl, &[a.into(), b.into()], name).map_err(|e| err(e.to_string()))?;
-    let result = match call.try_as_basic_value() {
-        inkwell::values::ValueKind::Basic(v) => v.into_float_value(),
-        inkwell::values::ValueKind::Instruction(_) => return Err(err(format!("{} produced no value", intrinsic_name))),
-    };
-    let bits = bld.build_bit_cast(result, ctx.i64_type(), name).map_err(|e| err(e.to_string()))?;
-    Ok(llvm_value_value(bits))
-}
-
-fn llvm_builder_build_fpow(args: &[Value]) -> Result<Value, EvalError> {
-    llvm_builder_build_float_binary_intrinsic(args, "fpow", "llvm.pow.f64")
-}
-
-/// `(select cond then else)`: CL's `max`/`min` (and `bignum`/`ratio`'s, via
-/// their own three-way `rt_*_cmp` comparator) all lower to this — an
-/// `icmp`+`select` pair, branch-free, rather than real control flow. `cond`
-/// is an ordinary `i64`-valued `llvm-value` (nonzero = true, the same
-/// convention [`llvm_builder_build_cond_br`]'s `cond` uses), narrowed to `i1`
-/// with an `icmp ne cond, 0` before `select` — which, unlike `br`, requires a
-/// genuine `i1` operand, not a widened `i64`.
+/// `(build-select builder cond then else)` — `then` when `cond`, a `bool`,
+/// is true, and `else` otherwise; both are computed.
 fn llvm_builder_build_select(args: &[Value]) -> Result<Value, EvalError> {
     let builder = expect_llvm_builder(&args[0])?;
-    let cond = expect_llvm_value(&args[1])?.into_int_value();
-    let then_v = expect_llvm_value(&args[2])?.into_int_value();
-    let else_v = expect_llvm_value(&args[3])?.into_int_value();
-    let bld = builder.borrow();
-    let err = |e: String| EvalError::Internal(format!("build-select: {}", e));
-    let ctx = crate::compile::llvm_context();
-    let zero = ctx.i64_type().const_zero();
-    let is_nonzero = bld.build_int_compare(inkwell::IntPredicate::NE, cond, zero, "select_cond").map_err(|e| err(e.to_string()))?;
-    let result = bld.build_select(is_nonzero, then_v, else_v, "select").map_err(|e| err(e.to_string()))?;
-    Ok(llvm_value_value(result.into_int_value().into()))
-}
-
-/// `float->int` (`f64->i32`, narrowing, truncating toward zero): `bitcast`
-/// the `i64`-carried operand to `double`, then the `llvm.fptosi.sat`
-/// intrinsic (overloaded on both its result and its `f64` operand type,
-/// hence the `module` parameter every other overloaded-intrinsic builtin
-/// here already takes — see [`llvm_builder_build_float_unary_intrinsic`]/
-/// [`llvm_builder_build_fpow`]) to `i32`, then `sext` back to the full `i64`
-/// register every compiled integer is carried in (see
-/// `int-native-method?`'s doc comment).
-///
-/// Saturating to `i32` and not to the register: `float->int`'s declared
-/// return type *is* `i32`, and a value in a register always holds the number
-/// its type claims, sign-extended (`types::normalize_int`). Unlike a plain
-/// `fptosi` instruction (poison on NaN/out-of-range input), `.sat` clamps:
-/// NaN -> 0, `+inf`/an overflowing magnitude -> `i32::MAX`, `-inf`/an
-/// underflowing magnitude -> `i32::MIN` — exactly Rust's `as` cast
-/// semantics, matching the interpreter's `float_to_int` (`f as i32`) bit for
-/// bit.
-fn llvm_builder_build_fptosi(args: &[Value]) -> Result<Value, EvalError> {
-    let builder = expect_llvm_builder(&args[0])?;
-    let module = expect_llvm_module(&args[1])?;
-    let x_bits = expect_llvm_value(&args[2])?.into_int_value();
-    let bld = builder.borrow();
-    let ctx = crate::compile::llvm_context();
-    let f64_ty = ctx.f64_type();
-    let i32_ty = ctx.i32_type();
-    let i64_ty = ctx.i64_type();
-    let err = |e: String| EvalError::Internal(format!("build-fptosi: {}", e));
-    let x = bld.build_bit_cast(x_bits, f64_ty, "x_f").map_err(|e| err(e.to_string()))?.into_float_value();
-    let intrinsic =
-        inkwell::intrinsics::Intrinsic::find("llvm.fptosi.sat").ok_or_else(|| err("no such LLVM intrinsic llvm.fptosi.sat".into()))?;
-    let decl = intrinsic
-        .get_declaration(&module.borrow(), &[i32_ty.into(), f64_ty.into()])
-        .ok_or_else(|| err("failed to declare llvm.fptosi.sat".into()))?;
-    let call = bld.build_call(decl, &[x.into()], "fptosi_sat").map_err(|e| err(e.to_string()))?;
-    let narrow = match call.try_as_basic_value() {
-        inkwell::values::ValueKind::Basic(v) => v.into_int_value(),
-        inkwell::values::ValueKind::Instruction(_) => return Err(err("llvm.fptosi.sat produced no value".into())),
-    };
-    let result = bld.build_int_s_extend(narrow, i64_ty, "fptosi_sext").map_err(|e| err(e.to_string()))?;
-    Ok(llvm_value_value(result.into()))
-}
-
-/// `int->float`: `sitofp` the operand (every compiled integer is carried in a
-/// full `i64` register, whatever its static width) to `double`, then
-/// `bitcast` it back to the raw word a compiled `f64` is carried in — the
-/// exact inverse of [`llvm_builder_build_fptosi`]'s opening `bitcast`.
-///
-/// No saturating intrinsic and no `module` parameter: `sitofp` is total on
-/// every input, so there is nothing to clamp, which matches the interpreter's
-/// `int_to_float` (`n as f64`).
-fn llvm_builder_build_sitofp(args: &[Value]) -> Result<Value, EvalError> {
-    let builder = expect_llvm_builder(&args[0])?;
-    let x = expect_llvm_value(&args[1])?.into_int_value();
-    let bld = builder.borrow();
-    let ctx = crate::compile::llvm_context();
-    let err = |e: String| EvalError::Internal(format!("build-sitofp: {}", e));
-    let f = bld.build_signed_int_to_float(x, ctx.f64_type(), "x_f").map_err(|e| err(e.to_string()))?;
-    let bits = bld.build_bit_cast(f, ctx.i64_type(), "x_bits").map_err(|e| err(e.to_string()))?;
-    Ok(llvm_value_value(bits.into_int_value().into()))
-}
-
-/// The nearest binary32 value, still carried as an `f64`: `fptrunc` to
-/// `float`, then `fpext` straight back to `double`.
-///
-/// This is what makes `f32` a width rather than a label. A float value lives
-/// in a 64-bit word whichever type names it — every binary32 value is exactly
-/// a binary64 value — but an `f32` *operation* rounds its result to binary32,
-/// and this is that rounding. The interpreter's `float_at` does the same
-/// thing as `v as f32 as f64`.
-fn llvm_builder_build_fround32(args: &[Value]) -> Result<Value, EvalError> {
-    let builder = expect_llvm_builder(&args[0])?;
-    let x_bits = expect_llvm_value(&args[1])?.into_int_value();
-    let bld = builder.borrow();
-    let ctx = crate::compile::llvm_context();
-    let err = |e: String| EvalError::Internal(format!("build-fround32: {}", e));
-    let x = bld.build_bit_cast(x_bits, ctx.f64_type(), "x_f").map_err(|e| err(e.to_string()))?.into_float_value();
-    let narrow = bld.build_float_trunc(x, ctx.f32_type(), "x_f32").map_err(|e| err(e.to_string()))?;
-    let wide = bld.build_float_ext(narrow, ctx.f64_type(), "x_f64").map_err(|e| err(e.to_string()))?;
-    let bits = bld.build_bit_cast(wide, ctx.i64_type(), "x_bits").map_err(|e| err(e.to_string()))?;
-    Ok(llvm_value_value(bits.into_int_value().into()))
+    let cond = value_or_return!(&args[1]).into_int_value();
+    let Some((then_v, else_v)) = int_pair(&args[2], &args[3], "build-select")? else { return slots::no_value() };
+    let r = builder
+        .borrow()
+        .build_select(cond, then_v, else_v, "select")
+        .map_err(|e| EvalError::Internal(format!("build-select: {}", e)))?;
+    Ok(llvm_value_value(r))
 }
 
 /// `(build-sadd-overflow builder module a b flag-slot)` and its `ssub`/`smul`
-/// siblings: the `llvm.*.with.overflow.i64` intrinsic on two `i64` words,
-/// answering the (wrapped) result and storing the overflow flag, widened to
-/// an `i64` `0`/`1`, into slot 0 of `flag-slot` (an `alloca-args` pointer).
+/// siblings: the `llvm.*.with.overflow` intrinsic on two words, answering the
+/// (wrapped) result and putting whether it overflowed, a `bool`, in slot 0 of
+/// `flag-slot`.
 ///
 /// This is `int`'s fast path (`compile-assoc`'s `int` branch): two tagged
 /// fixnums are `n << 1`, so the tagged words add and subtract directly and
@@ -752,61 +528,39 @@ fn llvm_builder_build_fround32(args: &[Value]) -> Result<Value, EvalError> {
 /// rather than the sign-comparison identity because `mul` has no cheap one,
 /// and one shape for all three reads better than two.
 ///
-/// Two results and one return value: the flag travels through memory. A
+/// Two results and one return value: the flag travels through a place. A
 /// builder answering a struct would need the island to extract from it,
-/// which no other builtin does, and a slot is what the island already uses
+/// which no other builtin does, and a place is what the island already uses
 /// to merge values across blocks (`build-try-option`).
 fn llvm_builder_build_int_overflow(args: &[Value], name: &str, intrinsic_name: &str) -> Result<Value, EvalError> {
     let builder = expect_llvm_builder(&args[0])?;
     let module = expect_llvm_module(&args[1])?;
-    let a = expect_llvm_value(&args[2])?.into_int_value();
-    let b = expect_llvm_value(&args[3])?.into_int_value();
-    let flag_slot = expect_llvm_value(&args[4])?.into_pointer_value();
-    let bld = builder.borrow();
-    let ctx = crate::compile::llvm_context();
-    let i64_ty = ctx.i64_type();
+    let Some((a, b)) = int_pair(&args[2], &args[3], name)? else { return slots::no_value() };
+    let flag_slot = expect_slots(&args[4])?;
     let err = |e: String| EvalError::Internal(format!("build-{}-overflow: {}", name, e));
     let intrinsic = inkwell::intrinsics::Intrinsic::find(intrinsic_name).ok_or_else(|| err(format!("no such LLVM intrinsic {}", intrinsic_name)))?;
     let decl = intrinsic
-        .get_declaration(&module.borrow(), &[i64_ty.into()])
+        .get_declaration(&module.borrow(), &[a.get_type().into()])
         .ok_or_else(|| err(format!("failed to declare {}", intrinsic_name)))?;
-    let call = bld.build_call(decl, &[a.into(), b.into()], name).map_err(|e| err(e.to_string()))?;
-    let pair = match call.try_as_basic_value() {
-        inkwell::values::ValueKind::Basic(v) => v.into_struct_value(),
-        inkwell::values::ValueKind::Instruction(_) => return Err(err(format!("{} produced no value", intrinsic_name))),
+    let (result, flag) = {
+        let bld = builder.borrow();
+        let call = bld.build_call(decl, &[a.into(), b.into()], name).map_err(|e| err(e.to_string()))?;
+        let pair = match call.try_as_basic_value() {
+            inkwell::values::ValueKind::Basic(v) => v.into_struct_value(),
+            inkwell::values::ValueKind::Instruction(_) => return Err(err(format!("{} produced no value", intrinsic_name))),
+        };
+        let result = bld.build_extract_value(pair, 0, "ov_result").map_err(|e| err(e.to_string()))?;
+        (result, bld.build_extract_value(pair, 1, "ov_flag").map_err(|e| err(e.to_string()))?)
     };
-    let result = bld.build_extract_value(pair, 0, "ov_result").map_err(|e| err(e.to_string()))?.into_int_value();
-    let flag = bld.build_extract_value(pair, 1, "ov_flag").map_err(|e| err(e.to_string()))?.into_int_value();
-    let flag_wide = bld.build_int_z_extend(flag, i64_ty, "ov_flag_i64").map_err(|e| err(e.to_string()))?;
-    let zero = i64_ty.const_zero();
-    let slot0 = unsafe { bld.build_gep(i64_ty, flag_slot, &[zero], "ov_flag_ptr").map_err(|e| err(e.to_string()))? };
-    bld.build_store(slot0, flag_wide).map_err(|e| err(e.to_string()))?;
-    Ok(llvm_value_value(result.into()))
-}
-
-/// Stack-allocates a `[count x i64]` array and returns its base pointer, to
-/// be filled in by `store-arg` and passed to `build-call` — the compiled-IR
-/// equivalent of building the `i64* args` array every compiled function's
-/// fixed ABI expects (see `llvm_module_add_function`'s doc comment). Opaque
-/// pointers (the only kind LLVM 22 has) carry no element-type info of their own, so
-/// this pointer is usable as a flat `i64*` exactly the way `load_arg`'s own
-/// `args_ptr` parameter already is — every GEP against it supplies
-/// `ctx.i64_type()` itself, regardless of the alloca's nominal array type.
-fn llvm_builder_alloca_args(args: &[Value]) -> Result<Value, EvalError> {
-    let builder = expect_llvm_builder(&args[0])?;
-    let count = expect_int(&args[1])? as u32;
-    let ctx = crate::compile::llvm_context();
-    let array_ty = ctx.i64_type().array_type(count);
-    let b = builder.borrow();
-    let ptr = entry_alloca(&b, array_ty, "call_args").map_err(|e| EvalError::Internal(format!("alloca-args: {}", e)))?;
-    Ok(llvm_value_value(ptr.into()))
+    slots::put(&builder, &flag_slot, 0, Some(flag))?;
+    Ok(llvm_value_value(result))
 }
 
 /// An `alloca` of `ty` in the entry block of the function `b` is building,
 /// with `b` left where it was.
 fn entry_alloca(
     b: &Builder<'static>,
-    ty: inkwell::types::ArrayType<'static>,
+    ty: inkwell::types::BasicTypeEnum<'static>,
     name: &str,
 ) -> Result<PointerValue<'static>, String> {
     // The array is emitted in the **entry block**, not where the island asked
@@ -847,122 +601,31 @@ fn entry_alloca(
     at_entry.build_alloca(ty, name).map_err(|e| e.to_string())
 }
 
-/// `(scratch-slot builder role)` — the one-word stack slot this function uses
-/// for `role`, the same slot every time it is asked for.
-///
-/// A slot of its own per request (`alloca-args`) is a slot of its own in the
-/// machine frame, so a body with a merge slot per arithmetic operation had a
-/// frame as long as the body: `(+ 1 (+ 1 ... a))` a hundred thousand deep
-/// needed 8.3MB. What the island asks for here instead is one slot per role,
-/// on its word that no two uses of one role are ever in progress at once —
-/// true of a merge slot, which is filled on each branch and read where they
-/// meet before anything else asks for that role.
-///
-/// Only inside a frame (`coroutine-begin` .. `coroutine-end`), which is what
-/// keeps the answer to one function.
-fn llvm_builder_scratch_slot(args: &[Value]) -> Result<Value, EvalError> {
-    let builder = expect_llvm_builder(&args[0])?;
-    let role = expect_int(&args[1])?;
-    let key = builder_key(&builder);
-    let known = FRAME_CTXS.with(|c| {
-        c.borrow()
-            .get(&key)
-            .map(|f| f.scratch.get(&role).copied())
-            .ok_or_else(|| EvalError::Internal("scratch-slot: no frame is open on this builder".to_string()))
-    })?;
-    if let Some(slot) = known {
-        return Ok(llvm_value_value(slot.into()));
-    }
-    let slot = entry_alloca(&builder.borrow(), crate::compile::llvm_context().i64_type().array_type(1), &format!("scratch{}", role))
-        .map_err(|e| EvalError::Internal(format!("scratch-slot: {}", e)))?;
-    FRAME_CTXS.with(|c| {
-        if let Some(f) = c.borrow_mut().get_mut(&key) {
-            f.scratch.insert(role, slot);
-        }
-    });
-    Ok(llvm_value_value(slot.into()))
-}
-
-/// Writes `value` into slot `index` of an `alloca-args` array — the same
-/// GEP pattern `load_arg` uses to *read* a logical argument, just paired
-/// with a store instead of a load.
-fn llvm_builder_store_arg(args: &[Value]) -> Result<Value, EvalError> {
-    let builder = expect_llvm_builder(&args[0])?;
-    let array_ptr = expect_llvm_value(&args[1])?.into_pointer_value();
-    let index = expect_int(&args[2])? as u64;
-    let value = expect_llvm_value(&args[3])?.into_int_value();
-    let b = builder.borrow();
-    let elem_ptr = i64_word_ptr(&b, array_ptr, index, "store_arg_ptr", "store-arg")?;
-    b.build_store(elem_ptr, value).map_err(|e| EvalError::Internal(format!("store-arg: {}", e)))?;
-    Ok(Value::Empty)
-}
-
-/// The generic-pointer read counterpart of [`llvm_builder_store_arg`] — same
-/// GEP pattern as [`llvm_builder_load_arg`], but against an arbitrary
-/// `array_ptr` rather than a function's own args parameter (automatic
-/// retain/release insertion's `release-pending-args` uses this to read back
-/// the parallel "which call/env-array slots need releasing" array
-/// `compile-call-args`/`compile-env-args` built via `store-arg`).
-fn llvm_builder_load_raw(args: &[Value]) -> Result<Value, EvalError> {
-    let builder = expect_llvm_builder(&args[0])?;
-    let array_ptr = expect_llvm_value(&args[1])?.into_pointer_value();
-    let index = expect_int(&args[2])? as u64;
-    let loaded = load_i64_word(&builder.borrow(), array_ptr, index, ("load_raw_ptr", "load_raw_val"), "load-raw")?;
-    Ok(llvm_value_value(loaded))
-}
-
-/// [`llvm_builder_load_raw`]'s GEP without the load: the *address* of one
-/// word in an `i64` array.
-///
-/// A compiled frame is an `i64` array (`Heap::open_frame`), and a local is one
-/// word in it. Everything that already handles a local —
-/// `resolve-value`/`compile-set`/`retain-bindings` — speaks in pointers,
-/// because a local has been a 1-element `alloca-args` slot since `setf` and
-/// loop re-entry needed somewhere to write. So carving the slot out of a frame
-/// instead of allocating it on the machine stack is the whole change, and this
-/// is the one primitive it needs.
-fn llvm_builder_build_slot_ptr(args: &[Value]) -> Result<Value, EvalError> {
-    let builder = expect_llvm_builder(&args[0])?;
-    let array_ptr = expect_llvm_value(&args[1])?.into_pointer_value();
-    let index = expect_int(&args[2])? as u64;
-    let elem_ptr = i64_word_ptr(&builder.borrow(), array_ptr, index, "slot_ptr", "build-slot-ptr")?;
-    Ok(llvm_value_value(elem_ptr.into()))
-}
-
-
-/// Shared by every `build-icmp-*` builtin (if/let/comparisons, labels/closures
-/// Stage 5): runs `icmp <predicate>` on two `i64` operands, then widens the
-/// resulting `i1` back to `i64` (0/1) via `build_int_z_extend` — every other
-/// builtin here treats a compiled value as a plain `i64` (see
-/// the doc comment of `llvm-module`'s definition (`typeck::builtins::llvm`)), and a comparison result is no
-/// exception, which is exactly what lets `compile-if`'s `build-cond-br` (and
-/// ordinary arithmetic/storage) accept it without caring it came from a
-/// comparison rather than `+`/a literal.
+/// Every `build-icmp-*`: a comparison of two integers of one type, read as
+/// signed, answering a `bool`.
 fn llvm_builder_build_icmp(args: &[Value], name: &str, predicate: inkwell::IntPredicate) -> Result<Value, EvalError> {
     let builder = expect_llvm_builder(&args[0])?;
-    let a = expect_llvm_value(&args[1])?.into_int_value();
-    let b = expect_llvm_value(&args[2])?.into_int_value();
-    let bld = builder.borrow();
-    let cmp = bld.build_int_compare(predicate, a, b, name).map_err(|e| EvalError::Internal(format!("{}: {}", name, e)))?;
-    let ctx = crate::compile::llvm_context();
-    let widened = bld.build_int_z_extend(cmp, ctx.i64_type(), name).map_err(|e| EvalError::Internal(format!("{}: {}", name, e)))?;
-    Ok(llvm_value_value(widened.into()))
+    let Some((a, b)) = int_pair(&args[1], &args[2], name)? else { return slots::no_value() };
+    let cmp = builder.borrow().build_int_compare(predicate, a, b, name).map_err(|e| EvalError::Internal(format!("{}: {}", name, e)))?;
+    Ok(llvm_value_value(cmp.into()))
 }
 
-/// `compile-if`'s branch primitive: branches to `then_block` when `cond`
-/// (an ordinary `i64`-valued `llvm-value`) is nonzero, `else_block`
-/// otherwise — built from an `icmp ne cond, 0` plus a conditional branch.
+/// `compile-if`'s branch primitive: to `then_block` when `cond`, a `bool`,
+/// is true, and to `else_block` otherwise.
 fn llvm_builder_build_cond_br(args: &[Value]) -> Result<Value, EvalError> {
     let builder = expect_llvm_builder(&args[0])?;
-    let cond = expect_llvm_value(&args[1])?.into_int_value();
+    let bool_ty = crate::compile::llvm_context().bool_type();
+    let cond = match operand(&args[1])? {
+        Some(BasicValueEnum::IntValue(v)) if v.get_type() == bool_ty => v,
+        None => bool_ty.const_zero(),
+        Some(other) => return Err(EvalError::Internal(format!("build-cond-br: on a {}", other.get_type().print_to_string()))),
+    };
     let then_block = expect_llvm_basic_block(&args[2])?;
     let else_block = expect_llvm_basic_block(&args[3])?;
-    let b = builder.borrow();
-    let ctx = crate::compile::llvm_context();
-    let zero = ctx.i64_type().const_zero();
-    let is_nonzero =
-        b.build_int_compare(inkwell::IntPredicate::NE, cond, zero, "if_cond_nz").map_err(|e| EvalError::Internal(format!("build-cond-br: {}", e)))?;
-    b.build_conditional_branch(is_nonzero, then_block, else_block).map_err(|e| EvalError::Internal(format!("build-cond-br: {}", e)))?;
+    builder
+        .borrow()
+        .build_conditional_branch(cond, then_block, else_block)
+        .map_err(|e| EvalError::Internal(format!("build-cond-br: {}", e)))?;
     Ok(Value::Empty)
 }
 
@@ -982,96 +645,57 @@ fn llvm_builder_block_terminated(args: &[Value]) -> Result<Value, EvalError> {
     Ok(Value::Bool(terminated))
 }
 
-/// A direct call to an already-declared `target` (typically `get-function`'s
-/// result), passing `args_ptr`/`argc` straight through to its fixed ABI —
-/// see the doc comment of `llvm-module`'s definition (`typeck::builtins::llvm`) for why every compiled
-/// function shares that one signature regardless of arity. This is the one
-/// new primitive that unlocks every statically-resolvable direct call:
-/// self-recursion, `labels`-sibling calls, and top-level `defun`-to-`defun`
-/// calls alike, since all three reduce to "the callee's `llvm-function`
-/// already exists in this module, look it up and call it."
+/// `(build-call builder target args)` — a call of `target` with the values in
+/// the slots `args`: a runtime function, under its own signature.
+///
+/// A function under the array ABI (`compiled_fn_type`) is called with them in
+/// an array of words, and so is a runtime function that takes a list of any
+/// length.
 fn llvm_builder_build_call(args: &[Value]) -> Result<Value, EvalError> {
     let builder = expect_llvm_builder(&args[0])?;
     let target = expect_llvm_function(&args[1])?;
-    let args_ptr = expect_llvm_value(&args[2])?;
-    let argc = expect_int(&args[3])? as u64;
-    let ctx = crate::compile::llvm_context();
-    let argc_val = ctx.i32_type().const_int(argc, false);
-    let call = builder
-        .borrow()
-        .build_call(target, &[args_ptr.into(), argc_val.into()], "call_result")
-        .map_err(|e| EvalError::Internal(format!("build-call: {}", e)))?;
-    crate::compile::raise_check::after_call(&builder.borrow(), target).map_err(|e| EvalError::Internal(format!("build-call: {}", e)))?;
-    match call.try_as_basic_value() {
-        inkwell::values::ValueKind::Basic(v) => Ok(llvm_value_value(v)),
-        inkwell::values::ValueKind::Instruction(_) => Err(EvalError::Internal("build-call: callee produced no value".into())),
+    let given = expect_slots(&args[2])?;
+    let err = |e: String| EvalError::Internal(format!("build-call: {}", e));
+    let b = builder.borrow();
+    let given = all_of(&b, &given)?;
+    if let Some(sig) = crate::compile::externs::runtime_sig(&target.get_name().to_string_lossy()).filter(|sig| !sig.takes_array()) {
+        let given: Vec<_> = given
+            .iter()
+            .zip(&sig.params)
+            .map(|(v, p)| v.unwrap_or_else(|| crate::compile::raise_check::zero_of(p.llvm())))
+            .collect();
+        let (_, result) = crate::compile::runtime_abi::call_declared(&b, target, sig, &given).map_err(err)?;
+        crate::compile::raise_check::after_call(&b, target).map_err(err)?;
+        return Ok(llvm_value_value(result));
+    }
+    let word_zero = crate::compile::carriers::word().const_zero();
+    let given: Vec<_> = given.into_iter().map(|v| v.unwrap_or_else(|| word_zero.into())).collect();
+    match emit_rt_call(&b, target, &given, "call", "build-call")? {
+        Some(v) => Ok(llvm_value_value(v)),
+        None => Err(err("callee produced no value".into())),
     }
 }
 
-/// The captures counterpart of [`llvm_builder_build_call`]: calls `target`
-/// (declared via `add-function-with-env`) passing both the args array
-/// (`args_ptr`/`argc`, exactly as `build-call` does) and an env array
-/// (`env_ptr`/`env_len`) under its extended ABI.
-fn llvm_builder_build_call_with_env(args: &[Value]) -> Result<Value, EvalError> {
-    let builder = expect_llvm_builder(&args[0])?;
-    let target = expect_llvm_function(&args[1])?;
-    let args_ptr = expect_llvm_value(&args[2])?;
-    let argc = expect_int(&args[3])? as u64;
-    let env_ptr = expect_llvm_value(&args[4])?;
-    let env_len = expect_int(&args[5])? as u64;
-    let ctx = crate::compile::llvm_context();
-    let argc_val = ctx.i32_type().const_int(argc, false);
-    let env_len_val = ctx.i32_type().const_int(env_len, false);
-    let call = builder
-        .borrow()
-        .build_call(target, &[args_ptr.into(), argc_val.into(), env_ptr.into(), env_len_val.into()], "call_result")
-        .map_err(|e| EvalError::Internal(format!("build-call-with-env: {}", e)))?;
-    crate::compile::raise_check::after_call(&builder.borrow(), target)
-        .map_err(|e| EvalError::Internal(format!("build-call-with-env: {}", e)))?;
-    match call.try_as_basic_value() {
-        inkwell::values::ValueKind::Basic(v) => Ok(llvm_value_value(v)),
-        inkwell::values::ValueKind::Instruction(_) => {
-            Err(EvalError::Internal("build-call-with-env: callee produced no value".into()))
-        }
-    }
-}
-
-/// Heap-allocates a `BoxedObj::CompiledClosure` (`typelisp-mem`) wrapping
-/// `target` (a function declared via `add-function-with-env` — see
-/// `compiled_fn_type_with_env`'s doc comment for why *every* closure-boxed
-/// function uses that ABI) and a copy of `env`'s `env_len` values (an
-/// already-built `alloca-args`/`store-arg` array — the same shape a direct
-/// capturing call already builds, see `compiler.rs`'s `compile-env-args`).
-/// The closure-representation unification's flip of the retired
-/// `ClosureBox` (a raw `malloc`'d, reference-counted block the GC never saw)
-/// to a GC-heap value: builds a scratch `rt_closure_new` argument array
-/// (`target`'s raw address, `sexpr_mask`, then each captured slot copied
-/// verbatim from `env_ptr`) and calls it through the ordinary `rt_*` FFI
-/// convention every other `BoxedObj` constructor uses (`rt_struct_new`,
-/// `rt_data_new`, ...) — `rt_closure_new` is unconditionally forward-declared
-/// into every module (`rt_extern_functions`), so `target`'s own parent module
-/// already has it. `sexpr_mask` (`compiler.rs`'s `compute-sexpr-mask`) is
-/// passed straight through unchanged: it marks which captured slots are
-/// tagged `Sexpr` values for `rt_closure_new` to `decode`, exactly the mask
-/// [`BoxedObj::CompiledClosure`]'s own doc comment describes.
+/// `(build-make-closure builder m target env mask-low mask-high)` — a
+/// function value of `target` over the values in the slots `env`.
+///
+/// `mask` marks which captured values are tagged words, for the runtime to
+/// `decode` ([`BoxedObj::CompiledClosure`]'s own doc comment). It arrives as
+/// two 32-bit halves: one bit per captured slot, and the island's widest
+/// fixed-width integer is `i32`, so 64 slots do not fit one of its words.
+/// Each half is a *bit pattern* (`pow2` doubles into `i32`'s sign bit for
+/// slot 31), so it is masked back to 32 bits here rather than sign-extended.
 fn llvm_builder_build_make_closure(args: &[Value]) -> Result<Value, EvalError> {
     let builder = expect_llvm_builder(&args[0])?;
     let module = expect_llvm_module(&args[1])?;
     let target = expect_llvm_function(&args[2])?;
-    let env_ptr = expect_llvm_value(&args[3])?.into_pointer_value();
-    let env_len = expect_int(&args[4])? as u64;
-    // The mask arrives as two 32-bit halves: it has one bit per captured slot
-    // and the island's widest fixed-width integer is `i32`, so 64 slots do not
-    // fit one of its words. Each half is a *bit pattern* (`pow2` doubles into
-    // `i32`'s sign bit for slot 31), so it is masked back to 32 bits here
-    // rather than sign-extended.
+    let env = expect_slots(&args[3])?;
     let mask_half = |i: usize| -> Result<u64, EvalError> {
         Ok(expect_int(&args[i])? as u64 & 0xFFFF_FFFF)
     };
-    let sexpr_mask = mask_half(5)? | (mask_half(6)? << 32);
-    let ctx = crate::compile::llvm_context();
+    let sexpr_mask = mask_half(4)? | (mask_half(5)? << 32);
+    let err = |e: String| EvalError::Internal(format!("build-make-closure: {}", e));
     let b = builder.borrow();
-    let module = module.borrow();
     // Which constructor names the ABI the body was emitted under, so the
     // closure carries it. A process can hold both at once across an ABI
     // change — the island runs from its committed dump while this binary JITs
@@ -1079,135 +703,30 @@ fn llvm_builder_build_make_closure(args: &[Value]) -> Result<Value, EvalError> {
     // `EMITTED_BODY_ABI` (which is one) was the wrong place to read it. The
     // right one is the function being boxed: its LLVM type *is* the ABI, so
     // there is nothing to record separately and nothing to get out of step.
-    // `coroutine_fn_type` takes one `i64`; the classic type takes a pointer
+    // `coroutine_fn_type` takes one word; the classic type takes a pointer
     // and a `u32`.
     let ctor_name = if target.get_type() == coroutine_fn_type() {
         "rt_coroutine_closure_new"
     } else {
         "rt_closure_new"
     };
-    let rt_closure_new = module.get_function(ctor_name).ok_or_else(|| {
-        EvalError::Internal(format!("build-make-closure: {} not declared in this module", ctor_name))
-    })?;
-
-    let i64_ty = ctx.i64_type();
-    let argc = 2 + env_len;
-    let ctor_args_ptr = entry_alloca(&b, i64_ty.array_type(argc as u32), "closure_ctor_args")
-        .map_err(|e| EvalError::Internal(format!("build-make-closure: {}", e)))?;
-    let store_slot = |idx: u64, v: BasicValueEnum<'static>| -> Result<(), EvalError> {
-        let idx_val = i64_ty.const_int(idx, false);
-        let p = unsafe {
-            b.build_gep(i64_ty, ctor_args_ptr, &[idx_val], "closure_ctor_arg_ptr")
-                .map_err(|e| EvalError::Internal(format!("build-make-closure: {}", e)))?
-        };
-        b.build_store(p, v).map_err(|e| EvalError::Internal(format!("build-make-closure: {}", e)))?;
-        Ok(())
-    };
-
-    let fn_ptr_int = b
-        .build_ptr_to_int(target.as_global_value().as_pointer_value(), i64_ty, "closure_fn_ptr")
-        .map_err(|e| EvalError::Internal(format!("build-make-closure: {}", e)))?;
-    store_slot(0, fn_ptr_int.into())?;
-    store_slot(1, i64_ty.const_int(sexpr_mask, false).into())?;
-    for i in 0..env_len {
-        let idx_val = i64_ty.const_int(i, false);
-        let src_ptr = unsafe {
-            b.build_gep(i64_ty, env_ptr, &[idx_val], "closure_env_src")
-                .map_err(|e| EvalError::Internal(format!("build-make-closure: {}", e)))?
-        };
-        let v = b
-            .build_load(i64_ty, src_ptr, "closure_env_val")
-            .map_err(|e| EvalError::Internal(format!("build-make-closure: {}", e)))?;
-        store_slot(2 + i, v)?;
-    }
-
-    let argc_val = ctx.i32_type().const_int(argc, false);
-    let call = b
-        .build_call(rt_closure_new, &[ctor_args_ptr.into(), argc_val.into()], "closure_new_result")
-        .map_err(|e| EvalError::Internal(format!("build-make-closure: {}", e)))?;
-    match call.try_as_basic_value() {
-        inkwell::values::ValueKind::Basic(v) => Ok(llvm_value_value(v)),
-        inkwell::values::ValueKind::Instruction(_) => Err(EvalError::Internal("build-make-closure: rt_closure_new produced no value".into())),
+    let ctor = module
+        .borrow()
+        .get_function(ctor_name)
+        .ok_or_else(|| err(format!("{} not declared in this module", ctor_name)))?;
+    let word_ty = crate::compile::carriers::word();
+    let address = b
+        .build_ptr_to_int(target.as_global_value().as_pointer_value(), word_ty, "closure_fn_ptr")
+        .map_err(|e| err(e.to_string()))?;
+    let mut given: Vec<BasicValueEnum<'static>> = vec![address.into(), crate::compile::carriers::int(64).const_int(sexpr_mask, false).into()];
+    given.extend(all_of(&b, &env)?.into_iter().map(|v| v.unwrap_or_else(|| word_ty.const_zero().into())));
+    match emit_rt_call(&b, ctor, &given, "closure_new", "build-make-closure")? {
+        Some(v) => Ok(llvm_value_value(v)),
+        None => Err(err(format!("{} produced no value", ctor_name))),
     }
 }
 
-// ---- Stage 6 of the Sexpr-representation plan: generic malloc/free ------
-// (`docs/implementation-log.md`) — the `ClosureBox` generalization: a general ADT box
-// (`Option`/`Result`/`defstruct`) needs heap storage and offset load/store
-// exactly like a `ClosureBox` does, but with no fixed header shape to bake
-// in (a variant tag slot, then one slot per field — `compiler.rs`'s
-// `compile-construct` lays this out itself using the four primitives below
-// plus the already-generic `store-arg`/`load-raw`). Unlike `ClosureBox`,
-// no refcounting/cascading-release machinery exists yet for these boxes —
-// `compile-construct` simply leaks them, the same accepted trade-off this
-// codebase already takes for an unreferenced boxed `labels` sibling or a
-// captured reference cycle (see `compiler.rs`'s module doc comment) —
-// `build-free` is exposed regardless, ready for a later stage to wire up
-// automatic freeing without needing a new Rust primitive then.
-
-/// Heap-allocates `count` `i64` slots and returns the raw pointer — see this
-/// section's own doc comment. The generalization of
-/// [`llvm_builder_build_make_closure`]'s own `build_array_malloc` call,
-/// without baking in `ClosureBox`'s fixed header layout.
-fn llvm_builder_build_malloc(args: &[Value]) -> Result<Value, EvalError> {
-    let builder = expect_llvm_builder(&args[0])?;
-    let count = expect_int(&args[1])? as u64;
-    let ctx = crate::compile::llvm_context();
-    let count_val = ctx.i64_type().const_int(count, false);
-    let ptr = builder
-        .borrow()
-        .build_array_malloc(ctx.i64_type(), count_val, "box")
-        .map_err(|e| EvalError::Internal(format!("build-malloc: {}", e)))?;
-    Ok(llvm_value_value(ptr.into()))
-}
-
-/// Frees a pointer `build-malloc` returned (or any other `llvm-value`
-/// already holding a real pointer, e.g. after `build-int-to-ptr`) — the
-/// inverse of `build-malloc`. See this section's own doc comment for why
-/// nothing in `compiler.rs` calls this yet.
-fn llvm_builder_build_free(args: &[Value]) -> Result<Value, EvalError> {
-    let builder = expect_llvm_builder(&args[0])?;
-    let ptr = expect_llvm_value(&args[1])?.into_pointer_value();
-    builder.borrow().build_free(ptr).map_err(|e| EvalError::Internal(format!("build-free: {}", e)))?;
-    Ok(Value::Empty)
-}
-
-/// Reinterprets an `i64`-valued `llvm-value` as a pointer — every compiled
-/// value is a plain `i64` (the doc comment of `llvm-module`'s definition (`typeck::builtins::llvm`)), so a
-/// general ADT box value read back out of a slot/argument/field needs this
-/// before `load-raw`/`store-arg` (which both expect an already-pointer-typed
-/// `llvm-value`) can dereference it — `compiler.rs`'s `compile-field-get`/
-/// `compile-field-set` need it directly.
-fn llvm_builder_build_int_to_ptr(args: &[Value]) -> Result<Value, EvalError> {
-    let builder = expect_llvm_builder(&args[0])?;
-    let v = expect_llvm_value(&args[1])?.into_int_value();
-    let ctx = crate::compile::llvm_context();
-    let ptr_ty = ctx.ptr_type(AddressSpace::default());
-    let ptr = builder
-        .borrow()
-        .build_int_to_ptr(v, ptr_ty, "int_to_ptr")
-        .map_err(|e| EvalError::Internal(format!("build-int-to-ptr: {}", e)))?;
-    Ok(llvm_value_value(ptr.into()))
-}
-
-/// The inverse of `build-int-to-ptr` — `compile-construct`'s final step,
-/// turning a freshly `build-malloc`'d pointer into the plain `i64` value
-/// every other compiled value already is, matching how `build-make-closure`
-/// does the same `ptrtoint` for a `ClosureBox`.
-fn llvm_builder_build_ptr_to_int(args: &[Value]) -> Result<Value, EvalError> {
-    let builder = expect_llvm_builder(&args[0])?;
-    let ptr = expect_llvm_value(&args[1])?.into_pointer_value();
-    let ctx = crate::compile::llvm_context();
-    let v = builder
-        .borrow()
-        .build_ptr_to_int(ptr, ctx.i64_type(), "ptr_to_int")
-        .map_err(|e| EvalError::Internal(format!("build-ptr-to-int: {}", e)))?;
-    Ok(llvm_value_value(v.into()))
-}
-
-/// `build-fn-address`: a declared function's own address as the plain `i64`
-/// every other compiled value already is — `build-ptr-to-int` applied to the
-/// function itself rather than to a `build-malloc`'d block.
+/// `build-fn-address`: a declared function's own address, as a word.
 ///
 /// Every Lisp call is the caller: `coroutine-call` *names* its callee to the
 /// driver rather than being a `call` instruction with it, so the target has to
@@ -1219,10 +738,9 @@ fn llvm_builder_build_ptr_to_int(args: &[Value]) -> Result<Value, EvalError> {
 fn llvm_builder_build_fn_address(args: &[Value]) -> Result<Value, EvalError> {
     let builder = expect_llvm_builder(&args[0])?;
     let f = expect_llvm_function(&args[1])?;
-    let ctx = crate::compile::llvm_context();
     let v = builder
         .borrow()
-        .build_ptr_to_int(f.as_global_value().as_pointer_value(), ctx.i64_type(), "fn_address")
+        .build_ptr_to_int(f.as_global_value().as_pointer_value(), crate::compile::carriers::word(), "fn_address")
         .map_err(|e| EvalError::Internal(format!("build-fn-address: {}", e)))?;
     Ok(llvm_value_value(v.into()))
 }

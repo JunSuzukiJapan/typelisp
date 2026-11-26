@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/README.md @ 398532233e28225bb121ed5b18609d41ea1bf813 -->
+<!-- translated-from: docs/ja/reference/functions/README.md @ b01477a6134617bbcef066ff2065d17245132754 -->
 # Eingebaute Funktionen
 
 Die Liste der eingebauten Funktionen, der Methoden und der Standardbibliothek. Zur Syntax (Spezialformen und
@@ -34,8 +34,10 @@ seinen Pfad, `std::net::tcp-connect`. Die Tabelle nennt diese Namen und das Modu
 | Modul | Namen |
 |---|---|
 | `std::array` | `array-iter` |
+| `std::board` | `disable-interrupt`, `enable-interrupt` |
 | `std::char` | `digit->char`, `digit-weight`, `name->char` |
 | `std::collections` | `Deque`, `HashSet`, `Scope`, `SortedTable`, `hashtable-iter` |
+| `std::dbg` | `llvm-size-of` |
 | `std::env` | `command-line-args`, `getenv`, `home-directory` |
 | `std::error` | `WrappedError`, `as-dyn-error`, `assert-equal`, `describe-error`, `wrap-error` |
 | `std::eval` | `Environment` |

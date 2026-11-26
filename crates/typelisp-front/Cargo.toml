@@ -24,11 +24,12 @@ name = "typelisp_front"
 crate-type = ["rlib", "staticlib"]
 
 [dependencies]
-typelisp-abi.workspace = true
-typelisp-mem.workspace = true
-typelisp-print.workspace = true
-typelisp-read.workspace = true
-typelisp-rt.workspace = true
+typelisp-abi = { workspace = true, features = ["std"] }
+typelisp-mem = { workspace = true, features = ["std"] }
+typelisp-print = { workspace = true, features = ["std"] }
+typelisp-read = { workspace = true, features = ["std"] }
+typelisp-rt = { workspace = true, features = ["std"] }
+typelisp-rt-sys.workspace = true
 num-bigint = "0.4"
 num-rational = "0.4"
 num-traits = "0.2"
@@ -47,3 +48,7 @@ parking_lot = "0.12"
 # keyed by something other than a string, which `DefLocs`/`Docs` need.
 serde = { version = "1", features = ["derive", "rc"] }
 bincode = "1.3"
+
+# Sockets, TLS and OS threads: not on WebAssembly, which has none of them.
+[target.'cfg(not(target_family = "wasm"))'.dependencies]
+typelisp-rt-posix.workspace = true

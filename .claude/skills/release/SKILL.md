@@ -94,18 +94,19 @@ description: typelisp の新しい版(例 0.2.0)をリリースする。版上�
     - リリースノートは `--generate-notes` のコミット一覧。書き直すなら `gh release edit v<ver> --notes-file ...`。
 
 11. **crates.io の案内**: 公開は依存される側から順に、ユーザーが流す。
-    typelisp-mem → typelisp-abi → typelisp-print → typelisp-read → typelisp-rt → typelisp-front
+    typelisp-mem → typelisp-abi → typelisp-print → typelisp-read → typelisp-rt → typelisp-rt-sys
+    → typelisp-rt-posix → typelisp-rt-embedded → typelisp-rt-semihosting → typelisp-front
     → typelisp。`scripts/publish-crates.sh` がこの順に流す(`--dry-run` は typelisp-mem だけ
     確かめて止まる。公開済みの版は飛ばすので、途中で止まっても同じコマンドで続けられる)。
     Claude は流さず、このコマンドをユーザーに渡す。
     公開後は、読み取りだけで確かめる(`publish-crates.sh` は本番の公開を行うので確認には使わない):
-    7 クレートそれぞれ `curl -s -A "<名前>" https://crates.io/api/v1/crates/<crate>/<ver>` が
+    11 クレートそれぞれ `curl -s -A "<名前>" https://crates.io/api/v1/crates/<crate>/<ver>` が
     `"num":"<ver>"` を返し、`"yanked":false` であること。
 
 ## 版の出現箇所(0.1.1 → 0.2.0 と 0.2.0 → 0.2.1 で同じ)
 
 - ルート `Cargo.toml`: `[workspace.package]` の `version` 1 つと、`[workspace.dependencies]` の
-  内部クレート 6 つの `version`(各クレートの Cargo.toml は `version.workspace = true` なので触らない)
+  内部クレート 10 個の `version`(各クレートの Cargo.toml は `version.workspace = true` なので触らない)
 - `Cargo.lock`(regen-abi-version.sh か cargo が更新する)
 - `tests/typl_help_version_test.rs` の期待値 `typl <ver>\n`
 - `README.md` と `README_JP.md` のインストール例 `TYPELISP_VERSION=<ver>`

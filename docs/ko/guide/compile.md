@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ 7622044725db7d28dabb691d82e592367d9284e8 -->
+<!-- translated-from: docs/ja/guide/compile.md @ 1b5dc6ac828d8e4a95800a91218b5e9dffe83f98 -->
 # 컴파일
 
 아무것도 하지 않으면 typelisp 프로그램은 인터프리터에서 실행된다. 그 밖에 네이티브 코드로 컴파일하는 방법이 두 가지,
@@ -214,7 +214,148 @@ const code = await run({ write: (fd, text) => { /* 예를 들어 화면에 표�
 - 브라우저에서는 `hello.wasm`을 `hello.mjs`와 같은 위치에서 HTTP로 제공하세요(`file://`에서는 불러올 수 없습니다).
 - `sleep`은 `Atomics.wait`로 기다립니다. 브라우저에서는 이것을 교차 출처 격리된 페이지의 Worker 안에서만 쓸 수 있으므로, `sleep`을 쓰는 프로그램은 Worker에서 실행하세요.
 - 지역 시간(`zone`을 생략한 `decode-universal-time` 등)은 JavaScript의 `Date`가 알려 주는 시간대로 구합니다.
-- 3.6절에서 쓸 수 없는 것에 더해, 파일과 디렉터리 조작이 **컴파일 오류**가 됩니다. 표준 입력은 빈 것으로 읽히고, `(command-line-args)`는 빈 벡터입니다.
+- 3.6절에서 쓸 수 없는 것에 더해, 파일과 디렉터리 조작, 환경 변수, `(command-line-args)`, 홈 디렉터리, `dribble`이 **컴파일 오류**가 됩니다. 표준 입력은 빈 것으로 읽힙니다.
+
+### 3.8 마이크로컨트롤러(Cortex-M)용으로 컴파일하기
+
+`--target thumbv7em-none-eabihf`를 붙이면 OS가 없는 Cortex-M4F・M7 보드용 실행 파일(ELF)을 만듭니다. `-o`를 생략하면 소스의 `.typl`을 `.elf`로 바꾼 이름이 됩니다. `--target thumbv8m.main-none-eabihf`이면 Cortex-M33 보드용입니다.
+
+```sh
+$ typl -c hello.typl --target thumbv7em-none-eabihf          # hello.elf가 생긴다
+$ qemu-system-arm -M mps2-an386 -nographic \
+    -semihosting-config enable=on,target=native -kernel hello.elf   # QEMU의 Cortex-M4에서 실행한다
+$ typl -c hello.typl --target thumbv8m.main-none-eabihf
+$ qemu-system-arm -M mps2-an505 -nographic \
+    -semihosting-config enable=on,target=native -kernel hello.elf   # QEMU의 Cortex-M33에서 실행한다
+```
+
+- `install.sh`로 설치한 `typl`은 그대로 쓸 수 있습니다. `cargo install`로 설치할 때는 `rustup target add thumbv7em-none-eabihf thumbv8m.main-none-eabihf`를 실행한 뒤 `--features embedded`를 붙여 설치합니다(wasm과 둘 다라면 `--features wasm,embedded`). 저장소의 디버그 빌드 `typl`에서는 `scripts/build-embedded-runtime.sh`를 실행합니다. 링크에는 rustup 툴체인의 링커를 씁니다.
+- 보드의 메모리 배치는 `--linker-script FILE`로 넘깁니다. 쓰는 법은 `cortex-m-rt`의 `memory.x`와 같고, FLASH와 RAM의 주소와 크기를 씁니다. `_typelisp_stack_size = 32K;`처럼 쓰면 RAM 중 스택이 쓰는 크기가 됩니다(쓰지 않으면 64KiB). RAM의 나머지가 힙입니다. 생략하면 QEMU의 `mps2-an386`(Cortex-M33에서는 `mps2-an505`) 배치가 됩니다.
+
+  ```
+  MEMORY
+  {
+    FLASH : ORIGIN = 0x08000000, LENGTH = 512K
+    RAM : ORIGIN = 0x20000000, LENGTH = 128K
+  }
+  _typelisp_stack_size = 16K;
+  ```
+
+- 출력・입력・종료・시각(보드의 함수)을 누가 제공할지는 `--board-functions`로 고릅니다.
+  - `semihosting`(기본값): semihosting으로 제공합니다. QEMU(`-semihosting-config enable=on`)나 디버거로 실행할 때 씁니다.
+  - `c`: 보드가 C 함수로 제공합니다. 아래 함수를 정의한 오브젝트나 정적 라이브러리를 `--link FILE`로 넘깁니다(`--link`는 여러 번 쓸 수 있습니다. `defffi`로 부르는 벤더의 라이브러리도 같은 방식으로 넘깁니다).
+
+  ```c
+  void     typelisp_host_write(int32_t fd, const uint8_t *p, size_t len); // fd 1은 표준 출력, 2는 표준 오류
+  size_t   typelisp_host_read(int32_t fd, uint8_t *p, size_t len);        // fd 0, 읽은 바이트 수, 끝이면 0
+  void     typelisp_host_exit(int32_t code);                              // 돌아오지 않는다
+  uint64_t typelisp_host_now_us(void);                                    // 거꾸로 가지 않는 시계의 마이크로초
+  int64_t  typelisp_host_unix_us(void);                                   // 1970-01-01부터의 마이크로초
+  void     typelisp_host_sleep_us(uint64_t us);                           // us 마이크로초 기다린다
+  ```
+
+- 보드의 레지스터(메모리에 매핑된 주변 장치)는 `volatile-read-u8`, `volatile-read-u16`, `volatile-read-u32`로 읽고 `volatile-write-u8`, `volatile-write-u16`, `volatile-write-u32`로 씁니다. 주소는 `int`나 `u16` 같은 폭이 정해진 정수로 넘기며, 읽은 값은 그 폭의 타입(`u8` 등)이 됩니다. 식을 쓴 자리에서 반드시 한 번 읽거나 쓰며, 컴파일러는 이를 생략하거나 옮기지 않습니다. 모두 `unsafe` 안에서만 쓸 수 있습니다. 주소가 음수이거나 폭의 배수가 아니면, 읽거나 쓰기 전에 실행 시간 오류가 됩니다.
+
+  ```lisp
+  ;; QEMU mps2-an386의 UART 0: 데이터 0x40004000, 상태 0x40004004, 제어 0x40004008
+  (defun put-byte ((c u32)) ()
+    (unsafe
+      (loop (when (= (logand (volatile-read-u32 #x40004004) 1) 0) (break)))   ; 송신 중이면 기다린다
+      (volatile-write-u32 #x40004000 c)))
+
+  (defun main () ()
+    (unsafe (volatile-write-u32 #x40004008 1))                               ; 송신을 켠다
+    (put-byte 104) (put-byte 105) (put-byte 10))                             ; "hi"와 줄바꿈
+  ```
+
+- 인터럽트가 올 때 호출되는 함수는 `defun`에 `#[interrupt(N)]`(주변 장치 인터럽트 `N`)이나 `#[exception(SysTick)]` 같은 속성을 붙여 씁니다. 인터럽트는 `(enable-interrupt N)`으로 켭니다. 핸들러는 그 자리에서 실행되며, 런타임의 처리 도중에 왔을 때만 그 처리가 끝난 뒤 실행됩니다. 핸들러 안에서는 기다릴 수 없습니다(`sleep`은 컴파일 오류입니다). 자세한 내용은 [구문 레퍼런스](../reference/syntax.md)의 3.17절에 있습니다.
+
+  ```lisp
+  (use std::board::enable-interrupt)
+
+  #[interrupt(5)]
+  (defun on-five () ()
+    (println "interrupt 5"))
+
+  (defun main () ()
+    (enable-interrupt 5)
+    (unsafe (volatile-write-u32 #xE000E200 (as u32 32))))   ; 인터럽트 5를 스스로 일으킨다(NVIC의 보류 레지스터)
+  ```
+
+- 기동(벡터 테이블과 RAM 준비)과 메모리 확보는 런타임이 합니다. HardFault나 처리되지 않는 인터럽트가 일어나면 panic과 같은 종료 코드(1)로 끝납니다.
+- `throw`/`catch`/`panic`, bignum・ratio・부동소수, 태스크・채널・`sleep`은 실행 파일과 똑같이 동작합니다. 태스크는 하나의 코어에서 차례로 실행됩니다. C 함수(`defffi`)도 쓸 수 있습니다.
+- 보드에 없는 것을 쓰는 프로그램은 **컴파일 오류**가 됩니다. 3.7절에서 쓸 수 없는 것에 더해 `eval`・`macroexpand`를 쓸 수 없습니다. 지방시는 알 수 없습니다(3.6절과 같음).
+- cons 아레나는 1024셀에서 시작해 모자라면 늘어납니다. `--heap-cells`, `--max-memory`, `--no-cons`, `-O<N>`, `--release`는 그대로 쓸 수 있습니다.
+
+### 3.9 Arduino Uno(AVR)용으로 컴파일하기
+
+`--target avr-atmega328p`를 붙이면 Arduino Uno의 마이크로컨트롤러(ATmega328P)용 실행 파일(ELF)을 만듭니다. 다음 프로그램은 보드의 LED를 깜박입니다.
+
+```lisp
+(defconstant (PINB int) #x23)
+(defconstant (DDRB int) #x24)
+(defconstant (LED u8) 32)                         ; PB5
+
+(defun wait-a-bit () ()
+  (let ((i (the u32 0)))
+    (while (< i (the u32 400000))
+      (unsafe (volatile-read-u8 PINB))
+      (setf i (+ i 1)))
+    ()))
+
+(defun main () ()
+  (unsafe (volatile-write-u8 DDRB LED))           ; 출력으로 설정
+  (while true
+    (unsafe (volatile-write-u8 PINB LED))         ; 반전
+    (wait-a-bit)))
+```
+
+```sh
+$ typl -c blink.typl --target avr-atmega328p -O2   # blink.elf가 만들어짐
+$ qemu-system-avr -M uno -display none -serial stdio -bios blink.elf   # QEMU에서 실행
+```
+
+- 런타임이 없으므로 런타임을 사용하는 프로그램은 **컴파일 오류**가 됩니다. 오류에는 무엇이 필요하고 어떤 함수를 거쳐 도달하는지가 나옵니다. 사용할 수 있는 것은 고정 폭 정수(`i8`부터 `u32`까지), `f32`, `f64`, `bool`, `char`의 계산, 함수 호출(재귀 포함), 조건 분기, 반복문, 그 값들을 담는 `defvar`와 `defconstant`, `volatile-read-u8` 등, C 함수 호출입니다.
+- 사용할 수 없는 것: 문자열·리스트·구조체처럼 힙에 놓이는 값. `catch`, 함수 값 호출. 문자열이나 함수를 넘기는 C 함수 호출. `sin`, `expt` 같은 부동소수점 수학 함수(`sqrt`와 `floor` 같은 반올림은 사용할 수 있습니다).
+- 인터럽트 핸들러는 `#[interrupt(N)]`로 씁니다([구문](../reference/syntax.md) 3.17절). `N`은 ATmega328P의 인터럽트 번호로, 리셋을 0으로 센 1~25입니다(타이머 1 오버플로는 13). 아래 예를 보십시오.
+- 0으로 나누면 그 자리에서 마이크로컨트롤러가 멈춥니다(인터럽트도 더 오지 않습니다). 부호 있는 최솟값을 `-1`로 나누는 `/`도 마찬가지입니다.
+- `int`는 폭이 정해져 있지 않으므로 사용할 수 없습니다(컴파일 오류). `i16`이나 `u16` 같은 폭이 정해진 타입을 쓰십시오. 주소도 폭이 정해진 정수로 계산할 수 있습니다. 숫자로 쓴 주소나 `defconstant`의 `int`처럼 컴파일할 때 값이 정해지는 것은 사용할 수 있습니다.
+- 재귀로 스택이 모자라면 마이크로컨트롤러가 멈춥니다.
+- C 함수는 `defffi`로 선언하고, AVR용으로 컴파일한 오브젝트 파일을 `--link FILE`로 넘깁니다.
+- 아무것도 하지 않는 반복문은 `-O1` 이상에서 제거됩니다. 기다리는 반복문 안에서는 레지스터를 읽는 등의 작업을 하십시오.
+- `main`이 끝나면 마이크로컨트롤러가 멈춥니다.
+- 메모리 배치는 `--linker-script FILE`로 바꿀 수 있습니다. 생략하면 플래시 32KiB에서 끝부분의 부트로더 512바이트를 뺀 영역과 RAM 2KiB입니다. RAM 주소는 `0x800100`처럼 `0x800000`을 더해서 씁니다.
+- `f32`와 `f64`의 계산은 보조 함수가 합니다. 사용한 것만 플래시에 들어갑니다(`f64` 쪽이 더 큽니다).
+- 링크에는 3.8절과 같이 rustup 툴체인의 링커를 사용합니다.
+
+타이머 인터럽트로 LED를 깜빡이는 예입니다. 인터럽트는 주변 장치의 레지스터에서 활성화합니다.
+
+```lisp
+(defconstant (PINB int) #x23)
+(defconstant (DDRB int) #x24)
+(defconstant (LED u8) 32)
+(defconstant (TIMSK1 int) #x6F)
+(defconstant (TCCR1B int) #x81)
+(defvar (ticks u16) 0)
+
+#[interrupt(13)]                                  ; 타이머 1 오버플로
+(defun on-overflow () ()
+  (unsafe (volatile-write-u8 PINB LED))           ; 반전
+  (setf ticks (+ ticks 1))
+  ())
+
+(defun main () ()
+  (unsafe (volatile-write-u8 DDRB LED)
+          (volatile-write-u8 TIMSK1 1)            ; 오버플로 인터럽트를 활성화
+          (volatile-write-u8 TCCR1B 3))           ; 클록의 1/64로 세기 시작
+  (while true))
+```
+
+- 핸들러가 있는 프로그램은 전역 변수의 초기화가 끝나면 인터럽트를 받습니다. `main`의 처음에 주변 장치를 설정하십시오.
+- `enable-interrupt`와 `#[exception(NAME)]`은 쓸 수 없습니다(컴파일 에러).
+- 핸들러가 실행되는 동안 다른 인터럽트는 기다립니다. 핸들러도 다른 함수처럼 런타임을 쓸 수 없습니다.
+- 전역 변수를 한 번 읽거나 쓰는 동작은 2바이트 이상의 값이라도 도중에 핸들러가 끼어들지 않습니다. 이를 위한 인터럽트 금지는 핸들러가 쓰는 변수를 읽을 때와 핸들러가 읽거나 쓰는 변수를 쓸 때 하며, 그 변수를 컴파일할 때 경고로 알립니다. 읽고 나서 쓰는 갱신(`(setf n (+ n 1))`) 사이에는 인터럽트가 올 수 있습니다. 핸들러도 쓰는 변수를 갱신할 때는 상태 레지스터(`#x5F` 번지)를 읽어 보관하고, 0을 써서 인터럽트를 멈춘 다음, 끝나면 보관한 값을 다시 쓰십시오.
+- 핸들러가 없는 인터럽트가 오면 마이크로컨트롤러는 멈춥니다.
 
 ## 4. 덤프
 

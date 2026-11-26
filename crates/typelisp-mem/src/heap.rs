@@ -55,12 +55,14 @@
 //!
 //! All `unsafe` is confined here; the public API is safe.
 
-use std::collections::HashMap;
-use std::ptr;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::{Arc, Mutex};
+use crate::prelude::*;
+use crate::collections::HashMap;
+use core::ptr;
+use core::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use alloc::sync::Arc;
+use crate::sync::Mutex;
 
-use parking_lot::RwLock;
+use crate::sync::RwLock;
 
 use super::symbols::{self, SymRef};
 use super::value::{BoxId, BoxedObj, Cell, ConsRef, LocId, Value};
@@ -72,6 +74,7 @@ mod roots;
 mod objects;
 mod hashtable;
 mod scope;
+mod native;
 mod cons;
 
 pub use frames::*;
@@ -253,6 +256,12 @@ impl<T> SlotStore<T> {
         }
     }
 
+    /// The bytes of slots that are allocated and hold nothing: what can be
+    /// stored before the store itself takes more memory.
+    fn spare_bytes(&self) -> usize {
+        (self.slots.capacity() - (self.slots.len() - self.free.len())) * size_of::<Option<T>>()
+    }
+
     fn occupied(&self) -> usize {
         self.slots.iter().filter(|s| s.is_some()).count()
     }
@@ -304,7 +313,7 @@ pub struct HeapShared {
     // backs — see `push_permanent_root`) must read the same way from every
     // thread that names it.
     permanent_roots: Mutex<Slab<Value>>,
-    // `parking_lot::RwLock`, not `std::sync::RwLock`: `path_segments`
+    // `crate::sync::RwLock`, not `std::sync::RwLock`: `path_segments`
     // returns a reference borrowed from inside this lock, and
     // only `parking_lot`'s guards can be `.map()`ped to shrink that
     // reference down from "the whole table" to "the one entry" while still
@@ -323,8 +332,8 @@ pub struct HeapShared {
     // the reader consults it per path, which must not wait on the arena.
     // Lock order: this one, then the symbol table's (`SessionNames`' methods
     // take that one while this is held), never the other way round.
-    names: parking_lot::Mutex<symbols::SessionNames>,
-    // Same `parking_lot::RwLock`-for-mapped-guards reasoning as `interning`,
+    names: crate::sync::Mutex<symbols::SessionNames>,
+    // Same `crate::sync::RwLock`-for-mapped-guards reasoning as `interning`,
     // for `Heap::string`'s return.
     strings: RwLock<StrStore>,
     // Same reasoning again, for `Heap::bignum_value`/`ratio_value`'s return
@@ -343,16 +352,27 @@ pub struct HeapShared {
     // return, only the plain `Vec` operations `alloc_cell`/`gc` already use
     // (`retain`/`push`/iteration), the same reasoning as `root_stacks`/
     // `permanent_roots`.
-    cell_registry: Mutex<Vec<std::sync::Weak<BoxId>>>,
+    cell_registry: Mutex<Vec<alloc::sync::Weak<BoxId>>>,
     // Every view, and the stop-the-world flag — see `Heap::gc`.
     threads: ThreadRegistry,
     // How many collections have run, for tests that assert an allocation
     // pattern does not thrash — see `gc_count`. Shared, because a
     // collection run from any view collects the whole heap.
-    gc_count: AtomicU64,
-    // When set, every `cons` collects first — see `set_gc_stress`. Shared
+    gc_count: crate::sync::AtomicCount,
+    // The memory use at which the heap next collects — see
+    // `Heap::short_of_memory`.
+    next_collection: AtomicUsize,
+    // `SlotStore::spare_bytes` of `strings` and of `boxes`, as the last
+    // change to each left it, for `Heap::memory_used` to read without
+    // taking their locks.
+    spare_strings: AtomicUsize,
+    spare_boxes: AtomicUsize,
+    // When set, every safepoint collects — see `set_gc_stress`. Shared
     // so that a view attached after it was switched on is under stress too.
     gc_stress: AtomicBool,
+    /// Whether nothing may collect, so that a `cons` that finds no free cell
+    /// grows the arena instead — [`Heap::inhibit_collection`].
+    collect_inhibited: AtomicBool,
 }
 
 // Every field is behind a lock or an atomic, so the auto traits fail only
@@ -429,7 +449,7 @@ impl Heap {
     /// memory the machine lacks but an arena no address space can hold, so a
     /// driver can refuse it by name instead of letting the allocation panic.
     pub const fn max_capacity() -> usize {
-        isize::MAX as usize / std::mem::size_of::<Cell>()
+        isize::MAX as usize / core::mem::size_of::<Cell>()
     }
 
     /// Growth is the default because the heap now holds the *program*, not just
@@ -456,13 +476,17 @@ impl Heap {
             root_stacks: Mutex::new(vec![Some(home)]),
             permanent_roots: Mutex::new(Slab::new()),
             interning: RwLock::new(Interning::default()),
-            names: parking_lot::Mutex::new(symbols::SessionNames::new()),
+            names: crate::sync::Mutex::new(symbols::SessionNames::new()),
             strings: RwLock::new(StrStore::default()),
             boxes: RwLock::new(SlotStore::default()),
             cell_registry: Mutex::new(Vec::new()),
             threads: ThreadRegistry::new(),
-            gc_count: AtomicU64::new(0),
+            gc_count: crate::sync::AtomicCount::new(0),
+            next_collection: AtomicUsize::new(crate::memory::next_collection(crate::memory::in_use())),
+            spare_strings: AtomicUsize::new(0),
+            spare_boxes: AtomicUsize::new(0),
             gc_stress: AtomicBool::new(false),
+            collect_inhibited: AtomicBool::new(false),
         });
 
         let slot = shared.threads.register();
@@ -599,17 +623,17 @@ impl Heap {
 
     /// Total number of cons cells in the arena.
     pub fn capacity(&self) -> usize {
-        self.shared.arena.lock().unwrap().cap
+        self.shared.arena.lock().cap
     }
 
     /// Cons cells currently on the free list (available to allocate).
     pub fn free_count(&self) -> usize {
-        self.shared.arena.lock().unwrap().free_count
+        self.shared.arena.lock().free_count
     }
 
     /// Cons cells currently in use (`capacity - free_count`).
     pub fn live_count(&self) -> usize {
-        let arena = self.shared.arena.lock().unwrap();
+        let arena = self.shared.arena.lock();
         arena.cap - arena.free_count
     }
 
@@ -618,7 +642,7 @@ impl Heap {
     /// sits close to capacity collects a handful of times rather than once per
     /// allocation (see [`Heap::cons`]).
     pub fn gc_count(&self) -> u64 {
-        self.shared.gc_count.load(Ordering::Relaxed)
+        u64::from(self.shared.gc_count.load(Ordering::Relaxed))
     }
 
     /// Distinct interned symbols.
@@ -684,14 +708,14 @@ impl<'h> RootScope<'h> {
     }
 }
 
-impl std::ops::Deref for RootScope<'_> {
+impl core::ops::Deref for RootScope<'_> {
     type Target = Heap;
     fn deref(&self) -> &Heap {
         self.heap
     }
 }
 
-impl std::ops::DerefMut for RootScope<'_> {
+impl core::ops::DerefMut for RootScope<'_> {
     fn deref_mut(&mut self) -> &mut Heap {
         self.heap
     }
@@ -722,10 +746,8 @@ impl Drop for Heap {
             // stack in the meantime, and nothing reads it after this.
             self.current = ptr::null_mut();
         }
-        if let Ok(mut root_stacks) = self.shared.root_stacks.lock() {
-            if let Some(s) = root_stacks.get_mut(self.home_stack) {
-                *s = None;
-            }
+        if let Some(s) = self.shared.root_stacks.lock().get_mut(self.home_stack) {
+            *s = None;
         }
         // A view dropped while native (a panic unwinding out of `native`'s
         // closure) is not running either; unregistering is all it needs.
@@ -733,25 +755,25 @@ impl Drop for Heap {
     }
 }
 
-thread_local! {
+crate::thread_local! {
     // The `SessionNames` mutexes this thread holds, by address (`Heap::names`).
-    static NAMES_HELD: std::cell::RefCell<Vec<usize>> = const { std::cell::RefCell::new(Vec::new()) };
+    static NAMES_HELD: core::cell::RefCell<Vec<usize>> = const { core::cell::RefCell::new(Vec::new()) };
 }
 
 /// [`Heap::names`]'s guard: the session's names, locked by this thread.
 pub struct NamesGuard<'a> {
-    guard: parking_lot::MutexGuard<'a, symbols::SessionNames>,
+    guard: crate::sync::MutexGuard<'a, symbols::SessionNames>,
     at: usize,
 }
 
-impl std::ops::Deref for NamesGuard<'_> {
+impl core::ops::Deref for NamesGuard<'_> {
     type Target = symbols::SessionNames;
     fn deref(&self) -> &symbols::SessionNames {
         &self.guard
     }
 }
 
-impl std::ops::DerefMut for NamesGuard<'_> {
+impl core::ops::DerefMut for NamesGuard<'_> {
     fn deref_mut(&mut self) -> &mut symbols::SessionNames {
         &mut self.guard
     }

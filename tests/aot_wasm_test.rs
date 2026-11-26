@@ -284,3 +284,13 @@ fn an_unknown_target_is_refused() {
     assert_eq!(out.status.code(), Some(1));
     assert!(String::from_utf8_lossy(&out.stderr).contains("--target: unknown target `riscv64`"));
 }
+
+/// A word is 32 bits there, and the answers are the same.
+#[test]
+fn a_narrow_word_answers_as_a_wide_one() {
+    for level in ["-O0", "-O2"] {
+        let (out, _, code) = same_as_native("wasm_word_width", include_str!("programs/word_width.typl"), &[level]);
+        assert!(out.starts_with("1073741823\n1073741824\n"), "{}", out);
+        assert_eq!(code, Some(0));
+    }
+}

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/format.md @ 59f6f286d9081f10d4e2d72836362c3efc3e42af -->
+<!-- translated-from: docs/ja/reference/functions/format.md @ 9657f5a39527be80deea76fe60ecc58ab1752689 -->
 # Các chỉ thị định dạng
 
 Các chỉ thị được viết trong chuỗi điều khiển của `print`/`println`/`format`. Chúng bao phủ gần hết các chỉ
@@ -105,12 +105,13 @@ và `@` hay không.
 - Việc phân giải tên giống như với lời gọi ([Tham chiếu cú pháp 3.10](../syntax.md#310-module--use--không-gian-tên)). Nếu kiểu của đối số có
   phương thức `name` thì gọi nó; nếu không, gọi hàm `name` nhìn thấy được. Hàm trong module có thể được
   viết bằng đường dẫn (`~/m::shout/`).
-- Thứ có thể gọi là hàm hoặc phương thức viết bằng typelisp, nhận nguyên đối số, `colon` và `at`, và trả về
-  `string`. Không gọi được hàm dựng sẵn.
+- Thứ được gọi là hàm hoặc phương thức nhận đối số, `colon` và `at`, và trả về `string`. Gọi được cả
+  thứ dựng sẵn.
 - **Gọi gì được xác định lúc kiểm tra.** Bộ kiểm tra tìm mọi đối số có thể đến được `~/name/` đó, tính cả
   các bước nhảy của `~*` và `~[`, rồi phân giải tên theo kiểu của từng đối số. Nếu có một cái không phân
-  giải được thì là lỗi lúc kiểm tra, và trường hợp các đối số có thể đến được sẽ gọi hai định nghĩa khác
-  nhau cũng vậy. Lúc chạy không tìm tên nào, nên nó chạy giống hệt trong tệp thực thi AOT.
+  giải được thì là lỗi lúc kiểm tra. Các đối số có thể đến được được phép gọi các định nghĩa khác nhau tùy
+  theo kiểu; lúc chạy, định nghĩa của kiểu của đối số thực sự đến được sẽ được gọi. Lúc chạy không tìm tên
+  nào, nên nó chạy giống hệt trong tệp thực thi AOT.
 - **Không dùng được bên trong `~{`, `~:{`, `~:@{` hay `~<...~:>`** (lỗi lúc kiểm tra). Kiểu của phần tử
   trong đối số danh sách là `Sexpr`, không xác định được cần gọi gì. `~@{` duyệt các đối số còn lại của lời
   gọi, có kiểu đã biết, nên dùng được ở đó.

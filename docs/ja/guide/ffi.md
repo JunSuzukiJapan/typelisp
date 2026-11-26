@@ -45,7 +45,7 @@ C の関数を typelisp から呼ぶ方法を説明します。宣言できる�
 | `bool` | `bool`（`_Bool`） |
 | `()` | `void` |
 | `string` | `const char *` |
-| `c-long` / `c-ulong` | `long` / `unsigned long`（`size_t` `int64_t` なども） |
+| `c-long` / `c-ulong` | `long` / `unsigned long`（`size_t` なども） |
 | `ptr` | 任意のポインタ（`void *` `FILE *` など） |
 | `(ptr T)` | `T` へのポインタ（[7 節](#7-c-の構造体)） |
 
@@ -61,10 +61,11 @@ C の関数を typelisp から呼ぶ方法を説明します。宣言できる�
 ### `c-long` / `c-ulong` / `ptr`
 
 これらは C との境界を渡すためだけの型で、**算術はできません**。typelisp の整数として使うときは
-`as` で変換します。
+`as` で変換します。幅はプログラムが動く機械の C と同じです（64bit の macOS と Linux では
+`c-long` もポインタも 64bit、`--target` に wasm32 や Cortex-M を指定したときは 32bit）。
 
 ```lisp
-(as int (unsafe (c-strlen s)))      ; int は 64bit の値を落とさない
+(as int (unsafe (c-strlen s)))      ; int は値を落とさない
 (try-as i32 (unsafe (c-strlen s)))  ; i32 に入らなければ None
 (unsafe (c-malloc 16))              ; 整数リテラルはそのまま渡せる
 ```

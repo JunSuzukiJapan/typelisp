@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ ac5a6b3adada21a0a55e0e1c4b0e1fabf4854908 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 1b5dc6ac828d8e4a95800a91218b5e9dffe83f98 -->
 # typelisp Syntax Reference
 
 typelisp is a statically typed Lisp, written in S-expressions. For the list of built-in functions and
@@ -79,7 +79,7 @@ and for reading error messages, [errors.md](errors.md).
   `#{string int}`). A tuple has 1 to 12 elements. Each evaluation makes a new tuple. To build one
   from computed values, use `(tuple a b)`. Where S-expression data is expected, it is a tuple whose
   elements are all data: the `Tuple` variant of `Sexpr`.
-- **Attributes**: `#[test]` is a mark attached to the next form (written as in Rust). The only attribute so far is `test`, which goes on a `defun` ([3.16 `#[test]`](#316-test--test-functions)). Read with `read`, it becomes the list `(%internal::attribute (test) form)`.
+- **Attributes**: `#[test]` is a mark attached to the next form (written as in Rust). There are three attributes, `test`, `interrupt(N)` and `exception(NAME)`, each of which goes on a `defun` ([3.16 `#[test]`](#316-test--test-functions), [3.17 interrupt handlers](#317-interruptn--exceptionname--interrupt-handlers)). An attribute with arguments is written with the parenthesis right after its name. Read with `read`, they become the lists `(%internal::attribute (test) form)` and `(%internal::attribute ((interrupt 7)) form)`.
 - **The empty list `()`**: depending on context, the value of the `Unit` type or the `None` of
   `Option<Sexpr>`. **`Sexpr` has no empty-list variant**: `Sexpr` means "a non-empty S-expression",
   and the type of S-expression data is `Option<Sexpr>` (see "Patterns for `Option<Sexpr>`" in
@@ -363,7 +363,7 @@ running, so the only correct lifetime is that of the process.
 #### ptr / c-long / c-ulong — raw machine words
 
 `ptr` is an opaque pointer (`void *`, `FILE *`, whatever the declaration meant). `c-long` / `c-ulong` are
-C's `long` / `unsigned long` (also `size_t`, `int64_t` and `intptr_t`).
+C's `long` / `unsigned long` (also `size_t` and `intptr_t`).
 
 ```lisp
 (defffi (c-malloc "malloc") (c-ulong) ptr)
@@ -375,7 +375,7 @@ C's `long` / `unsigned long` (also `size_t`, `int64_t` and `intptr_t`).
 
 **Not calling them `i64` / `u64` is deliberate.** This language has no 64-bit integer type, because a
 tagged immediate has only 63 bits ([chapter 2](#2-writing-types)). The name `c-long` says "this is a
-word crossing the boundary with C, not an integer of this language".
+word crossing the boundary with C, not an integer of this language". Its width is that of C's `long` on the target (64 bits on 64-bit macOS and Linux, 32 bits on wasm32 and Cortex-M).
 
 **They have no arithmetic.** `(+ x 1)` cannot be written. It could be provided but is not, so that no
 computation runs on a value that cannot be stored anywhere and has a different width from every other
@@ -383,7 +383,7 @@ number, for the same reason the 64-bit integer type was left out. There are **on
 
 ```lisp
 (as i32 (unsafe (c-strlen "hello")))         ; read what came back
-(as int (unsafe (c-strlen s)))               ; this one to read it exactly (int does not lose 64 bits)
+(as int (unsafe (c-strlen s)))               ; this one to read it exactly (int loses none of the value)
 (try-as i32 (unsafe (c-strlen s)))           ; ask whether it fits
 (as c-ulong n)                               ; make one from another integer
 ```
@@ -517,8 +517,7 @@ Declares a struct with the same layout as in C. It can be written only inside a 
 
 The types that can be written for fields are `i8` `i16` `i32` `u8` `u16` `u32` `c-long` `c-ulong` `f32`
 `f64` `bool` `ptr`, typed pointers `(ptr T)`, and other `def-c-struct`s (embedded by value). The layout
-(the offset of each field, and the size and alignment of the struct) is computed by C's rules (assuming
-LP64). A field pointing to the struct itself can be written, but the struct cannot embed itself.
+(the offset of each field, and the size and alignment of the struct) is computed by C's rules (the widths of `c-long` and pointers and the alignment of `f64` follow the target's C). A field pointing to the struct itself can be written, but the struct cannot embed itself.
 
 ```lisp
 (unsafe
@@ -542,6 +541,7 @@ Allocation, reading and writing are written in the following forms. All of them 
 | `(c-alloc T)` / `(c-alloc T n)` | Allocates `n` values of `T` (1 if omitted). The contents are filled with 0. Returns a `(ptr T)` |
 | `(c-ref p i)` | A pointer to element `i` from `p`. An error if outside the allocated range |
 | `(c-deref p)` / `(setf (c-deref p) v)` | Reads / writes the scalar `p` points to |
+| `(volatile-read-u32 addr)` / `(volatile-write-u32 addr v)` | Read or write the register at address `addr` (an `int`, or an integer of a fixed width such as `u16`), exactly once, where written. The same for `-u8` and `-u16` |
 | `p::field` / `(setf p::field v)` | Reads / writes a field of a struct. Reading a field that is an embedded struct gives its address (`(ptr inner-type)`) |
 | `(as ptr p)` | Forgets the type, making a `ptr` (to pass to something like the `void *` of `qsort`). There is no conversion back |
 
@@ -1320,6 +1320,34 @@ test result: FAILED. 1 passed; 1 failed; 0 filtered out
 
 What a test `print`s goes straight to standard output (it is not captured). For output meant for investigating, `eprint`/`eprintln` ([Printing](functions/printing.md)) write to standard error and do not mix with the program's output.
 
+### 3.17 `#[interrupt(N)]` / `#[exception(NAME)]` — interrupt handlers
+
+```lisp
+(use std::board::enable-interrupt)
+(defvar (*received* int) 0)
+
+#[interrupt(7)]
+(defun on-uart () ()
+  (unsafe (volatile-write-u32 #x4000400C 1))   ; clear what raised the interrupt
+  (setf *received* (+ *received* 1))
+  ())
+
+(defun main () ()
+  (enable-interrupt 7)
+  ...)
+```
+
+In a program compiled for a microcontroller (section 3.8 of [Compiling](../guide/compile.md)), these are the functions called when an interrupt comes. `#[interrupt(N)]` makes one the handler of the peripheral interrupt `N` (0 to 239), and `#[exception(NAME)]` of the core exception `NAME`, one of `NonMaskableInt`, `MemoryManagement`, `BusFault`, `UsageFault`, `SVCall`, `DebugMonitor`, `PendSV`, `SysTick` (`HardFault` is the runtime's, and ends the program).
+
+- For the Arduino Uno the numbering and the way of enabling differ, and `#[exception(NAME)]` and `enable-interrupt` cannot be used ([Compiling](../guide/compile.md), section 3.9). What is said of the runtime below is about the Cortex-M.
+- They go on a top-level `defun` that takes nothing and returns `()` (no type parameters either). One interrupt has one handler, and one function handles one interrupt.
+- A peripheral interrupt does not come until `(enable-interrupt N)` enables it (`(disable-interrupt N)` stops it; see [System](functions/system.md)). An exception such as SysTick comes once the registers are set to raise it.
+- A handler runs at once, where the interrupt came. If it comes in the middle of the runtime's work (allocating, collecting, output, switching tasks and so on), the handler runs as soon as that work is done. Handlers do not interrupt each other.
+- No garbage collection happens in a handler (the heap grows if it needs to). The program's state, such as global variables, can be read and written as usual.
+- A handler cannot wait. A handler that uses `sleep` is a compile error. An operation that waits only sometimes, such as receiving from a channel, can be used while it need not wait; if it would, it is a panic.
+- A `panic` or `throw` leaving a handler ends the program, as an uncaught one does.
+- No interrupt comes in the interpreter or in a program compiled for anything but a microcontroller. In the interpreter a handler can be called as an ordinary function (for tests). `typl -c` for anything but a microcontroller refuses a program with a handler.
+
 ## 4. Binding and conditionals
 
 ```lisp
@@ -1773,6 +1801,8 @@ on).
 (todo)                              ; expands to (panic "todo"). defmacro
 (as Type expr)                      ; numeric/character type conversion. conversions that can fail panic on failure
 (try-as Type expr)                  ; like as, but returns the result as Option<Type> (None on failure)
+(size-of Type)                      ; the bytes a value of Type takes (int)
+(size-of-val expr)                  ; the bytes a value of expr's type takes (int); expr is not evaluated
 (print control args...)             ; expands the format and writes to standard output (no newline)
 (println control args...)           ; the same (with a newline at the end)
 (format dest control args...)       ; CL's format. returns the expanded string
@@ -1822,6 +1852,30 @@ succeeds. `float->int`/`ratio->int`/`char->int` land on `int`, and if a narrower
 
 From `rational`, `as`/`try-as` convert to `int` (`as` truncates, `try-as` succeeds only for an
 integer), `ratio` and `f64`; from `int`/`ratio`, to `rational`.
+
+`size-of`/`size-of-val` are what `sizeof` is in C. The answer is a constant decided at compile time, and is the size
+on the target the code runs on:
+
+| Type | Bytes |
+|---|---|
+| `i8` `u8` `bool` | 1 |
+| `i16` `u16` | 2 |
+| `i32` `u32` `f32` `char` | 4 |
+| `f64` | 8 |
+| `c-long` `c-ulong` | the same as the target's C `long` |
+| `ptr` `(ptr T)` | the same as a pointer of the target |
+| `def-c-struct` | the same as the C structure (padding included) |
+| `()` | 0 |
+| Everything else (`int`, `string`, a `defstruct` type and so on) | one word (the same as a pointer of the target): the value itself, or where the value is |
+
+```lisp
+(size-of u16)                       ; => 2
+(size-of-val (as i8 5))             ; => 1
+(let ((x 1.0)) (size-of-val x))     ; => 8
+```
+
+A type parameter of a generic function can be written too, and is decided by the type at each call. `!` has no value, so
+it is an error. A `def-c-struct` type can be written outside `unsafe` as well.
 
 `documentation`, like `quote`/`compile`, is a special form that reads `name` without evaluating it, as an
 unevaluated bare symbol / `::` path. Unlike CL's `(documentation 'name 'function)`, it takes no type
@@ -2212,10 +2266,9 @@ panic like `` `recv` cannot block: ... ``, treated the same as a `(panic ...)`).
   left off in the next evaluation). At the end of an evaluation, it waits for each thread to finish its
   current step, so if a C function (`defffi`) keeps blocking inside a `thread`, the evaluation does not end
   until it returns.
-- **Printing on workers**: interpreted `print-object` methods, and interpreted functions and methods
-  called by `~/name/`, cannot run on other threads, so printing such values on another thread is a
-  panic treated the same as a `(panic ...)` (`(compile T::print-object)`, or print from the main
-  task).
+- **Printing on workers**: interpreted `print-object` methods cannot run on other threads, so printing
+  such values on another thread is a panic treated the same as a `(panic ...)`
+  (`(compile T::print-object)`, or print from the main task).
 - **Data races are undefined** (the same position as Go). The result of several tasks changing the same
   value without going through `Mutex<T>` / `Chan<T>` is not guaranteed.
 - **`task` returns a value.** Unlike Go's `go` statement, it returns a `Task<T>`, and `(wait t)` gets the

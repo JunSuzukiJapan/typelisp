@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/option-result.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
+<!-- translated-from: docs/ja/reference/functions/option-result.md @ dff3b51792f6d9c49bb8802bd3d3fb6e168edd92 -->
 # Option, Result e tipi di errore
 
 ## 1. `Option<T>` / `Result<T,E>`
@@ -66,7 +66,7 @@ Un box viene usato solo quando un valore di `T` non può essere distinto dal val
 |---|---|---|
 | `Option<U>` (annidato) | Box | Il `None` interno sarebbe lo stesso valore del `None` esterno |
 | `()` | Box | Il valore di `()` è il valore della lista vuota stesso |
-| `ptr` / `c-long` / `c-ulong` | Box | Tutti i 64 bit sono valore, senza lasciare spazio per distinguerli |
+| `ptr` / `c-long` / `c-ulong` | Box | Tutti i bit sono valore, senza lasciare spazio per distinguerli |
 | Qualsiasi altro | Nessun box | — |
 
 La rappresentazione è decisa dal solo tipo e non si può leggere da un valore. In fase di stampa,

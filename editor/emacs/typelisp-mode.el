@@ -85,6 +85,9 @@ stands for where it is written, as a variable's name stands for its value.")
     "let" "let*" "if" "when" "unless" "cond" "case" "and" "or" "progn" "unsafe"
     ;; memory for `def-c-struct's and typed pointers, inside `unsafe'
     "c-alloc" "c-ref" "c-deref"
+    ;; the registers of a board, inside `unsafe'
+    "volatile-read-u8" "volatile-read-u16" "volatile-read-u32"
+    "volatile-write-u8" "volatile-write-u16" "volatile-write-u32"
     "the" "match" "if-let" "while-let" "make-instance"
     ;; CL's chapter-5 control forms (cl-parity-plan.md Phase 4a, §4/§7)
     "ecase" "ccase" "prog1" "prog2" "setq" "psetq" "psetf"
@@ -108,7 +111,7 @@ stands for where it is written, as a variable's name stands for its value.")
     ;; other special forms (§7)
     "setf" "incf" "decf" "rotatef" "shiftf"
     "list" "tuple" "quote" "quasiquote" "unquote" "unquote-splicing"
-    "panic" "unreachable" "todo" "as" "try-as" "compile" "documentation"
+    "panic" "unreachable" "todo" "as" "try-as" "size-of" "size-of-val" "compile" "documentation"
     ;; the REPL tool layer (CLHS 25.2).  Special forms because each takes the
     ;; *name* of a definition rather than a value — `step' is the exception,
     ;; which takes a form.  `room'/`dribble' are ordinary functions and are
@@ -218,7 +221,7 @@ function types; `&optional' and `&key' are `defmacro'-only.")
     "int->c-long" "int->c-ulong" "try-int->c-long" "try-int->c-ulong"
     "float->f32" "float->f64" "try-float->f32" "try-float->f64"
     "int->int" "ratio->int" "int->ratio"
-    "float->ratio" "ratio->float" "numerator" "denominator"
+    "float->ratio" "float->i8" "float->i16" "float->i32" "float->u8" "float->u16" "float->u32" "ratio->float" "numerator" "denominator"
     "ratio->rational" "rational->int" "try-rational->int" "rational->ratio" "rational->float"
     "symbol->string" "intern"
     ;; generic pair (cons-cell<A,B>); set-car/set-cdr were removed, mutate
@@ -356,7 +359,9 @@ function types; `&optional' and `&key' are `defmacro'-only.")
     "y-or-n-p" "yes-or-no-p"
     ;; the REPL tool layer's ordinary functions (CLHS 25.2).  `heap-info' is
     ;; what `room' prints and what a program reads the same numbers from.
-    "room" "heap-info" "dribble")
+    "room" "heap-info" "dribble"
+    ;; a board's interrupts
+    "enable-interrupt" "disable-interrupt")
   "Builtin functions and methods from the standard catalog.
 See docs/ja/reference/functions/.")
 

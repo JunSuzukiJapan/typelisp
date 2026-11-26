@@ -62,9 +62,16 @@ extern "C" {
     fn exp(x: f64) -> f64;
     fn log(x: f64) -> f64;
     fn pow(x: f64, y: f64) -> f64;
-    fn fmax(x: f64, y: f64) -> f64;
-    fn fmin(x: f64, y: f64) -> f64;
-    fn fmod(x: f64, y: f64) -> f64;
+    fn floorf(x: f32) -> f32;
+    fn ceilf(x: f32) -> f32;
+    fn truncf(x: f32) -> f32;
+    fn rintf(x: f32) -> f32;
+    fn sqrtf(x: f32) -> f32;
+    fn sinf(x: f32) -> f32;
+    fn cosf(x: f32) -> f32;
+    fn expf(x: f32) -> f32;
+    fn logf(x: f32) -> f32;
+    fn powf(x: f32, y: f32) -> f32;
 }
 
 /// Functions code generation may call without the module declaring them, so
@@ -72,16 +79,17 @@ extern "C" {
 ///
 /// - `resume` becomes a call to `_Unwind_Resume`, and [`end_unwind_table`]
 ///   adds a landing pad under `rust_eh_personality`.
-/// - Each `f64` intrinsic the compiler emits (`llvm.floor.f64` and the rest,
-///   in `llvm_builtins`) is either an instruction or a call to the libm
-///   function of the same name, depending on the target and its features —
-///   x86_64 without SSE4.1 calls `floor`, arm64 has an instruction. So every
-///   one is here, whether or not this machine calls it. `frem` becomes `fmod`.
+/// - Each float intrinsic the compiler emits (`llvm.floor.f64`,
+///   `llvm.floor.f32` and the rest, in `llvm_builtins::numeric`) is either an
+///   instruction or a call to the libm function of the same name (`floor`,
+///   `floorf`), depending on the target and its features — x86_64 without
+///   SSE4.1 calls `floor`, arm64 has an instruction. So every one is here,
+///   whether or not this machine calls it.
 ///
 /// An intrinsic added to the compiler needs its libm function added here. A
 /// call missing from this list fails the JIT with the symbol's name, so
 /// nothing runs into address 0.
-fn codegen_helpers() -> [(&'static str, usize); 15] {
+fn codegen_helpers() -> [(&'static str, usize); 22] {
     [
         (RUST_EH_PERSONALITY, rust_eh_personality as *const () as usize),
         ("_Unwind_Resume", _Unwind_Resume as *const () as usize),
@@ -95,9 +103,16 @@ fn codegen_helpers() -> [(&'static str, usize); 15] {
         ("exp", exp as *const () as usize),
         ("log", log as *const () as usize),
         ("pow", pow as *const () as usize),
-        ("fmax", fmax as *const () as usize),
-        ("fmin", fmin as *const () as usize),
-        ("fmod", fmod as *const () as usize),
+        ("floorf", floorf as *const () as usize),
+        ("ceilf", ceilf as *const () as usize),
+        ("truncf", truncf as *const () as usize),
+        ("rintf", rintf as *const () as usize),
+        ("sqrtf", sqrtf as *const () as usize),
+        ("sinf", sinf as *const () as usize),
+        ("cosf", cosf as *const () as usize),
+        ("expf", expf as *const () as usize),
+        ("logf", logf as *const () as usize),
+        ("powf", powf as *const () as usize),
     ]
 }
 
@@ -526,7 +541,7 @@ impl Drop for JitCode {
 /// against an older SDK can be told a compatibility number in its place.
 #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
 pub fn unsupported_host_warning() -> Option<&'static str> {
-    let release = typelisp_rt::os::os_release().expect("uname reports a release");
+    let release = typelisp_rt_posix::os::os_release().expect("uname reports a release");
     let darwin: u32 = release
         .split('.')
         .next()

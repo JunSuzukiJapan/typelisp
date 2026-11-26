@@ -5,6 +5,7 @@
 //! the runtime build and test such boxes with no checker in hand;
 //! `tests/type_identity_guard_test.rs` holds them equal to the checker's.
 
+use crate::prelude::*;
 /// The most elements a tuple can have; the prelude defines one tuple type per
 /// arity up to this.
 pub const TUPLE_MAX_ARITY: usize = 12;

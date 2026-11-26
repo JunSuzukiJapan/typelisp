@@ -63,6 +63,10 @@ pub(crate) enum NativeHandle {
     Function(FunctionValue<'static>),
     BasicBlock(BasicBlock<'static>),
     Value(BasicValueEnum<'static>),
+    /// The value of code that does not come back (`super::slots`).
+    Never,
+    /// Where the code being built keeps values.
+    Slots(Rc<RefCell<super::slots::Slots>>),
 }
 
 /// The registry itself, wrapped only so its teardown can be given the same
@@ -124,7 +128,7 @@ pub(crate) fn llvm_handle_get(h: i64) -> Option<NativeHandle> {
 }
 
 /// Register `h` as the interpreter-level value standing for it.
-fn handle_value(h: NativeHandle) -> Value {
+pub(super) fn handle_value(h: NativeHandle) -> Value {
     Value::Int(llvm_handle_register(h))
 }
 
@@ -264,6 +268,9 @@ enum LlvmRetK {
     Unit,
     /// Raw 0/1.
     Bool,
+    /// A small `int`, raw — the way an `int` argument arrives
+    /// ([`LlvmArgK::Int`]); the caller's side tags it.
+    Int,
     /// A freshly-allocated tagged heap `Value::Str`.
     Str,
     /// `Option<handle>` as a heap `BoxedObj::Enum` (`Some` payload =
@@ -309,6 +316,7 @@ fn llvm_ret_kind(ty: &Type) -> LlvmRetK {
         match ty {
             Type::Unit => LlvmRetK::Unit,
             Type::Bool => LlvmRetK::Bool,
+            Type::Int => LlvmRetK::Int,
             Type::Str => LlvmRetK::Str,
             other => panic!("llvm_op_table: return type {:?} has no rt_llvm_call marshaling", other),
         }
@@ -384,12 +392,12 @@ fn rt_llvm_fatal(msg: &str) -> ! {
 /// `args` must point to `argc` valid `i64`s; a `Heap` must already be
 /// registered on this thread (`set_active_heap`). Errors abort via
 /// [`rt_llvm_fatal`], mirroring `typelisp-rt`'s `fatal`.
-pub(crate) unsafe extern "C" fn rt_llvm_call(args: *const i64, argc: u32) -> i64 {
+pub(crate) unsafe extern "C" fn rt_llvm_call(args: *const typelisp_mem::Word, argc: u32) -> typelisp_mem::Word {
     let argv = std::slice::from_raw_parts(args, argc as usize);
     let Some((&opid, raw_args)) = argv.split_first() else {
         rt_llvm_fatal("rt_llvm_call: missing op id");
     };
-    let Some(op) = llvm_op_table().get(&opid) else {
+    let Some(op) = llvm_op_table().get(&(opid as i64)) else {
         rt_llvm_fatal(&format!("rt_llvm_call: unknown op id {}", opid));
     };
     if raw_args.len() != op.args.len() {
@@ -405,7 +413,7 @@ pub(crate) unsafe extern "C" fn rt_llvm_call(args: *const i64, argc: u32) -> i64
     let mut vals: Vec<Value> = Vec::with_capacity(raw_args.len());
     for (raw, k) in raw_args.iter().zip(&op.args) {
         vals.push(match k {
-            LlvmArgK::Handle => match value_of_handle(*raw) {
+            LlvmArgK::Handle => match value_of_handle(*raw as i64) {
                 Some(v) => v,
                 None => rt_llvm_fatal(&format!(
                     "rt_llvm_call: {}::{}: dangling llvm handle {} (registry holds {}, args so far {:?})",
@@ -424,7 +432,7 @@ pub(crate) unsafe extern "C" fn rt_llvm_call(args: *const i64, argc: u32) -> i64
                 v @ Value::Boxed(_) => v,
                 other => rt_llvm_fatal(&format!("rt_llvm_call: {}::{}: expected a scope box, got {:?}", op.type_key, op.method, other)),
             },
-            LlvmArgK::Int => Value::Int(*raw),
+            LlvmArgK::Int => Value::Int(*raw as i64),
             LlvmArgK::Bool => Value::Bool(*raw != 0),
         });
     }
@@ -479,7 +487,7 @@ pub(crate) unsafe extern "C" fn rt_llvm_call(args: *const i64, argc: u32) -> i64
     };
     match op.ret {
         LlvmRetK::Handle => match handle_of(&v) {
-            Some(h) => h,
+            Some(h) => h as typelisp_mem::Word,
             None => rt_llvm_fatal(&format!("rt_llvm_call: {}::{}: expected a handle result, got {:?}", op.type_key, op.method, v)),
         },
         LlvmRetK::Scope => {
@@ -491,8 +499,12 @@ pub(crate) unsafe extern "C" fn rt_llvm_call(args: *const i64, argc: u32) -> i64
         }
         LlvmRetK::Unit => 0,
         LlvmRetK::Bool => match v {
-            Value::Bool(b) => i64::from(b),
+            Value::Bool(b) => typelisp_mem::Word::from(b),
             other => rt_llvm_fatal(&format!("rt_llvm_call: {}::{}: expected a Bool result, got {:?}", op.type_key, op.method, other)),
+        },
+        LlvmRetK::Int => match v {
+            Value::Int(n) => n as typelisp_mem::Word,
+            other => rt_llvm_fatal(&format!("rt_llvm_call: {}::{}: expected an int result, got {:?}", op.type_key, op.method, other)),
         },
         LlvmRetK::Str => match v {
             // Already a heap string; encoding is the tagged word, no copy.

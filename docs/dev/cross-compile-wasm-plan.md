@@ -82,7 +82,7 @@ typl -c SOURCE [-o OUTPUT] [--target TRIPLE] [--heap-cells N] [--no-cons] [--max
 - 入口: wasi-libc の `crt1-command.o` は `__main_void` を呼ぶので、`main` をその名前に変える。引数は Rust の std が WASI から読む。
 - リンク: rustup の toolchain の `rust-lld` を `wasm-ld` という名前で起動する。`crt1-command.o`、`libc.a` と並べて、`scripts/build-wasm-runtime.sh` が `<target>/wasm-runtime/<profile>/wasm32-wasip1/` に置く（Homebrew の LLVM 22 には lld が無く、Homebrew の rust には wasm のターゲットが無い）。スタックは 8MiB。
 - ランタイム: wasm では `net`、`net/tls`、`x509`、`net_builtin`、`rt_net_*` の shim、ストリームのソケットの変種を cfg で外す（rustls/ring は wasm 以外だけの依存）。スケジューラはスレッドが 1 本: `thread_count` は 1、時間つきの待ちは眠るだけ、時間なしの待ちは fatal、`SelfPipe` は作れるだけで触れたら unreachable。インタプリタ（`eval`）からのソケットは panic。
-- 使えないもののコンパイル時の検出は段階 2 の到達判定を一般化した `src/compile/aot/reach.rs` で行う。表は `externs::WASM_UNAVAILABLE_SHIMS` と `rt_net_` の接頭辞。C の関数は `defffi` の記号で判定する。
+- 使えないもののコンパイル時の検出は段階 2 の到達判定を一般化した `src/compile/aot/reach.rs` で行う。表は shim を定義するクレートで決まる（`externs::RuntimeCrate` と `Target::missing_runtimes`）。wasip1 は `typelisp-rt-posix` の shim を断る。C の関数は `defffi` の記号で判定する。
 - リリースビルド: feature `wasm` を付けたときだけ、build.rs の `bundled_wasm` が 2 つのターゲットのランタイムと wasi-libc（`crt1-command.o`、`libc.a`）を入れ子の cargo でビルドして埋め込む（ユーザー決定: 指定されない限り何も埋め込まない）。書き出し先は `$TYPELISP_HOME/lib/<ビルドID>/<triple>/` で、ビルドID は wasm のものも含めたハッシュ。付けなかったリリースビルドの `--target` はエラー。`rust-lld` は toolchain の `libLLVM.dylib` に依存し単体で動かないので埋め込まず、リリースビルドは実行時に `rustup which rustc` の sysroot の `rust-lld` を `-flavor wasm` で使う（デバッグビルドはスクリプトが置いたシンボリックリンク）。
 - テスト: `tests/aot_wasm_test.rs`。`scripts/run-wasi.mjs`（node の `node:wasi`、`/` だけを開く。`.` も開くと絶対パスの解決が `.` に引かれて失敗する）で実行し、ネイティブの実行ファイルと出力・終了コードを比べる。
 
@@ -102,7 +102,7 @@ typl -c SOURCE [-o OUTPUT] [--target TRIPLE] [--heap-cells N] [--no-cons] [--max
 - 標準入力は読めば入力の終わり、`(command-line-args)` は空。コンパイル時に断るのは、wasip1 の表に加えて、ファイルとディレクトリの操作。
 - リンク: crt1/libc 無しで `wasm-ld --no-entry --export=typelisp_main`。ランタイムは `scripts/build-wasm-runtime.sh` が両方のターゲットを作る。
 - ローダー: `src/compile/aot/wasm_loader.mjs` を `include_str!` し、モジュールの名前を埋めて `<出力>.mjs` に書く。`node prog.mjs` で実行でき、`run({ write })` で他の JS からも呼べる。Node では `fs.writeSync` で書く（`process.stdout.write` は macOS のパイプで非同期になり、終了の前に失われうる）。ブラウザの既定はコンソールへ 1 行ずつ、最後に改行の無い行も出す。`SharedArrayBuffer` は `sleep` の時に初めて作る（クロスオリジン分離されていないページでは作れないので、sleep しないプログラムを巻き込まない）。
-- 断る表: `externs::wasm_unknown_unavailable` = wasip1 の表 + `NO_FILE_SYSTEM_SHIMS`（`rt_stream_open_file`）+ `rt_file_` の接頭辞。
+- 断る表: `typelisp-rt-sys` と `typelisp-rt-posix` の shim（ファイル、環境変数、コマンド行引数、dribble、ソケットなど）。
 - テスト: `tests/aot_wasm_js_test.rs`。import が `typelisp` の 5 つだけであることも確かめる。ブラウザでの実行は未確認（Node のみ）。
 
 ## 必要なツール

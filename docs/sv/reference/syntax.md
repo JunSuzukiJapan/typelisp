@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ ac5a6b3adada21a0a55e0e1c4b0e1fabf4854908 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 1b5dc6ac828d8e4a95800a91218b5e9dffe83f98 -->
 # Syntaxreferens för typelisp
 
 typelisp är ett statiskt typat Lisp, skrivet med S-uttryck. För listan över inbyggda funktioner och
@@ -81,7 +81,7 @@ och för att läsa felmeddelanden, [errors.md](errors.md).
   `#{string int}`). En tupel har 1 till 12 element. Varje evaluering skapar en ny tupel. För att
   bygga en av beräknade värden använder man `(tuple a b)`. Där S-uttrycksdata förväntas är det en
   tupel vars element alla är data: varianten `Tuple` av `Sexpr`.
-- **Attribut**: `#[test]` är en markering som hör till nästa form (skriven som i Rust). Det enda attributet hittills är `test`, och det sätts på en `defun` ([3.16 `#[test]`](#316-test--testfunktioner)). Läst med `read` blir det listan `(%internal::attribute (test) form)`.
+- **Attribut**: `#[test]` är en markering på nästa form (skriven som i Rust). Det finns tre attribut, `test`, `interrupt(N)` och `exception(NAME)`, som vart och ett sitter på en `defun` ([3.16 `#[test]`](#316-test--testfunktioner), [3.17 avbrottshanterare](#317-interruptn--exceptionname--avbrottshanterare)). Ett attribut med argument skrivs med parentesen direkt efter namnet. Lästa med `read` blir de listorna `(%internal::attribute (test) form)` och `(%internal::attribute ((interrupt 7)) form)`.
 - **Den tomma listan `()`**: beroende på sammanhang värdet av typen `Unit` eller `None` i
   `Option<Sexpr>`. **`Sexpr` har ingen variant för den tomma listan**: `Sexpr` betyder "ett icke-tomt
   S-uttryck", och typen för S-uttrycksdata är `Option<Sexpr>` (se "Mönster för `Option<Sexpr>`" i
@@ -367,7 +367,7 @@ korrekta livslängden är processens.
 #### ptr / c-long / c-ulong — råa maskinord
 
 `ptr` är en ogenomskinlig pekare (`void *`, `FILE *`, vad deklarationen än avsåg). `c-long` / `c-ulong` är
-C:s `long` / `unsigned long` (även `size_t`, `int64_t` och `intptr_t`).
+C:s `long` / `unsigned long` (även `size_t` och `intptr_t`).
 
 ```lisp
 (defffi (c-malloc "malloc") (c-ulong) ptr)
@@ -379,7 +379,7 @@ C:s `long` / `unsigned long` (även `size_t`, `int64_t` och `intptr_t`).
 
 **Att inte kalla dem `i64` / `u64` är avsiktligt.** Det här språket har ingen 64-bitars heltalstyp, eftersom
 ett taggat omedelbart värde bara har 63 bitar ([kapitel 2](#2-hur-typer-skrivs)). Namnet `c-long` säger "det
-här är ett ord som korsar gränsen mot C, inte ett heltal i det här språket".
+här är ett ord som korsar gränsen mot C, inte ett heltal i det här språket". Bredden är densamma som för C:s `long` på målet (64 bitar på 64-bitars macOS och Linux, 32 bitar på wasm32 och Cortex-M).
 
 **De har ingen aritmetik.** `(+ x 1)` kan inte skrivas. Det kunde tillhandahållas men gör det inte, så att
 ingen beräkning körs på ett värde som inte kan lagras någonstans och har en annan bredd än alla andra tal,
@@ -387,7 +387,7 @@ av samma skäl som 64-bitars heltalstypen utelämnades. Det finns **bara konvert
 
 ```lisp
 (as i32 (unsafe (c-strlen "hello")))         ; läs det som kom tillbaka
-(as int (unsafe (c-strlen s)))               ; den här för att läsa det exakt (int förlorar inte 64 bitar)
+(as int (unsafe (c-strlen s)))               ; den här för att läsa det exakt (int förlorar ingenting av värdet)
 (try-as i32 (unsafe (c-strlen s)))           ; fråga om det ryms
 (as c-ulong n)                               ; gör ett av ett annat heltal
 ```
@@ -520,8 +520,7 @@ inte kan innehålla något annat än `def-c-struct`). En dokumentationssträng k
 
 De typer som kan skrivas för fält är `i8` `i16` `i32` `u8` `u16` `u32` `c-long` `c-ulong` `f32`
 `f64` `bool` `ptr`, typade pekare `(ptr T)` och andra `def-c-struct` (inbäddade per värde). Layouten
-(varje fälts offset, samt structens storlek och justering) beräknas enligt C:s regler (under antagande av
-LP64). Ett fält som pekar på structen själv kan skrivas, men structen kan inte bädda in sig själv.
+(varje fälts offset, samt structens storlek och justering) beräknas enligt C:s regler (bredderna för `c-long` och pekare och justeringen av `f64` följer målets C). Ett fält som pekar på structen själv kan skrivas, men structen kan inte bädda in sig själv.
 
 ```lisp
 (unsafe
@@ -544,6 +543,7 @@ Allokering, läsning och skrivning skrivs i följande former. Alla kan användas
 | `(c-alloc T)` / `(c-alloc T n)` | Allokerar `n` värden av `T` (1 om utelämnat). Innehållet fylls med 0. Returnerar en `(ptr T)` |
 | `(c-ref p i)` | En pekare till element `i` från `p`. Ett fel om utanför det allokerade intervallet |
 | `(c-deref p)` / `(setf (c-deref p) v)` | Läser / skriver den skalär `p` pekar på |
+| `(volatile-read-u32 addr)` / `(volatile-write-u32 addr v)` | Läser eller skriver registret på adressen `addr` (en `int`, eller ett heltal av fast bredd som `u16`), exakt en gång, där den står. Samma för `-u8` och `-u16` |
 | `p::field` / `(setf p::field v)` | Läser / skriver ett fält i en struct. Att läsa ett fält som är en inbäddad struct ger dess adress (`(ptr inner-type)`) |
 | `(as ptr p)` | Glömmer typen och gör en `ptr` (för att skicka till något som `void *` i `qsort`). Det finns ingen konvertering tillbaka |
 
@@ -1317,6 +1317,34 @@ test result: FAILED. 1 passed; 1 failed; 0 filtered out
 
 Det ett test skriver ut med `print` går direkt till standard ut (det fångas inte upp). För utdata avsedda för felsökning skriver `eprint`/`eprintln` ([Utskrift](functions/printing.md)) till standard fel och blandas inte med programmets utdata.
 
+### 3.17 `#[interrupt(N)]` / `#[exception(NAME)]` — avbrottshanterare
+
+```lisp
+(use std::board::enable-interrupt)
+(defvar (*received* int) 0)
+
+#[interrupt(7)]
+(defun on-uart () ()
+  (unsafe (volatile-write-u32 #x4000400C 1))   ; nollställ det som utlöste avbrottet
+  (setf *received* (+ *received* 1))
+  ())
+
+(defun main () ()
+  (enable-interrupt 7)
+  ...)
+```
+
+I ett program kompilerat för en mikrokontroller (avsnitt 3.8 i [Kompilera](../guide/compile.md)) är detta de funktioner som anropas när ett avbrott kommer. `#[interrupt(N)]` gör en funktion till hanterare för kringutrustningsavbrottet `N` (0 till 239), och `#[exception(NAME)]` för kärnans undantag `NAME`, ett av `NonMaskableInt`, `MemoryManagement`, `BusFault`, `UsageFault`, `SVCall`, `DebugMonitor`, `PendSV`, `SysTick` (`HardFault` tillhör körtidsmiljön och avslutar programmet).
+
+- För Arduino Uno är numreringen och sättet att slå på annorlunda, och `#[exception(NAME)]` och `enable-interrupt` kan inte användas ([Kompilera](../guide/compile.md), avsnitt 3.9). Det som sägs om körtidsmiljön nedan gäller Cortex-M.
+- De sitter på en `defun` på toppnivå som inte tar något och returnerar `()` (inga typparametrar heller). Ett avbrott har en hanterare, och en funktion hanterar ett avbrott.
+- Ett kringutrustningsavbrott kommer inte förrän `(enable-interrupt N)` slår på det (`(disable-interrupt N)` stoppar det; se [System](functions/system.md)). Ett undantag som SysTick kommer så snart registren är inställda för att utlösa det.
+- En hanterare körs genast, där avbrottet kom. Kommer det mitt i körtidsmiljöns arbete (allokering, skräpsamling, utmatning, byte av uppgift och så vidare) körs hanteraren så snart det arbetet är klart. Hanterare avbryter inte varandra.
+- Ingen skräpsamling sker i en hanterare (heapen växer vid behov). Programmets tillstånd, som globala variabler, läses och skrivs som vanligt.
+- En hanterare kan inte vänta. En hanterare som använder `sleep` är ett kompileringsfel. En operation som bara ibland väntar, som att ta emot från en kanal, går att använda så länge den inte behöver vänta; skulle den behöva det är det en panic.
+- En `panic` eller `throw` som lämnar en hanterare avslutar programmet, som en ofångad gör.
+- Inget avbrott kommer i tolken eller i ett program kompilerat för något annat än en mikrokontroller. I tolken kan en hanterare anropas som en vanlig funktion (för tester). `typl -c` för något annat än en mikrokontroller avvisar ett program med en hanterare.
+
 ## 4. Bindning och villkor
 
 ```lisp
@@ -1771,6 +1799,8 @@ och så vidare).
 (todo)                              ; expanderar till (panic "todo"). defmacro
 (as Type expr)                      ; tal-/teckentypkonvertering. konverteringar som kan misslyckas ger panic vid misslyckande
 (try-as Type expr)                  ; som as, men returnerar resultatet som Option<Type> (None vid misslyckande)
+(size-of Type)                      ; antal byte för ett värde av Type (int)
+(size-of-val expr)                  ; antal byte för ett värde av expr:s typ (int); expr utvärderas inte
 (print control args...)             ; expanderar formatet och skriver till standard ut (inget radbyte)
 (println control args...)           ; samma (med ett radbyte på slutet)
 (format dest control args...)       ; CL:s format. returnerar den expanderade strängen
@@ -1817,6 +1847,30 @@ konverteringsmetoder (`int->char`/`int->int`/`int->W` och så vidare i [Tal](fun
 
 Från `rational` konverterar `as`/`try-as` till `int` (`as` avkortar, `try-as` lyckas bara för ett
 heltal), `ratio` och `f64`; från `int`/`ratio` till `rational`.
+
+`size-of`/`size-of-val` motsvarar `sizeof` i C. Svaret är en konstant som bestäms vid kompileringen: storleken på målet
+där koden körs:
+
+| Typ | Byte |
+|---|---|
+| `i8` `u8` `bool` | 1 |
+| `i16` `u16` | 2 |
+| `i32` `u32` `f32` `char` | 4 |
+| `f64` | 8 |
+| `c-long` `c-ulong` | samma som `long` i C på målet |
+| `ptr` `(ptr T)` | samma som en pekare på målet |
+| `def-c-struct` | samma som C-strukturen (inklusive utfyllnad) |
+| `()` | 0 |
+| Allt annat (`int`, `string`, en `defstruct`-typ osv.) | ett ord (samma som en pekare på målet): själva värdet, eller platsen där det finns |
+
+```lisp
+(size-of u16)                       ; => 2
+(size-of-val (as i8 5))             ; => 1
+(let ((x 1.0)) (size-of-val x))     ; => 8
+```
+
+Även en typparameter i en generisk funktion kan skrivas; typen vid varje anrop avgör. `!` har inget värde, så det är ett
+fel. En `def-c-struct`-typ kan skrivas även utanför `unsafe`.
 
 `documentation` är, liksom `quote`/`compile`, en specialform som läser `name` utan att utvärdera den, som
 en onekvaliserad bar symbol / `::`-sökväg. Till skillnad från CL:s `(documentation 'name 'function)` tar den
@@ -2206,9 +2260,9 @@ panic som `` `recv` cannot block: ... ``, behandlad på samma sätt som en `(pan
   nästa utvärdering). Vid slutet av en utvärdering väntar den på att varje tråd ska bli klar med sitt
   aktuella steg, så om en C-funktion (`defffi`) fortsätter blockera inuti en `thread` tar utvärderingen inte
   slut förrän den returnerar.
-- **Utskrift på workers**: tolkade `print-object`-metoder, och tolkade funktioner och metoder som `~/name/`
-  anropar, kan inte köras på andra trådar, så att skriva ut sådana värden på en annan tråd är en panic som
-  behandlas som en `(panic ...)` (`(compile T::print-object)`, eller skriv ut från huvuduppgiften).
+- **Utskrift på workers**: tolkade `print-object`-metoder kan inte köras på andra trådar, så att skriva
+  ut sådana värden på en annan tråd är en panic som behandlas som en `(panic ...)`
+  (`(compile T::print-object)`, eller skriv ut från huvuduppgiften).
 - **Dataracer är odefinierade** (samma ståndpunkt som Go). Resultatet av att flera tasks ändrar samma värde
   utan att gå genom `Mutex<T>` / `Chan<T>` är inte garanterat.
 - **`task` returnerar ett värde.** Till skillnad från Gos `go`-sats returnerar den en `Task<T>`, och

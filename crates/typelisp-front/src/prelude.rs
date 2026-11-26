@@ -595,7 +595,6 @@ pub const SOURCE_TEMPLATE: &str = r##"
 (impl i32
   (pub defmethod abs (self) i32 (if (< self 0) (* self -1) self))
   (pub defmethod signum (self) i32 (if (= self 0) self (/ self (abs self))))
-  (pub defmethod rem (self (b i32)) i32 (- self (* b (/ self b))))
   (pub defmethod gcd (self (b i32)) i32 (if (= b 0) (abs self) (gcd b (mod self b))))
   (pub defmethod lcm (self (b i32)) i32
     (if (or (= self 0) (= b 0)) (- self self) (/ (abs (* self b)) (gcd self b)))))
@@ -2292,23 +2291,12 @@ user-visible capacity."
 ;; `(Div T)`, or `(Div T (Output T))` to divide within `T`.
 (pub deftrait Number (Add Sub Mul Rem Ord)))
 
-;; `mod`/`rem` for the widths that did not have them. Same bodies the
-;; `i32` (integer) and `f64` (float) methods above carry — floored for
-;; `mod`, truncated for `rem`. The integer widths get `mod` from the built-in
-;; table, so only `f32` needs one here.
+;; `mod`/`rem` for `f32`, the same bodies `f64`'s above carry — floored for
+;; `mod`, truncated for `rem`. The integer widths get both from the built-in
+;; table.
 (impl f32
   (pub defmethod mod (self (b f32)) f32 (- self (* b (floor (/ self b)))))
   (pub defmethod rem (self (b f32)) f32 (- self (* b (truncate (/ self b))))))
-(impl i8
-  (pub defmethod rem (self (b i8   )) i8    (- self (* b (/ self b)))))
-(impl i16
-  (pub defmethod rem (self (b i16  )) i16   (- self (* b (/ self b)))))
-(impl u8
-  (pub defmethod rem (self (b u8   )) u8    (- self (* b (/ self b)))))
-(impl u16
-  (pub defmethod rem (self (b u16  )) u16   (- self (* b (/ self b)))))
-(impl u32
-  (pub defmethod rem (self (b u32  )) u32   (- self (* b (/ self b)))))
 
 ;; The impls. A primitive type's built-in operator is the trait's method.
 (impl Add i32)
@@ -3670,12 +3658,12 @@ user-visible capacity."
         out))))
 
 ;; CL's numeric limit constants (CLHS 12.1.4.2 / 12.1.3). A fixnum is an
-;; `int` that fits its 63-bit immediate word; past these bounds an `int` is
-;; a bignum box (`typelisp-mem`'s `FIXNUM_MAX`/`FIXNUM_MIN`), and the
-;; arithmetic goes on unchanged.
+;; `int` that fits a word of the machine less one bit; past these bounds an
+;; `int` is a bignum box (`typelisp-mem`'s `FIXNUM_MAX`/`FIXNUM_MIN`), and
+;; the arithmetic goes on unchanged.
 (module num
-(pub defconstant (most-positive-fixnum int) 4611686018427387903)
-(pub defconstant (most-negative-fixnum int) -4611686018427387904)
+(pub defconstant (most-positive-fixnum int) (%internal::largest-fixnum))
+(pub defconstant (most-negative-fixnum int) (- -1 (%internal::largest-fixnum)))
 (pub defconstant (most-positive-double-float f64) 1.7976931348623157e308)
 (pub defconstant (most-negative-double-float f64) -1.7976931348623157e308)
 (pub defconstant (least-positive-double-float f64) 5.0e-324)

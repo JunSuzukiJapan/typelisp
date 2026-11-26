@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/README.md @ 398532233e28225bb121ed5b18609d41ea1bf813 -->
+<!-- translated-from: docs/ja/reference/functions/README.md @ b01477a6134617bbcef066ff2065d17245132754 -->
 # 內建函式
 
 內建函式、方法與標準函式庫的一覽。語法（特殊形式、定義方式）見[語法參考](../syntax.md)，型別一覽見[型別一覽](../types.md)。
@@ -29,8 +29,10 @@
 | 模組 | 名稱 |
 |---|---|
 | `std::array` | `array-iter` |
+| `std::board` | `disable-interrupt`、`enable-interrupt` |
 | `std::char` | `digit->char`、`digit-weight`、`name->char` |
 | `std::collections` | `Deque`、`HashSet`、`Scope`、`SortedTable`、`hashtable-iter` |
+| `std::dbg` | `llvm-size-of` |
 | `std::env` | `command-line-args`、`getenv`、`home-directory` |
 | `std::error` | `WrappedError`、`as-dyn-error`、`assert-equal`、`describe-error`、`wrap-error` |
 | `std::eval` | `Environment` |

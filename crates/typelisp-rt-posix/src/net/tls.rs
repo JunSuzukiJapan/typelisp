@@ -2,21 +2,75 @@
 //! configurations from PEM files, and moving a connection's handshake and
 //! records over its socket.
 
-use std::collections::HashMap;
+use typelisp_mem::prelude::*;
+use core::any::Any;
+use typelisp_mem::collections::HashMap;
 use std::io::ErrorKind;
 use std::sync::{Arc, Mutex};
-use crate::stream::Sock;
+use super::Sock;
 
-/// What a `tls-listen` listener holds: the configuration every accepted
-/// connection shares, and the certificates it chooses among — kept apart
-/// from the configuration so that `tls-add-certificate` can add one
-/// without rebuilding it.
-pub(crate) struct TlsServer {
+/// A connection's TLS state as its stream entry holds it: a
+/// `rustls::Connection` in a box that names no type. Every stream entry is
+/// dropped and closed through code every program with a stream table
+/// reaches (`Backend`'s drop, `StreamTable::close`); rustls's own type or
+/// methods there would make each executable carry rustls. Through the box
+/// they are reached only from where a connection is made ([`TlsConn::new`]),
+/// which is what builds the box's vtable.
+pub(crate) struct TlsConn(Box<dyn Session>);
+
+/// What the code every stream reaches does with a TLS connection.
+trait Session: Any + Send {
+    /// Tells the peer the connection is closing (`close_notify`), best
+    /// effort and without waiting.
+    fn close(&mut self, sock: &mut Sock);
+}
+
+impl Session for rustls::Connection {
+    fn close(&mut self, sock: &mut Sock) {
+        self.send_close_notify();
+        let _ = self.write_tls(sock);
+    }
+}
+
+impl TlsConn {
+    pub(super) fn new(conn: rustls::Connection) -> Self {
+        TlsConn(Box::new(conn))
+    }
+
+    pub(super) fn get(&mut self) -> &mut rustls::Connection {
+        (&mut *self.0 as &mut dyn Any).downcast_mut().expect("a `TlsConn` holds a `rustls::Connection`")
+    }
+
+    pub(super) fn peek(&self) -> &rustls::Connection {
+        (&*self.0 as &dyn Any).downcast_ref().expect("a `TlsConn` holds a `rustls::Connection`")
+    }
+
+    /// [`Session::close`].
+    pub(crate) fn close(&mut self, sock: &mut Sock) {
+        self.0.close(sock);
+    }
+}
+
+/// What a `tls-listen` listener holds, in a box that names no type for the
+/// reason [`TlsConn`] gives: its [`ServerState`].
+pub(crate) struct TlsServer(Box<dyn Any + Send>);
+
+impl TlsServer {
+    pub(super) fn state(&self) -> &ServerState {
+        self.0.downcast_ref().expect("a `TlsServer` holds a `ServerState`")
+    }
+}
+
+/// The configuration every connection a `tls-listen` listener accepts
+/// shares, and the certificates it chooses among — kept apart from the
+/// configuration so that `tls-add-certificate` can add one without
+/// rebuilding it.
+pub(super) struct ServerState {
     pub(super) config: Arc<rustls::ServerConfig>,
     certs: Arc<SniCerts>,
 }
 
-impl TlsServer {
+impl ServerState {
     /// Serves `key` to a client that asks for `name` (lower-cased), from the
     /// next handshake on.
     pub(super) fn add_certificate(&self, name: String, key: rustls::sign::CertifiedKey) -> Result<(), String> {
@@ -134,7 +188,7 @@ fn pem_roots(file: &str) -> Result<rustls::RootCertStore, String> {
 /// certificate — is built once; anything with a private CA or an identity
 /// is built per connect, since those are rare and their files may change.
 pub(super) fn tls_client_config(ca_file: Option<&str>, identity: Option<(&str, &str)>) -> Result<Arc<rustls::ClientConfig>, String> {
-    static DEFAULT: std::sync::OnceLock<Arc<rustls::ClientConfig>> = std::sync::OnceLock::new();
+    static DEFAULT: typelisp_mem::sync::OnceLock<Arc<rustls::ClientConfig>> = typelisp_mem::sync::OnceLock::new();
     if ca_file.is_none() && identity.is_none() {
         return Ok(Arc::clone(DEFAULT.get_or_init(|| {
             let mut roots = rustls::RootCertStore::empty();
@@ -166,7 +220,7 @@ pub(super) fn tls_client_config(ca_file: Option<&str>, identity: Option<(&str, &
 /// The chain in `cert_file` with the key in `key_file`, checked to match.
 pub(super) fn certified_key(cert_file: &str, key_file: &str) -> Result<rustls::sign::CertifiedKey, String> {
     use rustls::pki_types::pem::PemObject;
-    static PROVIDER: std::sync::OnceLock<rustls::crypto::CryptoProvider> = std::sync::OnceLock::new();
+    static PROVIDER: typelisp_mem::sync::OnceLock<rustls::crypto::CryptoProvider> = typelisp_mem::sync::OnceLock::new();
     let provider = PROVIDER.get_or_init(rustls::crypto::ring::default_provider);
     let certs = pem_certificates(cert_file)?;
     let key = rustls::pki_types::PrivateKeyDer::from_pem_file(key_file).map_err(|e| format!("{}: {}", key_file, e))?;
@@ -189,5 +243,5 @@ pub(super) fn tls_server_config(cert_file: &str, key_file: &str, client_ca: Opti
         }
     };
     let config = Arc::new(builder.with_cert_resolver(Arc::clone(&certs) as Arc<dyn rustls::server::ResolvesServerCert>));
-    Ok(TlsServer { config, certs })
+    Ok(TlsServer(Box::new(ServerState { config, certs })))
 }

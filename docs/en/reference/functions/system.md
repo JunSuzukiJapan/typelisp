@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/system.md @ 7622044725db7d28dabb691d82e592367d9284e8 -->
+<!-- translated-from: docs/ja/reference/functions/system.md @ b01477a6134617bbcef066ff2065d17245132754 -->
 # Time, Environment and Implementation
 
 Functions for time, queries about the runtime environment, implementation tools, parsing and
@@ -368,3 +368,32 @@ what gets compiled is the expanded form of the body.
 | `with-standard-io-syntax` | `(with-standard-io-syntax body...)` | — | Runs `body` with every printer control variable at its standard value and `*read-eval*` set to `true` ([Printing](printing.md#6-controlling-how-much-is-printed)) |
 | `exit` | `(exit code)` | `int→!` | Ends the process |
 | `dump` | `(dump path)` | `string→bool` | Writes the current environment (type information plus compiled bodies) to one file. `typl --image <path>` starts again from it. Interpreter-only ([Syntax Reference 10.1](../syntax.md#101-dumps)) |
+
+## 11. Microcontroller interrupts (`std::board`)
+
+Bring them in with a `use`, as in `(use std::board::enable-interrupt)`. How to write an interrupt handler is in [syntax reference 3.17](../syntax.md#317-interruptn--exceptionname--interrupt-handlers).
+
+| Name | Form | Type | Description |
+|---|---|---|---|
+| `enable-interrupt` | `(enable-interrupt n)` | `int→()` | Makes the peripheral interrupt `n` (0 to 239) come. Off a microcontroller, a runtime error (a compile error under `typl -c`) |
+| `disable-interrupt` | `(disable-interrupt n)` | `int→()` | Makes interrupt `n` stop coming. Off a microcontroller, as for `enable-interrupt` |
+
+## 12. Debugging (`std::dbg`)
+
+Bring it in with a `use`, as in `(use std::dbg::llvm-size-of)`.
+
+| Name | Form | Type | Description |
+|---|---|---|---|
+| `llvm-size-of` | `(llvm-size-of expr)` | `A→u32` | How many bytes compiled code holds the value of `expr` in. LLVM counts the size of the LLVM type the compiler gave the value, for the target the code runs on. `expr` is evaluated. Run by the interpreter, a runtime error |
+
+`size-of-val` answers the size the type decides, and `llvm-size-of` the size compiled code actually uses. When the two differ, the compiler has the value's width wrong.
+
+```lisp
+(use std::dbg::llvm-size-of)
+(defun widths ((x i8)) ()
+  (println "~a ~a ~a" (llvm-size-of x) (llvm-size-of (as u32 x)) (llvm-size-of (< x 0))))
+(compile widths)
+(widths 1)                          ; prints 1 4 1
+```
+
+A value in the heap (a `string`, a `defstruct` type and so on) and an `int` take one word, which stands for where the value is or for the value itself.

@@ -1,11 +1,11 @@
-# ABI バージョン 0.3.66
+# ABI バージョン 0.3.90
 
 `scripts/regen-abi-version.sh` が生成した文書。手で編集しない。
 
-コンパイラが生成するコードが、ABI バージョン 0.3.66 のランタイムライブラリについて仮定していることの一覧。
+コンパイラが生成するコードが、ABI バージョン 0.3.90 のランタイムライブラリについて仮定していることの一覧。
 ここに書かれていない前提(シムが引数をどう扱うか、生成コードがヒープを直接読む箇所など)は含まない。
 
-内容ハッシュ (FNV-1a 64): `167b265f331f54c3`
+内容ハッシュ (FNV-1a 64): `329748c8ec618934`
 
 ## 呼び出し規約 (typelisp_abi)
 
@@ -78,6 +78,7 @@
 | IMMEDIATE_FALSE | 1 |
 | IMMEDIATE_TRUE | 2 |
 | NIL_WORD | 7 |
+| VALUE_WORDS | 1 |
 
 ## C メモリ (typelisp_rt::c_mem)
 
@@ -89,12 +90,12 @@
 | KIND_U8 | 4 |
 | KIND_U16 | 5 |
 | KIND_U32 | 6 |
-| KIND_C_LONG | 7 |
-| KIND_C_ULONG | 8 |
+| KIND_RAW_I32 | 7 |
+| KIND_RAW_U32 | 8 |
 | KIND_F32 | 9 |
 | KIND_F64 | 10 |
 | KIND_BOOL | 11 |
-| KIND_PTR | 12 |
+| KIND_RAW_64 | 12 |
 
 ## 終了コード (typelisp_rt)
 
@@ -438,7 +439,7 @@
 | 315 | `add-coroutine-function` |
 | 316 | `add-function` |
 | 317 | `add-function-with-env` |
-| 318 | `alloca-args` |
+| 318 | `arg-list` |
 | 319 | `alphap` |
 | 320 | `append` |
 | 321 | `append-block` |
@@ -459,326 +460,379 @@
 | 336 | `build-ashr` |
 | 337 | `build-br` |
 | 338 | `build-call` |
-| 339 | `build-call-with-env` |
-| 340 | `build-cond-br` |
-| 341 | `build-fadd` |
-| 342 | `build-fceil` |
-| 343 | `build-fcmp-eq` |
-| 344 | `build-fcmp-ge` |
-| 345 | `build-fcmp-gt` |
-| 346 | `build-fcmp-le` |
-| 347 | `build-fcmp-lt` |
-| 348 | `build-fcmp-ne` |
-| 349 | `build-fcos` |
-| 350 | `build-fdiv` |
-| 351 | `build-fexp` |
-| 352 | `build-ffloor` |
-| 353 | `build-flog` |
-| 354 | `build-fmaxnum` |
-| 355 | `build-fminnum` |
-| 356 | `build-fmul` |
-| 357 | `build-fn-address` |
-| 358 | `build-fpow` |
-| 359 | `build-fptosi` |
-| 360 | `build-free` |
-| 361 | `build-frem` |
-| 362 | `build-fround` |
-| 363 | `build-fround32` |
-| 364 | `build-fsin` |
-| 365 | `build-fsqrt` |
-| 366 | `build-fsub` |
-| 367 | `build-ftrunc` |
-| 368 | `build-icmp-eq` |
-| 369 | `build-icmp-ge` |
-| 370 | `build-icmp-gt` |
-| 371 | `build-icmp-le` |
-| 372 | `build-icmp-lt` |
-| 373 | `build-icmp-ne` |
-| 374 | `build-int-to-ptr` |
-| 375 | `build-lshr` |
-| 376 | `build-make-closure` |
-| 377 | `build-malloc` |
-| 378 | `build-mul` |
-| 379 | `build-or` |
-| 380 | `build-ptr-to-int` |
-| 381 | `build-ret` |
-| 382 | `build-sadd-overflow` |
-| 383 | `build-select` |
-| 384 | `build-shl` |
-| 385 | `build-sitofp` |
-| 386 | `build-slot-ptr` |
-| 387 | `build-smul-overflow` |
-| 388 | `build-ssub-overflow` |
-| 389 | `build-sub` |
-| 390 | `build-xor` |
-| 391 | `cap` |
-| 392 | `ceiling` |
-| 393 | `char->int` |
-| 394 | `char->string` |
-| 395 | `clear` |
-| 396 | `clone-frames` |
-| 397 | `close` |
-| 398 | `const-word` |
-| 399 | `coroutine-apply` |
-| 400 | `coroutine-begin` |
-| 401 | `coroutine-call` |
-| 402 | `coroutine-call-env` |
-| 403 | `coroutine-dyn-call` |
-| 404 | `coroutine-end` |
-| 405 | `coroutine-suspend` |
-| 406 | `coroutine-unwind` |
-| 407 | `cos` |
-| 408 | `cosh` |
-| 409 | `count` |
-| 410 | `create` |
-| 411 | `current-id` |
-| 412 | `denominator` |
-| 413 | `digitp` |
-| 414 | `downcase` |
-| 415 | `entries` |
-| 416 | `eq` |
-| 417 | `eql` |
-| 418 | `equal` |
-| 419 | `equalp` |
-| 420 | `exp` |
-| 421 | `expt` |
-| 422 | `float->f32` |
-| 423 | `float->f64` |
-| 424 | `float->int` |
-| 425 | `float->ratio` |
-| 426 | `floor` |
-| 427 | `frame-clear-handler` |
-| 428 | `frame-set-handler` |
-| 429 | `frame-slot` |
-| 430 | `frame-slot-rooted` |
-| 431 | `function-param` |
-| 432 | `get` |
-| 433 | `get-function` |
-| 434 | `int->c-long` |
-| 435 | `int->c-ulong` |
-| 436 | `int->char` |
-| 437 | `int->float` |
-| 438 | `int->i16` |
-| 439 | `int->i32` |
-| 440 | `int->i8` |
-| 441 | `int->int` |
-| 442 | `int->ratio` |
-| 443 | `int->u16` |
-| 444 | `int->u32` |
-| 445 | `int->u8` |
-| 446 | `integer-length` |
-| 447 | `join` |
-| 448 | `keys` |
-| 449 | `len` |
-| 450 | `length` |
-| 451 | `load-arg` |
-| 452 | `load-env` |
-| 453 | `load-raw` |
-| 454 | `load-type` |
-| 455 | `log` |
-| 456 | `logand` |
-| 457 | `logbitp` |
-| 458 | `logcount` |
-| 459 | `logior` |
-| 460 | `lognot` |
-| 461 | `logtest` |
-| 462 | `logxor` |
-| 463 | `lt` |
-| 464 | `max` |
-| 465 | `min` |
-| 466 | `mod` |
-| 467 | `new` |
-| 468 | `numerator` |
-| 469 | `pop` |
-| 470 | `pop-frame` |
-| 471 | `position-at-end` |
-| 472 | `push` |
-| 473 | `push-frame` |
-| 474 | `ratio->float` |
-| 475 | `ratio->int` |
-| 476 | `ratio->rational` |
-| 477 | `rational->float` |
-| 478 | `rational->int` |
-| 479 | `rational->ratio` |
-| 480 | `ref` |
-| 481 | `round` |
-| 482 | `scratch-slot` |
-| 483 | `sin` |
-| 484 | `sinh` |
-| 485 | `sqrt` |
-| 486 | `store-arg` |
-| 487 | `substring` |
-| 488 | `tan` |
-| 489 | `tanh` |
-| 490 | `to-string` |
-| 491 | `truncate` |
-| 492 | `try-float->f32` |
-| 493 | `try-float->f64` |
-| 494 | `try-int->c-long` |
-| 495 | `try-int->c-ulong` |
-| 496 | `try-int->char` |
-| 497 | `try-int->i16` |
-| 498 | `try-int->i32` |
-| 499 | `try-int->i8` |
-| 500 | `try-int->u16` |
-| 501 | `try-int->u32` |
-| 502 | `try-int->u8` |
-| 503 | `try-rational->int` |
-| 504 | `upcase` |
-| 505 | `values` |
-| 506 | `verify` |
-| 507 | `wait` |
-| 508 | `compile-file` |
-| 509 | `dump` |
-| 510 | `dribble-start` |
-| 511 | `dribble-stop` |
-| 512 | `ed-open` |
-| 513 | `file-create-directories` |
-| 514 | `file-delete` |
-| 515 | `file-directory-p` |
-| 516 | `file-exists-p` |
-| 517 | `file-list-directory` |
-| 518 | `file-modified-date` |
-| 519 | `file-owner-name` |
-| 520 | `file-rename` |
-| 521 | `file-truename` |
-| 522 | `make-random-state-fresh` |
-| 523 | `net-accept` |
-| 524 | `net-buffered-p` |
-| 525 | `net-connect-begin` |
-| 526 | `net-connect-finish` |
-| 527 | `net-fill` |
-| 528 | `net-flush` |
-| 529 | `net-listen` |
-| 530 | `net-local-address` |
-| 531 | `net-peer-address` |
-| 532 | `net-peer-subject` |
-| 533 | `net-pop-byte` |
-| 534 | `net-pop-char` |
-| 535 | `net-push-byte` |
-| 536 | `net-push-string` |
-| 537 | `net-resolve-begin` |
-| 538 | `net-resolve-finish` |
-| 539 | `net-server-name` |
-| 540 | `net-set-keepalive` |
-| 541 | `net-set-keepalive-period` |
-| 542 | `net-set-nodelay` |
-| 543 | `net-shutdown-write` |
-| 544 | `net-socket-error` |
-| 545 | `net-tls-add-certificate` |
-| 546 | `net-tls-handshake` |
-| 547 | `net-tls-listen` |
-| 548 | `net-tls-start` |
-| 549 | `net-udp-bind` |
-| 550 | `net-udp-last-sender` |
-| 551 | `net-udp-recv` |
-| 552 | `net-udp-send-to` |
-| 553 | `net-unix-connect` |
-| 554 | `net-unix-listen` |
-| 555 | `net-wait` |
-| 556 | `net-wait-for` |
-| 557 | `random-state-copy` |
-| 558 | `random-state-next` |
-| 559 | `read-datum-at` |
-| 560 | `stream-at-line-start` |
-| 561 | `stream-close` |
-| 562 | `stream-describe` |
-| 563 | `stream-finish-output` |
-| 564 | `stream-input-p` |
-| 565 | `stream-listen` |
-| 566 | `stream-open-file` |
-| 567 | `stream-open-p` |
-| 568 | `stream-output-p` |
-| 569 | `stream-position` |
-| 570 | `stream-read-byte` |
-| 571 | `stream-read-char` |
-| 572 | `stream-stderr` |
-| 573 | `stream-stdin` |
-| 574 | `stream-stdout` |
-| 575 | `stream-string-input` |
-| 576 | `stream-string-output` |
-| 577 | `stream-take-output-string` |
-| 578 | `stream-unread-char` |
-| 579 | `stream-write-byte` |
-| 580 | `stream-write-string` |
-| 581 | `command-line-args` |
-| 582 | `getenv` |
-| 583 | `home-directory` |
-| 584 | `lisp-implementation-version` |
-| 585 | `machine-instance` |
-| 586 | `machine-type` |
-| 587 | `machine-version` |
-| 588 | `software-type` |
-| 589 | `software-version` |
-| 590 | `eval` |
-| 591 | `macroexpand` |
-| 592 | `macroexpand-1` |
-| 593 | `pprint-indent` |
-| 594 | `pprint-list-exhausted` |
-| 595 | `pprint-newline` |
-| 596 | `pprint-pop` |
-| 597 | `pprint-tab` |
-| 598 | `parse-float` |
-| 599 | `exit` |
-| 600 | `seed-random-state` |
-| 601 | `get-dispatch-macro-character` |
-| 602 | `get-macro-character` |
-| 603 | `read` |
-| 604 | `set-dispatch-macro-character` |
-| 605 | `set-macro-character` |
-| 606 | `heap-info` |
-| 607 | `sexpr-atom` |
-| 608 | `sexpr-bool` |
-| 609 | `sexpr-car` |
-| 610 | `sexpr-cdr` |
-| 611 | `sexpr-char` |
-| 612 | `sexpr-cons` |
-| 613 | `sexpr-consp` |
-| 614 | `sexpr-f32` |
-| 615 | `sexpr-f64` |
-| 616 | `sexpr-i16` |
-| 617 | `sexpr-i32` |
-| 618 | `sexpr-i8` |
-| 619 | `sexpr-int` |
-| 620 | `sexpr-null` |
-| 621 | `sexpr-str` |
-| 622 | `sexpr-sym-name` |
-| 623 | `sexpr-symp` |
-| 624 | `sexpr-u16` |
-| 625 | `sexpr-u32` |
-| 626 | `sexpr-u8` |
-| 627 | `keywordp` |
-| 628 | `symbol->string` |
-| 629 | `sleep` |
-| 630 | `yield` |
-| 631 | `get-internal-real-time` |
-| 632 | `get-internal-run-time` |
-| 633 | `get-universal-time` |
-| 634 | `timezone-daylight-p` |
-| 635 | `timezone-offset-seconds` |
-| 636 | `format-rt` |
-| 637 | `print-rt` |
-| 638 | `println-rt` |
-| 639 | `pprint-rt` |
-| 640 | `pprint-block-start-rt` |
-| 641 | `pprint-block-end-rt` |
-| 642 | ` c-arena-open` |
-| 643 | ` c-arena-close` |
-| 644 | ` c-alloc` |
-| 645 | ` c-ptr-check` |
-| 646 | ` c-index` |
-| 647 | ` c-offset` |
-| 648 | ` c-load` |
-| 649 | ` c-store` |
-| 650 | ` ffi-callback-address` |
-| 651 | `pat-dyn` |
-| 652 | `hash-function` |
-| 653 | `test-function` |
-| 654 | `sxhash-eq` |
-| 655 | `sxhash-eql` |
-| 656 | `sxhash-equalp` |
-| 657 | `&environment` |
-| 658 | `define-symbol-macro` |
+| 339 | `no-value` |
+| 340 | `const-value` |
+| 341 | `const-like` |
+| 342 | `convert` |
+| 343 | `coerce` |
+| 344 | `tag-field` |
+| 345 | `untag-field` |
+| 346 | `global-get` |
+| 347 | `global-put` |
+| 348 | `global-new` |
+| 349 | `build-cond-br` |
+| 350 | `build-fixed-binop` |
+| 351 | `build-fixed-div-check` |
+| 352 | `build-fixed-unary` |
+| 353 | `build-float-binop` |
+| 354 | `build-float-unary` |
+| 355 | `build-fn-address` |
+| 356 | `add-frame-slot` |
+| 357 | `build-icmp-eq` |
+| 358 | `build-icmp-ge` |
+| 359 | `build-icmp-gt` |
+| 360 | `build-icmp-le` |
+| 361 | `build-icmp-lt` |
+| 362 | `build-icmp-ne` |
+| 363 | `add-frame-slot-rooted` |
+| 364 | `build-lshr` |
+| 365 | `build-make-closure` |
+| 366 | `frame-slots` |
+| 367 | `build-mul` |
+| 368 | `build-or` |
+| 369 | `build-not` |
+| 370 | `build-ret` |
+| 371 | `build-sadd-overflow` |
+| 372 | `build-select` |
+| 373 | `build-shl` |
+| 374 | `temp-slot` |
+| 375 | `build-smul-overflow` |
+| 376 | `build-ssub-overflow` |
+| 377 | `build-sub` |
+| 378 | `build-xor` |
+| 379 | `cap` |
+| 380 | `ceiling` |
+| 381 | `char->int` |
+| 382 | `char->string` |
+| 383 | `clear` |
+| 384 | `clone-frames` |
+| 385 | `close` |
+| 386 | `const-word` |
+| 387 | `coroutine-apply` |
+| 388 | `coroutine-begin` |
+| 389 | `coroutine-call` |
+| 390 | `coroutine-call-env` |
+| 391 | `coroutine-dyn-call` |
+| 392 | `coroutine-end` |
+| 393 | `coroutine-suspend` |
+| 394 | `coroutine-unwind` |
+| 395 | `cos` |
+| 396 | `cosh` |
+| 397 | `count` |
+| 398 | `create` |
+| 399 | `current-id` |
+| 400 | `c-long-bits` |
+| 401 | `denominator` |
+| 402 | `digitp` |
+| 403 | `downcase` |
+| 404 | `entries` |
+| 405 | `entry-value` |
+| 406 | `eq` |
+| 407 | `eql` |
+| 408 | `equal` |
+| 409 | `equalp` |
+| 410 | `exp` |
+| 411 | `expt` |
+| 412 | `float->f32` |
+| 413 | `float->f64` |
+| 414 | `float->int` |
+| 415 | `float->ratio` |
+| 416 | `floor` |
+| 417 | `frame-clear-handler` |
+| 418 | `frame-set-handler` |
+| 419 | `frame-slot` |
+| 420 | `frame-slot-rooted` |
+| 421 | `function-param` |
+| 422 | `get` |
+| 423 | `get-function` |
+| 424 | `int->c-long` |
+| 425 | `int->c-ulong` |
+| 426 | `int->char` |
+| 427 | `int->float` |
+| 428 | `int->i16` |
+| 429 | `int->i32` |
+| 430 | `int->i8` |
+| 431 | `int->int` |
+| 432 | `int->ratio` |
+| 433 | `int->u16` |
+| 434 | `int->u32` |
+| 435 | `int->u8` |
+| 436 | `integer-length` |
+| 437 | `join` |
+| 438 | `keys` |
+| 439 | `len` |
+| 440 | `length` |
+| 441 | `load-arg` |
+| 442 | `load-env` |
+| 443 | `slot-get` |
+| 444 | `load-type` |
+| 445 | `loop-safepoint` |
+| 446 | `log` |
+| 447 | `logand` |
+| 448 | `logbitp` |
+| 449 | `logcount` |
+| 450 | `logior` |
+| 451 | `lognot` |
+| 452 | `logtest` |
+| 453 | `logxor` |
+| 454 | `lt` |
+| 455 | `max` |
+| 456 | `min` |
+| 457 | `mod` |
+| 458 | `new` |
+| 459 | `numerator` |
+| 460 | `pop` |
+| 461 | `pop-frame` |
+| 462 | `position-at-end` |
+| 463 | `push` |
+| 464 | `push-frame` |
+| 465 | `ratio->float` |
+| 466 | `ratio->int` |
+| 467 | `ratio->rational` |
+| 468 | `rational->float` |
+| 469 | `rational->int` |
+| 470 | `rational->ratio` |
+| 471 | `ref` |
+| 472 | `rem` |
+| 473 | `round` |
+| 474 | `scratch-slot` |
+| 475 | `sin` |
+| 476 | `sinh` |
+| 477 | `sqrt` |
+| 478 | `slot-set` |
+| 479 | `substring` |
+| 480 | `tan` |
+| 481 | `tanh` |
+| 482 | `to-string` |
+| 483 | `truncate` |
+| 484 | `try-float->f32` |
+| 485 | `try-float->f64` |
+| 486 | `try-int->char` |
+| 487 | `try-int->i16` |
+| 488 | `try-int->i32` |
+| 489 | `try-int->i8` |
+| 490 | `try-int->u16` |
+| 491 | `try-int->u32` |
+| 492 | `try-int->u8` |
+| 493 | `try-rational->int` |
+| 494 | `upcase` |
+| 495 | `values` |
+| 496 | `verify` |
+| 497 | `wait` |
+| 498 | `compile-file` |
+| 499 | `dump` |
+| 500 | `dribble-start` |
+| 501 | `dribble-stop` |
+| 502 | `ed-open` |
+| 503 | `file-create-directories` |
+| 504 | `file-delete` |
+| 505 | `file-directory-p` |
+| 506 | `file-exists-p` |
+| 507 | `file-list-directory` |
+| 508 | `file-modified-date` |
+| 509 | `file-owner-name` |
+| 510 | `file-rename` |
+| 511 | `file-truename` |
+| 512 | `make-random-state-fresh` |
+| 513 | `net-accept` |
+| 514 | `net-buffered-p` |
+| 515 | `net-connect-begin` |
+| 516 | `net-connect-finish` |
+| 517 | `net-fill` |
+| 518 | `net-flush` |
+| 519 | `net-listen` |
+| 520 | `net-local-address` |
+| 521 | `net-peer-address` |
+| 522 | `net-peer-subject` |
+| 523 | `net-pop-byte` |
+| 524 | `net-pop-char` |
+| 525 | `net-push-byte` |
+| 526 | `net-push-string` |
+| 527 | `net-resolve-begin` |
+| 528 | `net-resolve-finish` |
+| 529 | `net-server-name` |
+| 530 | `net-set-keepalive` |
+| 531 | `net-set-keepalive-period` |
+| 532 | `net-set-nodelay` |
+| 533 | `net-shutdown-write` |
+| 534 | `net-socket-error` |
+| 535 | `net-tls-add-certificate` |
+| 536 | `net-tls-handshake` |
+| 537 | `net-tls-listen` |
+| 538 | `net-tls-start` |
+| 539 | `net-udp-bind` |
+| 540 | `net-udp-last-sender` |
+| 541 | `net-udp-recv` |
+| 542 | `net-udp-send-to` |
+| 543 | `net-unix-connect` |
+| 544 | `net-unix-listen` |
+| 545 | `net-wait` |
+| 546 | `net-wait-for` |
+| 547 | `random-state-copy` |
+| 548 | `random-state-next` |
+| 549 | `read-datum-at` |
+| 550 | `stream-at-line-start` |
+| 551 | `stream-close` |
+| 552 | `stream-describe` |
+| 553 | `stream-finish-output` |
+| 554 | `stream-input-p` |
+| 555 | `stream-listen` |
+| 556 | `stream-open-file` |
+| 557 | `stream-open-p` |
+| 558 | `stream-output-p` |
+| 559 | `stream-position` |
+| 560 | `stream-read-byte` |
+| 561 | `stream-read-char` |
+| 562 | `stream-stderr` |
+| 563 | `stream-stdin` |
+| 564 | `stream-stdout` |
+| 565 | `stream-string-input` |
+| 566 | `stream-string-output` |
+| 567 | `stream-take-output-string` |
+| 568 | `stream-unread-char` |
+| 569 | `stream-write-byte` |
+| 570 | `stream-write-string` |
+| 571 | `command-line-args` |
+| 572 | `getenv` |
+| 573 | `home-directory` |
+| 574 | `lisp-implementation-version` |
+| 575 | `machine-instance` |
+| 576 | `machine-type` |
+| 577 | `machine-version` |
+| 578 | `software-type` |
+| 579 | `software-version` |
+| 580 | `eval` |
+| 581 | `macroexpand` |
+| 582 | `macroexpand-1` |
+| 583 | `pprint-indent` |
+| 584 | `pprint-list-exhausted` |
+| 585 | `pprint-newline` |
+| 586 | `pprint-pop` |
+| 587 | `pprint-tab` |
+| 588 | `parse-float` |
+| 589 | `exit` |
+| 590 | `seed-random-state` |
+| 591 | `get-dispatch-macro-character` |
+| 592 | `get-macro-character` |
+| 593 | `read` |
+| 594 | `set-dispatch-macro-character` |
+| 595 | `set-macro-character` |
+| 596 | `heap-info` |
+| 597 | `sexpr-atom` |
+| 598 | `sexpr-bool` |
+| 599 | `sexpr-car` |
+| 600 | `sexpr-cdr` |
+| 601 | `sexpr-char` |
+| 602 | `sexpr-cons` |
+| 603 | `sexpr-consp` |
+| 604 | `sexpr-f32` |
+| 605 | `sexpr-f64` |
+| 606 | `sexpr-i16` |
+| 607 | `sexpr-i32` |
+| 608 | `sexpr-i8` |
+| 609 | `sexpr-int` |
+| 610 | `sexpr-null` |
+| 611 | `sexpr-str` |
+| 612 | `sexpr-sym-name` |
+| 613 | `sexpr-symp` |
+| 614 | `sexpr-u16` |
+| 615 | `sexpr-u32` |
+| 616 | `sexpr-u8` |
+| 617 | `keywordp` |
+| 618 | `symbol->string` |
+| 619 | `sleep` |
+| 620 | `yield` |
+| 621 | `get-internal-real-time` |
+| 622 | `get-internal-run-time` |
+| 623 | `get-universal-time` |
+| 624 | `timezone-daylight-p` |
+| 625 | `timezone-offset-seconds` |
+| 626 | `format-rt` |
+| 627 | `print-rt` |
+| 628 | `println-rt` |
+| 629 | `pprint-rt` |
+| 630 | `pprint-block-start-rt` |
+| 631 | `pprint-block-end-rt` |
+| 632 | ` c-arena-open` |
+| 633 | ` c-arena-close` |
+| 634 | ` c-alloc` |
+| 635 | ` c-ptr-check` |
+| 636 | ` c-index` |
+| 637 | ` c-offset` |
+| 638 | ` c-load` |
+| 639 | ` c-store` |
+| 640 | ` ffi-callback-address` |
+| 641 | `pat-dyn` |
+| 642 | `hash-function` |
+| 643 | `test-function` |
+| 644 | `sxhash-eq` |
+| 645 | `sxhash-eql` |
+| 646 | `sxhash-equalp` |
+| 647 | `&environment` |
+| 648 | `define-symbol-macro` |
+| 649 | `format-out` |
+| 650 | ` fmt-open` |
+| 651 | ` fmt-text` |
+| 652 | ` fmt-fresh-line` |
+| 653 | ` fmt-a` |
+| 654 | ` fmt-string` |
+| 655 | ` fmt-number` |
+| 656 | ` fmt-value` |
+| 657 | ` fmt-d` |
+| 658 | ` fmt-integer` |
+| 659 | ` fmt-integer-any` |
+| 660 | ` fmt-words` |
+| 661 | ` fmt-plural` |
+| 662 | ` fmt-char` |
+| 663 | ` fmt-fixed` |
+| 664 | ` fmt-exponent` |
+| 665 | ` fmt-general` |
+| 666 | ` fmt-dollars` |
+| 667 | ` fmt-tab` |
+| 668 | ` fmt-newline` |
+| 669 | ` fmt-indent` |
+| 670 | ` fmt-case-open` |
+| 671 | ` fmt-case-close` |
+| 672 | ` fmt-just-open` |
+| 673 | ` fmt-just-segment` |
+| 674 | ` fmt-just-close` |
+| 675 | ` fmt-block-open` |
+| 676 | ` fmt-block-close` |
+| 677 | ` fmt-result` |
+| 678 | ` fmt-emit` |
+| 679 | ` fmt-first` |
+| 680 | ` fmt-rest` |
+| 681 | ` fmt-empty` |
+| 682 | ` fmt-length` |
+| 683 | ` fmt-goto` |
+| 684 | ` fmt-as-list` |
+| 685 | ` fmt-param` |
+| 686 | ` fmt-select` |
+| 687 | ` fmt-bool` |
+| 688 | `volatile-read-u8` |
+| 689 | `volatile-read-u16` |
+| 690 | `volatile-read-u32` |
+| 691 | `volatile-write-u8` |
+| 692 | `volatile-write-u16` |
+| 693 | `volatile-write-u32` |
+| 694 | ` c-volatile-load` |
+| 695 | ` c-volatile-store` |
+| 696 | `enable-interrupt` |
+| 697 | `disable-interrupt` |
+| 698 | `largest-fixnum` |
+| 699 | ` c-address` |
+| 700 | `size-of` |
+| 701 | `size-of-val` |
+| 702 | `entry-safepoint` |
+| 703 | `float->i8` |
+| 704 | `float->i16` |
+| 705 | `float->i32` |
+| 706 | `float->u8` |
+| 707 | `float->u16` |
+| 708 | `float->u32` |
+| 709 | `llvm-size-of` |
+| 710 | `llvm-size-of-value` |
+| 711 | `build-size-of` |
 
 ## 組み込み型 (typelisp_mem::BUILTIN_TYPES)
 
@@ -803,91 +857,92 @@
 | 16 | `std::option::Option<std::sexpr::Sexpr>` |
 | 17 | `std::vec::Vector<std::option::Option<std::sexpr::Sexpr>>` |
 | 18 | `std::array::Array<std::option::Option<std::sexpr::Sexpr>>` |
+| 19 | `std::%internal::format-out` |
 
-## 実行時が組み立てる値の型 (typelisp_rt)
+## 実行時が組み立てる値の型
 
 | 表 | 関数 | 型 |
 |---|---|---|
-| sys_builtin::RESULT_TYPES | `parse-float` | `std::result::Result<std::primitive::f64,std::num::ParseFloatError>` |
-| sys_builtin::RESULT_TYPES | `command-line-args` | `std::vec::Vector<std::primitive::string>` |
-| sys_builtin::RESULT_TYPES | `getenv` | `std::option::Option<std::primitive::string>` |
-| sys_builtin::RESULT_TYPES | `home-directory` | `std::option::Option<std::primitive::string>` |
-| sys_builtin::RESULT_TYPES | `machine-instance` | `std::option::Option<std::primitive::string>` |
-| sys_builtin::RESULT_TYPES | `machine-version` | `std::option::Option<std::primitive::string>` |
-| sys_builtin::RESULT_TYPES | `software-version` | `std::option::Option<std::primitive::string>` |
-| sys_builtin::RESULT_TYPES | `timezone-offset-seconds` | `std::option::Option<std::primitive::int>` |
-| sys_builtin::RESULT_TYPES | `timezone-daylight-p` | `std::option::Option<std::primitive::bool>` |
-| sys_builtin::RESULT_TYPES | `dribble-start` | `std::result::Result<(),std::fs::FileError>` |
-| sys_builtin::RESULT_TYPES | `dribble-stop` | `std::result::Result<(),std::fs::FileError>` |
-| sys_builtin::RESULT_TYPES | `ed-open` | `std::result::Result<(),std::fs::FileError>` |
-| stream_builtin::RESULT_TYPES | `stream-open-file` | `std::result::Result<std::primitive::i32,std::fs::FileError>` |
-| stream_builtin::RESULT_TYPES | `stream-close` | `std::result::Result<(),std::fs::FileError>` |
-| stream_builtin::RESULT_TYPES | `stream-input-p` | `std::result::Result<std::primitive::bool,std::fs::FileError>` |
-| stream_builtin::RESULT_TYPES | `stream-output-p` | `std::result::Result<std::primitive::bool,std::fs::FileError>` |
-| stream_builtin::RESULT_TYPES | `stream-listen` | `std::result::Result<std::primitive::bool,std::fs::FileError>` |
-| stream_builtin::RESULT_TYPES | `stream-position` | `std::result::Result<std::primitive::int,std::fs::FileError>` |
-| stream_builtin::RESULT_TYPES | `stream-at-line-start` | `std::result::Result<std::primitive::bool,std::fs::FileError>` |
-| stream_builtin::RESULT_TYPES | `stream-read-char` | `std::result::Result<std::option::Option<std::primitive::char>,std::fs::FileError>` |
-| stream_builtin::RESULT_TYPES | `stream-unread-char` | `std::result::Result<(),std::fs::FileError>` |
-| stream_builtin::RESULT_TYPES | `stream-read-byte` | `std::result::Result<std::option::Option<std::primitive::int>,std::fs::FileError>` |
-| stream_builtin::RESULT_TYPES | `stream-write-byte` | `std::result::Result<(),std::fs::FileError>` |
-| stream_builtin::RESULT_TYPES | `stream-write-string` | `std::result::Result<(),std::fs::FileError>` |
-| stream_builtin::RESULT_TYPES | `stream-finish-output` | `std::result::Result<(),std::fs::FileError>` |
-| stream_builtin::RESULT_TYPES | `stream-take-output-string` | `std::result::Result<std::primitive::string,std::fs::FileError>` |
-| stream_builtin::RESULT_TYPES | `file-delete` | `std::result::Result<(),std::fs::FileError>` |
-| stream_builtin::RESULT_TYPES | `file-truename` | `std::result::Result<std::primitive::string,std::fs::FileError>` |
-| stream_builtin::RESULT_TYPES | `file-modified-date` | `std::result::Result<std::time::universal-time,std::fs::FileError>` |
-| stream_builtin::RESULT_TYPES | `file-owner-name` | `std::result::Result<std::option::Option<std::primitive::string>,std::fs::FileError>` |
-| stream_builtin::RESULT_TYPES | `file-list-directory` | `std::result::Result<std::vec::Vector<std::primitive::string>,std::fs::FileError>` |
-| stream_builtin::RESULT_TYPES | `file-create-directories` | `std::result::Result<(),std::fs::FileError>` |
-| stream_builtin::RESULT_TYPES | `file-rename` | `std::result::Result<(),std::fs::FileError>` |
-| stream_builtin::INNER_TYPES | `stream-read-char` | `std::option::Option<std::primitive::char>` |
-| stream_builtin::INNER_TYPES | `stream-read-byte` | `std::option::Option<std::primitive::int>` |
-| stream_builtin::INNER_TYPES | `file-list-directory` | `std::vec::Vector<std::primitive::string>` |
-| stream_builtin::INNER_TYPES | `file-owner-name` | `std::option::Option<std::primitive::string>` |
-| net_builtin::RESULT_TYPES | `net-resolve-begin` | `std::result::Result<std::primitive::i32,std::net::NetError>` |
-| net_builtin::RESULT_TYPES | `net-resolve-finish` | `std::result::Result<std::option::Option<std::vec::Vector<std::primitive::string>>,std::net::NetError>` |
-| net_builtin::RESULT_TYPES | `net-connect-begin` | `std::result::Result<std::primitive::i32,std::net::NetError>` |
-| net_builtin::RESULT_TYPES | `net-connect-finish` | `std::result::Result<(),std::net::NetError>` |
-| net_builtin::RESULT_TYPES | `net-listen` | `std::result::Result<std::primitive::i32,std::net::NetError>` |
-| net_builtin::RESULT_TYPES | `net-tls-listen` | `std::result::Result<std::primitive::i32,std::net::NetError>` |
-| net_builtin::RESULT_TYPES | `net-unix-connect` | `std::result::Result<std::primitive::i32,std::net::NetError>` |
-| net_builtin::RESULT_TYPES | `net-unix-listen` | `std::result::Result<std::primitive::i32,std::net::NetError>` |
-| net_builtin::RESULT_TYPES | `net-accept` | `std::result::Result<std::option::Option<std::primitive::i32>,std::net::NetError>` |
-| net_builtin::RESULT_TYPES | `net-fill` | `std::result::Result<std::option::Option<std::primitive::int>,std::net::NetError>` |
-| net_builtin::RESULT_TYPES | `net-pop-byte` | `std::result::Result<std::option::Option<std::primitive::int>,std::net::NetError>` |
-| net_builtin::RESULT_TYPES | `net-pop-char` | `std::result::Result<std::option::Option<std::primitive::char>,std::net::NetError>` |
-| net_builtin::RESULT_TYPES | `net-buffered-p` | `std::result::Result<std::primitive::bool,std::net::NetError>` |
-| net_builtin::RESULT_TYPES | `net-push-string` | `std::result::Result<(),std::net::NetError>` |
-| net_builtin::RESULT_TYPES | `net-push-byte` | `std::result::Result<(),std::net::NetError>` |
-| net_builtin::RESULT_TYPES | `net-flush` | `std::result::Result<std::option::Option<std::primitive::int>,std::net::NetError>` |
-| net_builtin::RESULT_TYPES | `net-socket-error` | `std::result::Result<std::option::Option<std::primitive::string>,std::net::NetError>` |
-| net_builtin::RESULT_TYPES | `net-peer-subject` | `std::result::Result<std::option::Option<std::primitive::string>,std::net::NetError>` |
-| net_builtin::RESULT_TYPES | `net-server-name` | `std::result::Result<std::option::Option<std::primitive::string>,std::net::NetError>` |
-| net_builtin::RESULT_TYPES | `net-set-nodelay` | `std::result::Result<(),std::net::NetError>` |
-| net_builtin::RESULT_TYPES | `net-set-keepalive` | `std::result::Result<(),std::net::NetError>` |
-| net_builtin::RESULT_TYPES | `net-set-keepalive-period` | `std::result::Result<(),std::net::NetError>` |
-| net_builtin::RESULT_TYPES | `net-tls-add-certificate` | `std::result::Result<(),std::net::NetError>` |
-| net_builtin::RESULT_TYPES | `net-shutdown-write` | `std::result::Result<(),std::net::NetError>` |
-| net_builtin::RESULT_TYPES | `net-local-address` | `std::result::Result<std::primitive::string,std::net::NetError>` |
-| net_builtin::RESULT_TYPES | `net-peer-address` | `std::result::Result<std::primitive::string,std::net::NetError>` |
-| net_builtin::RESULT_TYPES | `net-tls-start` | `std::result::Result<(),std::net::NetError>` |
-| net_builtin::RESULT_TYPES | `net-tls-handshake` | `std::result::Result<std::option::Option<std::primitive::int>,std::net::NetError>` |
-| net_builtin::RESULT_TYPES | `net-udp-bind` | `std::result::Result<std::primitive::i32,std::net::NetError>` |
-| net_builtin::RESULT_TYPES | `net-udp-send-to` | `std::result::Result<std::primitive::bool,std::net::NetError>` |
-| net_builtin::RESULT_TYPES | `net-udp-recv` | `std::result::Result<std::option::Option<std::vec::Vector<std::primitive::int>>,std::net::NetError>` |
-| net_builtin::RESULT_TYPES | `net-udp-last-sender` | `std::result::Result<std::primitive::string,std::net::NetError>` |
-| net_builtin::INNER_TYPES | `net-resolve-finish` | `std::option::Option<std::vec::Vector<std::primitive::string>>` |
-| net_builtin::INNER_TYPES | `net-tls-handshake` | `std::option::Option<std::primitive::int>` |
-| net_builtin::INNER_TYPES | `net-udp-recv` | `std::option::Option<std::vec::Vector<std::primitive::int>>` |
-| net_builtin::INNER_TYPES | `net-accept` | `std::option::Option<std::primitive::i32>` |
-| net_builtin::INNER_TYPES | `net-fill` | `std::option::Option<std::primitive::int>` |
-| net_builtin::INNER_TYPES | `net-flush` | `std::option::Option<std::primitive::int>` |
-| net_builtin::INNER_TYPES | `net-socket-error` | `std::option::Option<std::primitive::string>` |
-| net_builtin::INNER_TYPES | `net-peer-subject` | `std::option::Option<std::primitive::string>` |
-| net_builtin::INNER_TYPES | `net-server-name` | `std::option::Option<std::primitive::string>` |
-| net_builtin::INNER_TYPES | `net-pop-byte` | `std::option::Option<std::primitive::int>` |
-| net_builtin::INNER_TYPES | `net-pop-char` | `std::option::Option<std::primitive::char>` |
+| typelisp_rt::sys_builtin::RESULT_TYPES | `parse-float` | `std::result::Result<std::primitive::f64,std::num::ParseFloatError>` |
+| typelisp_rt::sys_builtin::RESULT_TYPES | `machine-version` | `std::option::Option<std::primitive::string>` |
+| typelisp_rt::sys_builtin::RESULT_TYPES | `timezone-offset-seconds` | `std::option::Option<std::primitive::int>` |
+| typelisp_rt::sys_builtin::RESULT_TYPES | `timezone-daylight-p` | `std::option::Option<std::primitive::bool>` |
+| typelisp_rt::stream_builtin::RESULT_TYPES | `stream-close` | `std::result::Result<(),std::fs::FileError>` |
+| typelisp_rt::stream_builtin::RESULT_TYPES | `stream-input-p` | `std::result::Result<std::primitive::bool,std::fs::FileError>` |
+| typelisp_rt::stream_builtin::RESULT_TYPES | `stream-output-p` | `std::result::Result<std::primitive::bool,std::fs::FileError>` |
+| typelisp_rt::stream_builtin::RESULT_TYPES | `stream-listen` | `std::result::Result<std::primitive::bool,std::fs::FileError>` |
+| typelisp_rt::stream_builtin::RESULT_TYPES | `stream-position` | `std::result::Result<std::primitive::int,std::fs::FileError>` |
+| typelisp_rt::stream_builtin::RESULT_TYPES | `stream-at-line-start` | `std::result::Result<std::primitive::bool,std::fs::FileError>` |
+| typelisp_rt::stream_builtin::RESULT_TYPES | `stream-read-char` | `std::result::Result<std::option::Option<std::primitive::char>,std::fs::FileError>` |
+| typelisp_rt::stream_builtin::RESULT_TYPES | `stream-unread-char` | `std::result::Result<(),std::fs::FileError>` |
+| typelisp_rt::stream_builtin::RESULT_TYPES | `stream-read-byte` | `std::result::Result<std::option::Option<std::primitive::int>,std::fs::FileError>` |
+| typelisp_rt::stream_builtin::RESULT_TYPES | `stream-write-byte` | `std::result::Result<(),std::fs::FileError>` |
+| typelisp_rt::stream_builtin::RESULT_TYPES | `stream-write-string` | `std::result::Result<(),std::fs::FileError>` |
+| typelisp_rt::stream_builtin::RESULT_TYPES | `stream-finish-output` | `std::result::Result<(),std::fs::FileError>` |
+| typelisp_rt::stream_builtin::RESULT_TYPES | `stream-take-output-string` | `std::result::Result<std::primitive::string,std::fs::FileError>` |
+| typelisp_rt::stream_builtin::INNER_TYPES | `stream-read-char` | `std::option::Option<std::primitive::char>` |
+| typelisp_rt::stream_builtin::INNER_TYPES | `stream-read-byte` | `std::option::Option<std::primitive::int>` |
+| typelisp_rt_posix::net_builtin::RESULT_TYPES | `net-resolve-begin` | `std::result::Result<std::primitive::i32,std::net::NetError>` |
+| typelisp_rt_posix::net_builtin::RESULT_TYPES | `net-resolve-finish` | `std::result::Result<std::option::Option<std::vec::Vector<std::primitive::string>>,std::net::NetError>` |
+| typelisp_rt_posix::net_builtin::RESULT_TYPES | `net-connect-begin` | `std::result::Result<std::primitive::i32,std::net::NetError>` |
+| typelisp_rt_posix::net_builtin::RESULT_TYPES | `net-connect-finish` | `std::result::Result<(),std::net::NetError>` |
+| typelisp_rt_posix::net_builtin::RESULT_TYPES | `net-listen` | `std::result::Result<std::primitive::i32,std::net::NetError>` |
+| typelisp_rt_posix::net_builtin::RESULT_TYPES | `net-tls-listen` | `std::result::Result<std::primitive::i32,std::net::NetError>` |
+| typelisp_rt_posix::net_builtin::RESULT_TYPES | `net-unix-connect` | `std::result::Result<std::primitive::i32,std::net::NetError>` |
+| typelisp_rt_posix::net_builtin::RESULT_TYPES | `net-unix-listen` | `std::result::Result<std::primitive::i32,std::net::NetError>` |
+| typelisp_rt_posix::net_builtin::RESULT_TYPES | `net-accept` | `std::result::Result<std::option::Option<std::primitive::i32>,std::net::NetError>` |
+| typelisp_rt_posix::net_builtin::RESULT_TYPES | `net-fill` | `std::result::Result<std::option::Option<std::primitive::int>,std::net::NetError>` |
+| typelisp_rt_posix::net_builtin::RESULT_TYPES | `net-pop-byte` | `std::result::Result<std::option::Option<std::primitive::int>,std::net::NetError>` |
+| typelisp_rt_posix::net_builtin::RESULT_TYPES | `net-pop-char` | `std::result::Result<std::option::Option<std::primitive::char>,std::net::NetError>` |
+| typelisp_rt_posix::net_builtin::RESULT_TYPES | `net-buffered-p` | `std::result::Result<std::primitive::bool,std::net::NetError>` |
+| typelisp_rt_posix::net_builtin::RESULT_TYPES | `net-push-string` | `std::result::Result<(),std::net::NetError>` |
+| typelisp_rt_posix::net_builtin::RESULT_TYPES | `net-push-byte` | `std::result::Result<(),std::net::NetError>` |
+| typelisp_rt_posix::net_builtin::RESULT_TYPES | `net-flush` | `std::result::Result<std::option::Option<std::primitive::int>,std::net::NetError>` |
+| typelisp_rt_posix::net_builtin::RESULT_TYPES | `net-socket-error` | `std::result::Result<std::option::Option<std::primitive::string>,std::net::NetError>` |
+| typelisp_rt_posix::net_builtin::RESULT_TYPES | `net-peer-subject` | `std::result::Result<std::option::Option<std::primitive::string>,std::net::NetError>` |
+| typelisp_rt_posix::net_builtin::RESULT_TYPES | `net-server-name` | `std::result::Result<std::option::Option<std::primitive::string>,std::net::NetError>` |
+| typelisp_rt_posix::net_builtin::RESULT_TYPES | `net-set-nodelay` | `std::result::Result<(),std::net::NetError>` |
+| typelisp_rt_posix::net_builtin::RESULT_TYPES | `net-set-keepalive` | `std::result::Result<(),std::net::NetError>` |
+| typelisp_rt_posix::net_builtin::RESULT_TYPES | `net-set-keepalive-period` | `std::result::Result<(),std::net::NetError>` |
+| typelisp_rt_posix::net_builtin::RESULT_TYPES | `net-tls-add-certificate` | `std::result::Result<(),std::net::NetError>` |
+| typelisp_rt_posix::net_builtin::RESULT_TYPES | `net-shutdown-write` | `std::result::Result<(),std::net::NetError>` |
+| typelisp_rt_posix::net_builtin::RESULT_TYPES | `net-local-address` | `std::result::Result<std::primitive::string,std::net::NetError>` |
+| typelisp_rt_posix::net_builtin::RESULT_TYPES | `net-peer-address` | `std::result::Result<std::primitive::string,std::net::NetError>` |
+| typelisp_rt_posix::net_builtin::RESULT_TYPES | `net-tls-start` | `std::result::Result<(),std::net::NetError>` |
+| typelisp_rt_posix::net_builtin::RESULT_TYPES | `net-tls-handshake` | `std::result::Result<std::option::Option<std::primitive::int>,std::net::NetError>` |
+| typelisp_rt_posix::net_builtin::RESULT_TYPES | `net-udp-bind` | `std::result::Result<std::primitive::i32,std::net::NetError>` |
+| typelisp_rt_posix::net_builtin::RESULT_TYPES | `net-udp-send-to` | `std::result::Result<std::primitive::bool,std::net::NetError>` |
+| typelisp_rt_posix::net_builtin::RESULT_TYPES | `net-udp-recv` | `std::result::Result<std::option::Option<std::vec::Vector<std::primitive::int>>,std::net::NetError>` |
+| typelisp_rt_posix::net_builtin::RESULT_TYPES | `net-udp-last-sender` | `std::result::Result<std::primitive::string,std::net::NetError>` |
+| typelisp_rt_posix::net_builtin::INNER_TYPES | `net-resolve-finish` | `std::option::Option<std::vec::Vector<std::primitive::string>>` |
+| typelisp_rt_posix::net_builtin::INNER_TYPES | `net-tls-handshake` | `std::option::Option<std::primitive::int>` |
+| typelisp_rt_posix::net_builtin::INNER_TYPES | `net-udp-recv` | `std::option::Option<std::vec::Vector<std::primitive::int>>` |
+| typelisp_rt_posix::net_builtin::INNER_TYPES | `net-accept` | `std::option::Option<std::primitive::i32>` |
+| typelisp_rt_posix::net_builtin::INNER_TYPES | `net-fill` | `std::option::Option<std::primitive::int>` |
+| typelisp_rt_posix::net_builtin::INNER_TYPES | `net-flush` | `std::option::Option<std::primitive::int>` |
+| typelisp_rt_posix::net_builtin::INNER_TYPES | `net-socket-error` | `std::option::Option<std::primitive::string>` |
+| typelisp_rt_posix::net_builtin::INNER_TYPES | `net-peer-subject` | `std::option::Option<std::primitive::string>` |
+| typelisp_rt_posix::net_builtin::INNER_TYPES | `net-server-name` | `std::option::Option<std::primitive::string>` |
+| typelisp_rt_posix::net_builtin::INNER_TYPES | `net-pop-byte` | `std::option::Option<std::primitive::int>` |
+| typelisp_rt_posix::net_builtin::INNER_TYPES | `net-pop-char` | `std::option::Option<std::primitive::char>` |
+| typelisp_rt_posix::sys::RESULT_TYPES | `machine-instance` | `std::option::Option<std::primitive::string>` |
+| typelisp_rt_posix::sys::RESULT_TYPES | `software-version` | `std::option::Option<std::primitive::string>` |
+| typelisp_rt_posix::sys::RESULT_TYPES | `ed-open` | `std::result::Result<(),std::fs::FileError>` |
+| typelisp_rt_posix::sys::RESULT_TYPES | `file-owner-name` | `std::result::Result<std::option::Option<std::primitive::string>,std::fs::FileError>` |
+| typelisp_rt_posix::sys::INNER_TYPES | `file-owner-name` | `std::option::Option<std::primitive::string>` |
+| typelisp_rt_sys::fs_builtin::RESULT_TYPES | `stream-open-file` | `std::result::Result<std::primitive::i32,std::fs::FileError>` |
+| typelisp_rt_sys::fs_builtin::RESULT_TYPES | `file-delete` | `std::result::Result<(),std::fs::FileError>` |
+| typelisp_rt_sys::fs_builtin::RESULT_TYPES | `file-truename` | `std::result::Result<std::primitive::string,std::fs::FileError>` |
+| typelisp_rt_sys::fs_builtin::RESULT_TYPES | `file-modified-date` | `std::result::Result<std::time::universal-time,std::fs::FileError>` |
+| typelisp_rt_sys::fs_builtin::RESULT_TYPES | `file-list-directory` | `std::result::Result<std::vec::Vector<std::primitive::string>,std::fs::FileError>` |
+| typelisp_rt_sys::fs_builtin::RESULT_TYPES | `file-create-directories` | `std::result::Result<(),std::fs::FileError>` |
+| typelisp_rt_sys::fs_builtin::RESULT_TYPES | `file-rename` | `std::result::Result<(),std::fs::FileError>` |
+| typelisp_rt_sys::fs_builtin::INNER_TYPES | `file-list-directory` | `std::vec::Vector<std::primitive::string>` |
+| typelisp_rt_sys::env::RESULT_TYPES | `command-line-args` | `std::vec::Vector<std::primitive::string>` |
+| typelisp_rt_sys::env::RESULT_TYPES | `getenv` | `std::option::Option<std::primitive::string>` |
+| typelisp_rt_sys::env::RESULT_TYPES | `home-directory` | `std::option::Option<std::primitive::string>` |
+| typelisp_rt_sys::dribble::RESULT_TYPES | `dribble-start` | `std::result::Result<(),std::fs::FileError>` |
+| typelisp_rt_sys::dribble::RESULT_TYPES | `dribble-stop` | `std::result::Result<(),std::fs::FileError>` |
 | readtable::READER_MACRO_OPTION_TYPE | | `std::option::Option<(fn (std::io::string-input-stream,std::primitive::char) std::option::Option<std::sexpr::Sexpr>)>` |
 
 ## 型ごとの表現 (Repr)
@@ -904,6 +959,7 @@
 | `(fn (K K) bool)` | `(fn (K,K) std::primitive::bool)` | fn | 6 | 2 |
 | `(fn (K) int)` | `(fn (K) std::primitive::int)` | fn | 6 | 2 |
 | `(fn (std::io::string-input-stream char) std::option::Option<std::sexpr::Sexpr>)` | `(fn (std::io::string-input-stream,std::primitive::char) std::option::Option<std::sexpr::Sexpr>)` | fn | 6 | 2 |
+| `A` | `A` | none | 0 | 0 |
 | `E` | `E` | none | 0 | 0 |
 | `K` | `K` | none | 0 | 0 |
 | `T` | `T` | none | 0 | 0 |
@@ -914,9 +970,9 @@
 | `char` | `std::primitive::char` | char | 3 | 0 |
 | `f32` | `std::primitive::f32` | f32 | 11 | 0 |
 | `f64` | `std::primitive::f64` | f64 | 2 | 0 |
-| `i16` | `std::primitive::i16` | int-any-width | 1 | 0 |
-| `i32` | `std::primitive::i32` | int-any-width | 1 | 0 |
-| `i8` | `std::primitive::i8` | int-any-width | 1 | 0 |
+| `i16` | `std::primitive::i16` | i16 | 233 | 0 |
+| `i32` | `std::primitive::i32` | i32 | 265 | 0 |
+| `i8` | `std::primitive::i8` | i8 | 217 | 0 |
 | `int` | `std::primitive::int` | int | 6 | 2 |
 | `random-state` | `std::primitive::random-state` | random-state | 6 | 2 |
 | `ratio` | `std::primitive::ratio` | ratio | 6 | 2 |
@@ -929,8 +985,6 @@
 | `std::option::Option<T>` | `std::option::Option<T>` | enum | 6 | 2 |
 | `std::option::Option<V>` | `std::option::Option<V>` | enum | 6 | 2 |
 | `std::option::Option<bool>` | `std::option::Option<std::primitive::bool>` | niche | 101 | 0 |
-| `std::option::Option<c-long>` | `std::option::Option<std::primitive::c-long>` | enum | 6 | 2 |
-| `std::option::Option<c-ulong>` | `std::option::Option<std::primitive::c-ulong>` | enum | 6 | 2 |
 | `std::option::Option<char>` | `std::option::Option<std::primitive::char>` | niche | 101 | 0 |
 | `std::option::Option<f32>` | `std::option::Option<std::primitive::f32>` | niche | 101 | 2 |
 | `std::option::Option<f64>` | `std::option::Option<std::primitive::f64>` | niche | 101 | 2 |
@@ -983,363 +1037,442 @@
 | `std::vec::Vector<string>` | `std::vec::Vector<std::primitive::string>` | vector | 6 | 2 |
 | `string` | `std::primitive::string` | str | 6 | 2 |
 | `symbol` | `std::primitive::symbol` | sym | 6 | 0 |
-| `u16` | `std::primitive::u16` | int-any-width | 1 | 0 |
-| `u32` | `std::primitive::u32` | int-any-width | 1 | 0 |
-| `u8` | `std::primitive::u8` | int-any-width | 1 | 0 |
+| `u16` | `std::primitive::u16` | u16 | 232 | 0 |
+| `u32` | `std::primitive::u32` | u32 | 264 | 0 |
+| `u8` | `std::primitive::u8` | u8 | 216 | 0 |
 
 ## ランタイム関数
 
 | シンボル | LLVM の型 |
 |---|---|
-| `rt_atom` | `i64 (ptr, i32)` |
-| `rt_bignum_new` | `i64 (ptr, i32)` |
-| `rt_box_kind` | `i64 (ptr, i32)` |
-| `rt_c_alloc` | `i64 (ptr, i32)` |
-| `rt_c_arena_close` | `i64 (ptr, i32)` |
-| `rt_c_arena_open` | `i64 (ptr, i32)` |
-| `rt_c_index` | `i64 (ptr, i32)` |
-| `rt_c_load` | `i64 (ptr, i32)` |
-| `rt_c_offset` | `i64 (ptr, i32)` |
-| `rt_c_ptr_check` | `i64 (ptr, i32)` |
-| `rt_c_store` | `i64 (ptr, i32)` |
-| `rt_car` | `i64 (ptr, i32)` |
-| `rt_cdr` | `i64 (ptr, i32)` |
-| `rt_cell_get` | `i64 (ptr, i32)` |
-| `rt_cell_new` | `i64 (ptr, i32)` |
-| `rt_cell_set` | `i64 (ptr, i32)` |
-| `rt_char_alphap` | `i64 (ptr, i32)` |
-| `rt_char_digitp` | `i64 (ptr, i32)` |
-| `rt_char_downcase` | `i64 (ptr, i32)` |
-| `rt_char_equalp` | `i64 (ptr, i32)` |
-| `rt_char_upcase` | `i64 (ptr, i32)` |
-| `rt_closure_env_get` | `i64 (ptr, i32)` |
-| `rt_closure_env_len` | `i64 (ptr, i32)` |
-| `rt_closure_fnptr` | `i64 (ptr, i32)` |
-| `rt_closure_new` | `i64 (ptr, i32)` |
-| `rt_command_line_args` | `i64 (ptr, i32)` |
-| `rt_cons` | `i64 (ptr, i32)` |
-| `rt_consp` | `i64 (ptr, i32)` |
-| `rt_coroutine_closure_new` | `i64 (ptr, i32)` |
-| `rt_data_field` | `i64 (ptr, i32)` |
-| `rt_data_new` | `i64 (ptr, i32)` |
-| `rt_data_variant` | `i64 (ptr, i32)` |
-| `rt_dribble_start` | `i64 (ptr, i32)` |
-| `rt_dribble_stop` | `i64 (ptr, i32)` |
-| `rt_drive_body` | `i64 (ptr, i32)` |
-| `rt_dyn_new` | `i64 (ptr, i32)` |
-| `rt_dyn_upcast` | `i64 (ptr, i32)` |
-| `rt_dyn_value` | `i64 (ptr, i32)` |
-| `rt_dyn_vtable` | `i64 (ptr, i32)` |
-| `rt_ed_open` | `i64 (ptr, i32)` |
-| `rt_eval` | `i64 (ptr, i32)` |
-| `rt_eval_init` | `i64 (ptr, i32)` |
-| `rt_eval_state` | `i64 (ptr, i32)` |
-| `rt_exit` | `i64 (ptr, i32)` |
-| `rt_f32_new` | `i64 (ptr, i32)` |
-| `rt_f32_value` | `i64 (ptr, i32)` |
-| `rt_f64_acos` | `i64 (ptr, i32)` |
-| `rt_f64_acosh` | `i64 (ptr, i32)` |
-| `rt_f64_asin` | `i64 (ptr, i32)` |
-| `rt_f64_asinh` | `i64 (ptr, i32)` |
-| `rt_f64_atan` | `i64 (ptr, i32)` |
-| `rt_f64_atanh` | `i64 (ptr, i32)` |
-| `rt_f64_cosh` | `i64 (ptr, i32)` |
-| `rt_f64_fits_f32` | `i64 (ptr, i32)` |
-| `rt_f64_new` | `i64 (ptr, i32)` |
-| `rt_f64_sinh` | `i64 (ptr, i32)` |
-| `rt_f64_tan` | `i64 (ptr, i32)` |
-| `rt_f64_tanh` | `i64 (ptr, i32)` |
-| `rt_f64_value` | `i64 (ptr, i32)` |
-| `rt_ffi_callback_address` | `i64 (ptr, i32)` |
-| `rt_ffi_callback_enter` | `i64 (ptr, i32)` |
-| `rt_ffi_callback_invoke` | `i64 (ptr, i32)` |
-| `rt_ffi_callback_leave` | `i64 (ptr, i32)` |
-| `rt_ffi_callback_register` | `i64 (ptr, i32)` |
-| `rt_ffi_cstring_free` | `i64 (ptr, i32)` |
-| `rt_ffi_cstring_new` | `i64 (ptr, i32)` |
-| `rt_ffi_enter_native` | `i64 (ptr, i32)` |
-| `rt_ffi_leave_native` | `i64 (ptr, i32)` |
-| `rt_ffi_string_from_cstr` | `i64 (ptr, i32)` |
-| `rt_file_create_directories` | `i64 (ptr, i32)` |
-| `rt_file_delete` | `i64 (ptr, i32)` |
-| `rt_file_directory_p` | `i64 (ptr, i32)` |
-| `rt_file_exists_p` | `i64 (ptr, i32)` |
-| `rt_file_list_directory` | `i64 (ptr, i32)` |
-| `rt_file_modified_date` | `i64 (ptr, i32)` |
-| `rt_file_owner_name` | `i64 (ptr, i32)` |
-| `rt_file_rename` | `i64 (ptr, i32)` |
-| `rt_file_truename` | `i64 (ptr, i32)` |
-| `rt_float_to_int` | `i64 (ptr, i32)` |
-| `rt_float_to_ratio` | `i64 (ptr, i32)` |
-| `rt_format` | `i64 (ptr, i32)` |
-| `rt_format_call_method` | `i64 (ptr, i32)` |
-| `rt_frame_apply` | `i64 (ptr, i32)` |
-| `rt_frame_call` | `i64 (ptr, i32)` |
-| `rt_frame_call_env` | `i64 (ptr, i32)` |
-| `rt_frame_dyn_call` | `i64 (ptr, i32)` |
-| `rt_frame_open` | `i64 (ptr, i32)` |
-| `rt_get_dispatch_macro_character` | `i64 (ptr, i32)` |
-| `rt_get_internal_real_time` | `i64 (ptr, i32)` |
-| `rt_get_internal_run_time` | `i64 (ptr, i32)` |
-| `rt_get_macro_character` | `i64 (ptr, i32)` |
-| `rt_get_universal_time` | `i64 (ptr, i32)` |
-| `rt_getenv` | `i64 (ptr, i32)` |
-| `rt_global_get` | `i64 (ptr, i32)` |
-| `rt_global_new` | `i64 (ptr, i32)` |
-| `rt_global_set` | `i64 (ptr, i32)` |
-| `rt_hashtable_bucket_count` | `i64 (ptr, i32)` |
-| `rt_hashtable_bucket_delete` | `i64 (ptr, i32)` |
-| `rt_hashtable_bucket_key` | `i64 (ptr, i32)` |
-| `rt_hashtable_bucket_put` | `i64 (ptr, i32)` |
-| `rt_hashtable_bucket_value` | `i64 (ptr, i32)` |
-| `rt_hashtable_clear` | `i64 (ptr, i32)` |
-| `rt_hashtable_count` | `i64 (ptr, i32)` |
-| `rt_hashtable_entries` | `i64 (ptr, i32)` |
-| `rt_hashtable_function` | `i64 (ptr, i32)` |
-| `rt_hashtable_keys` | `i64 (ptr, i32)` |
-| `rt_hashtable_new` | `i64 (ptr, i32)` |
-| `rt_hashtable_values` | `i64 (ptr, i32)` |
-| `rt_heap_info` | `i64 (ptr, i32)` |
-| `rt_heap_init` | `i64 (ptr, i32)` |
-| `rt_home_directory` | `i64 (ptr, i32)` |
-| `rt_int_ash` | `i64 (ptr, i32)` |
-| `rt_int_div` | `i64 (ptr, i32)` |
-| `rt_int_fits` | `i64 (ptr, i32)` |
-| `rt_int_fits_char` | `i64 (ptr, i32)` |
-| `rt_int_integer_length` | `i64 (ptr, i32)` |
-| `rt_int_logbitp` | `i64 (ptr, i32)` |
-| `rt_int_logcount` | `i64 (ptr, i32)` |
-| `rt_int_mod` | `i64 (ptr, i32)` |
-| `rt_int_not_fixnum` | `i64 (ptr, i32)` |
-| `rt_int_to_char` | `i64 (ptr, i32)` |
-| `rt_int_to_ratio` | `i64 (ptr, i32)` |
-| `rt_integer_add` | `i64 (ptr, i32)` |
-| `rt_integer_ash` | `i64 (ptr, i32)` |
-| `rt_integer_cmp` | `i64 (ptr, i32)` |
-| `rt_integer_div` | `i64 (ptr, i32)` |
-| `rt_integer_fits` | `i64 (ptr, i32)` |
-| `rt_integer_fits_char` | `i64 (ptr, i32)` |
-| `rt_integer_from_word` | `i64 (ptr, i32)` |
-| `rt_integer_integer_length` | `i64 (ptr, i32)` |
-| `rt_integer_logand` | `i64 (ptr, i32)` |
-| `rt_integer_logbitp` | `i64 (ptr, i32)` |
-| `rt_integer_logcount` | `i64 (ptr, i32)` |
-| `rt_integer_logior` | `i64 (ptr, i32)` |
-| `rt_integer_lognot` | `i64 (ptr, i32)` |
-| `rt_integer_logtest` | `i64 (ptr, i32)` |
-| `rt_integer_logxor` | `i64 (ptr, i32)` |
-| `rt_integer_mod` | `i64 (ptr, i32)` |
-| `rt_integer_mul` | `i64 (ptr, i32)` |
-| `rt_integer_narrow` | `i64 (ptr, i32)` |
-| `rt_integer_sub` | `i64 (ptr, i32)` |
-| `rt_integer_to_char` | `i64 (ptr, i32)` |
-| `rt_integer_to_float` | `i64 (ptr, i32)` |
-| `rt_integer_to_ratio` | `i64 (ptr, i32)` |
-| `rt_intern` | `i64 (ptr, i32)` |
-| `rt_intern_path` | `i64 (ptr, i32)` |
-| `rt_intern_symbol` | `i64 (ptr, i32)` |
-| `rt_keywordp` | `i64 (ptr, i32)` |
-| `rt_lisp_implementation_version` | `i64 (ptr, i32)` |
-| `rt_list_to_path` | `i64 (ptr, i32)` |
-| `rt_list_to_sexpr_tuple` | `i64 (ptr, i32)` |
-| `rt_list_to_sexpr_vector` | `i64 (ptr, i32)` |
-| `rt_lists_to_sexpr_array` | `i64 (ptr, i32)` |
-| `rt_llvm_call` | `i64 (ptr, i32)` |
-| `rt_loop_safepoint` | `i64 (ptr, i32)` |
-| `rt_machine_instance` | `i64 (ptr, i32)` |
-| `rt_machine_type` | `i64 (ptr, i32)` |
-| `rt_machine_version` | `i64 (ptr, i32)` |
-| `rt_macroexpand` | `i64 (ptr, i32)` |
-| `rt_macroexpand_1` | `i64 (ptr, i32)` |
-| `rt_make_random_state_fresh` | `i64 (ptr, i32)` |
-| `rt_match_fail` | `i64 (ptr, i32)` |
-| `rt_narrow_new` | `i64 (ptr, i32)` |
-| `rt_narrow_value` | `i64 (ptr, i32)` |
-| `rt_net_accept` | `i64 (ptr, i32)` |
-| `rt_net_buffered_p` | `i64 (ptr, i32)` |
-| `rt_net_connect_begin` | `i64 (ptr, i32)` |
-| `rt_net_connect_finish` | `i64 (ptr, i32)` |
-| `rt_net_fill` | `i64 (ptr, i32)` |
-| `rt_net_flush` | `i64 (ptr, i32)` |
-| `rt_net_listen` | `i64 (ptr, i32)` |
-| `rt_net_local_address` | `i64 (ptr, i32)` |
-| `rt_net_peer_address` | `i64 (ptr, i32)` |
-| `rt_net_peer_subject` | `i64 (ptr, i32)` |
-| `rt_net_pop_byte` | `i64 (ptr, i32)` |
-| `rt_net_pop_char` | `i64 (ptr, i32)` |
-| `rt_net_push_byte` | `i64 (ptr, i32)` |
-| `rt_net_push_string` | `i64 (ptr, i32)` |
-| `rt_net_resolve_begin` | `i64 (ptr, i32)` |
-| `rt_net_resolve_finish` | `i64 (ptr, i32)` |
-| `rt_net_server_name` | `i64 (ptr, i32)` |
-| `rt_net_set_keepalive` | `i64 (ptr, i32)` |
-| `rt_net_set_keepalive_period` | `i64 (ptr, i32)` |
-| `rt_net_set_nodelay` | `i64 (ptr, i32)` |
-| `rt_net_shutdown_write` | `i64 (ptr, i32)` |
-| `rt_net_socket_error` | `i64 (ptr, i32)` |
-| `rt_net_tls_add_certificate` | `i64 (ptr, i32)` |
-| `rt_net_tls_handshake` | `i64 (ptr, i32)` |
-| `rt_net_tls_listen` | `i64 (ptr, i32)` |
-| `rt_net_tls_start` | `i64 (ptr, i32)` |
-| `rt_net_udp_bind` | `i64 (ptr, i32)` |
-| `rt_net_udp_last_sender` | `i64 (ptr, i32)` |
-| `rt_net_udp_recv` | `i64 (ptr, i32)` |
-| `rt_net_udp_send_to` | `i64 (ptr, i32)` |
-| `rt_net_unix_connect` | `i64 (ptr, i32)` |
-| `rt_net_unix_listen` | `i64 (ptr, i32)` |
-| `rt_null` | `i64 (ptr, i32)` |
-| `rt_panic` | `i64 (ptr, i32)` |
-| `rt_parse_float` | `i64 (ptr, i32)` |
-| `rt_path_to_list` | `i64 (ptr, i32)` |
-| `rt_pending_arg` | `i64 (ptr, i32)` |
-| `rt_pending_argc` | `i64 (ptr, i32)` |
-| `rt_pending_env` | `i64 (ptr, i32)` |
-| `rt_pending_envc` | `i64 (ptr, i32)` |
-| `rt_pop_sexpr_root` | `i64 (ptr, i32)` |
-| `rt_pprint` | `i64 (ptr, i32)` |
-| `rt_pprint_block_end` | `i64 (ptr, i32)` |
-| `rt_pprint_block_start` | `i64 (ptr, i32)` |
-| `rt_pprint_indent` | `i64 (ptr, i32)` |
-| `rt_pprint_list_exhausted` | `i64 (ptr, i32)` |
-| `rt_pprint_newline` | `i64 (ptr, i32)` |
-| `rt_pprint_pop` | `i64 (ptr, i32)` |
-| `rt_pprint_tab` | `i64 (ptr, i32)` |
-| `rt_print` | `i64 (ptr, i32)` |
-| `rt_print_enum_variant` | `i64 (ptr, i32)` |
-| `rt_print_field_name` | `i64 (ptr, i32)` |
-| `rt_print_field_template` | `i64 (ptr, i32)` |
-| `rt_print_global` | `i64 (ptr, i32)` |
-| `rt_print_name_import` | `i64 (ptr, i32)` |
-| `rt_print_name_module` | `i64 (ptr, i32)` |
-| `rt_print_object_method` | `i64 (ptr, i32)` |
-| `rt_println` | `i64 (ptr, i32)` |
-| `rt_push_permanent_sexpr_root` | `i64 (ptr, i32)` |
-| `rt_push_sexpr_root` | `i64 (ptr, i32)` |
-| `rt_random_state_copy` | `i64 (ptr, i32)` |
-| `rt_random_state_next` | `i64 (ptr, i32)` |
-| `rt_ratio_add` | `i64 (ptr, i32)` |
-| `rt_ratio_cmp` | `i64 (ptr, i32)` |
-| `rt_ratio_denominator` | `i64 (ptr, i32)` |
-| `rt_ratio_div` | `i64 (ptr, i32)` |
-| `rt_ratio_from_bignums` | `i64 (ptr, i32)` |
-| `rt_ratio_mul` | `i64 (ptr, i32)` |
-| `rt_ratio_numerator` | `i64 (ptr, i32)` |
-| `rt_ratio_sub` | `i64 (ptr, i32)` |
-| `rt_ratio_to_float` | `i64 (ptr, i32)` |
-| `rt_ratio_to_int` | `i64 (ptr, i32)` |
-| `rt_rational_add` | `i64 (ptr, i32)` |
-| `rt_rational_cmp` | `i64 (ptr, i32)` |
-| `rt_rational_denominator` | `i64 (ptr, i32)` |
-| `rt_rational_div` | `i64 (ptr, i32)` |
-| `rt_rational_from_ratio` | `i64 (ptr, i32)` |
-| `rt_rational_is_int` | `i64 (ptr, i32)` |
-| `rt_rational_mul` | `i64 (ptr, i32)` |
-| `rt_rational_numerator` | `i64 (ptr, i32)` |
-| `rt_rational_sub` | `i64 (ptr, i32)` |
-| `rt_rational_to_float` | `i64 (ptr, i32)` |
-| `rt_rational_to_int` | `i64 (ptr, i32)` |
-| `rt_rational_to_ratio` | `i64 (ptr, i32)` |
-| `rt_read` | `i64 (ptr, i32)` |
-| `rt_read_datum_at` | `i64 (ptr, i32)` |
-| `rt_root_count` | `i64 (ptr, i32)` |
-| `rt_run_entry` | `i64 (i64)` |
-| `rt_seed_random_state` | `i64 (ptr, i32)` |
-| `rt_set_car` | `i64 (ptr, i32)` |
-| `rt_set_cdr` | `i64 (ptr, i32)` |
-| `rt_set_dispatch_macro_character` | `i64 (ptr, i32)` |
-| `rt_set_macro_character` | `i64 (ptr, i32)` |
-| `rt_set_sexpr_root` | `i64 (ptr, i32)` |
-| `rt_sexpr_bool` | `i64 (ptr, i32)` |
-| `rt_sexpr_char` | `i64 (ptr, i32)` |
-| `rt_sexpr_eq` | `i64 (ptr, i32)` |
-| `rt_sexpr_eql` | `i64 (ptr, i32)` |
-| `rt_sexpr_equal` | `i64 (ptr, i32)` |
-| `rt_sexpr_equalp` | `i64 (ptr, i32)` |
-| `rt_sexpr_f32` | `i64 (ptr, i32)` |
-| `rt_sexpr_f64` | `i64 (ptr, i32)` |
-| `rt_sexpr_i16` | `i64 (ptr, i32)` |
-| `rt_sexpr_i32` | `i64 (ptr, i32)` |
-| `rt_sexpr_i8` | `i64 (ptr, i32)` |
-| `rt_sexpr_instance_test` | `i64 (ptr, i32)` |
-| `rt_sexpr_int` | `i64 (ptr, i32)` |
-| `rt_sexpr_str` | `i64 (ptr, i32)` |
-| `rt_sexpr_tuple_items` | `i64 (ptr, i32)` |
-| `rt_sexpr_u16` | `i64 (ptr, i32)` |
-| `rt_sexpr_u32` | `i64 (ptr, i32)` |
-| `rt_sexpr_u8` | `i64 (ptr, i32)` |
-| `rt_software_type` | `i64 (ptr, i32)` |
-| `rt_software_version` | `i64 (ptr, i32)` |
-| `rt_str_append` | `i64 (ptr, i32)` |
-| `rt_str_downcase` | `i64 (ptr, i32)` |
-| `rt_str_eq` | `i64 (ptr, i32)` |
-| `rt_str_equalp` | `i64 (ptr, i32)` |
-| `rt_str_length` | `i64 (ptr, i32)` |
-| `rt_str_lt` | `i64 (ptr, i32)` |
-| `rt_str_new` | `i64 (ptr, i32)` |
-| `rt_str_ref` | `i64 (ptr, i32)` |
-| `rt_str_substring` | `i64 (ptr, i32)` |
-| `rt_str_upcase` | `i64 (ptr, i32)` |
-| `rt_stream_at_line_start` | `i64 (ptr, i32)` |
-| `rt_stream_close` | `i64 (ptr, i32)` |
-| `rt_stream_describe` | `i64 (ptr, i32)` |
-| `rt_stream_finish_output` | `i64 (ptr, i32)` |
-| `rt_stream_input_p` | `i64 (ptr, i32)` |
-| `rt_stream_listen` | `i64 (ptr, i32)` |
-| `rt_stream_open_file` | `i64 (ptr, i32)` |
-| `rt_stream_open_p` | `i64 (ptr, i32)` |
-| `rt_stream_output_p` | `i64 (ptr, i32)` |
-| `rt_stream_position` | `i64 (ptr, i32)` |
-| `rt_stream_read_byte` | `i64 (ptr, i32)` |
-| `rt_stream_read_char` | `i64 (ptr, i32)` |
-| `rt_stream_stderr` | `i64 (ptr, i32)` |
-| `rt_stream_stdin` | `i64 (ptr, i32)` |
-| `rt_stream_stdout` | `i64 (ptr, i32)` |
-| `rt_stream_string_input` | `i64 (ptr, i32)` |
-| `rt_stream_string_output` | `i64 (ptr, i32)` |
-| `rt_stream_take_output_string` | `i64 (ptr, i32)` |
-| `rt_stream_unread_char` | `i64 (ptr, i32)` |
-| `rt_stream_write_byte` | `i64 (ptr, i32)` |
-| `rt_stream_write_string` | `i64 (ptr, i32)` |
-| `rt_struct_field_count` | `i64 (ptr, i32)` |
-| `rt_struct_field_get` | `i64 (ptr, i32)` |
-| `rt_struct_field_set` | `i64 (ptr, i32)` |
-| `rt_struct_new` | `i64 (ptr, i32)` |
-| `rt_struct_pop_field` | `i64 (ptr, i32)` |
-| `rt_struct_push_field` | `i64 (ptr, i32)` |
-| `rt_suspend_chan_cap` | `i64 (ptr, i32)` |
-| `rt_suspend_chan_close` | `i64 (ptr, i32)` |
-| `rt_suspend_chan_len` | `i64 (ptr, i32)` |
-| `rt_suspend_chan_new` | `i64 (ptr, i32)` |
-| `rt_suspend_chan_recv` | `i64 (ptr, i32)` |
-| `rt_suspend_chan_select` | `i64 (ptr, i32)` |
-| `rt_suspend_chan_send` | `i64 (ptr, i32)` |
-| `rt_suspend_io` | `i64 (ptr, i32)` |
-| `rt_suspend_io_for` | `i64 (ptr, i32)` |
-| `rt_suspend_main` | `i64 (ptr, i32)` |
-| `rt_suspend_sleep` | `i64 (ptr, i32)` |
-| `rt_suspend_task` | `i64 (ptr, i32)` |
-| `rt_suspend_thread` | `i64 (ptr, i32)` |
-| `rt_suspend_wait` | `i64 (ptr, i32)` |
-| `rt_suspend_yield` | `i64 (ptr, i32)` |
-| `rt_sxhash_eq` | `i64 (ptr, i32)` |
-| `rt_sxhash_eql` | `i64 (ptr, i32)` |
-| `rt_sxhash_equalp` | `i64 (ptr, i32)` |
-| `rt_sym_name` | `i64 (ptr, i32)` |
-| `rt_symp` | `i64 (ptr, i32)` |
-| `rt_thread_available_parallelism` | `i64 (ptr, i32)` |
-| `rt_thread_current_id` | `i64 (ptr, i32)` |
-| `rt_throw` | `i64 (ptr, i32)` |
-| `rt_throw_matches` | `i64 (ptr, i32)` |
-| `rt_throw_take_value` | `i64 (ptr, i32)` |
-| `rt_timezone_daylight_p` | `i64 (ptr, i32)` |
-| `rt_timezone_offset_seconds` | `i64 (ptr, i32)` |
-| `rt_truncate_sexpr_roots` | `i64 (ptr, i32)` |
-| `rt_types_define` | `i64 (ptr, i32)` |
-| `rt_unwinding` | `i64 (ptr, i32)` |
-| `rt_upcast_set` | `i64 (ptr, i32)` |
-| `rt_vector_to_sexpr_tuple` | `i64 (ptr, i32)` |
-| `rt_vtable_set` | `i64 (ptr, i32)` |
-| `rt_wk_symbol` | `i64 (ptr, i32)` |
+| `rt_atom` | `bool (word)` |
+| `rt_bignum_new` | `word (ptr, u32)` |
+| `rt_box_kind` | `word (word)` |
+| `rt_c_address` | `word (word)` |
+| `rt_c_alloc` | `word (ptr, u32)` |
+| `rt_c_arena_close` | `word (word)` |
+| `rt_c_arena_open` | `word ()` |
+| `rt_c_index` | `word (word, word, word, word)` |
+| `rt_c_load` | `i64 (word, word, word)` |
+| `rt_c_offset` | `word (word, word)` |
+| `rt_c_ptr_check` | `word (word, word)` |
+| `rt_c_store` | `word (word, word, word, i64)` |
+| `rt_c_volatile_load` | `u32 (word, word)` |
+| `rt_c_volatile_store` | `word (word, word, u32)` |
+| `rt_car` | `word (word)` |
+| `rt_cdr` | `word (word)` |
+| `rt_cell_get` | `word (word)` |
+| `rt_cell_new` | `word (word)` |
+| `rt_cell_set` | `word (word, word)` |
+| `rt_char_alphap` | `bool (u32)` |
+| `rt_char_digitp` | `bool (u32)` |
+| `rt_char_downcase` | `u32 (u32)` |
+| `rt_char_equalp` | `bool (u32, u32)` |
+| `rt_char_upcase` | `u32 (u32)` |
+| `rt_closure_env_get` | `word (word, word)` |
+| `rt_closure_env_len` | `word (word)` |
+| `rt_closure_fnptr` | `word (word)` |
+| `rt_closure_new` | `word (ptr, u32)` |
+| `rt_command_line_args` | `word ()` |
+| `rt_cons` | `word (word, word)` |
+| `rt_consp` | `bool (word)` |
+| `rt_coroutine_closure_new` | `word (ptr, u32)` |
+| `rt_data_field` | `word (word, word)` |
+| `rt_data_new` | `word (ptr, u32)` |
+| `rt_data_variant` | `word (word)` |
+| `rt_dribble_start` | `word (word)` |
+| `rt_dribble_stop` | `word ()` |
+| `rt_drive_body` | `word (word, word, word)` |
+| `rt_dyn_new` | `word (word, word)` |
+| `rt_dyn_upcast` | `word (word, word)` |
+| `rt_dyn_value` | `word (word)` |
+| `rt_dyn_vtable` | `word (word)` |
+| `rt_ed_open` | `word (word, word)` |
+| `rt_eval` | `word (word)` |
+| `rt_eval_init` | `word ()` |
+| `rt_eval_state` | `word (word, word, word, word, word)` |
+| `rt_exit` | `word (word)` |
+| `rt_f32_acos` | `float (float)` |
+| `rt_f32_acosh` | `float (float)` |
+| `rt_f32_asin` | `float (float)` |
+| `rt_f32_asinh` | `float (float)` |
+| `rt_f32_atan` | `float (float)` |
+| `rt_f32_atanh` | `float (float)` |
+| `rt_f32_cosh` | `float (float)` |
+| `rt_f32_new` | `word (float)` |
+| `rt_f32_sinh` | `float (float)` |
+| `rt_f32_tan` | `float (float)` |
+| `rt_f32_tanh` | `float (float)` |
+| `rt_f32_value` | `float (word)` |
+| `rt_f64_acos` | `double (double)` |
+| `rt_f64_acosh` | `double (double)` |
+| `rt_f64_asin` | `double (double)` |
+| `rt_f64_asinh` | `double (double)` |
+| `rt_f64_atan` | `double (double)` |
+| `rt_f64_atanh` | `double (double)` |
+| `rt_f64_cosh` | `double (double)` |
+| `rt_f64_fits_f32` | `bool (double)` |
+| `rt_f64_new` | `word (double)` |
+| `rt_f64_sinh` | `double (double)` |
+| `rt_f64_tan` | `double (double)` |
+| `rt_f64_tanh` | `double (double)` |
+| `rt_f64_value` | `double (word)` |
+| `rt_ffi_callback_address` | `word (word, word)` |
+| `rt_ffi_callback_enter` | `word ()` |
+| `rt_ffi_callback_invoke` | `i64 (ptr, u32)` |
+| `rt_ffi_callback_leave` | `word ()` |
+| `rt_ffi_callback_register` | `word (word, word, word, word)` |
+| `rt_ffi_cstring_free` | `word (word)` |
+| `rt_ffi_cstring_new` | `word (word)` |
+| `rt_ffi_enter_native` | `word ()` |
+| `rt_ffi_leave_native` | `word ()` |
+| `rt_ffi_string_from_cstr` | `word (word)` |
+| `rt_file_create_directories` | `word (word)` |
+| `rt_file_delete` | `word (word)` |
+| `rt_file_directory_p` | `bool (word)` |
+| `rt_file_exists_p` | `bool (word)` |
+| `rt_file_list_directory` | `word (word)` |
+| `rt_file_modified_date` | `word (word)` |
+| `rt_file_owner_name` | `word (word)` |
+| `rt_file_rename` | `word (word, word)` |
+| `rt_file_truename` | `word (word)` |
+| `rt_float_to_bits` | `u64 (double)` |
+| `rt_float_to_int` | `word (double)` |
+| `rt_float_to_ratio` | `word (double)` |
+| `rt_fmt_as_list` | `word (ptr, u32)` |
+| `rt_fmt_block_close` | `word (ptr, u32)` |
+| `rt_fmt_block_open` | `word (ptr, u32)` |
+| `rt_fmt_bool` | `bool (ptr, u32)` |
+| `rt_fmt_case_close` | `word (ptr, u32)` |
+| `rt_fmt_case_open` | `word (ptr, u32)` |
+| `rt_fmt_char` | `word (ptr, u32)` |
+| `rt_fmt_dollars` | `word (ptr, u32)` |
+| `rt_fmt_emit` | `word (ptr, u32)` |
+| `rt_fmt_empty` | `bool (ptr, u32)` |
+| `rt_fmt_exponent` | `word (ptr, u32)` |
+| `rt_fmt_first` | `word (ptr, u32)` |
+| `rt_fmt_fixed` | `word (ptr, u32)` |
+| `rt_fmt_fresh_line` | `word (ptr, u32)` |
+| `rt_fmt_general` | `word (ptr, u32)` |
+| `rt_fmt_goto` | `word (ptr, u32)` |
+| `rt_fmt_indent` | `word (ptr, u32)` |
+| `rt_fmt_integer` | `word (ptr, u32)` |
+| `rt_fmt_integer_any` | `word (ptr, u32)` |
+| `rt_fmt_just_close` | `word (ptr, u32)` |
+| `rt_fmt_just_open` | `word (ptr, u32)` |
+| `rt_fmt_just_segment` | `word (ptr, u32)` |
+| `rt_fmt_length` | `i32 (ptr, u32)` |
+| `rt_fmt_newline` | `word (ptr, u32)` |
+| `rt_fmt_number` | `word (ptr, u32)` |
+| `rt_fmt_open` | `word (ptr, u32)` |
+| `rt_fmt_param` | `i32 (ptr, u32)` |
+| `rt_fmt_plural` | `word (ptr, u32)` |
+| `rt_fmt_rest` | `word (ptr, u32)` |
+| `rt_fmt_result` | `word (ptr, u32)` |
+| `rt_fmt_select` | `i32 (ptr, u32)` |
+| `rt_fmt_string` | `word (ptr, u32)` |
+| `rt_fmt_tab` | `word (ptr, u32)` |
+| `rt_fmt_text` | `word (ptr, u32)` |
+| `rt_fmt_value` | `word (ptr, u32)` |
+| `rt_fmt_words` | `word (ptr, u32)` |
+| `rt_frame_apply` | `word (ptr, u32)` |
+| `rt_frame_call` | `word (ptr, u32)` |
+| `rt_frame_call_env` | `word (ptr, u32)` |
+| `rt_frame_dyn_call` | `word (ptr, u32)` |
+| `rt_frame_open` | `word (word, word)` |
+| `rt_get_dispatch_macro_character` | `word (u32, u32)` |
+| `rt_get_internal_real_time` | `word ()` |
+| `rt_get_internal_run_time` | `word ()` |
+| `rt_get_macro_character` | `word (u32)` |
+| `rt_get_universal_time` | `word ()` |
+| `rt_getenv` | `word (word)` |
+| `rt_global_get` | `word (word)` |
+| `rt_global_new` | `word (word)` |
+| `rt_global_set` | `word (word, word)` |
+| `rt_hashtable_bucket_count` | `word (word, word)` |
+| `rt_hashtable_bucket_delete` | `word (word, word, word)` |
+| `rt_hashtable_bucket_key` | `word (word, word, word)` |
+| `rt_hashtable_bucket_put` | `word (word, word, word, word, word)` |
+| `rt_hashtable_bucket_value` | `word (word, word, word)` |
+| `rt_hashtable_clear` | `word (word)` |
+| `rt_hashtable_count` | `word (word)` |
+| `rt_hashtable_entries` | `word (word, word)` |
+| `rt_hashtable_function` | `word (word, word)` |
+| `rt_hashtable_keys` | `word (word, word)` |
+| `rt_hashtable_new` | `word (word, word, word)` |
+| `rt_hashtable_values` | `word (word, word)` |
+| `rt_heap_info` | `word ()` |
+| `rt_heap_init` | `word (word, word, word)` |
+| `rt_home_directory` | `word ()` |
+| `rt_i16_box` | `word (i16)` |
+| `rt_i16_unbox` | `i16 (word)` |
+| `rt_i32_box` | `word (i32)` |
+| `rt_i32_unbox` | `i32 (word)` |
+| `rt_i8_box` | `word (i8)` |
+| `rt_i8_unbox` | `i8 (word)` |
+| `rt_int_div_fault` | `word (i64, i64)` |
+| `rt_int_fits_char` | `bool (i64)` |
+| `rt_int_mod_fault` | `word (i64, i64)` |
+| `rt_int_not_fixnum` | `word (word)` |
+| `rt_int_to_char` | `u32 (i64)` |
+| `rt_int_to_ratio` | `word (i64)` |
+| `rt_integer_add` | `word (word, word)` |
+| `rt_integer_ash` | `word (word, word)` |
+| `rt_integer_cmp` | `word (word, word)` |
+| `rt_integer_div` | `word (word, word)` |
+| `rt_integer_fits_char` | `bool (word)` |
+| `rt_integer_fits_i16` | `bool (word)` |
+| `rt_integer_fits_i32` | `bool (word)` |
+| `rt_integer_fits_i8` | `bool (word)` |
+| `rt_integer_fits_u16` | `bool (word)` |
+| `rt_integer_fits_u32` | `bool (word)` |
+| `rt_integer_fits_u8` | `bool (word)` |
+| `rt_integer_from_c_ulong` | `word (u64)` |
+| `rt_integer_from_word` | `word (i64)` |
+| `rt_integer_integer_length` | `word (word)` |
+| `rt_integer_logand` | `word (word, word)` |
+| `rt_integer_logbitp` | `bool (word, word)` |
+| `rt_integer_logcount` | `word (word)` |
+| `rt_integer_logior` | `word (word, word)` |
+| `rt_integer_lognot` | `word (word)` |
+| `rt_integer_logtest` | `bool (word, word)` |
+| `rt_integer_logxor` | `word (word, word)` |
+| `rt_integer_mod` | `word (word, word)` |
+| `rt_integer_mul` | `word (word, word)` |
+| `rt_integer_sub` | `word (word, word)` |
+| `rt_integer_to_c_long` | `i64 (word)` |
+| `rt_integer_to_c_ulong` | `u64 (word)` |
+| `rt_integer_to_char` | `u32 (word)` |
+| `rt_integer_to_float` | `double (word)` |
+| `rt_integer_to_i16` | `i16 (word)` |
+| `rt_integer_to_i32` | `i32 (word)` |
+| `rt_integer_to_i8` | `i8 (word)` |
+| `rt_integer_to_ratio` | `word (word)` |
+| `rt_integer_to_u16` | `u16 (word)` |
+| `rt_integer_to_u32` | `u32 (word)` |
+| `rt_integer_to_u8` | `u8 (word)` |
+| `rt_intern` | `word (word, word)` |
+| `rt_intern_path` | `word (ptr, u32)` |
+| `rt_intern_symbol` | `word (ptr, u32)` |
+| `rt_interrupt_disable` | `word (word)` |
+| `rt_interrupt_enable` | `word (word)` |
+| `rt_interrupt_register` | `word (word, word)` |
+| `rt_keywordp` | `bool (word)` |
+| `rt_largest_fixnum` | `word ()` |
+| `rt_lisp_implementation_version` | `word ()` |
+| `rt_list_to_path` | `word (word)` |
+| `rt_list_to_sexpr_tuple` | `word (word)` |
+| `rt_list_to_sexpr_vector` | `word (word)` |
+| `rt_lists_to_sexpr_array` | `word (word, word)` |
+| `rt_llvm_call` | `word (ptr, u32)` |
+| `rt_local_frame_close` | `word (word)` |
+| `rt_local_frame_open` | `word (word, word)` |
+| `rt_loop_safepoint` | `word ()` |
+| `rt_machine_instance` | `word ()` |
+| `rt_machine_type` | `word ()` |
+| `rt_machine_version` | `word ()` |
+| `rt_macroexpand` | `word (word, word)` |
+| `rt_macroexpand_1` | `word (word, word)` |
+| `rt_main_answered` | `word (word)` |
+| `rt_main_returned` | `word ()` |
+| `rt_make_random_state_fresh` | `word ()` |
+| `rt_match_fail` | `word ()` |
+| `rt_net_accept` | `word (i32)` |
+| `rt_net_buffered_p` | `word (i32)` |
+| `rt_net_connect_begin` | `word (word)` |
+| `rt_net_connect_finish` | `word (i32)` |
+| `rt_net_fill` | `word (i32)` |
+| `rt_net_flush` | `word (i32)` |
+| `rt_net_listen` | `word (word, word)` |
+| `rt_net_local_address` | `word (i32)` |
+| `rt_net_peer_address` | `word (i32)` |
+| `rt_net_peer_subject` | `word (i32)` |
+| `rt_net_pop_byte` | `word (i32)` |
+| `rt_net_pop_char` | `word (i32)` |
+| `rt_net_push_byte` | `word (i32, word)` |
+| `rt_net_push_string` | `word (i32, word)` |
+| `rt_net_resolve_begin` | `word (word, word)` |
+| `rt_net_resolve_finish` | `word (i32)` |
+| `rt_net_server_name` | `word (i32)` |
+| `rt_net_set_keepalive` | `word (i32, bool)` |
+| `rt_net_set_keepalive_period` | `word (i32, word)` |
+| `rt_net_set_nodelay` | `word (i32, bool)` |
+| `rt_net_shutdown_write` | `word (i32)` |
+| `rt_net_socket_error` | `word (i32)` |
+| `rt_net_tls_add_certificate` | `word (i32, word, word, word)` |
+| `rt_net_tls_handshake` | `word (i32)` |
+| `rt_net_tls_listen` | `word (word, word, word, word, word)` |
+| `rt_net_tls_start` | `word (i32, word, word, word, word)` |
+| `rt_net_udp_bind` | `word (word, word)` |
+| `rt_net_udp_last_sender` | `word (i32)` |
+| `rt_net_udp_recv` | `word (i32)` |
+| `rt_net_udp_send_to` | `word (i32, word, word)` |
+| `rt_net_unix_connect` | `word (word)` |
+| `rt_net_unix_listen` | `word (word)` |
+| `rt_null` | `bool (word)` |
+| `rt_panic` | `word (word)` |
+| `rt_parse_float` | `word (word)` |
+| `rt_path_to_list` | `word (word)` |
+| `rt_pending_arg` | `word (word)` |
+| `rt_pending_argc` | `word ()` |
+| `rt_pending_env` | `word (word)` |
+| `rt_pending_envc` | `word ()` |
+| `rt_pop_sexpr_root` | `word ()` |
+| `rt_pprint` | `word (word, word, word)` |
+| `rt_pprint_block_end` | `word ()` |
+| `rt_pprint_block_start` | `word (word, word, bool, word)` |
+| `rt_pprint_indent` | `word (word, word)` |
+| `rt_pprint_list_exhausted` | `bool ()` |
+| `rt_pprint_newline` | `word (word)` |
+| `rt_pprint_pop` | `word ()` |
+| `rt_pprint_tab` | `word (word, word, word)` |
+| `rt_print_enum_variant` | `word (word, word, word, word)` |
+| `rt_print_field_name` | `word (word, word, word, word)` |
+| `rt_print_field_template` | `word (word, word, word, word)` |
+| `rt_print_global` | `word (word, word, word)` |
+| `rt_print_names` | `word (word)` |
+| `rt_print_object_method` | `word (word, word)` |
+| `rt_push_sexpr_root` | `word (word)` |
+| `rt_random_state_copy` | `word (word)` |
+| `rt_random_state_next` | `word (word, word)` |
+| `rt_ratio_add` | `word (word, word)` |
+| `rt_ratio_cmp` | `word (word, word)` |
+| `rt_ratio_denominator` | `word (word)` |
+| `rt_ratio_div` | `word (word, word)` |
+| `rt_ratio_from_bignums` | `word (word, word)` |
+| `rt_ratio_mul` | `word (word, word)` |
+| `rt_ratio_numerator` | `word (word)` |
+| `rt_ratio_sub` | `word (word, word)` |
+| `rt_ratio_to_float` | `double (word)` |
+| `rt_ratio_to_int` | `word (word)` |
+| `rt_rational_add` | `word (word, word)` |
+| `rt_rational_cmp` | `word (word, word)` |
+| `rt_rational_denominator` | `word (word)` |
+| `rt_rational_div` | `word (word, word)` |
+| `rt_rational_from_ratio` | `word (word)` |
+| `rt_rational_is_int` | `bool (word)` |
+| `rt_rational_mul` | `word (word, word)` |
+| `rt_rational_numerator` | `word (word)` |
+| `rt_rational_sub` | `word (word, word)` |
+| `rt_rational_to_float` | `double (word)` |
+| `rt_rational_to_int` | `word (word)` |
+| `rt_rational_to_ratio` | `word (word)` |
+| `rt_read` | `word (word)` |
+| `rt_read_datum_at` | `word (word, word, bool)` |
+| `rt_root_count` | `word ()` |
+| `rt_run_entry` | `word (word)` |
+| `rt_run_program` | `word (word, word, word)` |
+| `rt_run_program_alone` | `word (word, word, word)` |
+| `rt_run_program_alone_int` | `word (word, word, word)` |
+| `rt_run_program_int` | `word (word, word, word)` |
+| `rt_run_program_interp` | `word (word, word, word)` |
+| `rt_run_program_interp_int` | `word (word, word, word)` |
+| `rt_run_program_threads` | `word (word, word, word)` |
+| `rt_run_program_threads_int` | `word (word, word, word)` |
+| `rt_safepoint` | `word ()` |
+| `rt_seed_random_state` | `word (word)` |
+| `rt_set_car` | `word (word, word)` |
+| `rt_set_cdr` | `word (word, word)` |
+| `rt_set_dispatch_macro_character` | `word (u32, u32, word)` |
+| `rt_set_macro_character` | `word (u32, word)` |
+| `rt_set_sexpr_root` | `word (word, word)` |
+| `rt_sexpr_bool` | `bool (word)` |
+| `rt_sexpr_char` | `u32 (word)` |
+| `rt_sexpr_eq` | `bool (word, word)` |
+| `rt_sexpr_eql` | `bool (word, word)` |
+| `rt_sexpr_equal` | `bool (word, word)` |
+| `rt_sexpr_equalp` | `bool (word, word)` |
+| `rt_sexpr_f32` | `float (word)` |
+| `rt_sexpr_f64` | `double (word)` |
+| `rt_sexpr_i16` | `i16 (word)` |
+| `rt_sexpr_i32` | `i32 (word)` |
+| `rt_sexpr_i8` | `i8 (word)` |
+| `rt_sexpr_instance_test` | `bool (word, word, word)` |
+| `rt_sexpr_int` | `word (word)` |
+| `rt_sexpr_str` | `word (word)` |
+| `rt_sexpr_tuple_items` | `word (word)` |
+| `rt_sexpr_u16` | `u16 (word)` |
+| `rt_sexpr_u32` | `u32 (word)` |
+| `rt_sexpr_u8` | `u8 (word)` |
+| `rt_software_type` | `word ()` |
+| `rt_software_version` | `word ()` |
+| `rt_str_append` | `word (word, word)` |
+| `rt_str_downcase` | `word (word)` |
+| `rt_str_eq` | `bool (word, word)` |
+| `rt_str_equalp` | `bool (word, word)` |
+| `rt_str_length` | `word (word)` |
+| `rt_str_lt` | `bool (word, word)` |
+| `rt_str_new` | `word (ptr, u32)` |
+| `rt_str_ref` | `u32 (word, word)` |
+| `rt_str_substring` | `word (word, word, word)` |
+| `rt_str_upcase` | `word (word)` |
+| `rt_stream_at_line_start` | `word (i32)` |
+| `rt_stream_close` | `word (i32)` |
+| `rt_stream_describe` | `word (i32)` |
+| `rt_stream_finish_output` | `word (i32)` |
+| `rt_stream_input_p` | `word (i32)` |
+| `rt_stream_listen` | `word (i32)` |
+| `rt_stream_open_file` | `word (word, word)` |
+| `rt_stream_open_p` | `bool (i32)` |
+| `rt_stream_output_p` | `word (i32)` |
+| `rt_stream_position` | `word (i32)` |
+| `rt_stream_read_byte` | `word (i32)` |
+| `rt_stream_read_char` | `word (i32)` |
+| `rt_stream_stderr` | `i32 ()` |
+| `rt_stream_stdin` | `i32 ()` |
+| `rt_stream_stdout` | `i32 ()` |
+| `rt_stream_string_input` | `i32 (word)` |
+| `rt_stream_string_output` | `i32 ()` |
+| `rt_stream_take_output_string` | `word (i32)` |
+| `rt_stream_unread_char` | `word (i32, u32)` |
+| `rt_stream_write_byte` | `word (i32, word)` |
+| `rt_stream_write_string` | `word (i32, word)` |
+| `rt_struct_field_count` | `word (word)` |
+| `rt_struct_field_get` | `word (word, word)` |
+| `rt_struct_field_set` | `word (word, word, word)` |
+| `rt_struct_new` | `word (ptr, u32)` |
+| `rt_struct_pop_field` | `word (word)` |
+| `rt_struct_push_field` | `word (word, word)` |
+| `rt_suspend_chan_cap` | `word (word)` |
+| `rt_suspend_chan_close` | `word (word)` |
+| `rt_suspend_chan_len` | `word (word)` |
+| `rt_suspend_chan_new` | `word (word, word)` |
+| `rt_suspend_chan_recv` | `word (word, word)` |
+| `rt_suspend_chan_select` | `word (ptr, u32)` |
+| `rt_suspend_chan_send` | `word (word, word)` |
+| `rt_suspend_io` | `word (i32, word)` |
+| `rt_suspend_io_for` | `word (i32, word, double)` |
+| `rt_suspend_main` | `word ()` |
+| `rt_suspend_sleep` | `word (double)` |
+| `rt_suspend_task` | `word (word, word)` |
+| `rt_suspend_thread` | `word (word, word)` |
+| `rt_suspend_wait` | `word (word)` |
+| `rt_suspend_yield` | `word ()` |
+| `rt_sxhash_eq` | `word (word)` |
+| `rt_sxhash_eql` | `word (word)` |
+| `rt_sxhash_equalp` | `word (word)` |
+| `rt_sym_name` | `word (word)` |
+| `rt_symp` | `bool (word)` |
+| `rt_thread_available_parallelism` | `word ()` |
+| `rt_thread_current_id` | `word ()` |
+| `rt_throw` | `word (word, word)` |
+| `rt_throw_matches` | `word (word)` |
+| `rt_throw_take_value` | `word ()` |
+| `rt_timezone_daylight_p` | `word (word, word)` |
+| `rt_timezone_offset_seconds` | `word (word, word)` |
+| `rt_truncate_sexpr_roots` | `word (word)` |
+| `rt_types_define` | `word (word, word, word)` |
+| `rt_u16_box` | `word (u16)` |
+| `rt_u16_unbox` | `u16 (word)` |
+| `rt_u32_box` | `word (u32)` |
+| `rt_u32_unbox` | `u32 (word)` |
+| `rt_u8_box` | `word (u8)` |
+| `rt_u8_unbox` | `u8 (word)` |
+| `rt_unwinding` | `word ()` |
+| `rt_upcast_set` | `word (word, word, word)` |
+| `rt_vector_to_sexpr_tuple` | `word (word)` |
+| `rt_vtable_set` | `word (word, word, word, word)` |
+| `rt_wk_symbol` | `word (word)` |
 
 ## 組み込み型
 
@@ -1348,86 +1481,78 @@
 
 ### `%core::llvm-builder` (sum, 型引数 [])
 
-- インスタンス `alloca-args`: `(%core::llvm-builder, int) -> %core::llvm-value`
+- インスタンス `add-frame-slot`: `(%core::llvm-builder, %core::llvm-value) -> ()`
+- インスタンス `add-frame-slot-rooted`: `(%core::llvm-builder, %core::llvm-value) -> ()`
+- インスタンス `arg-list`: `(%core::llvm-builder, int) -> %core::llvm-value`
 - インスタンス `block-terminated?`: `(%core::llvm-builder) -> bool`
 - インスタンス `build-add`: `(%core::llvm-builder, %core::llvm-value, %core::llvm-value) -> %core::llvm-value`
 - インスタンス `build-and`: `(%core::llvm-builder, %core::llvm-value, %core::llvm-value) -> %core::llvm-value`
 - インスタンス `build-ashr`: `(%core::llvm-builder, %core::llvm-value, %core::llvm-value) -> %core::llvm-value`
 - インスタンス `build-br`: `(%core::llvm-builder, %core::llvm-basic-block) -> ()`
-- インスタンス `build-call`: `(%core::llvm-builder, %core::llvm-function, %core::llvm-value, int) -> %core::llvm-value`
-- インスタンス `build-call-with-env`: `(%core::llvm-builder, %core::llvm-function, %core::llvm-value, int, %core::llvm-value, int) -> %core::llvm-value`
+- インスタンス `build-call`: `(%core::llvm-builder, %core::llvm-function, %core::llvm-value) -> %core::llvm-value`
 - インスタンス `build-cond-br`: `(%core::llvm-builder, %core::llvm-value, %core::llvm-basic-block, %core::llvm-basic-block) -> ()`
-- インスタンス `build-fadd`: `(%core::llvm-builder, %core::llvm-value, %core::llvm-value) -> %core::llvm-value`
-- インスタンス `build-fceil`: `(%core::llvm-builder, %core::llvm-module, %core::llvm-value) -> %core::llvm-value`
-- インスタンス `build-fcmp-eq`: `(%core::llvm-builder, %core::llvm-value, %core::llvm-value) -> %core::llvm-value`
-- インスタンス `build-fcmp-ge`: `(%core::llvm-builder, %core::llvm-value, %core::llvm-value) -> %core::llvm-value`
-- インスタンス `build-fcmp-gt`: `(%core::llvm-builder, %core::llvm-value, %core::llvm-value) -> %core::llvm-value`
-- インスタンス `build-fcmp-le`: `(%core::llvm-builder, %core::llvm-value, %core::llvm-value) -> %core::llvm-value`
-- インスタンス `build-fcmp-lt`: `(%core::llvm-builder, %core::llvm-value, %core::llvm-value) -> %core::llvm-value`
-- インスタンス `build-fcmp-ne`: `(%core::llvm-builder, %core::llvm-value, %core::llvm-value) -> %core::llvm-value`
-- インスタンス `build-fcos`: `(%core::llvm-builder, %core::llvm-module, %core::llvm-value) -> %core::llvm-value`
-- インスタンス `build-fdiv`: `(%core::llvm-builder, %core::llvm-value, %core::llvm-value) -> %core::llvm-value`
-- インスタンス `build-fexp`: `(%core::llvm-builder, %core::llvm-module, %core::llvm-value) -> %core::llvm-value`
-- インスタンス `build-ffloor`: `(%core::llvm-builder, %core::llvm-module, %core::llvm-value) -> %core::llvm-value`
-- インスタンス `build-flog`: `(%core::llvm-builder, %core::llvm-module, %core::llvm-value) -> %core::llvm-value`
-- インスタンス `build-fmaxnum`: `(%core::llvm-builder, %core::llvm-module, %core::llvm-value, %core::llvm-value) -> %core::llvm-value`
-- インスタンス `build-fminnum`: `(%core::llvm-builder, %core::llvm-module, %core::llvm-value, %core::llvm-value) -> %core::llvm-value`
-- インスタンス `build-fmul`: `(%core::llvm-builder, %core::llvm-value, %core::llvm-value) -> %core::llvm-value`
+- インスタンス `build-fixed-binop`: `(%core::llvm-builder, int, string, %core::llvm-value, %core::llvm-value) -> %core::llvm-value`
+- インスタンス `build-fixed-div-check`: `(%core::llvm-builder, int, string, %core::llvm-value, %core::llvm-value) -> %core::llvm-value`
+- インスタンス `build-fixed-unary`: `(%core::llvm-builder, %core::llvm-module, int, string, %core::llvm-value) -> %core::llvm-value`
+- インスタンス `build-float-binop`: `(%core::llvm-builder, %core::llvm-module, int, string, %core::llvm-value, %core::llvm-value) -> %core::llvm-value`
+- インスタンス `build-float-unary`: `(%core::llvm-builder, %core::llvm-module, int, string, %core::llvm-value) -> %core::llvm-value`
 - インスタンス `build-fn-address`: `(%core::llvm-builder, %core::llvm-function) -> %core::llvm-value`
-- インスタンス `build-fpow`: `(%core::llvm-builder, %core::llvm-module, %core::llvm-value, %core::llvm-value) -> %core::llvm-value`
-- インスタンス `build-fptosi`: `(%core::llvm-builder, %core::llvm-module, %core::llvm-value) -> %core::llvm-value`
-- インスタンス `build-free`: `(%core::llvm-builder, %core::llvm-value) -> ()`
-- インスタンス `build-frem`: `(%core::llvm-builder, %core::llvm-value, %core::llvm-value) -> %core::llvm-value`
-- インスタンス `build-fround`: `(%core::llvm-builder, %core::llvm-module, %core::llvm-value) -> %core::llvm-value`
-- インスタンス `build-fround32`: `(%core::llvm-builder, %core::llvm-value) -> %core::llvm-value`
-- インスタンス `build-fsin`: `(%core::llvm-builder, %core::llvm-module, %core::llvm-value) -> %core::llvm-value`
-- インスタンス `build-fsqrt`: `(%core::llvm-builder, %core::llvm-module, %core::llvm-value) -> %core::llvm-value`
-- インスタンス `build-fsub`: `(%core::llvm-builder, %core::llvm-value, %core::llvm-value) -> %core::llvm-value`
-- インスタンス `build-ftrunc`: `(%core::llvm-builder, %core::llvm-module, %core::llvm-value) -> %core::llvm-value`
 - インスタンス `build-icmp-eq`: `(%core::llvm-builder, %core::llvm-value, %core::llvm-value) -> %core::llvm-value`
 - インスタンス `build-icmp-ge`: `(%core::llvm-builder, %core::llvm-value, %core::llvm-value) -> %core::llvm-value`
 - インスタンス `build-icmp-gt`: `(%core::llvm-builder, %core::llvm-value, %core::llvm-value) -> %core::llvm-value`
 - インスタンス `build-icmp-le`: `(%core::llvm-builder, %core::llvm-value, %core::llvm-value) -> %core::llvm-value`
 - インスタンス `build-icmp-lt`: `(%core::llvm-builder, %core::llvm-value, %core::llvm-value) -> %core::llvm-value`
 - インスタンス `build-icmp-ne`: `(%core::llvm-builder, %core::llvm-value, %core::llvm-value) -> %core::llvm-value`
-- インスタンス `build-int-to-ptr`: `(%core::llvm-builder, %core::llvm-value) -> %core::llvm-value`
 - インスタンス `build-lshr`: `(%core::llvm-builder, %core::llvm-value, %core::llvm-value) -> %core::llvm-value`
-- インスタンス `build-make-closure`: `(%core::llvm-builder, %core::llvm-module, %core::llvm-function, %core::llvm-value, int, int, int) -> %core::llvm-value`
-- インスタンス `build-malloc`: `(%core::llvm-builder, int) -> %core::llvm-value`
+- インスタンス `build-make-closure`: `(%core::llvm-builder, %core::llvm-module, %core::llvm-function, %core::llvm-value, int, int) -> %core::llvm-value`
 - インスタンス `build-mul`: `(%core::llvm-builder, %core::llvm-value, %core::llvm-value) -> %core::llvm-value`
+- インスタンス `build-not`: `(%core::llvm-builder, %core::llvm-value) -> %core::llvm-value`
 - インスタンス `build-or`: `(%core::llvm-builder, %core::llvm-value, %core::llvm-value) -> %core::llvm-value`
-- インスタンス `build-ptr-to-int`: `(%core::llvm-builder, %core::llvm-value) -> %core::llvm-value`
 - インスタンス `build-ret`: `(%core::llvm-builder, %core::llvm-value) -> ()`
 - インスタンス `build-sadd-overflow`: `(%core::llvm-builder, %core::llvm-module, %core::llvm-value, %core::llvm-value, %core::llvm-value) -> %core::llvm-value`
 - インスタンス `build-select`: `(%core::llvm-builder, %core::llvm-value, %core::llvm-value, %core::llvm-value) -> %core::llvm-value`
 - インスタンス `build-shl`: `(%core::llvm-builder, %core::llvm-value, %core::llvm-value) -> %core::llvm-value`
-- インスタンス `build-sitofp`: `(%core::llvm-builder, %core::llvm-value) -> %core::llvm-value`
-- インスタンス `build-slot-ptr`: `(%core::llvm-builder, %core::llvm-value, int) -> %core::llvm-value`
+- インスタンス `build-size-of`: `(%core::llvm-builder, %core::llvm-value) -> %core::llvm-value`
 - インスタンス `build-smul-overflow`: `(%core::llvm-builder, %core::llvm-module, %core::llvm-value, %core::llvm-value, %core::llvm-value) -> %core::llvm-value`
 - インスタンス `build-ssub-overflow`: `(%core::llvm-builder, %core::llvm-module, %core::llvm-value, %core::llvm-value, %core::llvm-value) -> %core::llvm-value`
 - インスタンス `build-sub`: `(%core::llvm-builder, %core::llvm-value, %core::llvm-value) -> %core::llvm-value`
 - インスタンス `build-xor`: `(%core::llvm-builder, %core::llvm-value, %core::llvm-value) -> %core::llvm-value`
+- インスタンス `coerce`: `(%core::llvm-builder, int, %core::llvm-value) -> %core::llvm-value`
+- インスタンス `const-like`: `(%core::llvm-builder, %core::llvm-value, int, int) -> %core::llvm-value`
+- インスタンス `const-value`: `(%core::llvm-builder, int, int, int) -> %core::llvm-value`
 - インスタンス `const-word`: `(%core::llvm-builder, int) -> %core::llvm-value`
+- インスタンス `convert`: `(%core::llvm-builder, int, int, %core::llvm-value) -> %core::llvm-value`
 - インスタンス `coroutine-apply`: `(%core::llvm-builder, %core::llvm-module, %core::llvm-value, %core::llvm-value, int) -> %core::llvm-value`
 - インスタンス `coroutine-begin`: `(%core::llvm-builder, %core::llvm-module, %core::llvm-function) -> ()`
 - インスタンス `coroutine-call`: `(%core::llvm-builder, %core::llvm-module, %core::llvm-value, %core::llvm-value, int) -> %core::llvm-value`
-- インスタンス `coroutine-call-env`: `(%core::llvm-builder, %core::llvm-module, %core::llvm-value, %core::llvm-value, int, %core::llvm-value, int) -> %core::llvm-value`
+- インスタンス `coroutine-call-env`: `(%core::llvm-builder, %core::llvm-module, %core::llvm-value, %core::llvm-value, int, %core::llvm-value) -> %core::llvm-value`
 - インスタンス `coroutine-dyn-call`: `(%core::llvm-builder, %core::llvm-module, %core::llvm-value, %core::llvm-value, %core::llvm-value, int) -> %core::llvm-value`
 - インスタンス `coroutine-end`: `(%core::llvm-builder, %core::llvm-module, %core::llvm-value) -> ()`
 - インスタンス `coroutine-suspend`: `(%core::llvm-builder, %core::llvm-module) -> %core::llvm-value`
 - インスタンス `coroutine-unwind`: `(%core::llvm-builder, %core::llvm-module) -> ()`
 - 関連関数 `create`: `() -> %core::llvm-builder`
+- インスタンス `entry-safepoint`: `(%core::llvm-builder, %core::llvm-module) -> ()`
+- インスタンス `entry-value`: `(%core::llvm-builder, %core::llvm-module, string, int, int) -> %core::llvm-value`
 - インスタンス `frame-clear-handler`: `(%core::llvm-builder, %core::llvm-module) -> ()`
 - インスタンス `frame-set-handler`: `(%core::llvm-builder, %core::llvm-module, %core::llvm-basic-block) -> ()`
 - インスタンス `frame-slot`: `(%core::llvm-builder) -> %core::llvm-value`
-- インスタンス `frame-slot-rooted`: `(%core::llvm-builder, %core::llvm-module) -> %core::llvm-value`
+- インスタンス `frame-slot-rooted`: `(%core::llvm-builder) -> %core::llvm-value`
+- インスタンス `frame-slots`: `(%core::llvm-builder) -> %core::llvm-value`
+- インスタンス `global-get`: `(%core::llvm-builder, %core::llvm-module, int, int) -> %core::llvm-value`
+- インスタンス `global-new`: `(%core::llvm-builder, %core::llvm-module, int, int, %core::llvm-value) -> %core::llvm-value`
+- インスタンス `global-put`: `(%core::llvm-builder, %core::llvm-module, int, int, %core::llvm-value) -> %core::llvm-value`
 - インスタンス `load-arg`: `(%core::llvm-builder, %core::llvm-function, int) -> %core::llvm-value`
 - インスタンス `load-env`: `(%core::llvm-builder, %core::llvm-function, int) -> %core::llvm-value`
-- インスタンス `load-raw`: `(%core::llvm-builder, %core::llvm-value, int) -> %core::llvm-value`
 - インスタンス `load-type`: `(%core::llvm-builder, %core::llvm-module, int) -> %core::llvm-value`
+- インスタンス `loop-safepoint`: `(%core::llvm-builder, %core::llvm-module, %core::llvm-basic-block) -> ()`
+- 関連関数 `no-value`: `() -> %core::llvm-value`
 - インスタンス `position-at-end`: `(%core::llvm-builder, %core::llvm-basic-block) -> ()`
 - インスタンス `scratch-slot`: `(%core::llvm-builder, int) -> %core::llvm-value`
-- インスタンス `store-arg`: `(%core::llvm-builder, %core::llvm-value, int, %core::llvm-value) -> ()`
+- インスタンス `slot-get`: `(%core::llvm-builder, %core::llvm-value, int) -> %core::llvm-value`
+- インスタンス `slot-set`: `(%core::llvm-builder, %core::llvm-value, int, %core::llvm-value) -> ()`
+- インスタンス `tag-field`: `(%core::llvm-builder, %core::llvm-module, %core::llvm-value, int) -> %core::llvm-value`
+- インスタンス `temp-slot`: `(%core::llvm-builder) -> %core::llvm-value`
+- インスタンス `untag-field`: `(%core::llvm-builder, %core::llvm-module, %core::llvm-value, int) -> %core::llvm-value`
 
 ### `%core::llvm-function` (sum, 型引数 [])
 
@@ -1439,6 +1564,7 @@
 - インスタンス `add-coroutine-function`: `(%core::llvm-module, string) -> %core::llvm-function`
 - インスタンス `add-function`: `(%core::llvm-module, string) -> %core::llvm-function`
 - インスタンス `add-function-with-env`: `(%core::llvm-module, string) -> %core::llvm-function`
+- インスタンス `c-long-bits`: `(%core::llvm-module) -> int`
 - 関連関数 `create`: `(string) -> %core::llvm-module`
 - インスタンス `get-function`: `(%core::llvm-module, string) -> %core::llvm-function`
 - インスタンス `to-string`: `(%core::llvm-module) -> string`
@@ -1518,8 +1644,6 @@
 - インスタンス `int->u16`: `(c-long) -> u16`
 - インスタンス `int->u32`: `(c-long) -> u32`
 - インスタンス `int->u8`: `(c-long) -> u8`
-- インスタンス `try-int->c-long`: `(c-long) -> std::option::Option<c-long>`
-- インスタンス `try-int->c-ulong`: `(c-long) -> std::option::Option<c-ulong>`
 - インスタンス `try-int->i16`: `(c-long) -> std::option::Option<i16>`
 - インスタンス `try-int->i32`: `(c-long) -> std::option::Option<i32>`
 - インスタンス `try-int->i8`: `(c-long) -> std::option::Option<i8>`
@@ -1538,8 +1662,6 @@
 - インスタンス `int->u16`: `(c-ulong) -> u16`
 - インスタンス `int->u32`: `(c-ulong) -> u32`
 - インスタンス `int->u8`: `(c-ulong) -> u8`
-- インスタンス `try-int->c-long`: `(c-ulong) -> std::option::Option<c-long>`
-- インスタンス `try-int->c-ulong`: `(c-ulong) -> std::option::Option<c-ulong>`
 - インスタンス `try-int->i16`: `(c-ulong) -> std::option::Option<i16>`
 - インスタンス `try-int->i32`: `(c-ulong) -> std::option::Option<i32>`
 - インスタンス `try-int->i8`: `(c-ulong) -> std::option::Option<i8>`
@@ -1594,8 +1716,14 @@
 - インスタンス `expt`: `(f32, f32) -> f32`
 - インスタンス `float->f32`: `(f32) -> f32`
 - インスタンス `float->f64`: `(f32) -> f64`
+- インスタンス `float->i16`: `(f32) -> i16`
+- インスタンス `float->i32`: `(f32) -> i32`
+- インスタンス `float->i8`: `(f32) -> i8`
 - インスタンス `float->int`: `(f32) -> int`
 - インスタンス `float->ratio`: `(f32) -> ratio`
+- インスタンス `float->u16`: `(f32) -> u16`
+- インスタンス `float->u32`: `(f32) -> u32`
+- インスタンス `float->u8`: `(f32) -> u8`
 - インスタンス `floor`: `(f32) -> f32`
 - インスタンス `log`: `(f32) -> f32`
 - インスタンス `max`: `(f32, f32) -> f32`
@@ -1639,8 +1767,14 @@
 - インスタンス `expt`: `(f64, f64) -> f64`
 - インスタンス `float->f32`: `(f64) -> f32`
 - インスタンス `float->f64`: `(f64) -> f64`
+- インスタンス `float->i16`: `(f64) -> i16`
+- インスタンス `float->i32`: `(f64) -> i32`
+- インスタンス `float->i8`: `(f64) -> i8`
 - インスタンス `float->int`: `(f64) -> int`
 - インスタンス `float->ratio`: `(f64) -> ratio`
+- インスタンス `float->u16`: `(f64) -> u16`
+- インスタンス `float->u32`: `(f64) -> u32`
+- インスタンス `float->u8`: `(f64) -> u8`
 - インスタンス `floor`: `(f64) -> f64`
 - インスタンス `log`: `(f64) -> f64`
 - インスタンス `max`: `(f64, f64) -> f64`
@@ -1695,8 +1829,7 @@
 - インスタンス `max`: `(i16, i16) -> i16`
 - インスタンス `min`: `(i16, i16) -> i16`
 - インスタンス `mod`: `(i16, i16) -> i16`
-- インスタンス `try-int->c-long`: `(i16) -> std::option::Option<c-long>`
-- インスタンス `try-int->c-ulong`: `(i16) -> std::option::Option<c-ulong>`
+- インスタンス `rem`: `(i16, i16) -> i16`
 - インスタンス `try-int->char`: `(i16) -> std::option::Option<char>`
 - インスタンス `try-int->i16`: `(i16) -> std::option::Option<i16>`
 - インスタンス `try-int->i32`: `(i16) -> std::option::Option<i32>`
@@ -1745,8 +1878,7 @@
 - インスタンス `max`: `(i32, i32) -> i32`
 - インスタンス `min`: `(i32, i32) -> i32`
 - インスタンス `mod`: `(i32, i32) -> i32`
-- インスタンス `try-int->c-long`: `(i32) -> std::option::Option<c-long>`
-- インスタンス `try-int->c-ulong`: `(i32) -> std::option::Option<c-ulong>`
+- インスタンス `rem`: `(i32, i32) -> i32`
 - インスタンス `try-int->char`: `(i32) -> std::option::Option<char>`
 - インスタンス `try-int->i16`: `(i32) -> std::option::Option<i16>`
 - インスタンス `try-int->i32`: `(i32) -> std::option::Option<i32>`
@@ -1795,8 +1927,7 @@
 - インスタンス `max`: `(i8, i8) -> i8`
 - インスタンス `min`: `(i8, i8) -> i8`
 - インスタンス `mod`: `(i8, i8) -> i8`
-- インスタンス `try-int->c-long`: `(i8) -> std::option::Option<c-long>`
-- インスタンス `try-int->c-ulong`: `(i8) -> std::option::Option<c-ulong>`
+- インスタンス `rem`: `(i8, i8) -> i8`
 - インスタンス `try-int->char`: `(i8) -> std::option::Option<char>`
 - インスタンス `try-int->i16`: `(i8) -> std::option::Option<i16>`
 - インスタンス `try-int->i32`: `(i8) -> std::option::Option<i32>`
@@ -1846,8 +1977,6 @@
 - インスタンス `min`: `(int, int) -> int`
 - インスタンス `mod`: `(int, int) -> int`
 - インスタンス `truncate`: `(int, int) -> int`
-- インスタンス `try-int->c-long`: `(int) -> std::option::Option<c-long>`
-- インスタンス `try-int->c-ulong`: `(int) -> std::option::Option<c-ulong>`
 - インスタンス `try-int->char`: `(int) -> std::option::Option<char>`
 - インスタンス `try-int->i16`: `(int) -> std::option::Option<i16>`
 - インスタンス `try-int->i32`: `(int) -> std::option::Option<i32>`
@@ -1971,8 +2100,7 @@
 - インスタンス `max`: `(u16, u16) -> u16`
 - インスタンス `min`: `(u16, u16) -> u16`
 - インスタンス `mod`: `(u16, u16) -> u16`
-- インスタンス `try-int->c-long`: `(u16) -> std::option::Option<c-long>`
-- インスタンス `try-int->c-ulong`: `(u16) -> std::option::Option<c-ulong>`
+- インスタンス `rem`: `(u16, u16) -> u16`
 - インスタンス `try-int->char`: `(u16) -> std::option::Option<char>`
 - インスタンス `try-int->i16`: `(u16) -> std::option::Option<i16>`
 - インスタンス `try-int->i32`: `(u16) -> std::option::Option<i32>`
@@ -2021,8 +2149,7 @@
 - インスタンス `max`: `(u32, u32) -> u32`
 - インスタンス `min`: `(u32, u32) -> u32`
 - インスタンス `mod`: `(u32, u32) -> u32`
-- インスタンス `try-int->c-long`: `(u32) -> std::option::Option<c-long>`
-- インスタンス `try-int->c-ulong`: `(u32) -> std::option::Option<c-ulong>`
+- インスタンス `rem`: `(u32, u32) -> u32`
 - インスタンス `try-int->char`: `(u32) -> std::option::Option<char>`
 - インスタンス `try-int->i16`: `(u32) -> std::option::Option<i16>`
 - インスタンス `try-int->i32`: `(u32) -> std::option::Option<i32>`
@@ -2071,8 +2198,7 @@
 - インスタンス `max`: `(u8, u8) -> u8`
 - インスタンス `min`: `(u8, u8) -> u8`
 - インスタンス `mod`: `(u8, u8) -> u8`
-- インスタンス `try-int->c-long`: `(u8) -> std::option::Option<c-long>`
-- インスタンス `try-int->c-ulong`: `(u8) -> std::option::Option<c-ulong>`
+- インスタンス `rem`: `(u8, u8) -> u8`
 - インスタンス `try-int->char`: `(u8) -> std::option::Option<char>`
 - インスタンス `try-int->i16`: `(u8) -> std::option::Option<i16>`
 - インスタンス `try-int->i32`: `(u8) -> std::option::Option<i32>`
@@ -2161,6 +2287,7 @@
 | `std::%internal::file-owner-name` | `rt_file_owner_name` | `(string) -> std::result::Result<std::option::Option<string>,std::fs::FileError>` |
 | `std::%internal::file-rename` | `rt_file_rename` | `(string, string) -> std::result::Result<(),std::fs::FileError>` |
 | `std::%internal::file-truename` | `rt_file_truename` | `(string) -> std::result::Result<string,std::fs::FileError>` |
+| `std::%internal::largest-fixnum` | `rt_largest_fixnum` | `() -> int` |
 | `std::%internal::make-random-state-fresh` | `rt_make_random_state_fresh` | `() -> random-state` |
 | `std::%internal::net-accept` | `rt_net_accept` | `(i32) -> std::result::Result<std::option::Option<i32>,std::net::NetError>` |
 | `std::%internal::net-buffered-p` | `rt_net_buffered_p` | `(i32) -> std::result::Result<bool,std::net::NetError>` |
@@ -2223,10 +2350,13 @@
 | `std::%internal::sxhash-eq` | `rt_sxhash_eq` | `<T> (T) -> int` |
 | `std::%internal::sxhash-eql` | `rt_sxhash_eql` | `<T> (T) -> int` |
 | `std::%internal::sxhash-equalp` | `rt_sxhash_equalp` | `<T> (T) -> int` |
+| `std::board::disable-interrupt` | `rt_interrupt_disable` | `(int) -> ()` |
+| `std::board::enable-interrupt` | `rt_interrupt_enable` | `(int) -> ()` |
 | `std::cmp::eq` | `rt_sexpr_eq` | `<T> (T, T) -> bool` |
 | `std::cmp::eql` | `rt_sexpr_eql` | `<T> (T, T) -> bool` |
 | `std::cmp::equalp` | `rt_sexpr_equalp` | `<T> (T, T) -> bool` |
 | `std::compile-file` |  | `(string, string) -> bool` |
+| `std::dbg::llvm-size-of` |  | `<A> (A) -> u32` |
 | `std::dump` |  | `(string) -> bool` |
 | `std::env::command-line-args` | `rt_command_line_args` | `() -> std::vec::Vector<string>` |
 | `std::env::getenv` | `rt_getenv` | `(string) -> std::option::Option<string>` |

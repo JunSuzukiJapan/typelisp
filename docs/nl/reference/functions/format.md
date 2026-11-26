@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/format.md @ 59f6f286d9081f10d4e2d72836362c3efc3e42af -->
+<!-- translated-from: docs/ja/reference/functions/format.md @ 9657f5a39527be80deea76fe60ecc58ab1752689 -->
 # Formatdirectieven
 
 De directieven die in de stuurstrings van `print`/`println`/`format` worden geschreven. Ze dekken
@@ -112,13 +112,14 @@ staat, en voert de string uit die de aanroep teruggeeft. Het verbruikt één arg
 - Het oplossen van de naam gaat zoals bij een aanroep ([Syntaxreferentie 3.10](../syntax.md#310-module--use--namespaces)). Heeft het type van
   het argument een methode `name`, dan wordt die aangeroepen; anders de zichtbare functie `name`. Een
   functie in een module kan met haar pad worden genoemd (`~/m::shout/`).
-- Aanroepbaar is een in typelisp geschreven functie of methode die het argument, `colon` en `at` ongewijzigd
-  neemt en een `string` teruggeeft. Ingebouwde functies kunnen niet worden aangeroepen.
+- Aangeroepen wordt een functie of methode die het argument, `colon` en `at` neemt en een `string`
+  teruggeeft. Ook ingebouwde kunnen worden aangeroepen.
 - **Wat er aangeroepen wordt, ligt vast bij de controle.** De controleur zoekt elk argument dat die
   `~/name/` kan bereiken, rekening houdend met verplaatsingen door `~*` en `~[`, en lost de naam op voor het
-  type van elk ervan. Lukt dat voor één ervan niet, dan is dat een fout bij de controle, en dat geldt ook
-  als de mogelijke argumenten twee verschillende definities zouden aanroepen. Tijdens het uitvoeren wordt
-  geen naam opgezocht, dus het werkt in AOT-uitvoerbare bestanden op dezelfde manier.
+  type van elk ervan. Lukt dat voor één ervan niet, dan is dat een fout bij de controle. De mogelijke
+  argumenten mogen naargelang hun type verschillende definities aanroepen; tijdens het uitvoeren wordt die
+  voor het type van het werkelijk bereikte argument aangeroepen. Tijdens het uitvoeren wordt geen naam
+  opgezocht, dus het werkt in AOT-uitvoerbare bestanden op dezelfde manier.
 - **Binnen `~{`, `~:{`, `~:@{` en `~<...~:>` kan het niet worden gebruikt** (fout bij de controle). Het type
   van de elementen van een lijstargument is `Sexpr`, en dat kan niet bepalen wat er aangeroepen wordt.
   `~@{` loopt langs de resterende argumenten van de aanroep, waarvan de types bekend zijn, en daar kan het

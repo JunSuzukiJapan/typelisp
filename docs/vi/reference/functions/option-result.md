@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/option-result.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
+<!-- translated-from: docs/ja/reference/functions/option-result.md @ dff3b51792f6d9c49bb8802bd3d3fb6e168edd92 -->
 # Option, Result và các kiểu lỗi
 
 ## 1. `Option<T>` / `Result<T,E>`
@@ -66,7 +66,7 @@ Hộp chỉ được dùng khi một giá trị kiểu `T` không thể phân bi
 |---|---|---|
 | `Option<U>` (lồng nhau) | Hộp | `None` bên trong sẽ là cùng giá trị với `None` bên ngoài |
 | `()` | Hộp | Giá trị của `()` chính là giá trị danh sách rỗng |
-| `ptr` / `c-long` / `c-ulong` | Hộp | Cả 64 bit đều là giá trị, không còn chỗ để phân biệt |
+| `ptr` / `c-long` / `c-ulong` | Hộp | Tất cả các bit đều là giá trị, không còn chỗ để phân biệt |
 | Mọi thứ khác | Không hộp | — |
 
 Biểu diễn được quyết định chỉ bởi kiểu và không thể đọc ra từ một giá trị. Khi in, `(Some ...)`/`None` được

@@ -1,5 +1,7 @@
 //! Symbols and symbol paths.
 
+use typelisp_mem::Word;
+use typelisp_mem::prelude::*;
 use typelisp_abi::{active_heap, decode, encode, fatal, raise};
 use typelisp_mem::Value;
 
@@ -28,7 +30,7 @@ use typelisp_mem::Value;
 /// encoding a `Value::Str`; a `Heap` must already be registered on this
 /// thread.
 #[no_mangle]
-pub unsafe extern "C" fn rt_intern_symbol(args: *const i64, argc: u32) -> i64 {
+pub unsafe extern "C" fn rt_intern_symbol(args: *const Word, argc: u32) -> Word {
     if argc < 1 {
         fatal("rt_intern_symbol: expected at least 1 argument");
     }
@@ -53,17 +55,14 @@ pub unsafe extern "C" fn rt_intern_symbol(args: *const i64, argc: u32) -> i64 {
 ///
 /// Same as [`rt_intern_symbol`].
 #[no_mangle]
-pub unsafe extern "C-unwind" fn rt_intern(args: *const i64, argc: u32) -> i64 {
-    if argc != 2 {
-        fatal("rt_intern: expected 2 arguments");
-    }
-    let str_arg = |i: usize| -> String {
-        match decode(*args.add(i)) {
+pub unsafe extern "C-unwind" fn rt_intern(name: Word, module: Word) -> Word {
+    let str_arg = |w: Word| -> String {
+        match decode(w) {
             Value::Str(id) => active_heap().string(id).to_string(),
             _ => fatal("rt_intern: argument is not a Str"),
         }
     };
-    let (name, module) = (str_arg(0), str_arg(1));
+    let (name, module) = (str_arg(name), str_arg(module));
     let Some(ns) = typelisp_mem::symbols::ns_named(&module) else {
         return raise(format!("intern: no module named `{}`", module)).into_word();
     };
@@ -77,17 +76,14 @@ pub unsafe extern "C-unwind" fn rt_intern(args: *const i64, argc: u32) -> i64 {
 ///
 /// Same as [`rt_consp`].
 #[no_mangle]
-pub unsafe extern "C" fn rt_keywordp(args: *const i64, argc: u32) -> i64 {
-    if argc < 1 {
-        fatal("rt_keywordp: expected 1 argument");
-    }
-    match decode(*args) {
-        Value::Symbol(id) => i64::from(id.is_keyword()),
+pub unsafe extern "C" fn rt_keywordp(x: Word) -> bool {
+    match decode(x) {
+        Value::Symbol(id) => id.is_keyword(),
         _ => fatal("rt_keywordp: argument is not a Symbol"),
     }
 }
 
-/// The system module's symbol at index `args[0]` (a raw `i64`, not a tagged
+/// The system module's symbol at index `x` (a raw `i64`, not a tagged
 /// value) of `BUILTIN_SYMBOLS`, as a tagged `Value::Symbol`.
 ///
 /// The compiled-code half of a quoted symbol from the fixed vocabulary
@@ -100,14 +96,11 @@ pub unsafe extern "C" fn rt_keywordp(args: *const i64, argc: u32) -> i64 {
 ///
 /// # Safety
 ///
-/// `argc` must be `>= 1` and `args` must point to a valid `i64` holding an
+/// The word must hold an
 /// index within `BUILTIN_SYMBOLS`.
 #[no_mangle]
-pub unsafe extern "C" fn rt_wk_symbol(args: *const i64, argc: u32) -> i64 {
-    if argc < 1 {
-        fatal("rt_wk_symbol: expected 1 argument");
-    }
-    encode(Value::Symbol(typelisp_mem::symbols::well_known_symbol(*args as u32)))
+pub unsafe extern "C" fn rt_wk_symbol(x: Word) -> Word {
+    encode(Value::Symbol(typelisp_mem::symbols::well_known_symbol(x as u32)))
 }
 
 /// Interns `args[0..argc]` (each a tagged `Value::Symbol`, one per `::`
@@ -125,7 +118,7 @@ pub unsafe extern "C" fn rt_wk_symbol(args: *const i64, argc: u32) -> i64 {
 /// `i64`s, each encoding a `Value::Symbol`; a `Heap` must already be
 /// registered on this thread.
 #[no_mangle]
-pub unsafe extern "C" fn rt_intern_path(args: *const i64, argc: u32) -> i64 {
+pub unsafe extern "C" fn rt_intern_path(args: *const Word, argc: u32) -> Word {
     if argc < 1 {
         fatal("rt_intern_path: expected at least 1 argument");
     }
@@ -150,15 +143,12 @@ pub unsafe extern "C" fn rt_intern_path(args: *const i64, argc: u32) -> i64 {
 ///
 /// # Safety
 ///
-/// `argc` must be `>= 1` and `args` must point to at least 1 valid `i64`
+/// The words must be valid
 /// encoding a `Value::Path`; a `Heap` must already be registered on this
 /// thread.
 #[no_mangle]
-pub unsafe extern "C" fn rt_path_to_list(args: *const i64, argc: u32) -> i64 {
-    if argc < 1 {
-        fatal("rt_path_to_list: expected 1 argument");
-    }
-    let id = match decode(*args) {
+pub unsafe extern "C" fn rt_path_to_list(id: Word) -> Word {
+    let id = match decode(id) {
         Value::Path(id) => id,
         _ => fatal("rt_path_to_list: argument is not a Path"),
     };
@@ -188,17 +178,14 @@ pub unsafe extern "C" fn rt_path_to_list(args: *const i64, argc: u32) -> i64 {
 ///
 /// # Safety
 ///
-/// `argc` must be `>= 1` and `args` must point to at least 1 valid `i64`
+/// The words must be valid
 /// encoding a proper `Sexpr` list of `Value::Symbol`s; a `Heap` must already
 /// be registered on this thread.
 #[no_mangle]
-pub unsafe extern "C" fn rt_list_to_path(args: *const i64, argc: u32) -> i64 {
-    if argc < 1 {
-        fatal("rt_list_to_path: expected 1 argument");
-    }
+pub unsafe extern "C" fn rt_list_to_path(cur: Word) -> Word {
     let heap = active_heap();
     let mut segs = Vec::new();
-    let mut cur = decode(*args);
+    let mut cur = decode(cur);
     loop {
         match cur {
             Value::Empty => break,

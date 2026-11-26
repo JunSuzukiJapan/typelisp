@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/format.md @ 59f6f286d9081f10d4e2d72836362c3efc3e42af -->
+<!-- translated-from: docs/ja/reference/functions/format.md @ 9657f5a39527be80deea76fe60ecc58ab1752689 -->
 # Direktif Format
 
 Direktif yang ditulis pada string kendali `print`/`println`/`format`. Direktif ini mencakup hampir
@@ -112,13 +112,14 @@ dan `at` adalah `bool` yang menyatakan apakah direktif membawa `:` dan `@`.
 - Resolusi nama sama dengan pemanggilan ([Referensi Sintaks 3.10](../syntax.md#310-module--use--ruang-nama)). Jika tipe argumen memiliki metode
   `name`, metode itu yang dipanggil; jika tidak, fungsi `name` yang terlihat. Fungsi di dalam modul dapat
   ditulis dengan jalurnya (`~/m::shout/`).
-- Yang dapat dipanggil adalah fungsi atau metode yang ditulis dalam typelisp, yang menerima argumen,
-  `colon`, dan `at` apa adanya dan mengembalikan `string`. Fungsi bawaan tidak dapat dipanggil.
+- Yang dipanggil adalah fungsi atau metode yang menerima argumen, `colon`, dan `at` lalu mengembalikan
+  `string`. Yang bawaan pun dapat dipanggil.
 - **Apa yang dipanggil ditetapkan saat pemeriksaan.** Pemeriksa mencari setiap argumen yang dapat mencapai
   `~/name/` itu, dengan memperhitungkan lompatan `~*` dan `~[`, lalu menyelesaikan nama untuk tipe masing-
-  masing. Jika salah satunya tidak dapat diselesaikan, itu galat saat pemeriksaan, begitu pula jika
-  argumen-argumen yang dapat mencapainya akan memanggil dua definisi yang berbeda. Tidak ada nama yang dicari
-  saat berjalan, sehingga cara kerjanya sama di executable AOT.
+  masing. Jika salah satunya tidak dapat diselesaikan, itu galat saat pemeriksaan. Argumen-argumen yang
+  dapat mencapainya boleh memanggil definisi yang berbeda menurut tipenya; saat berjalan, yang dipanggil
+  adalah definisi untuk tipe argumen yang benar-benar mencapainya. Tidak ada nama yang dicari saat
+  berjalan, sehingga cara kerjanya sama di executable AOT.
 - **Tidak dapat dipakai di dalam `~{`, `~:{`, `~:@{`, atau `~<...~:>`** (galat saat pemeriksaan). Tipe elemen
   argumen list adalah `Sexpr`, yang tidak dapat menentukan apa yang dipanggil. `~@{` menelusuri sisa argumen
   pemanggilan, yang tipenya diketahui, sehingga di sana dapat dipakai.

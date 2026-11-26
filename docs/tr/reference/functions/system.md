@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/system.md @ 7622044725db7d28dabb691d82e592367d9284e8 -->
+<!-- translated-from: docs/ja/reference/functions/system.md @ b01477a6134617bbcef066ff2065d17245132754 -->
 # Zaman, Ortam ve Gerçekleştirim
 
 Zaman, çalışma zamanı ortamı hakkındaki sorgular, gerçekleştirim araçları, metin ayrıştırma ve
@@ -369,3 +369,32 @@ kalmaz: derlenen şey gövdenin açılmış biçimidir.
 | `with-standard-io-syntax` | `(with-standard-io-syntax body...)` | — | `body`'yi her yazıcı denetim değişkeni standart değerinde ve `*read-eval*` `true` olarak ayarlı çalıştırır ([Yazdırma](printing.md#6-ne-kadarının-yazdırılacağını-denetleme)) |
 | `exit` | `(exit code)` | `int→!` | Süreci bitirir |
 | `dump` | `(dump path)` | `string→bool` | Geçerli ortamı (tür bilgisi artı derlenmiş gövdeler) tek bir dosyaya yazar. `typl --image <path>` ondan yeniden başlar. Yalnızca yorumlayıcıya özgü ([Sözdizimi Başvurusu 10.1](../syntax.md#101-dumplar)) |
+
+## 11. Bir mikrodenetleyicinin kesmeleri (`std::board`)
+
+`(use std::board::enable-interrupt)` gibi bir `use` ile içeri alın. Kesme işleyicisinin nasıl yazılacağı [sözdizimi başvurusu 3.17](../syntax.md#317-interruptn--exceptionname--kesme-işleyicileri) içindedir.
+
+| Ad | Biçim | Tür | Açıklama |
+|---|---|---|---|
+| `enable-interrupt` | `(enable-interrupt n)` | `int→()` | Çevre birimi kesmesi `n`'nin (0 ile 239 arası) gelmesini sağlar. Mikrodenetleyici dışında bir çalışma zamanı hatası (`typl -c` altında bir derleme hatası) |
+| `disable-interrupt` | `(disable-interrupt n)` | `int→()` | Kesme `n`'nin artık gelmemesini sağlar. Mikrodenetleyici dışında `enable-interrupt` gibi |
+
+## 12. Hata ayıklama (`std::dbg`)
+
+`(use std::dbg::llvm-size-of)` gibi bir `use` ile alınır.
+
+| Ad | Biçim | Tür | Açıklama |
+|---|---|---|---|
+| `llvm-size-of` | `(llvm-size-of expr)` | `A→u32` | Derlenmiş kodun `expr` değerini kaç baytta tuttuğu. LLVM, derleyicinin değere verdiği LLVM türünün boyutunu, kodun çalıştığı hedef için sayar. `expr` değerlendirilir. Yorumlayıcıda çalıştırılırsa çalışma zamanı hatası |
+
+`size-of-val` türün belirlediği boyutu, `llvm-size-of` ise derlenmiş kodun gerçekten kullandığı boyutu verir. İkisi farklıysa derleyici değerin genişliğini yanlış biliyordur.
+
+```lisp
+(use std::dbg::llvm-size-of)
+(defun widths ((x i8)) ()
+  (println "~a ~a ~a" (llvm-size-of x) (llvm-size-of (as u32 x)) (llvm-size-of (< x 0))))
+(compile widths)
+(widths 1)                          ; 1 4 1 yazdırır
+```
+
+Yığındaki bir değer (`string`, bir `defstruct` türü vb.) ve bir `int`, değerin yerini ya da değerin kendisini temsil eden bir sözcük kaplar.

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/format.md @ 59f6f286d9081f10d4e2d72836362c3efc3e42af -->
+<!-- translated-from: docs/ja/reference/functions/format.md @ 9657f5a39527be80deea76fe60ecc58ab1752689 -->
 # Formatdirektiv
 
 De direktiv som skrivs i kontrollsträngarna för `print`/`println`/`format`. De täcker nästan alla av CL:s
@@ -107,13 +107,13 @@ och skriver ut strängen som anropet returnerar. Det förbrukar ett argument. `c
 - Namnupplösningen är densamma som för ett anrop ([Syntaxreferens 3.10](../syntax.md#310-module--use--namnrymder)). Har argumentets typ en
   metod `name` anropas den, annars den synliga funktionen `name`. En funktion i en modul kan anges med sin
   sökväg (`~/m::shout/`).
-- Det som kan anropas är en funktion eller metod skriven i typelisp som tar argumentet, `colon` och `at`
-  som de är och returnerar en `string`. Inbyggda funktioner kan inte anropas.
+- Det som anropas är en funktion eller metod som tar argumentet, `colon` och `at` och returnerar en
+  `string`. Även inbyggda kan anropas.
 - **Vad som anropas bestäms vid kontrollen.** Kontrollen hittar varje argument som kan nå det `~/name/`,
   med hänsyn till förflyttningar med `~*` och `~[`, och löser upp namnet för vart och ett av dess typer.
-  Går något av dem inte att lösa upp är det ett fel vid kontrollen, liksom om de möjliga argumenten skulle
-  anropa två olika definitioner. Inget namn slås upp vid körning, så det fungerar likadant i körbara
-  AOT-filer.
+  Går något av dem inte att lösa upp är det ett fel vid kontrollen. De möjliga argumenten får anropa olika
+  definitioner beroende på typ; vid körning anropas den för typen hos det argument som faktiskt nåddes.
+  Inget namn slås upp vid körning, så det fungerar likadant i körbara AOT-filer.
 - **Det kan inte användas inuti `~{`, `~:{`, `~:@{` eller `~<...~:>`** (fel vid kontrollen). Typen hos
   elementen i ett listargument är `Sexpr`, som inte kan avgöra vad som ska anropas. `~@{` går igenom
   anropets återstående argument, vars typer är kända, så där kan det användas.

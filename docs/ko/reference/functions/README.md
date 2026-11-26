@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/README.md @ 398532233e28225bb121ed5b18609d41ea1bf813 -->
+<!-- translated-from: docs/ja/reference/functions/README.md @ b01477a6134617bbcef066ff2065d17245132754 -->
 # 내장 함수
 
 내장 함수, 메서드, 표준 라이브러리의 목록. 문법(특수 형식과 정의 방법)은 [문법 레퍼런스](../syntax.md), 타입 목록은
@@ -31,8 +31,10 @@
 | 모듈 | 이름 |
 |---|---|
 | `std::array` | `array-iter` |
+| `std::board` | `disable-interrupt`、`enable-interrupt` |
 | `std::char` | `digit->char`、`digit-weight`、`name->char` |
 | `std::collections` | `Deque`、`HashSet`、`Scope`、`SortedTable`、`hashtable-iter` |
+| `std::dbg` | `llvm-size-of` |
 | `std::env` | `command-line-args`、`getenv`、`home-directory` |
 | `std::error` | `WrappedError`、`as-dyn-error`、`assert-equal`、`describe-error`、`wrap-error` |
 | `std::eval` | `Environment` |

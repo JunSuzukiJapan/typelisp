@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/numbers.md @ 676864f7e6cf8e950e51aadacecd49695c8545a8 -->
+<!-- translated-from: docs/ja/reference/functions/numbers.md @ 1b5dc6ac828d8e4a95800a91218b5e9dffe83f98 -->
 # Bilangan
 
 Operasi pada bilangan bulat, bilangan floating-point, rasional, bilangan kompleks, dan boolean, serta
@@ -72,11 +72,10 @@ berhitung, pindah ke tipe berlebar. `c-long` / `c-ulong` hanya memiliki konversi
 | `int->i8` … `int->u32` | `(int->W x)` | `T→W` | Konversi lebar yang sama seperti bab 1. Nilai yang tidak muat dipotong |
 | `try-int->i8` … `try-int->u32` | `(try-int->W x)` | `T→Option<W>` | Konversi yang sama sebagai pertanyaan |
 | `int->c-long` `int->c-ulong` | `(int->W x)` | `T→W` | Jalan masuk, dari word mentah yang lain dan dari tipe bilangan bulat pada bab 1 |
-| `try-int->c-long` `try-int->c-ulong` | `(try-int->W x)` | `T→Option<W>` | Sama seperti di atas |
 | `int->int` | `(int->int x)` | `T→int` | **Selalu tepat**. Cara jujur membaca `size_t` yang tidak muat dalam `i32` |
 
 `(as i32 x)` / `(try-as i32 x)` / `(as int x)` / `(as c-ulong n)` adalah yang dilakukan konversi ini,
-dan konversinya ada untuk setiap pasangan dengan tipe bilangan bulat pada bab 1. `ptr` bahkan tidak
+dan konversinya ada untuk setiap pasangan dengan tipe bilangan bulat pada bab 1. Tidak ada bentuk `try-` ke word mentah: `Option<c-long>` akan menaruh word mentah di dalam tipe lain, dan itu tidak dapat ditulis. `ptr` bahkan tidak
 memiliki tabel ini: tidak disediakan cara membaca pointer sebagai bilangan. Ia adalah nilai yang
 hanya dioper, diterima, dan diserahkan ke fungsi C lain.
 
@@ -145,6 +144,7 @@ kesalahan saat dijalankan ("an integer argument does not fit a fixnum").
 | `log` (dua argumen) | `(log x base)` | `(f64,f64)→f64` | Logaritma dengan basis tertentu. Diekspansi menjadi `(/ (log x) (log base))` (bab 8) |
 | `floor-div` `ceiling-div` `round-div` `truncate-div` | `(op a b)` | `(f64,f64)→cons-cell<f64,f64>` | Sepadan dengan versi dua argumen pada CL (`(floor 7.0 2.0)`→hasil bagi 3, sisa 1). Rancangan yang sama seperti fungsi bernama sama pada bab 1 (`car`=hasil bagi, `cdr`=sisa) |
 | `float->int` | `(float->int x)` | `f64→int` | Mengubah menjadi `int` dengan memotong ke arah nol (`truncate` pada CL; tepat untuk nilai hingga berukuran berapa pun). Panic pada tak hingga dan NaN. Untuk lebar tetap, gunakan `(as i32 x)` |
+| `float->i8` `float->i16` `float->i32` `float->u8` `float->u16` `float->u32` | `(op x)` | `f64→i8` | Bit rendah dari jawaban `float->int` sebagai tipe itu (tanpa melalui `int`). Tak hingga dan NaN menyebabkan panic. Yang mendasari `(as i16 x)` |
 | `float->ratio` | `(float->ratio x)` | `f64→ratio` | Mengubah menjadi `ratio` sebagai rasional biner yang tepat (`rational` pada CL) |
 | `float->f32` `float->f64` | `(op x)` | `f64→f32` / `f64→f64` | Mengubah antarlebar floating-point. `float->f32` membulatkan ke yang terdekat, `float->f64` selalu tepat. Yang dilakukan `(as f32 x)` |
 | `try-float->f32` `try-float->f64` | `(op x)` | `f64→Option<f32>` / `→Option<f64>` | Konversi yang sama sebagai pertanyaan. `None` jika pembulatan mengubah nilai (pelebaran ke `f64` selalu `Some`). Yang dilakukan `(try-as f32 x)` |
@@ -335,7 +335,7 @@ Konstanta batas numerik (CLHS 12.1.4.2 / 12.1.3):
 
 | Nama | Tipe | Deskripsi |
 |---|---|---|
-| `most-positive-fixnum` / `most-negative-fixnum` | `int` | Batas atas / bawah nilai langsung 63 bit (2^62-1 / -2^62). `int` di luar batas itu menjadi bignum |
+| `most-positive-fixnum` / `most-negative-fixnum` | `int` | Batas atas / bawah nilai langsung 63 bit (2^62-1 / -2^62; di wasm32 dan Cortex-M 31 bit, 2^30-1 / -2^30). `int` di luar batas itu menjadi bignum |
 | `most-positive-double-float` / `most-negative-double-float` | `f64` | Nilai hingga terbesar / terkecil |
 | `least-positive-double-float` / `least-negative-double-float` | `f64` | Besaran bukan nol terkecil, termasuk subnormal |
 | `least-positive-normalized-double-float` / `least-negative-normalized-double-float` | `f64` | Sama, dibatasi pada bilangan ternormalisasi |

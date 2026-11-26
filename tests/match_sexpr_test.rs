@@ -368,7 +368,7 @@ fn the_narrow_accessors_read_back_what_was_put_in() {
 /// This is the case the old single `int` variant actually corrupted rather
 /// than merely mislabelled: its field type was `i32`, so `4000000000` came
 /// back out as a value no `i32` can hold, with the normalization invariant
-/// (`types::normalize_int`) broken in the process.
+/// (the word is the number its type names) broken in the process.
 #[test]
 fn a_u32_above_the_i32_range_survives_a_sexpr_round_trip() {
     assert_eq!(eval_ok("(sexpr-u32 (U32 4000000000))"), Value::Int(4_000_000_000));

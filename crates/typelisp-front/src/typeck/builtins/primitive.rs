@@ -148,24 +148,22 @@ fn symbol(def: &mut BuiltinType) {
 }
 
 /// Built-in arithmetic/comparison instance methods for a fixed-width integer
-/// type: `+ - * / mod` (binary, same-type) and `< <= > >= = /=` (binary,
-/// `Bool`-valued). `mod` is floored (CL, sign of the divisor); `/`/`mod`
-/// panic on a zero divisor at runtime (`crate::eval::interp::
-/// eval_int_builtin`) — the type system can't express "nonzero", the same
-/// precedent as `car`/`cdr` on a non-`Cons` `Sexpr`. Shared by every width
-/// since the operation set and panic policy are identical; only the
-/// receiver/param `Type` differs. The rest of CL's integer catalog
-/// (`rem`/`abs`/`signum`/`gcd`/`lcm`) is defined in `prelude.rs` as ordinary
-/// typelisp methods (so it compiles via the normal path); only the
-/// operations needing a genuinely primitive machine op live here.
+/// type: `+ - * / mod rem` (binary, same-type) and `< <= > >= = /=` (binary,
+/// `Bool`-valued). What each one means is `typelisp_mem::fixed`'s: `mod` is
+/// floored (CL, sign of the divisor) and `rem` truncated; `/`/`mod`/`rem`
+/// panic on a zero divisor at runtime — the type system can't express
+/// "nonzero", the same precedent as `car`/`cdr` on a non-`Cons` `Sexpr`.
+/// Shared by every width since the operation set and panic policy are
+/// identical; only the receiver/param `Type` differs. The rest of CL's
+/// integer catalog (`abs`/`signum`/`gcd`/`lcm`) is defined in `prelude.rs` as
+/// ordinary typelisp methods.
 fn fixed_width(def: &mut BuiltinType, ty: Type) {
     // `max`/`min` (CL) and the bitwise operators (`logand`/`logior`/
     // `logxor`) are same-type binary ops like `+`/`-`/`*`. Every one of them
     // works in the receiver type's own width and signedness — the value in
     // hand is always the number its type names, sign- or zero-extended into
-    // the 64-bit carrier (see `types::normalize_int` and `eval_int_builtin`'s
-    // doc comment).
-    for op in ["+", "-", "*", "/", "mod", "max", "min", "logand", "logior", "logxor"] {
+    // the 64-bit carrier (`typelisp_mem::fixed`).
+    for op in ["+", "-", "*", "/", "mod", "rem", "max", "min", "logand", "logior", "logxor"] {
         def.instance(op, vec![ty.clone(), ty.clone()], ty.clone());
     }
     // `ash` (arithmetic shift, positive = left) is *not* one of them: its
@@ -175,9 +173,8 @@ fn fixed_width(def: &mut BuiltinType, ty: Type) {
     // rejected because `-3` is out of `u8`'s range. The distance is an `int`
     // for the same reason CL's `(ash integer count)` lets `count` be any
     // integer: it measures bits, so the receiver's width and signedness have
-    // nothing to say about it. The compiled tier passes the distance as a
-    // raw word and `rt_int_ash` reads it as a signed count, as does
-    // `eval_int_builtin`.
+    // nothing to say about it. Both engines read it as a signed count
+    // (`typelisp_mem::fixed::ash`).
     def.instance("ash", vec![ty.clone(), Type::Int], ty.clone());
     for op in ["<", "<=", ">", ">=", "=", "/="] {
         def.instance(op, vec![ty.clone(), ty.clone()], Type::Bool);
@@ -261,7 +258,12 @@ fn width_casts(def: &mut BuiltinType, ty: &Type) {
     for to in crate::types::INT_TYPES.iter().chain(crate::types::C_WORD_TYPES.iter()) {
         let target = to.scalar_name().expect("the widths are scalar types");
         def.instance(&format!("int->{}", target), vec![ty.clone()], to.clone());
-        def.instance(&format!("try-int->{}", target), vec![ty.clone()], option_of(to.clone()));
+        // No `try-` form for a C word: `Option<c-long>` would put the word
+        // inside another type, which `type_syntax::no_nested_raw_word`
+        // refuses everywhere else.
+        if !to.is_c_word() {
+            def.instance(&format!("try-int->{}", target), vec![ty.clone()], option_of(to.clone()));
+        }
     }
 }
 
@@ -320,6 +322,11 @@ fn float(def: &mut BuiltinType, ty: Type) {
     // `truncate`); a non-finite float panics, having no integer to truncate
     // to. A fixed-width target is reached by chaining `int->W`.
     def.instance("float->int", vec![ty.clone()], Type::Int);
+    // `float->i8` and the other fixed widths: the low bits of what
+    // `float->int` answers, worked out with no `int` on the way.
+    for (name, to) in [("float->i8", Type::I8), ("float->i16", Type::I16), ("float->i32", Type::I32), ("float->u8", Type::U8), ("float->u16", Type::U16), ("float->u32", Type::U32)] {
+        def.instance(name, vec![ty.clone()], to);
+    }
     // `float->ratio`: widening and *exact* — every finite `f64` is itself an
     // exact dyadic rational (CL's `rational`, not the lossy-round-trip
     // `rationalize`), via `num_rational::BigRational::from_float`.

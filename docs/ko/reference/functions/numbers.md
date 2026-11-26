@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/numbers.md @ 676864f7e6cf8e950e51aadacecd49695c8545a8 -->
+<!-- translated-from: docs/ja/reference/functions/numbers.md @ 1b5dc6ac828d8e4a95800a91218b5e9dffe83f98 -->
 # 수
 
 정수, 부동소수점 수, 유리수, 복소수, 진리값의 연산과 그 밖의 수 관련 함수. 호출 형식 읽는 법은
@@ -60,11 +60,10 @@
 | `int->i8` … `int->u32` | `(int->W x)` | `T→W` | 1장과 같은 폭 변환. 들어가지 않는 값은 잘린다 |
 | `try-int->i8` … `try-int->u32` | `(try-int->W x)` | `T→Option<W>` | 같은 변환을 질문으로 |
 | `int->c-long` `int->c-ulong` | `(int->W x)` | `T→W` | 들어오는 길. 다른 원시 워드와 1장의 정수 타입에서 |
-| `try-int->c-long` `try-int->c-ulong` | `(try-int->W x)` | `T→Option<W>` | 위와 같음 |
 | `int->int` | `(int->int x)` | `T→int` | **항상 정확**. `i32`에 들어가지 않는 `size_t`를 정직하게 읽는 방법 |
 
 `(as i32 x)` / `(try-as i32 x)` / `(as int x)` / `(as c-ulong n)`이 이것들이 하는 일이며, 변환은 1장의 정수 타입과의 모든
-쌍에 있다. `ptr`에는 이 표조차 없다. 포인터를 수로 읽는 방법은 제공하지 않는다. 받고, 넘기고, 다른 C 함수에 건네기만
+쌍에 있다. 생 워드로의 `try-` 형태는 없다. `Option<c-long>`은 생 워드를 다른 타입 안에 넣게 되어 쓸 수 없기 때문이다. `ptr`에는 이 표조차 없다. 포인터를 수로 읽는 방법은 제공하지 않는다. 받고, 넘기고, 다른 C 함수에 건네기만
 하는 값이다.
 
 **출력할 수도 없다.** `(println "~a" x)`는 원시 워드를 받지 않으므로(`Sexpr` 표현이 없다) `(println "~a" (as int n))`처럼
@@ -125,6 +124,7 @@ CL의 `integer`이며 이 언어의 **정수**이다. 주석 없는 정수 리�
 | `log`(2인수) | `(log x base)` | `(f64,f64)→f64` | 밑을 지정한 로그. `(/ (log x) (log base))`로 전개된다(8장) |
 | `floor-div` `ceiling-div` `round-div` `truncate-div` | `(op a b)` | `(f64,f64)→cons-cell<f64,f64>` | CL의 2인수판에 해당한다(`(floor 7.0 2.0)`→몫 3, 나머지 1). 1장의 같은 이름의 함수와 같은 설계(`car`=몫, `cdr`=나머지) |
 | `float->int` | `(float->int x)` | `f64→int` | 0 쪽으로 버려 `int`로 바꾼다(CL의 `truncate`. 크기와 관계없이 유한한 값이면 정확). 무한대와 NaN이면 panic. 고정 폭이 필요하면 `(as i32 x)` |
+| `float->i8` `float->i16` `float->i32` `float->u8` `float->u16` `float->u32` | `(op x)` | `f64→i8` | `float->int`의 답의 하위 비트를 그 타입으로 한 것(`int`를 거치지 않는다). 무한대·NaN은 panic. `(as i16 x)`의 실체 |
 | `float->ratio` | `(float->ratio x)` | `f64→ratio` | 정확한 2진 유리수로 `ratio`로 바꾼다(CL의 `rational`) |
 | `float->f32` `float->f64` | `(op x)` | `f64→f32` / `f64→f64` | 부동소수점 폭 사이의 변환. `float->f32`는 가장 가까운 값으로 반올림, `float->f64`는 항상 정확. `(as f32 x)`가 하는 일 |
 | `try-float->f32` `try-float->f64` | `(op x)` | `f64→Option<f32>` / `→Option<f64>` | 같은 변환을 질문으로. 반올림으로 값이 바뀌면 `None`(`f64`로의 확대는 항상 `Some`). `(try-as f32 x)`가 하는 일 |
@@ -305,7 +305,7 @@ CL의 `numberp`/`integerp`/`floatp` 같은 **타입 술어는 없다**. 정적 �
 
 | 이름 | 타입 | 설명 |
 |---|---|---|
-| `most-positive-fixnum` / `most-negative-fixnum` | `int` | 63비트 즉시값의 상한 / 하한(2^62-1 / -2^62). 넘는 `int`는 다배정도가 된다 |
+| `most-positive-fixnum` / `most-negative-fixnum` | `int` | 63비트 즉시값의 상한 / 하한(2^62-1 / -2^62; wasm32와 Cortex-M에서는 31비트로 2^30-1 / -2^30). 넘는 `int`는 다배정도가 된다 |
 | `most-positive-double-float` / `most-negative-double-float` | `f64` | 가장 큰 / 가장 작은 유한값 |
 | `least-positive-double-float` / `least-negative-double-float` | `f64` | 비정규화 수를 포함한 0이 아닌 가장 작은 크기 |
 | `least-positive-normalized-double-float` / `least-negative-normalized-double-float` | `f64` | 같은 것을 정규화 수로 한정한 것 |

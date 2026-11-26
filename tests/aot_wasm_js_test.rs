@@ -10,7 +10,7 @@
 //! Scratch files go under `target/aot-test-tmp/`, one name per test, for the
 //! reason `tests/compile_file_test.rs`'s module doc comment gives.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 
 const TYPL: &str = env!("CARGO_BIN_EXE_typl");
@@ -90,10 +90,8 @@ fn hello_world_prints_and_exits_as_natively() {
     assert_eq!(code, Some(0));
 }
 
-/// The module imports only what the loader gives it.
-#[test]
-fn the_module_imports_only_the_loader_s_functions() {
-    let wasm = module("wasmjs_imports", r#"(defun main () () (println "x"))"#, &[]);
+/// The functions the module at `wasm` imports, sorted, as `module.name`.
+fn imports(wasm: &Path) -> String {
     let script = format!(
         "const m = await WebAssembly.compile(require('fs').readFileSync({:?})); \
          console.log(WebAssembly.Module.imports(m).map(i => i.module + '.' + i.name).sort().join(' '))",
@@ -104,7 +102,19 @@ fn the_module_imports_only_the_loader_s_functions() {
         .output()
         .expect("failed to start node");
     assert!(out.status.success(), "{}", text(&out.stderr));
-    assert_eq!(text(&out.stdout), "typelisp.exit typelisp.now typelisp.sleep typelisp.unix_time typelisp.write\n");
+    text(&out.stdout)
+}
+
+/// The module imports only what the loader gives it, and of that only what
+/// the program uses: the clock and `sleep` come with the scheduler, which a
+/// program that never waits does without, and the time of day with the
+/// random state, which a program that draws no random number does without.
+#[test]
+fn the_module_imports_only_the_loader_s_functions() {
+    let wasm = module("wasmjs_imports", r#"(defun main () () (println "x"))"#, &[]);
+    assert_eq!(imports(&wasm), "typelisp.exit typelisp.write\n");
+    let wasm = module("wasmjs_imports_sleep", r#"(defun main () () (sleep 0.01) (println "x ~a" (random 1)))"#, &[]);
+    assert_eq!(imports(&wasm), "typelisp.exit typelisp.now typelisp.sleep typelisp.unix_time typelisp.write\n");
 }
 
 #[test]

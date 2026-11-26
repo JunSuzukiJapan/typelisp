@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/system.md @ 7622044725db7d28dabb691d82e592367d9284e8 -->
+<!-- translated-from: docs/ja/reference/functions/system.md @ b01477a6134617bbcef066ff2065d17245132754 -->
 # Czas, środowisko i implementacja
 
 Funkcje do obsługi czasu, zapytania o środowisko uruchomieniowe, narzędzia implementacji, parsowanie i
@@ -368,3 +368,32 @@ kompilowana jest rozwinięta postać ciała.
 | `with-standard-io-syntax` | `(with-standard-io-syntax body...)` | — | Wykonuje `body` z każdą zmienną sterującą drukarki ustawioną na wartość standardową i `*read-eval*` ustawionym na `true` ([Wypisywanie](printing.md#6-kontrolowanie-ile-jest-wypisywane)) |
 | `exit` | `(exit code)` | `int→!` | Kończy proces |
 | `dump` | `(dump path)` | `string→bool` | Zapisuje bieżące środowisko (informacje o typach plus skompilowane ciała) do jednego pliku. `typl --image <path>` startuje od niego ponownie. Tylko interpreter ([Referencja składni 10.1](../syntax.md#101-zrzuty-dumps)) |
+
+## 11. Przerwania mikrokontrolera (`std::board`)
+
+Sprowadza się je przez `use`, np. `(use std::board::enable-interrupt)`. Jak napisać procedurę obsługi przerwania, opisuje [dokumentacja składni 3.17](../syntax.md#317-interruptn--exceptionname--procedury-obsługi-przerwań).
+
+| Nazwa | Forma | Typ | Opis |
+|---|---|---|---|
+| `enable-interrupt` | `(enable-interrupt n)` | `int→()` | Sprawia, że przerwanie peryferyjne `n` (od 0 do 239) nadchodzi. Poza mikrokontrolerem błąd czasu wykonania (błąd kompilacji przy `typl -c`) |
+| `disable-interrupt` | `(disable-interrupt n)` | `int→()` | Sprawia, że przerwanie `n` przestaje nadchodzić. Poza mikrokontrolerem jak `enable-interrupt` |
+
+## 12. Debugowanie (`std::dbg`)
+
+Wprowadza się przez `use`, jak w `(use std::dbg::llvm-size-of)`.
+
+| Nazwa | Forma | Typ | Opis |
+|---|---|---|---|
+| `llvm-size-of` | `(llvm-size-of expr)` | `A→u32` | W ilu bajtach skompilowany kod trzyma wartość `expr`. LLVM liczy rozmiar typu LLVM, który kompilator nadał wartości, dla celu, na którym działa kod. `expr` jest wartościowane. Uruchomione przez interpreter daje błąd czasu wykonania |
+
+`size-of-val` podaje rozmiar wynikający z typu, a `llvm-size-of` rozmiar, którego skompilowany kod faktycznie używa. Jeśli się różnią, kompilator myli się co do szerokości wartości.
+
+```lisp
+(use std::dbg::llvm-size-of)
+(defun widths ((x i8)) ()
+  (println "~a ~a ~a" (llvm-size-of x) (llvm-size-of (as u32 x)) (llvm-size-of (< x 0))))
+(compile widths)
+(widths 1)                          ; wypisuje 1 4 1
+```
+
+Wartość na stercie (`string`, typ `defstruct` itd.) i `int` zajmują jedno słowo, które oznacza miejsce wartości albo samą wartość.

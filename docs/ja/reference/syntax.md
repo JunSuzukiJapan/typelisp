@@ -71,9 +71,11 @@ typelisp は静的型付きの Lisp。文法は S 式。組み込み関数・メ
   型になる（`#{"foo" 123}` は `#{string int}`）。要素は 1〜12 個。評価するたびに新しいタプルが
   できる。計算した値から作るには `(tuple a b)` を使う。S 式データが期待される場所では、要素が
   すべてデータのタプル——`Sexpr` の `Tuple` 変種——になる。
-- **属性**: `#[test]` は次のフォームに付く印（Rust と同じ書き方）。今ある属性は `test` だけで、
-  `defun` に付ける（[3.16 `#[test]`](#316-test--テスト関数)）。`read` で読むと
-  `(%internal::attribute (test) フォーム)` というリストになる。
+- **属性**: `#[test]` は次のフォームに付く印（Rust と同じ書き方）。今ある属性は `test`、
+  `interrupt(N)`、`exception(NAME)` の 3 つで、どれも `defun` に付ける
+  （[3.16 `#[test]`](#316-test--テスト関数)、[3.17 割り込みハンドラ](#317-interruptn--exceptionname--割り込みハンドラ)）。
+  引数のある属性は名前の直後に括弧を続けて書く。`read` で読むと
+  `(%internal::attribute (test) フォーム)`、`(%internal::attribute ((interrupt 7)) フォーム)` というリストになる。
 - **空リスト `()`**: 文脈によって `Unit` 型の値、または `Option<Sexpr>` の `None` になる。
   **`Sexpr` に空リストの変種は無い**——`Sexpr` は「空でない S 式」を表し、S 式データの型は
   `Option<Sexpr>` である（[4.3 match](#43-match--パターンマッチ) の「`Option<Sexpr>` のパターン」参照）。
@@ -338,7 +340,7 @@ C の識別子は含めないため。C 名を省くと名前がそのまま C �
 #### ptr / c-long / c-ulong —— 生の機械語
 
 `ptr` は不透明なポインタ（`void *`、`FILE *`、何であれ宣言が意味したもの）。`c-long` /
-`c-ulong` は C の `long` / `unsigned long`（`size_t`、`int64_t`、`intptr_t` も同じ）。
+`c-ulong` は C の `long` / `unsigned long`（`size_t`、`intptr_t` も同じ）。
 
 ```lisp
 (defffi (c-malloc "malloc") (c-ulong) ptr)
@@ -350,7 +352,8 @@ C の識別子は含めないため。C 名を省くと名前がそのまま C �
 
 **`i64` / `u64` と呼ばないのは意図的。** この言語には 64bit 整数型が無い——タグ付きの即値は
 63bit しかないため（[2 章](#2-型の書き方)）。`c-long` という名前は「これは C との境界を渡る語で
-あって、この言語の整数ではない」と言っている。
+あって、この言語の整数ではない」と言っている。幅はコンパイル先の C の `long` と同じ（64bit の
+macOS と Linux では 64bit、wasm32 と Cortex-M では 32bit）。
 
 **算術は付いていない。** `(+ x 1)` は書けない。付けられるのに付けていないのは、どこにも保存
 できない値の上で、他のあらゆる数と幅の違う計算をさせないため——64bit 整数型を消したのと同じ
@@ -358,7 +361,7 @@ C の識別子は含めないため。C 名を省くと名前がそのまま C �
 
 ```lisp
 (as i32 (unsafe (c-strlen "hello")))         ; 返ってきたものを読む
-(as int (unsafe (c-strlen s)))               ; 正確に読むならこちら（int は 64bit を落とさない）
+(as int (unsafe (c-strlen s)))               ; 正確に読むならこちら（int は値を落とさない）
 (try-as i32 (unsafe (c-strlen s)))           ; 入るかどうかを問う
 (as c-ulong n)                               ; 他の整数から作る
 ```
@@ -481,7 +484,8 @@ C と同じ配置の構造体を宣言する。トップレベルの `unsafe` �
 
 フィールドに書ける型は `i8` `i16` `i32` `u8` `u16` `u32` `c-long` `c-ulong` `f32` `f64` `bool`
 `ptr`、型付きポインタ `(ptr T)`、それに別の `def-c-struct`（値として埋め込む）。配置（各
-フィールドのオフセット、構造体のサイズと整列）は C の規則で計算する（LP64 を前提にする）。
+フィールドのオフセット、構造体のサイズと整列）は C の規則で計算する（`c-long` とポインタの幅、
+`f64` の整列はコンパイル先の C に合わせる）。
 自分自身を指すフィールドは書けるが、自分自身を埋め込むことはできない。
 
 ```lisp
@@ -505,6 +509,7 @@ C と同じ配置の構造体を宣言する。トップレベルの `unsafe` �
 | `(c-alloc T)` / `(c-alloc T n)` | `T` を `n` 個（省略時 1 個）確保する。中身は 0 で埋まる。`(ptr T)` を返す |
 | `(c-ref p i)` | `p` から `i` 個目の要素へのポインタ。確保した範囲の外ならエラー |
 | `(c-deref p)` / `(setf (c-deref p) v)` | `p` の指すスカラを読む・書く |
+| `(volatile-read-u32 addr)` / `(volatile-write-u32 addr v)` | 番地 `addr`（`int` か、`u16` などの幅のある整数）のレジスタを読む・書く。必ずその場所で 1 回。`-u8`・`-u16` も同じ |
 | `p::field` / `(setf p::field v)` | 構造体のフィールドを読む・書く。埋め込んだ構造体のフィールドは、読むとそのアドレス（`(ptr 内側の型)`）になる |
 | `(as ptr p)` | 型を忘れて `ptr` にする（`qsort` の `void *` などへ渡すため）。逆向きの変換は無い |
 
@@ -1266,6 +1271,46 @@ test result: FAILED. 1 passed; 1 failed; 0 filtered out
 テストの中で `print` したものは、そのまま標準出力に出る（取り込まない）。調べるための出力は、標準エラー出力に
 書く `eprint`/`eprintln`（[印字](functions/printing.md)）を使うと、プログラムの出力と混ざらない。
 
+### 3.17 `#[interrupt(N)]` / `#[exception(NAME)]` — 割り込みハンドラ
+
+```lisp
+(use std::board::enable-interrupt)
+(defvar (*received* int) 0)
+
+#[interrupt(7)]
+(defun on-uart () ()
+  (unsafe (volatile-write-u32 #x4000400C 1))   ; 割り込みの要因を消す
+  (setf *received* (+ *received* 1))
+  ())
+
+(defun main () ()
+  (enable-interrupt 7)
+  ...)
+```
+
+マイコン向けにコンパイルしたプログラム（[コンパイル](../guide/compile.md) の 3.8 節）で、割り込みが
+来たときに呼ばれる関数を書く。`#[interrupt(N)]` は周辺機器の割り込み `N`（0〜239）、`#[exception(NAME)]`
+はコアの例外 `NAME` のハンドラになる。`NAME` は `NonMaskableInt`、`MemoryManagement`、`BusFault`、
+`UsageFault`、`SVCall`、`DebugMonitor`、`PendSV`、`SysTick` のどれか（`HardFault` はランタイムが受け持ち、
+プログラムを終わらせる）。
+
+- Arduino Uno 向けでは番号の数え方と有効にする方法が違い、`#[exception(NAME)]` と `enable-interrupt` は使えない
+  （[コンパイル](../guide/compile.md) の 3.9 節）。下の説明のうちランタイムに関わるものは、Cortex-M のもの。
+- 引数を取らず `()` を返す、トップレベルの `defun` に付ける（型パラメータも取れない）。1 つの割り込みに
+  ハンドラは 1 つ、1 つの関数が受け持つ割り込みも 1 つ。
+- 周辺機器の割り込みは `(enable-interrupt N)` で有効にするまで来ない（`(disable-interrupt N)` で止める。
+  [システム](functions/system.md)）。SysTick などの例外は、その例外を起こす設定をレジスタに書けば来る。
+- ハンドラは割り込みが来たその場で実行される。ただしランタイムの処理（確保、GC、出力、タスクの切り替え
+  など）の途中に来たときは、その処理が終わるまで待ってから実行される。ハンドラどうしは割り込み合わない。
+- ハンドラの中では GC が起きない（必要ならヒープを伸ばす）。プログラムの状態（グローバル変数など）は
+  そのまま読み書きできる。
+- ハンドラは待てない。`sleep` を使うハンドラはコンパイルエラーになる。チャネルの受信など、待つかどうかが
+  実行時に決まる操作は、待たずに済むときだけ使え、待つことになれば panic になる。
+- ハンドラから外へ出る `panic` と `throw` は、捕まえられなかったときと同じくプログラムを終わらせる。
+- インタプリタや、マイコン以外に向けたコンパイルでは割り込みは来ない。インタプリタではハンドラは普通の
+  関数として呼べる（テストに使える）。マイコン以外に向けた `typl -c` では、ハンドラがあるとコンパイル
+  エラーになる。
+
 ## 4. 束縛・条件分岐
 
 ```lisp
@@ -1702,6 +1747,8 @@ CL は節の語を裸のシンボルで書くが（`(loop for i from 1 to 3 coll
 (todo)                              ; (panic "todo") に展開。defmacro
 (as Type expr)                      ; 数値/文字の型変換。失敗しうる変換は失敗時に panic
 (try-as Type expr)                  ; as と同じだが結果を Option<Type> で返す（失敗は None）
+(size-of Type)                      ; Type の値のバイト数（int）
+(size-of-val expr)                  ; expr の型の値のバイト数（int）。expr は評価しない
 (print control args...)             ; 書式展開して標準出力へ（改行なし）
 (println control args...)           ; 同上（末尾に改行）
 (format dest control args...)       ; CL の format。展開結果の string を返す
@@ -1743,6 +1790,30 @@ CL は節の語を裸のシンボルで書くが（`(loop for i from 1 to 3 coll
 続けて呼ぶ。`rational` からは `int`（`as` は切り捨て、`try-as` は整数のときだけ成功）・`ratio`・`f64` へ、
 `int`/`ratio` からは `rational` へ変換できる。対応する変換メソッド（[数値](functions/numbers.md)の `int->char`/`int->int`/`int->W` 等）へ
 展開される糖衣構文。
+
+`size-of`/`size-of-val` は C の `sizeof` に当たる。答えはコンパイル時に決まる定数で、コードが動く
+ターゲットでの大きさになる:
+
+| 型 | バイト数 |
+|---|---|
+| `i8` `u8` `bool` | 1 |
+| `i16` `u16` | 2 |
+| `i32` `u32` `f32` `char` | 4 |
+| `f64` | 8 |
+| `c-long` `c-ulong` | ターゲットの C の `long` と同じ |
+| `ptr` `(ptr T)` | ターゲットのポインタと同じ |
+| `def-c-struct` の型 | C の構造体と同じ（詰め物を含む） |
+| `()` | 0 |
+| それ以外（`int`、`string`、`defstruct` の型など） | 語 1 つ（ターゲットのポインタと同じ）。値そのものか、値の場所を表す |
+
+```lisp
+(size-of u16)                       ; => 2
+(size-of-val (as i8 5))             ; => 1
+(let ((x 1.0)) (size-of-val x))     ; => 8
+```
+
+ジェネリック関数の型パラメータも書け、呼び出しごとの型で決まる。`!` には値が無いのでエラー。
+`def-c-struct` の型は `unsafe` の外でも書ける。
 
 `documentation` は `quote`/`compile` と同様、`name` を評価せず未評価の裸シンボル/`::`パスとして
 読む特殊形。CL の `(documentation 'name 'function)` と違い型引数は取らない——`name` を変数→関数→型
@@ -2122,8 +2193,8 @@ netpoller と同じ形。走れるタスクが無いときだけ、処理系は�
   トップレベルの形の合間には、他のスレッドはタスクを進めない（残ったタスクは次の評価で
   続きから走る）。評価の終わりには各スレッドが今の一歩を終えるのを待つので、`thread` の中で
   ブロックし続ける C 関数（`defffi`）があると、それが返るまで評価が終わらない。
-- **ワーカー上の印字**: 解釈実行される `print-object` メソッドや、`~/name/` が呼ぶ解釈実行の
-  関数・メソッドは他のスレッドでは走らせられないので、そういう値を他のスレッドで印字すると `(panic ...)` と同じ扱いの panic になる
+- **ワーカー上の印字**: 解釈実行される `print-object` メソッドは他のスレッドでは走らせられないので、
+  そういう値を他のスレッドで印字すると `(panic ...)` と同じ扱いの panic になる
   （`(compile T::print-object)` するか、メインタスクから印字する）。
 - **データ競合は未定義**（Go と同じ立場）。`Mutex<T>`・`Chan<T>` を通さずに複数のタスクから
   同じ値を書き換えた結果は保証されない。

@@ -25,13 +25,11 @@ use std::rc::Rc;
 
 use inkwell::memory_buffer::MemoryBuffer;
 use inkwell::module::Module;
-use inkwell::AddressSpace;
 
 use typelisp_mem::{Heap, RootScope, SymRef, Value};
 
 use crate::check::repr::Repr;
 use crate::eval::interp::{str_rt, EvalError, Interp, Uncompilable};
-use crate::compile::externs::rt_extern_functions;
 use crate::compile::symbols::target_symbol_name;
 use crate::CompileTarget;
 
@@ -223,17 +221,13 @@ pub(crate) fn fresh_module_with_declarations(name: &str, items: &[CompileTarget]
     let ctx = crate::compile::llvm_context();
     let _guard = crate::compile::COMPILE_LOCK.lock().unwrap();
     let module = ctx.create_module(name);
-    let ptr_ty = ctx.ptr_type(AddressSpace::default());
-    let fn_ty = ctx.i64_type().fn_type(&[ptr_ty.into(), ctx.i32_type().into()], false);
-    for (name, _) in rt_extern_functions() {
-        module.add_function(name, fn_ty, None);
-    }
+    crate::compile::externs::declare_runtime_functions(&module);
     // Under the coroutine ABI (Phase C2) a compiled Lisp function is
     // `i64 f(i64 frame)`, not `i64 f(i64*, i32)`.
     let lisp_fn_ty = if crate::compile::EMITTED_BODY_ABI == typelisp_abi::BODY_ABI_COROUTINE {
-        ctx.i64_type().fn_type(&[ctx.i64_type().into()], false)
+        crate::compile::carriers::word().fn_type(&[crate::compile::carriers::word().into()], false)
     } else {
-        fn_ty
+        crate::compile::llvm_builtins::compiled_fn_type()
     };
     for item in items {
         let sym = target_symbol_name(item);
@@ -336,6 +330,19 @@ pub fn translate_and_compile(
     internal_name: &str,
     extra_exclude_from_cell_names: &HashSet<SymRef>,
 ) -> Result<(), EvalError> {
+    let (param_list, body_sexpr) = translate(interp, heap, params, body, extra_exclude_from_cell_names)?;
+    run_compile_function(interp, heap, module, internal_name, param_list, body_sexpr)
+}
+
+/// [`translate_and_compile`]'s first half: the function as the island takes
+/// it, its parameter list and its body. Unrooted.
+pub fn translate(
+    interp: &Interp,
+    heap: &mut Heap,
+    params: &[(SymRef, Repr)],
+    body: &[Value],
+    extra_exclude_from_cell_names: &HashSet<SymRef>,
+) -> Result<(Value, Value), EvalError> {
     prepare_targets(interp, heap, body)?;
     // `core_bridge` is deliberately `Registry`-free, so hand it the type
     // definitions as a plain flattened snapshot of the scope tree —
@@ -356,8 +363,7 @@ pub fn translate_and_compile(
     drop(compiled_globals);
     drop(vtable_ids);
     drop(trait_ids);
-
-    run_compile_function(interp, heap, module, internal_name, param_list, body_sexpr)
+    Ok((param_list, body_sexpr))
 }
 
 /// The scope tree's type definitions, in the shape the compile bridge
@@ -476,8 +482,7 @@ fn optimize_ir(interp: &Interp, heap: &mut Heap, body_sexpr: Value) -> Result<Va
 /// AOT-only counterpart of [`crate::compile::driver::add_compiled_function`]: compiles a
 /// `defvar`'s initializer expression `value` into a zero-argument LLVM
 /// function `internal_name` in `module` that, when called, evaluates it
-/// and calls `rt_global_new` to establish that global's *runtime*
-/// storage — one entry in the startup sequence `compile::aot::
+/// and makes the global (`global-new`) — one entry in the startup sequence `compile::aot::
 /// compile_file` generates and wires into `main` (via
 /// `compile::aot::build_main_wrapper`) so a standalone executable
 /// allocates each of its own promoted globals before `tl_main` (the
@@ -487,9 +492,8 @@ fn optimize_ir(interp: &Interp, heap: &mut Heap, body_sexpr: Value) -> Result<Va
 ///
 /// Mirrors `add_compiled_function`'s own translate-then-`compile-
 /// function` shape almost exactly, just with no parameters and a body
-/// wrapped as `(global-init kind value-form)`
-/// ([`crate::compile::symbols::ast_to_sexpr_for_global_init`],
-/// `compiler.rs`'s `compile-global-init`) instead of an ordinary
+/// wrapped as `(global-init id kind value-form)`
+/// ([`crate::compile::core_bridge::global_init`], `compiler.rs`'s `compile-global-init`) instead of an ordinary
 /// translated function body — `value` may itself reference other
 /// globals (an earlier `defvar`'s value), so the same promotion pass
 /// applies here too.
@@ -500,6 +504,14 @@ pub fn add_compiled_global_init(
     internal_name: &str,
     form: Value,
 ) -> Result<(), EvalError> {
+    let body_sexpr = translate_global_init(interp, heap, form)?;
+    // A global initializer takes no parameters.
+    run_compile_function(interp, heap, module, internal_name, Value::Empty, body_sexpr)
+}
+
+/// [`add_compiled_global_init`]'s first half: the initializer as the island
+/// takes it. Unrooted.
+pub fn translate_global_init(interp: &Interp, heap: &mut Heap, form: Value) -> Result<Value, EvalError> {
     // The whole `(defvar ...)` form, not just its initializer:
     // `core_bridge::global_init` reads the declared representation off the
     // form to know how the global's storage is tagged, which the
@@ -525,11 +537,7 @@ pub fn add_compiled_global_init(
     drop(compiled_globals);
     drop(vtable_ids);
     drop(trait_ids);
-    let mut s = RootScope::new(heap);
-    s.push_root(body_sexpr);
-    // A global initializer takes no parameters.
-    let param_list = Value::Empty;
-    run_compile_function(interp, &mut s, module, internal_name, param_list, body_sexpr)
+    Ok(body_sexpr)
 }
 
 /// `(compile fn-name)` (or `(compile type::method)`): JIT-compiles a
@@ -665,9 +673,7 @@ pub fn disassemble_function(
             crate::compile::llvm_builtins::declare_external_compiled_function(&module, &target_symbol);
         }
     }
-    for (rt_name, _) in rt_extern_functions() {
-        crate::compile::llvm_builtins::declare_external_function(&module, rt_name);
-    }
+    crate::compile::externs::declare_runtime_functions(&module.borrow());
 
     add_compiled_function(interp, heap, module.clone(), target, &symbol)?;
 
@@ -778,9 +784,7 @@ pub fn compile_scc(interp: &Interp, heap: &mut Heap, members: &[CompileTarget]) 
     for member in members.iter().chain(&targets) {
         crate::compile::llvm_builtins::declare_external_compiled_function(&module, &target_symbol_name(member));
     }
-    for (rt_name, _) in rt_extern_functions() {
-        crate::compile::llvm_builtins::declare_external_function(&module, rt_name);
-    }
+    crate::compile::externs::declare_runtime_functions(&module.borrow());
 
     for member in members {
         add_compiled_function(interp, heap, module.clone(), member, &target_symbol_name(member))?;
@@ -794,7 +798,7 @@ pub fn compile_scc(interp: &Interp, heap: &mut Heap, members: &[CompileTarget]) 
             (target_symbol_name(t), addr)
         })
         .collect();
-    externals.extend(rt_extern_functions().iter().map(|(n, addr)| (n.to_string(), *addr)));
+    externals.extend(crate::compile::externs::runtime_addresses().map(|(n, addr)| (n.to_string(), addr)));
     // Mirrors `compile::aot::compile_file`'s own `verify()` call in the
     // same position, before handing the module to LLVM for real: a
     // typelisp-hosted `compiler.rs` bug that emits

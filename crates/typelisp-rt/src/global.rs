@@ -1,5 +1,6 @@
 //! Global variables (`defvar`/`defconstant`) for compiled code.
 
+use typelisp_mem::Word;
 use typelisp_abi::{active_heap, decode, encode, fatal};
 use typelisp_mem::{Heap, Value};
 use crate::shared;
@@ -10,9 +11,8 @@ use crate::shared;
 // compiled code can reach — the interpreter's own `Interp.globals` is a
 // plain Rust `HashMap` on the other side of the JIT/AOT boundary, invisible
 // here. Each such global is instead backed by a permanent GC root
-// (`Heap::push_permanent_root`, the same mechanism `rt_push_permanent_sexpr_root`
-// already uses for boxed-struct fields — "lives for the process, no matching
-// pop" is exactly a global's actual lifetime). `rt_global_new`/`rt_global_get`/
+// (`Heap::push_permanent_root`): living for the process, with no matching
+// pop, is exactly a global's actual lifetime. `rt_global_new`/`rt_global_get`/
 // `rt_global_set` are the read/write surface; see `rt_global_new`'s doc
 // comment for why a global's *id* (what `compiler.rs`'s generated code
 // addresses it by) and its raw permanent-root position aren't the same
@@ -50,8 +50,7 @@ pub fn reset_global_table() {
 /// plain `pub fn`s rather than FFI-only.
 ///
 /// The id is *not* the slot's `Heap::permanent_root` position: unrelated
-/// code ([`rt_push_permanent_sexpr_root`], called by `compiler.rs`'s
-/// `compile-construct-box-fields` for an ordinary boxed-struct field) also
+/// code (the checker and the interpreter, for forms they keep) also
 /// pushes permanent roots, so a global's raw heap-root position isn't
 /// predictable at the point `compiler.rs` generates a reference to it. What
 /// *is* predictable: only this function ever appends to `GLOBAL_INDEX`, and
@@ -68,20 +67,17 @@ pub fn global_new(heap: &mut Heap, v: Value) -> usize {
     globals.len() - 1
 }
 
-/// `args[0]` (its initial tagged value) — see [`global_new`] for the id this
+/// `v` (its initial tagged value) — see [`global_new`] for the id this
 /// assigns.
 ///
 /// # Safety
 ///
-/// `argc` must be `>= 1` and `args` must point to at least 1 valid `i64`; a
+/// The words must be valid; a
 /// `Heap` must already be registered on this thread.
 #[no_mangle]
-pub unsafe extern "C" fn rt_global_new(args: *const i64, argc: u32) -> i64 {
-    if argc < 1 {
-        fatal("rt_global_new: expected 1 argument");
-    }
-    let v = decode(*args);
-    global_new(active_heap(), v) as i64
+pub unsafe extern "C" fn rt_global_new(v: Word) -> Word {
+    let v = decode(v);
+    global_new(active_heap(), v) as Word
 }
 
 /// [`global_new`]'s id -> `Heap::permanent_root` position lookup, `pub` for
@@ -101,41 +97,45 @@ pub unsafe extern "C" fn rt_global_new(args: *const i64, argc: u32) -> i64 {
 /// rather than let a panic try to unwind through compiled native code; a
 /// plain Rust-to-Rust caller may still choose to panic on it.
 pub fn global_perm_idx(id: usize) -> Option<usize> {
-    shared::rt_shared().globals.read().get(id).copied()
+    shared::rt_shared().globals.read().get(id).copied().filter(|&i| i != UNUSED)
+}
+
+/// What [`global_skip`] leaves in a global's place.
+const UNUSED: usize = usize::MAX;
+
+/// Takes the next global id without making a slot for it: the global of an
+/// initialiser an executable left out, because nothing it can run reads it
+/// (`compile::aot`). The ids after it are the ones the compiled code
+/// expects; this one is never read, and [`global_perm_idx`] does not know
+/// it.
+pub fn global_skip() {
+    shared::rt_shared().globals.write().push(UNUSED);
 }
 
 /// Reads global `id`'s (an [`rt_global_new`] return value) current value.
 ///
 /// # Safety
 ///
-/// A `Heap` must already be registered on this thread; `args` must point to
-/// at least 1 valid `i64`; `id` must be a value `rt_global_new` actually
+/// A `Heap` must already be registered on this thread; `id` must be a value `rt_global_new` actually
 /// returned on this thread since the last [`reset_global_table`].
 #[no_mangle]
-pub unsafe extern "C" fn rt_global_get(args: *const i64, argc: u32) -> i64 {
-    if argc < 1 {
-        fatal("rt_global_get: expected 1 argument (the global id)");
-    }
-    let id = *args as usize;
+pub unsafe extern "C" fn rt_global_get(id: Word) -> Word {
+    let id = id as usize;
     let perm_idx = global_perm_idx(id).unwrap_or_else(|| fatal("rt_global_get: unknown global id"));
     encode(active_heap().permanent_root(perm_idx))
 }
 
-/// Overwrites global `id`'s value (`args[1]`, tagged) in place
+/// Overwrites global `id`'s value (`tagged`, tagged) in place
 /// (`Heap::set_permanent_root`); returns the new value unchanged, like
 /// [`rt_push_sexpr_root`].
 ///
 /// # Safety
 ///
-/// Same as [`rt_global_get`], plus `args` must point to at least 2 valid
-/// `i64`s.
+/// Same as [`rt_global_get`], and `tagged` must be a valid tagged word.
 #[no_mangle]
-pub unsafe extern "C" fn rt_global_set(args: *const i64, argc: u32) -> i64 {
-    if argc < 2 {
-        fatal("rt_global_set: expected 2 arguments (the global id and its new value)");
-    }
-    let id = *args as usize;
-    let tagged = *args.add(1);
+pub unsafe extern "C" fn rt_global_set(id: Word, tagged: Word) -> Word {
+    let id = id as usize;
+    let tagged = tagged;
     let perm_idx = global_perm_idx(id).unwrap_or_else(|| fatal("rt_global_set: unknown global id"));
     active_heap().set_permanent_root(perm_idx, decode(tagged));
     tagged

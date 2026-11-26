@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ 7622044725db7d28dabb691d82e592367d9284e8 -->
+<!-- translated-from: docs/ja/guide/compile.md @ 1b5dc6ac828d8e4a95800a91218b5e9dffe83f98 -->
 # Compileren
 
 Tenzij je iets anders doet, draaien typelisp-programma's in de interpreter. Daarnaast zijn er twee
@@ -230,7 +230,148 @@ const code = await run({ write: (fd, text) => { /* bijvoorbeeld op de pagina ton
 - Serveer in een browser `hello.wasm` via HTTP vanaf dezelfde plek als `hello.mjs` (vanaf `file://` kan het niet geladen worden).
 - `sleep` wacht met `Atomics.wait`. Een browser staat dat alleen toe in een Worker van een cross-origin-geïsoleerde pagina; voer een programma dat `sleep` gebruikt dus uit in een Worker.
 - De lokale tijd (`decode-universal-time` zonder `zone` enzovoort) wordt berekend met de tijdzone die `Date` van JavaScript meldt.
-- Naast wat in paragraaf 3.6 niet kan, zijn bestands- en mapbewerkingen een **compileerfout**. Standaardinvoer leest als leeg en `(command-line-args)` is een lege vector.
+- Naast wat in paragraaf 3.6 niet kan, zijn bestands- en mapbewerkingen, omgevingsvariabelen, `(command-line-args)`, de thuismap en `dribble` een **compileerfout**. Standaardinvoer wordt als leeg gelezen.
+
+### 3.8 Compileren voor een microcontroller (Cortex-M)
+
+Met `--target thumbv7em-none-eabihf` maakt `typl -c` een uitvoerbaar bestand (ELF) voor een Cortex-M4F- of M7-bord zonder besturingssysteem. Zonder `-o` krijgt het de naam van de bron met `.typl` vervangen door `.elf`. Met `--target thumbv8m.main-none-eabihf` is het voor een Cortex-M33-bord.
+
+```sh
+$ typl -c hello.typl --target thumbv7em-none-eabihf          # maakt hello.elf
+$ qemu-system-arm -M mps2-an386 -nographic \
+    -semihosting-config enable=on,target=native -kernel hello.elf   # draai het op de Cortex-M4 van QEMU
+$ typl -c hello.typl --target thumbv8m.main-none-eabihf
+$ qemu-system-arm -M mps2-an505 -nographic \
+    -semihosting-config enable=on,target=native -kernel hello.elf   # uitvoeren op de Cortex-M33 van QEMU
+```
+
+- Een met `install.sh` geïnstalleerde `typl` kan direct worden gebruikt. Voor `cargo install` voer je eerst `rustup target add thumbv7em-none-eabihf thumbv8m.main-none-eabihf` uit en installeer je met `--features embedded` (`--features wasm,embedded` voor beide). Met een debugbuild van `typl` in de repository voer je `scripts/build-embedded-runtime.sh` uit. Het linken gebruikt de linker van de rustup-toolchain.
+- Geef het geheugen van het bord op met `--linker-script FILE`. Het heeft de vorm van de `memory.x` van `cortex-m-rt`: de adressen en groottes van FLASH en RAM. Een regel als `_typelisp_stack_size = 32K;` bepaalt hoeveel RAM de stack inneemt (zonder opgave 64KiB); de rest van het RAM is de heap. Zonder de optie geldt de indeling van QEMU's `mps2-an386` (`mps2-an505` voor een Cortex-M33).
+
+  ```
+  MEMORY
+  {
+    FLASH : ORIGIN = 0x08000000, LENGTH = 512K
+    RAM : ORIGIN = 0x20000000, LENGTH = 128K
+  }
+  _typelisp_stack_size = 16K;
+  ```
+
+- `--board-functions` kiest wie uitvoer, invoer, afsluiten en de klok (de functies van het bord) levert.
+  - `semihosting` (standaard): via semihosting, om onder QEMU (`-semihosting-config enable=on`) of een debugger te draaien.
+  - `c`: het bord levert ze als C-functies. Geef met `--link FILE` een object of statische bibliotheek door die de functies hieronder definieert (`--link` mag herhaald worden; een bibliotheek van de fabrikant die `defffi` aanroept geef je op dezelfde manier door).
+
+  ```c
+  void     typelisp_host_write(int32_t fd, const uint8_t *p, size_t len); // fd 1 is standaarduitvoer, 2 standaardfout
+  size_t   typelisp_host_read(int32_t fd, uint8_t *p, size_t len);        // fd 0; gelezen bytes, 0 aan het eind
+  void     typelisp_host_exit(int32_t code);                              // keert niet terug
+  uint64_t typelisp_host_now_us(void);                                    // microseconden van een klok die nooit teruggaat
+  int64_t  typelisp_host_unix_us(void);                                   // microseconden sinds 1970-01-01
+  void     typelisp_host_sleep_us(uint64_t us);                           // wacht us microseconden
+  ```
+
+- De registers van een bord (in het geheugen afgebeelde randapparatuur) lees je met `volatile-read-u8`, `volatile-read-u16` en `volatile-read-u32`, en schrijf je met `volatile-write-u8`, `volatile-write-u16` en `volatile-write-u32`. Het adres is een `int` of een geheel getal van vaste breedte zoals `u16`, en de gelezen waarde heeft het type van de breedte (`u8` enzovoort). Elk leest of schrijft precies één keer, op de plek waar het staat; de compiler laat het niet weg en verplaatst het niet. Alle zijn alleen binnen `unsafe` te gebruiken. Een adres dat negatief is, of geen veelvoud van de breedte, is een runtimefout voordat er iets gelezen of geschreven wordt.
+
+  ```lisp
+  ;; UART 0 van de mps2-an386 van QEMU: data 0x40004000, status 0x40004004, besturing 0x40004008
+  (defun put-byte ((c u32)) ()
+    (unsafe
+      (loop (when (= (logand (volatile-read-u32 #x40004004) 1) 0) (break)))   ; wachten zolang hij verstuurt
+      (volatile-write-u32 #x40004000 c)))
+
+  (defun main () ()
+    (unsafe (volatile-write-u32 #x40004008 1))                               ; versturen inschakelen
+    (put-byte 104) (put-byte 105) (put-byte 10))                             ; "hi" en een nieuwe regel
+  ```
+
+- Schrijf de functie die wordt aangeroepen als er een interrupt komt als een `defun` met het attribuut `#[interrupt(N)]` (periferie-interrupt `N`) of een zoals `#[exception(SysTick)]`. Schakel een interrupt in met `(enable-interrupt N)`. Een handler draait meteen; alleen als hij midden in werk van de runtime komt, draait hij nadat dat werk klaar is. Een handler kan niet wachten (`sleep` is een compileerfout). De details staan in paragraaf 3.17 van de [syntaxreferentie](../reference/syntax.md).
+
+  ```lisp
+  (use std::board::enable-interrupt)
+
+  #[interrupt(5)]
+  (defun on-five () ()
+    (println "interrupt 5"))
+
+  (defun main () ()
+    (enable-interrupt 5)
+    (unsafe (volatile-write-u32 #xE000E200 (as u32 32))))   ; interrupt 5 zelf veroorzaken (het pending-register van de NVIC)
+  ```
+
+- De runtime start het programma (de vectortabel en het klaarmaken van het RAM) en wijst geheugen toe. Een HardFault of een onafgehandelde interrupt beëindigt het programma met de exitcode van een panic (1).
+- `throw`/`catch`/`panic`, bignums, breuken en drijvende-kommagetallen, en taken, kanalen en `sleep` gedragen zich zoals in het uitvoerbare bestand. Taken draaien om de beurt op de ene kern. C-functies (`defffi`) kunnen worden gebruikt.
+- Een programma dat iets gebruikt wat het bord niet heeft, is een **compileerfout**: naast wat in paragraaf 3.7 niet kan, `eval` en `macroexpand`. De lokale tijd is onbekend (zoals in paragraaf 3.6).
+- De cons-arena begint met 1024 cellen en groeit wanneer nodig. `--heap-cells`, `--max-memory`, `--no-cons`, `-O<N>` en `--release` werken zoals ze zijn.
+
+### 3.9 Compileren voor een Arduino Uno (AVR)
+
+Met `--target avr-atmega328p` maakt u een uitvoerbaar bestand (ELF) voor de microcontroller van de Arduino Uno (ATmega328P). Het volgende programma laat de led van het bord knipperen.
+
+```lisp
+(defconstant (PINB int) #x23)
+(defconstant (DDRB int) #x24)
+(defconstant (LED u8) 32)                         ; PB5
+
+(defun wait-a-bit () ()
+  (let ((i (the u32 0)))
+    (while (< i (the u32 400000))
+      (unsafe (volatile-read-u8 PINB))
+      (setf i (+ i 1)))
+    ()))
+
+(defun main () ()
+  (unsafe (volatile-write-u8 DDRB LED))           ; als uitgang instellen
+  (while true
+    (unsafe (volatile-write-u8 PINB LED))         ; omkeren
+    (wait-a-bit)))
+```
+
+```sh
+$ typl -c blink.typl --target avr-atmega328p -O2   # maakt blink.elf
+$ qemu-system-avr -M uno -display none -serial stdio -bios blink.elf   # in QEMU uitvoeren
+```
+
+- Er is geen runtime, dus een programma dat die gebruikt is een **compileerfout**. De fout vermeldt wat er nodig is en via welke functies het wordt bereikt. Bruikbaar zijn: rekenen met gehele getallen van vaste breedte (`i8` tot en met `u32`), `f32`, `f64`, `bool` en `char`, functieaanroepen (ook recursieve), voorwaarden, lussen, `defvar` en `defconstant` met zulke waarden, `volatile-read-u8` en dergelijke, en aanroepen van C-functies.
+- Niet bruikbaar zijn: waarden in de heap, zoals strings, lijsten en structs; `catch` en aanroepen van functiewaarden; aanroepen van C-functies die een string of een functie krijgen; wiskundige functies van drijvendekommagetallen zoals `sin` en `expt` (`sqrt` en afronden zoals `floor` zijn wel bruikbaar).
+- Een interrupthandler schrijf je als `#[interrupt(N)]` ([Syntaxis](../reference/syntax.md), paragraaf 3.17). `N` is het interruptnummer van de ATmega328P, 1 tot en met 25 met reset als 0 geteld (overloop van timer 1 is 13). Zie het voorbeeld hieronder.
+- Delen door 0 stopt de microcontroller ter plekke (er komen ook geen interrupts meer). Dat geldt ook voor `/` van de kleinste waarde met teken door `-1`.
+- Een `int` is niet bruikbaar (een compileerfout), omdat het geen vaste breedte heeft. Gebruik een type van vaste breedte, zoals `i16` of `u16`. Ook adressen reken je uit met gehele getallen van vaste breedte. Wat bij het compileren vastligt is wel bruikbaar, zoals een als getal geschreven adres en een `int` van een `defconstant`.
+- Raakt de stack bij een recursie op, dan stopt de microcontroller.
+- Een C-functie declareer je met `defffi`; het voor AVR gecompileerde objectbestand geef je mee met `--link FILE`.
+- Een lus die niets doet, verdwijnt vanaf `-O1`. Lees in een wachtlus bijvoorbeeld een register.
+- Als `main` eindigt, stopt de microcontroller.
+- Met `--linker-script FILE` verandert u de geheugenindeling. Zonder deze optie is dat 32 KiB flash min de laatste 512 bytes van de bootloader, en 2 KiB RAM. RAM-adressen worden geschreven met `0x800000` erbij opgeteld, zoals `0x800100`.
+- Het rekenen met `f32` en `f64` doen hulpfuncties. De gebruikte komen in de flash (die voor `f64` zijn groter).
+- Voor het linken wordt, net als in paragraaf 3.8, de linker van de rustup-toolchain gebruikt.
+
+Een voorbeeld dat de led laat knipperen met een timerinterrupt. Een interrupt schakel je in het register van het apparaat zelf in.
+
+```lisp
+(defconstant (PINB int) #x23)
+(defconstant (DDRB int) #x24)
+(defconstant (LED u8) 32)
+(defconstant (TIMSK1 int) #x6F)
+(defconstant (TCCR1B int) #x81)
+(defvar (ticks u16) 0)
+
+#[interrupt(13)]                                  ; overloop van timer 1
+(defun on-overflow () ()
+  (unsafe (volatile-write-u8 PINB LED))           ; omkeren
+  (setf ticks (+ ticks 1))
+  ())
+
+(defun main () ()
+  (unsafe (volatile-write-u8 DDRB LED)
+          (volatile-write-u8 TIMSK1 1)            ; schakel de overloopinterrupt in
+          (volatile-write-u8 TCCR1B 3))           ; tel op 1/64 van de klok
+  (while true))
+```
+
+- Een programma met een handler laat interrupts toe zodra de globale variabelen geïnitialiseerd zijn. Stel de apparaten in aan het begin van `main`.
+- `enable-interrupt` en `#[exception(NAME)]` zijn niet bruikbaar (compileerfout).
+- Terwijl een handler loopt, wachten andere interrupts. Net als elke andere functie kan een handler de runtime niet gebruiken.
+- Eén keer lezen of schrijven van een globale variabele wordt niet door een handler onderbroken, ook niet bij waarden van twee bytes of meer. Daartoe worden interrupts uitgeschakeld bij het lezen van een variabele die een handler schrijft en bij het schrijven van een variabele die een handler leest of schrijft, en een waarschuwing bij het compileren meldt de variabele. Tussen het lezen en schrijven van een bijwerking (`(setf n (+ n 1))`) kan wel een interrupt komen. Om een variabele bij te werken die een handler ook schrijft, lees en bewaar je het statusregister (adres `#x5F`), schrijf je er 0 in om interrupts te stoppen, en schrijf je daarna de bewaarde waarde terug.
+- Een interrupt zonder handler stopt de microcontroller.
 
 ## 4. Dumps
 

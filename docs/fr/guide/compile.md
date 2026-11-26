@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ 7622044725db7d28dabb691d82e592367d9284e8 -->
+<!-- translated-from: docs/ja/guide/compile.md @ 1b5dc6ac828d8e4a95800a91218b5e9dffe83f98 -->
 # Compilation
 
 Sauf indication contraire, les programmes typelisp s'exécutent dans l'interpréteur. Il existe en outre deux façons
@@ -224,7 +224,148 @@ const code = await run({ write: (fd, text) => { /* l'afficher dans la page, par 
 - Dans un navigateur, servez `hello.wasm` en HTTP depuis le même endroit que `hello.mjs` (il ne peut pas être chargé depuis `file://`).
 - `sleep` attend avec `Atomics.wait`. Un navigateur ne le permet que dans un Worker d'une page isolée cross-origin : exécutez donc dans un Worker un programme qui utilise `sleep`.
 - L'heure locale (`decode-universal-time` sans `zone`, etc.) est calculée avec le fuseau horaire que donne `Date` de JavaScript.
-- En plus de ce que la section 3.6 ne permet pas, les opérations sur les fichiers et les répertoires sont une **erreur de compilation**. L'entrée standard se lit comme vide, et `(command-line-args)` est un vecteur vide.
+- En plus de ce que la section 3.6 ne permet pas, les opérations sur les fichiers et les répertoires, les variables d'environnement, `(command-line-args)`, le répertoire personnel et `dribble` sont une **erreur de compilation**. L'entrée standard est lue comme vide.
+
+### 3.8 Compiler pour un microcontrôleur (Cortex-M)
+
+Avec `--target thumbv7em-none-eabihf`, `typl -c` crée un exécutable (ELF) pour une carte Cortex-M4F ou M7 sans système d'exploitation. Sans `-o`, il porte le nom de la source avec `.typl` remplacé par `.elf`. Avec `--target thumbv8m.main-none-eabihf`, il est pour une carte Cortex-M33.
+
+```sh
+$ typl -c hello.typl --target thumbv7em-none-eabihf          # crée hello.elf
+$ qemu-system-arm -M mps2-an386 -nographic \
+    -semihosting-config enable=on,target=native -kernel hello.elf   # l'exécuter sur le Cortex-M4 de QEMU
+$ typl -c hello.typl --target thumbv8m.main-none-eabihf
+$ qemu-system-arm -M mps2-an505 -nographic \
+    -semihosting-config enable=on,target=native -kernel hello.elf   # l'exécuter sur le Cortex-M33 de QEMU
+```
+
+- Un `typl` installé avec `install.sh` s'utilise tel quel. Pour installer avec `cargo install`, lancez `rustup target add thumbv7em-none-eabihf thumbv8m.main-none-eabihf`, puis installez avec `--features embedded` (`--features wasm,embedded` pour les deux). Avec une compilation de débogage de `typl` dans le dépôt, lancez `scripts/build-embedded-runtime.sh`. L'édition de liens utilise l'éditeur de liens de la toolchain rustup.
+- Indiquez la mémoire de la carte avec `--linker-script FILE`. Elle s'écrit comme le `memory.x` de `cortex-m-rt` : les adresses et tailles de FLASH et de RAM. Une ligne comme `_typelisp_stack_size = 32K;` fixe la part de RAM prise par la pile (64KiB sinon) ; le reste de la RAM est le tas. Sans l'option, la disposition est celle du `mps2-an386` (`mps2-an505` pour un Cortex-M33) de QEMU.
+
+  ```
+  MEMORY
+  {
+    FLASH : ORIGIN = 0x08000000, LENGTH = 512K
+    RAM : ORIGIN = 0x20000000, LENGTH = 128K
+  }
+  _typelisp_stack_size = 16K;
+  ```
+
+- `--board-functions` choisit qui fournit la sortie, l'entrée, la fin du programme et l'horloge (les fonctions de la carte).
+  - `semihosting` (par défaut) : par semihosting, pour exécuter sous QEMU (`-semihosting-config enable=on`) ou un débogueur.
+  - `c` : la carte les fournit sous forme de fonctions C. Passez avec `--link FILE` un objet ou une bibliothèque statique qui définit les fonctions ci-dessous (`--link` peut être répété ; une bibliothèque du fabricant appelée par `defffi` se passe de la même façon).
+
+  ```c
+  void     typelisp_host_write(int32_t fd, const uint8_t *p, size_t len); // fd 1 est la sortie standard, 2 la sortie d'erreur
+  size_t   typelisp_host_read(int32_t fd, uint8_t *p, size_t len);        // fd 0 ; octets lus, 0 à la fin
+  void     typelisp_host_exit(int32_t code);                              // ne revient pas
+  uint64_t typelisp_host_now_us(void);                                    // microsecondes d'une horloge qui ne recule jamais
+  int64_t  typelisp_host_unix_us(void);                                   // microsecondes depuis 1970-01-01
+  void     typelisp_host_sleep_us(uint64_t us);                           // attend us microsecondes
+  ```
+
+- Les registres d'une carte (périphériques projetés en mémoire) se lisent avec `volatile-read-u8`, `volatile-read-u16` et `volatile-read-u32`, et s'écrivent avec `volatile-write-u8`, `volatile-write-u16` et `volatile-write-u32`. L'adresse est un `int` ou un entier de largeur fixe comme `u16`, et la valeur lue a le type de la largeur (`u8`, etc.). Chacun lit ou écrit exactement une fois, là où il est écrit ; le compilateur ne l'omet ni ne le déplace. Tous ne s'utilisent qu'à l'intérieur de `unsafe`. Une adresse négative, ou qui n'est pas un multiple de la largeur, est une erreur à l'exécution avant toute lecture ou écriture.
+
+  ```lisp
+  ;; UART 0 du mps2-an386 de QEMU : données 0x40004000, état 0x40004004, contrôle 0x40004008
+  (defun put-byte ((c u32)) ()
+    (unsafe
+      (loop (when (= (logand (volatile-read-u32 #x40004004) 1) 0) (break)))   ; attendre tant qu'il envoie
+      (volatile-write-u32 #x40004000 c)))
+
+  (defun main () ()
+    (unsafe (volatile-write-u32 #x40004008 1))                               ; activer l'envoi
+    (put-byte 104) (put-byte 105) (put-byte 10))                             ; "hi" et un saut de ligne
+  ```
+
+- La fonction appelée quand une interruption arrive s'écrit comme un `defun` avec l'attribut `#[interrupt(N)]` (l'interruption de périphérique `N`) ou un attribut comme `#[exception(SysTick)]`. Une interruption s'active avec `(enable-interrupt N)`. Un gestionnaire s'exécute aussitôt ; seulement s'il arrive au milieu du travail du runtime s'exécute-t-il une fois ce travail fini. Un gestionnaire ne peut pas attendre (`sleep` est une erreur de compilation). Les détails sont dans la section 3.17 de la [référence de la syntaxe](../reference/syntax.md).
+
+  ```lisp
+  (use std::board::enable-interrupt)
+
+  #[interrupt(5)]
+  (defun on-five () ()
+    (println "interrupt 5"))
+
+  (defun main () ()
+    (enable-interrupt 5)
+    (unsafe (volatile-write-u32 #xE000E200 (as u32 32))))   ; lever soi-même l'interruption 5 (le registre des interruptions en attente du NVIC)
+  ```
+
+- Le runtime démarre le programme (la table des vecteurs et la préparation de la RAM) et alloue la mémoire. Un HardFault ou une interruption non traitée termine le programme avec le code de sortie d'un panic (1).
+- `throw`/`catch`/`panic`, les bignums, les fractions et les flottants, ainsi que les tâches, les canaux et `sleep` se comportent comme dans l'exécutable. Les tâches s'exécutent à tour de rôle sur l'unique cœur. Les fonctions C (`defffi`) sont utilisables.
+- Un programme qui utilise ce que la carte n'a pas est une **erreur de compilation** : en plus de ce que la section 3.7 ne permet pas, `eval` et `macroexpand`. L'heure locale est inconnue (comme à la section 3.6).
+- L'arène de cons commence à 1024 cellules et grandit au besoin. `--heap-cells`, `--max-memory`, `--no-cons`, `-O<N>` et `--release` fonctionnent tels quels.
+
+### 3.9 Compiler pour Arduino Uno (AVR)
+
+Avec `--target avr-atmega328p`, on crée un exécutable (ELF) pour le microcontrôleur de l'Arduino Uno (ATmega328P). Le programme suivant fait clignoter la LED de la carte.
+
+```lisp
+(defconstant (PINB int) #x23)
+(defconstant (DDRB int) #x24)
+(defconstant (LED u8) 32)                         ; PB5
+
+(defun wait-a-bit () ()
+  (let ((i (the u32 0)))
+    (while (< i (the u32 400000))
+      (unsafe (volatile-read-u8 PINB))
+      (setf i (+ i 1)))
+    ()))
+
+(defun main () ()
+  (unsafe (volatile-write-u8 DDRB LED))           ; mettre en sortie
+  (while true
+    (unsafe (volatile-write-u8 PINB LED))         ; inverser
+    (wait-a-bit)))
+```
+
+```sh
+$ typl -c blink.typl --target avr-atmega328p -O2   # crée blink.elf
+$ qemu-system-avr -M uno -display none -serial stdio -bios blink.elf   # exécuter dans QEMU
+```
+
+- Il n'y a pas de runtime : un programme qui l'utilise est une **erreur de compilation**. L'erreur indique ce qui est nécessaire et par quelles fonctions on y arrive. On peut utiliser : les calculs sur les entiers de largeur fixe (de `i8` à `u32`), `f32`, `f64`, `bool` et `char`, les appels de fonctions (récursifs compris), les conditions, les boucles, `defvar` et `defconstant` contenant ces valeurs, `volatile-read-u8` et les autres, ainsi que les appels de fonctions C.
+- On ne peut pas utiliser : les valeurs placées dans le tas, comme les chaînes, les listes et les structures ; `catch` et les appels de valeurs de fonction ; les appels de fonctions C qui reçoivent une chaîne ou une fonction ; les fonctions mathématiques sur les flottants comme `sin` et `expt` (`sqrt` et les arrondis comme `floor` sont utilisables).
+- Un gestionnaire d'interruption s'écrit `#[interrupt(N)]` ([Syntaxe](../reference/syntax.md), section 3.17). `N` est le numéro de l'interruption de l'ATmega328P, de 1 à 25 en comptant la réinitialisation comme 0 (le débordement du timer 1 est 13). Voir l'exemple ci-dessous.
+- Une division par 0 arrête le microcontrôleur sur place (plus aucune interruption ne survient). Il en va de même de `/` de la plus petite valeur signée par `-1`.
+- On ne peut pas utiliser `int` (c'est une erreur de compilation), car il n'a pas de largeur fixe. Utilisez un type de largeur fixe, comme `i16` ou `u16`. Les adresses se calculent aussi avec des entiers de largeur fixe. Ce qui est déterminé à la compilation reste utilisable, comme une adresse écrite comme un nombre et un `int` d'un `defconstant`.
+- Si une récursion épuise la pile, le microcontrôleur s'arrête.
+- Une fonction C se déclare avec `defffi`, et le fichier objet compilé pour AVR se passe avec `--link FILE`.
+- Une boucle qui ne fait rien disparaît à partir de `-O1`. Dans une boucle d'attente, lisez par exemple un registre.
+- Quand `main` se termine, le microcontrôleur s'arrête.
+- `--linker-script FILE` change la disposition de la mémoire. Sans cette option, ce sont 32 Kio de flash moins les 512 derniers octets, ceux du chargeur d'amorçage, et 2 Kio de RAM. Les adresses de RAM s'écrivent en ajoutant `0x800000`, comme `0x800100`.
+- Les calculs sur `f32` et `f64` sont faits par des fonctions auxiliaires. Celles qui sont utilisées vont en mémoire flash (celles de `f64` sont plus grosses).
+- L'édition de liens utilise l'éditeur de liens de la toolchain rustup, comme à la section 3.8.
+
+Un exemple qui fait clignoter la LED par l'interruption d'un timer. Une interruption s'active dans le registre du périphérique.
+
+```lisp
+(defconstant (PINB int) #x23)
+(defconstant (DDRB int) #x24)
+(defconstant (LED u8) 32)
+(defconstant (TIMSK1 int) #x6F)
+(defconstant (TCCR1B int) #x81)
+(defvar (ticks u16) 0)
+
+#[interrupt(13)]                                  ; débordement du timer 1
+(defun on-overflow () ()
+  (unsafe (volatile-write-u8 PINB LED))           ; inverser
+  (setf ticks (+ ticks 1))
+  ())
+
+(defun main () ()
+  (unsafe (volatile-write-u8 DDRB LED)
+          (volatile-write-u8 TIMSK1 1)            ; activer l'interruption de débordement
+          (volatile-write-u8 TCCR1B 3))           ; compter à 1/64 de l'horloge
+  (while true))
+```
+
+- Un programme qui a un gestionnaire accepte les interruptions dès que ses variables globales sont initialisées. Réglez les périphériques au début de `main`.
+- `enable-interrupt` et `#[exception(NAME)]` ne sont pas utilisables (erreur de compilation).
+- Pendant qu'un gestionnaire s'exécute, les autres interruptions attendent. Comme toute autre fonction, un gestionnaire ne peut pas utiliser le runtime.
+- Une lecture ou une écriture d'une variable globale n'est pas interrompue par un gestionnaire, même pour une valeur de deux octets ou plus. Pour cela, les interruptions sont désactivées à la lecture d'une variable qu'un gestionnaire écrit et à l'écriture d'une variable qu'un gestionnaire lit ou écrit, et un avertissement à la compilation signale la variable. Une interruption peut survenir entre la lecture et l'écriture d'une mise à jour (`(setf n (+ n 1))`). Pour mettre à jour une variable qu'un gestionnaire écrit aussi, lisez et gardez le registre d'état (adresse `#x5F`), écrivez-y 0 pour arrêter les interruptions, puis remettez la valeur gardée.
+- Une interruption sans gestionnaire arrête le microcontrôleur.
 
 ## 4. Dumps
 

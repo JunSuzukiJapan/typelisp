@@ -17,8 +17,9 @@
 //! quote `'`, quasiquote `` ` ``, unquote `,`, unquote-splicing `,@`, and
 //! comments (`;` line, `#| ... |#` nested block).
 
-use std::collections::HashSet;
-use std::sync::Arc;
+use typelisp_mem::prelude::*;
+use typelisp_mem::collections::HashSet;
+use alloc::sync::Arc;
 
 use num_bigint::BigInt;
 use num_rational::BigRational;
@@ -42,6 +43,7 @@ use typelisp_mem::{spec, symbols, wk, Error, Heap, Loc, NsId, StdModule, SymRef,
 #[derive(Clone, Debug, Default)]
 pub struct Features(HashSet<SymRef>);
 
+
 impl Features {
     /// The default set: `:typelisp`, the host architecture, and the host OS
     /// — following the CL convention of keyword-named implementation/
@@ -50,12 +52,14 @@ impl Features {
         let mut set = HashSet::new();
         let mut add = |name: &str| set.insert(symbols::intern_keyword(name));
         add("typelisp");
-        add(std::env::consts::ARCH);
-        match std::env::consts::OS {
+        add(typelisp_mem::host::ARCH);
+        match typelisp_mem::host::OS {
             "macos" => {
                 add("darwin");
                 add("macos");
             }
+            // A target with no operating system has none to name.
+            "none" => {}
             other => {
                 add(other);
             }
@@ -804,7 +808,7 @@ fn call_macro_char(
 }
 
 /// Read `<prefix-char><datum>` as `(<head> datum)` — the shared shape behind
-/// `'x` -> `(quote x)`, `` `x `` -> `(quasiquote x)`, `,x` -> `(unquote x)`,
+/// `'x` -> `(quote x)`, ` `x ` -> `(quasiquote x)`, `,x` -> `(unquote x)`,
 /// `,@x` -> `(unquote-splicing x)`. Consumes the single prefix character
 /// itself, then delegates the rest (reading `datum` and building the
 /// 2-element list) to [`read_wrapped_body`] — `,@` needs to consume *two*
@@ -1441,8 +1445,10 @@ fn read_tuple(cur: &mut Cursor, heap: &mut Heap, ctx: Ctx<'_>) -> Result<Value, 
 }
 
 /// The head of the form `#[ATTR...] FORM` reads as:
-/// `(%internal::attribute (ATTR...) FORM)`. Which attributes exist, and what
-/// they do to `FORM`, is the checker's business.
+/// `(%internal::attribute (ATTR...) FORM)`. An attribute with arguments,
+/// `name(ARG...)` with the parenthesis right after the name, reads as the
+/// list `(name ARG...)`. Which attributes exist, and what they do to `FORM`,
+/// is the checker's business.
 pub const ATTRIBUTE_HEAD: [u32; 2] = [wk::INTERNAL_MODULE_NAME, wk::ATTRIBUTE];
 
 /// `#[ATTR...] FORM` -> `(%internal::attribute (ATTR...) FORM)`. The cursor
@@ -1451,7 +1457,7 @@ pub const ATTRIBUTE_HEAD: [u32; 2] = [wk::INTERNAL_MODULE_NAME, wk::ATTRIBUTE];
 fn read_attribute(cur: &mut Cursor, heap: &mut Heap, ctx: Ctx<'_>) -> Result<Value, Error> {
     cur.next(); // '['
     let mark = heap.root_count();
-    let attrs = read_elements(cur, heap, ctx, ']', "#[")?;
+    let attrs = read_attribute_elements(cur, heap, ctx)?;
     if attrs.is_empty() {
         restore_roots(heap, mark);
         return Err(Error::ReadError("`#[]` names no attribute".to_string()));
@@ -1478,6 +1484,49 @@ fn read_attribute(cur: &mut Cursor, heap: &mut Heap, ctx: Ctx<'_>) -> Result<Val
     })();
     restore_roots(heap, mark);
     result
+}
+
+/// The attributes up to `]`, rooted as [`read_elements`] roots them: each a
+/// datum, and a name with `(` right after it the list of that name and what
+/// the parentheses hold — `interrupt(7)` is `(interrupt 7)`.
+fn read_attribute_elements(cur: &mut Cursor, heap: &mut Heap, ctx: Ctx<'_>) -> Result<Vec<Value>, Error> {
+    let mark = heap.root_count();
+    let mut elems: Vec<Value> = Vec::new();
+    let read = |cur: &mut Cursor, heap: &mut Heap, elems: &mut Vec<Value>| -> Result<bool, Error> {
+        skip_ws_comments(cur, heap, ctx)?;
+        match cur.peek() {
+            None => Err(Error::ReadError("end of input inside `#[`".to_string())),
+            Some(']') => {
+                cur.next();
+                Ok(false)
+            }
+            Some(_) => {
+                let name = read_datum(cur, heap, ctx)?;
+                heap.push_root(name);
+                let attr = if matches!(name, Value::Symbol(_)) && cur.peek() == Some('(') {
+                    let args = read_datum(cur, heap, ctx)?;
+                    heap.push_root(args);
+                    let attr = heap.cons(name, args)?;
+                    heap.push_root(attr);
+                    attr
+                } else {
+                    name
+                };
+                elems.push(attr);
+                Ok(true)
+            }
+        }
+    };
+    loop {
+        match read(cur, heap, &mut elems) {
+            Ok(true) => {}
+            Ok(false) => return Ok(elems),
+            Err(e) => {
+                restore_roots(heap, mark);
+                return Err(e);
+            }
+        }
+    }
 }
 
 /// The data up to `close`, each rooted as it is read so that reading the next

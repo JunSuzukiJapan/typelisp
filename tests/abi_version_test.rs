@@ -104,19 +104,29 @@ fn every_shared_constant_is_described() {
     let description = describe();
     // The files compiled code and the runtime share numbers through, and the
     // constants in them that are not part of what is shared.
-    let files: [(&str, &[&str]); 7] = [
+    // `FILE_ERROR` is how the tables' rows spell the error type, and those
+    // rows are described.
+    let files: [(&str, &[&str]); 11] = [
         ("crates/typelisp-abi/src/lib.rs", &["ABI_VERSION", "ABI_SYMBOL"]),
         ("crates/typelisp-mem/src/tagged.rs", &[]),
         ("crates/typelisp-rt/src/c_mem.rs", &[]),
         ("crates/typelisp-rt/src/program.rs", &[]),
         ("crates/typelisp-rt/src/sys_builtin.rs", &[]),
-        ("crates/typelisp-rt/src/stream_builtin.rs", &[]),
-        ("crates/typelisp-rt/src/net_builtin.rs", &[]),
+        ("crates/typelisp-rt/src/stream_builtin.rs", &["FILE_ERROR"]),
+        ("crates/typelisp-rt-posix/src/net_builtin.rs", &[]),
+        ("crates/typelisp-rt-posix/src/sys.rs", &[]),
+        ("crates/typelisp-rt-sys/src/fs_builtin.rs", &[]),
+        ("crates/typelisp-rt-sys/src/env.rs", &[]),
+        ("crates/typelisp-rt-sys/src/dribble.rs", &[]),
     ];
     let mut missing = Vec::new();
     for (file, excluded) in files {
         for line in read(&root().join(file)).lines() {
             let Some(rest) = line.trim_start().strip_prefix("pub const ") else { continue };
+            // A `const fn` is how a described constant is computed.
+            if rest.starts_with("fn ") {
+                continue;
+            }
             let name = rest.split(':').next().unwrap().trim();
             if excluded.contains(&name) {
                 continue;

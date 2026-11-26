@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/numbers.md @ 676864f7e6cf8e950e51aadacecd49695c8545a8 -->
+<!-- translated-from: docs/ja/reference/functions/numbers.md @ 1b5dc6ac828d8e4a95800a91218b5e9dffe83f98 -->
 # Số
 
 Các phép toán trên số nguyên, số dấu phẩy động, số hữu tỉ, số phức và boolean, cùng các hàm khác liên quan
@@ -68,11 +68,10 @@ kiểu có độ rộng. `c-long` / `c-ulong` chỉ có các phép chuyển đ�
 | `int->i8` … `int->u32` | `(int->W x)` | `T→W` | Cùng các phép chuyển đổi độ rộng như chương 1. Các giá trị không vừa bị cắt cụt |
 | `try-int->i8` … `try-int->u32` | `(try-int->W x)` | `T→Option<W>` | Cùng phép chuyển đổi dưới dạng một câu hỏi |
 | `int->c-long` `int->c-ulong` | `(int->W x)` | `T→W` | Đường vào, từ từ máy thô kia và từ các kiểu số nguyên của chương 1 |
-| `try-int->c-long` `try-int->c-ulong` | `(try-int->W x)` | `T→Option<W>` | Như trên |
 | `int->int` | `(int->int x)` | `T→int` | **Luôn chính xác**. Cách trung thực để đọc một `size_t` không vừa trong `i32` |
 
 `(as i32 x)` / `(try-as i32 x)` / `(as int x)` / `(as c-ulong n)` là những gì chúng làm, và các phép
-chuyển đổi tồn tại cho mọi cặp với các kiểu số nguyên của chương 1. `ptr` thậm chí không có bảng này:
+chuyển đổi tồn tại cho mọi cặp với các kiểu số nguyên của chương 1. Không có dạng `try-` sang một từ thô: `Option<c-long>` sẽ đặt một từ thô vào bên trong một kiểu khác, điều không thể viết được. `ptr` thậm chí không có bảng này:
 không có cách nào để đọc một con trỏ như một số. Nó là một giá trị chỉ được truyền, nhận và chuyển tiếp
 cho một hàm C khác.
 
@@ -138,6 +137,7 @@ not fit a fixnum").
 | `log` (hai đối số) | `(log x base)` | `(f64,f64)→f64` | Logarit theo một cơ số cho trước. Được khai triển thành `(/ (log x) (log base))` (chương 8) |
 | `floor-div` `ceiling-div` `round-div` `truncate-div` | `(op a b)` | `(f64,f64)→cons-cell<f64,f64>` | Tương ứng với các phiên bản hai đối số của CL (`(floor 7.0 2.0)`→thương 3, dư 1). Cùng thiết kế như các hàm cùng tên ở chương 1 (`car`=thương, `cdr`=số dư) |
 | `float->int` | `(float->int x)` | `f64→int` | Chuyển thành `int` bằng cách cắt về phía không (`truncate` của CL; chính xác với các giá trị hữu hạn ở mọi cỡ). Panic với vô cực và NaN. Với độ rộng cố định, hãy dùng `(as i32 x)` |
+| `float->i8` `float->i16` `float->i32` `float->u8` `float->u16` `float->u32` | `(op x)` | `f64→i8` | Các bit thấp của kết quả `float->int` theo kiểu đó (không đi qua `int`). Vô cực và NaN gây panic. Là bản chất của `(as i16 x)` |
 | `float->ratio` | `(float->ratio x)` | `f64→ratio` | Chuyển thành một `ratio` dưới dạng số hữu tỉ nhị phân chính xác (`rational` của CL) |
 | `float->f32` `float->f64` | `(op x)` | `f64→f32` / `f64→f64` | Chuyển đổi giữa các độ rộng dấu phẩy động. `float->f32` làm tròn đến gần nhất, `float->f64` luôn chính xác. Việc `(as f32 x)` làm |
 | `try-float->f32` `try-float->f64` | `(op x)` | `f64→Option<f32>` / `→Option<f64>` | Cùng phép chuyển đổi dưới dạng một câu hỏi. `None` nếu việc làm tròn thay đổi giá trị (mở rộng sang `f64` luôn là `Some`). Việc `(try-as f32 x)` làm |
@@ -324,7 +324,7 @@ Các hằng số giới hạn số (CLHS 12.1.4.2 / 12.1.3):
 
 | Tên | Kiểu | Mô tả |
 |---|---|---|
-| `most-positive-fixnum` / `most-negative-fixnum` | `int` | Giới hạn trên / dưới của một giá trị tức thời 63 bit (2^62-1 / -2^62). Một `int` vượt quá chúng trở thành bignum |
+| `most-positive-fixnum` / `most-negative-fixnum` | `int` | Giới hạn trên / dưới của một giá trị tức thời 63 bit (2^62-1 / -2^62; trên wasm32 và Cortex-M là 31 bit, 2^30-1 / -2^30). Một `int` vượt quá chúng trở thành bignum |
 | `most-positive-double-float` / `most-negative-double-float` | `f64` | Các giá trị hữu hạn lớn nhất / nhỏ nhất |
 | `least-positive-double-float` / `least-negative-double-float` | `f64` | Độ lớn khác không nhỏ nhất, gồm cả các số dưới chuẩn |
 | `least-positive-normalized-double-float` / `least-negative-normalized-double-float` | `f64` | Như trên, giới hạn ở các số chuẩn hóa |

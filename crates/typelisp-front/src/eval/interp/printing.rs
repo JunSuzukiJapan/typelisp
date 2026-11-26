@@ -33,25 +33,6 @@ pub(crate) fn is_print_object_sig(f: &FnDef) -> bool {
     matches!(f.sig.as_ref(), Some((params, ret)) if params.len() == 2 && params[1] == Repr::Bool && *ret == Repr::Str)
 }
 
-/// Whether what a `~/name/` calls takes its argument as a raw machine word,
-/// or `None` when `f` does not have the signature `~/name/` calls at all.
-pub(crate) fn format_call_receiver_is_word(f: &FnDef) -> Option<bool> {
-    match f.sig.as_ref() {
-        Some((params, ret))
-            if params.len() == 3 && params[1] == Repr::Bool && params[2] == Repr::Bool && *ret == Repr::Str =>
-        {
-            Some(params[0] == Repr::Narrow)
-        }
-        _ => None,
-    }
-}
-
-/// What `~/name/` says of a definition it was handed that does not have the
-/// signature it calls.
-pub(crate) fn format_call_sig_error(name: &str) -> String {
-    format!("format: ~/{}/ must be `((x T) (colon bool) (at bool)) -> string`", name)
-}
-
 impl Interp {
     /// Registers this `Interp` as the environment the printer asks its two
     /// program questions of, and its control variables of — see
@@ -139,52 +120,6 @@ impl Interp {
         }
     }
 
-    /// `~/name/`'s rendering of `v` — CL's function-call directive.
-    ///
-    /// `name` is the [`crate::CompileTarget::link_name`] of what the checker
-    /// resolved the directive to — `(name v colon at)` resolved at the site,
-    /// against the type of every argument the directive can meet — so the
-    /// definition is the one registered under that name, not one looked up.
-    pub(crate) fn format_call(
-        &self,
-        heap: &mut Heap,
-        name: &str,
-        v: Value,
-        colon: bool,
-        at: bool,
-    ) -> Result<String, String> {
-        let mut defs = Vec::new();
-        self.root.borrow().collect_defs(&mut defs);
-        let Some(f) = defs.into_iter().find(|f| f.target.link_name() == name) else {
-            return Err(format!("format: ~/{}/ — no such definition", name));
-        };
-        // Whether the argument's *declared* representation is a raw machine
-        // word — which is the question that decides what to hand over, not
-        // the shape the printer happens to be holding.
-        let Some(receiver_is_word) = format_call_receiver_is_word(&f) else {
-            return Err(format_call_sig_error(name));
-        };
-        // A narrow integer arrives here as a `BoxedObj::Narrow`, because a
-        // `Sexpr` is the one place a value's width is written down. A `u8`
-        // *parameter* is the plain normalized word, like every statically
-        // typed integer. So the box is opened on the way in — the crossing is
-        // driven by the declared type, which is the only thing that can say
-        // which side is which (`encode_crossing_args` got this wrong three
-        // times by asking the value instead).
-        let receiver = match v {
-            Value::Boxed(id) if receiver_is_word => match heap.narrow_box(id) {
-                Some(n) => Value::Int(n.value),
-                None => v,
-            },
-            _ => v,
-        };
-        // `enter`, not `apply` — see `print_object_method`'s call for why.
-        match self.enter(heap, &f, vec![receiver, Value::Bool(colon), Value::Bool(at)]).map_err(|e| e.to_string())? {
-            Value::Str(id) => Ok(heap.string(id).to_string()),
-            other => Err(format!("format: ~/{}/ returned {:?}, not a string", name, other)),
-        }
-    }
-
     /// The name of `variant` of the enum of type `ty` — the printer's
     /// question, answered from the scope tree.
     ///
@@ -256,10 +191,6 @@ const INTERP_PRINT_HOOKS: typelisp_print::runtime::PrintHooks = typelisp_print::
     },
     print_object: |heap, v, escape| {
         with_active_interp(|i| i.print_object(heap, v, escape)).unwrap_or_else(|| Err(NO_INTERP_FOR_METHODS.to_string()))
-    },
-    format_call: |heap, name, v, colon, at| match with_active_interp(|i| i.format_call(heap, name, v, colon, at)) {
-        Some(r) => r,
-        None => Err(format!("format: ~/{}/ needs a program to look the method up in", name)),
     },
     opts: |heap| match with_active_interp(|i| typelisp_print::runtime::read_opts(heap, &|name| i.printer_global(heap, name))) {
         Some(r) => r,

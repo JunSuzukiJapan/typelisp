@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/system.md @ 7622044725db7d28dabb691d82e592367d9284e8 -->
+<!-- translated-from: docs/ja/reference/functions/system.md @ b01477a6134617bbcef066ff2065d17245132754 -->
 # 时间、运行环境与实现
 
 时间、运行环境的查询、实现工具、文本的解析与求值、文档字符串，以及宏相关的函数。
@@ -313,3 +313,32 @@ CL 中有而这里没有的：`eval-when`（`:compile-toplevel`/`:load-toplevel`
 | `with-standard-io-syntax` | `(with-standard-io-syntax body...)` | — | 把所有打印控制变量设为标准值、把 `*read-eval*` 设为 `true`，然后执行 `body`（[打印](printing.md#6-控制打印量)） |
 | `exit` | `(exit code)` | `int→!` | 结束进程 |
 | `dump` | `(dump path)` | `string→bool` | 把当前环境（类型信息＋编译后的函数体）写到一个文件。可以用 `typl --image <path>` 重新启动。解释器专用（[语法参考 10.1](../syntax.md#101-转储)） |
+
+## 11. 微控制器的中断（`std::board`）
+
+像 `(use std::board::enable-interrupt)` 这样用 `use` 引入后使用。中断处理程序的写法见 [语法参考 3.17](../syntax.md#317-interruptn--exceptionname--中断处理程序)。
+
+| 名称 | 形式 | 类型 | 说明 |
+|---|---|---|---|
+| `enable-interrupt` | `(enable-interrupt n)` | `int→()` | 使外设中断 `n`（0～239）能够到来。在微控制器之外是运行时错误（在 `typl -c` 中是编译错误） |
+| `disable-interrupt` | `(disable-interrupt n)` | `int→()` | 使中断 `n` 不再到来。在微控制器之外的处理与 `enable-interrupt` 相同 |
+
+## 12. 调试 (`std::dbg`)
+
+用 `use` 引入，例如 `(use std::dbg::llvm-size-of)`。
+
+| 名称 | 形式 | 类型 | 说明 |
+|---|---|---|---|
+| `llvm-size-of` | `(llvm-size-of expr)` | `A→u32` | 编译后的代码用多少字节保存 `expr` 的值。LLVM 针对代码运行的目标，计算编译器给该值的 LLVM 类型的大小。`expr` 会被求值。在解释器中执行时是运行时错误 |
+
+`size-of-val` 回答由类型决定的大小，`llvm-size-of` 回答编译后的代码实际使用的大小。两者不一致时，说明编译器弄错了值的宽度。
+
+```lisp
+(use std::dbg::llvm-size-of)
+(defun widths ((x i8)) ()
+  (println "~a ~a ~a" (llvm-size-of x) (llvm-size-of (as u32 x)) (llvm-size-of (< x 0))))
+(compile widths)
+(widths 1)                          ; 打印 1 4 1
+```
+
+堆中的值（`string`、`defstruct` 类型等）和 `int` 占一个字，表示值所在的位置或值本身。

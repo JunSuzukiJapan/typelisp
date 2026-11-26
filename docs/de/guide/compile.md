@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ 7622044725db7d28dabb691d82e592367d9284e8 -->
+<!-- translated-from: docs/ja/guide/compile.md @ 1b5dc6ac828d8e4a95800a91218b5e9dffe83f98 -->
 # Kompilierung
 
 Ohne weiteres Zutun laufen typelisp-Programme im Interpreter. Darüber hinaus gibt es zwei Wege, in nativen
@@ -226,7 +226,148 @@ const code = await run({ write: (fd, text) => { /* zum Beispiel auf der Seite an
 - Im Browser liefern Sie `hello.wasm` per HTTP vom selben Ort wie `hello.mjs` aus (von `file://` lässt es sich nicht laden).
 - `sleep` wartet mit `Atomics.wait`. Ein Browser erlaubt das nur in einem Worker einer cross-origin-isolierten Seite; führen Sie ein Programm, das `sleep` benutzt, daher in einem Worker aus.
 - Die Ortszeit (`decode-universal-time` ohne `zone` usw.) wird mit der Zeitzone berechnet, die JavaScripts `Date` meldet.
-- Zusätzlich zu dem, was in Abschnitt 3.6 nicht verfügbar ist, sind Datei- und Verzeichnisoperationen ein **Kompilierfehler**. Die Standardeingabe liest sich als leer, und `(command-line-args)` ist ein leerer Vektor.
+- Zusätzlich zu dem, was in Abschnitt 3.6 nicht nutzbar ist, sind Datei- und Verzeichnisoperationen, Umgebungsvariablen, `(command-line-args)`, das Home-Verzeichnis und `dribble` ein **Kompilierfehler**. Die Standardeingabe wird als leer gelesen.
+
+### 3.8 Für einen Mikrocontroller (Cortex-M) kompilieren
+
+Mit `--target thumbv7em-none-eabihf` erzeugt `typl -c` eine ausführbare Datei (ELF) für eine Cortex-M4F- oder M7-Platine ohne Betriebssystem. Ohne `-o` wird sie nach der Quelle benannt, wobei `.typl` durch `.elf` ersetzt wird. Mit `--target thumbv8m.main-none-eabihf` ist sie für eine Cortex-M33-Platine.
+
+```sh
+$ typl -c hello.typl --target thumbv7em-none-eabihf          # erzeugt hello.elf
+$ qemu-system-arm -M mps2-an386 -nographic \
+    -semihosting-config enable=on,target=native -kernel hello.elf   # auf dem Cortex-M4 von QEMU ausführen
+$ typl -c hello.typl --target thumbv8m.main-none-eabihf
+$ qemu-system-arm -M mps2-an505 -nographic \
+    -semihosting-config enable=on,target=native -kernel hello.elf   # auf dem Cortex-M33 von QEMU ausführen
+```
+
+- Ein mit `install.sh` installiertes `typl` kann direkt verwendet werden. Für `cargo install` zuerst `rustup target add thumbv7em-none-eabihf thumbv8m.main-none-eabihf` ausführen und dann mit `--features embedded` installieren (`--features wasm,embedded` für beides). Mit einem Debug-Build von `typl` im Repository `scripts/build-embedded-runtime.sh` ausführen. Gelinkt wird mit dem Linker der rustup-Toolchain.
+- Den Speicher der Platine mit `--linker-script FILE` angeben. Die Datei hat die Form von `memory.x` aus `cortex-m-rt`: Adressen und Größen von FLASH und RAM. Eine Zeile wie `_typelisp_stack_size = 32K;` legt fest, wie viel des RAM der Stack belegt (ohne Angabe 64KiB); der Rest des RAM ist der Heap. Ohne die Option gilt die Aufteilung von QEMUs `mps2-an386` (für einen Cortex-M33 `mps2-an505`).
+
+  ```
+  MEMORY
+  {
+    FLASH : ORIGIN = 0x08000000, LENGTH = 512K
+    RAM : ORIGIN = 0x20000000, LENGTH = 128K
+  }
+  _typelisp_stack_size = 16K;
+  ```
+
+- `--board-functions` wählt, wer Ausgabe, Eingabe, Beenden und die Uhr (die Funktionen der Platine) bereitstellt.
+  - `semihosting` (Standard): über Semihosting, zum Ausführen unter QEMU (`-semihosting-config enable=on`) oder einem Debugger.
+  - `c`: Die Platine stellt sie als C-Funktionen bereit. Ein Objekt oder eine statische Bibliothek, die die folgenden Funktionen definiert, mit `--link FILE` übergeben (`--link` kann mehrfach angegeben werden; eine Herstellerbibliothek, die `defffi` aufruft, wird ebenso übergeben).
+
+  ```c
+  void     typelisp_host_write(int32_t fd, const uint8_t *p, size_t len); // fd 1 ist die Standardausgabe, 2 die Standardfehlerausgabe
+  size_t   typelisp_host_read(int32_t fd, uint8_t *p, size_t len);        // fd 0; gelesene Bytes, 0 am Ende
+  void     typelisp_host_exit(int32_t code);                              // kehrt nicht zurück
+  uint64_t typelisp_host_now_us(void);                                    // Mikrosekunden einer Uhr, die nie zurückläuft
+  int64_t  typelisp_host_unix_us(void);                                   // Mikrosekunden seit 1970-01-01
+  void     typelisp_host_sleep_us(uint64_t us);                           // wartet us Mikrosekunden
+  ```
+
+- Die Register einer Platine (in den Speicher eingeblendete Peripherie) werden mit `volatile-read-u8`, `volatile-read-u16` und `volatile-read-u32` gelesen und mit `volatile-write-u8`, `volatile-write-u16` und `volatile-write-u32` geschrieben. Die Adresse ist ein `int` oder eine Ganzzahl fester Breite wie `u16`, der gelesene Wert hat den Typ der Breite (`u8` usw.). Jeder Zugriff liest oder schreibt genau einmal, an der Stelle, an der er steht; der Compiler lässt ihn weder weg noch verschiebt er ihn. Alle sind nur innerhalb von `unsafe` nutzbar. Eine negative Adresse oder eine, die kein Vielfaches der Breite ist, ist ein Laufzeitfehler, bevor etwas gelesen oder geschrieben wird.
+
+  ```lisp
+  ;; UART 0 des mps2-an386 von QEMU: Daten 0x40004000, Status 0x40004004, Steuerung 0x40004008
+  (defun put-byte ((c u32)) ()
+    (unsafe
+      (loop (when (= (logand (volatile-read-u32 #x40004004) 1) 0) (break)))   ; warten, solange gesendet wird
+      (volatile-write-u32 #x40004000 c)))
+
+  (defun main () ()
+    (unsafe (volatile-write-u32 #x40004008 1))                               ; Senden einschalten
+    (put-byte 104) (put-byte 105) (put-byte 10))                             ; "hi" und ein Zeilenumbruch
+  ```
+
+- Die Funktion, die bei einem Interrupt aufgerufen wird, schreibt man als `defun` mit dem Attribut `#[interrupt(N)]` (Peripherie-Interrupt `N`) oder einem wie `#[exception(SysTick)]`. Ein Interrupt wird mit `(enable-interrupt N)` eingeschaltet. Ein Handler läuft sofort; nur wenn er mitten in der Arbeit der Laufzeit kommt, läuft er, nachdem diese fertig ist. Ein Handler kann nicht warten (`sleep` ist ein Kompilierfehler). Details stehen in Abschnitt 3.17 der [Syntaxreferenz](../reference/syntax.md).
+
+  ```lisp
+  (use std::board::enable-interrupt)
+
+  #[interrupt(5)]
+  (defun on-five () ()
+    (println "interrupt 5"))
+
+  (defun main () ()
+    (enable-interrupt 5)
+    (unsafe (volatile-write-u32 #xE000E200 (as u32 32))))   ; Interrupt 5 selbst auslösen (das Pending-Register des NVIC)
+  ```
+
+- Die Laufzeitumgebung startet das Programm (Vektortabelle und Vorbereitung des RAM) und verwaltet den Speicher. Ein HardFault oder ein unbehandelter Interrupt beendet das Programm mit dem Exit-Code eines Panic (1).
+- `throw`/`catch`/`panic`, Bignums, Brüche und Gleitkommazahlen sowie Tasks, Kanäle und `sleep` verhalten sich wie in der ausführbaren Datei. Tasks laufen nacheinander auf dem einen Kern. C-Funktionen (`defffi`) können verwendet werden.
+- Ein Programm, das etwas verwendet, das die Platine nicht hat, ist ein **Kompilierfehler**: zusätzlich zu dem, was in Abschnitt 3.7 nicht nutzbar ist, `eval` und `macroexpand`. Die Ortszeit ist unbekannt (wie in Abschnitt 3.6).
+- Die Cons-Arena beginnt mit 1024 Zellen und wächst bei Bedarf. `--heap-cells`, `--max-memory`, `--no-cons`, `-O<N>` und `--release` funktionieren unverändert.
+
+### 3.9 Für einen Arduino Uno (AVR) kompilieren
+
+Mit `--target avr-atmega328p` erzeugt `typl` eine ausführbare Datei (ELF) für den Mikrocontroller des Arduino Uno (ATmega328P). Das folgende Programm lässt die LED des Boards blinken.
+
+```lisp
+(defconstant (PINB int) #x23)
+(defconstant (DDRB int) #x24)
+(defconstant (LED u8) 32)                         ; PB5
+
+(defun wait-a-bit () ()
+  (let ((i (the u32 0)))
+    (while (< i (the u32 400000))
+      (unsafe (volatile-read-u8 PINB))
+      (setf i (+ i 1)))
+    ()))
+
+(defun main () ()
+  (unsafe (volatile-write-u8 DDRB LED))           ; als Ausgang schalten
+  (while true
+    (unsafe (volatile-write-u8 PINB LED))         ; umschalten
+    (wait-a-bit)))
+```
+
+```sh
+$ typl -c blink.typl --target avr-atmega328p -O2   # erzeugt blink.elf
+$ qemu-system-avr -M uno -display none -serial stdio -bios blink.elf   # in QEMU ausführen
+```
+
+- Es gibt keine Laufzeitumgebung, daher ist ein Programm, das sie benutzt, ein **Kompilierfehler**. Die Meldung nennt, was benötigt wird und über welche Funktionen es erreicht wird. Verwendbar sind: Rechnen mit Ganzzahlen fester Breite (`i8` bis `u32`), `f32`, `f64`, `bool` und `char`, Funktionsaufrufe (auch rekursive), Verzweigungen, Schleifen, `defvar` und `defconstant` mit solchen Werten, `volatile-read-u8` und Ähnliches sowie Aufrufe von C-Funktionen.
+- Nicht verwendbar sind: Werte im Heap wie Zeichenketten, Listen und Strukturen; `catch` und Aufrufe von Funktionswerten; Aufrufe von C-Funktionen, die eine Zeichenkette oder eine Funktion erhalten; mathematische Funktionen von Gleitkommazahlen wie `sin` und `expt` (`sqrt` und Rundungen wie `floor` sind verwendbar).
+- Ein Interrupt-Handler wird als `#[interrupt(N)]` geschrieben ([Syntax](../reference/syntax.md), Abschnitt 3.17). `N` ist die Interrupt-Nummer des ATmega328P, 1 bis 25, wobei Reset als 0 zählt (der Überlauf von Timer 1 ist 13). Siehe das Beispiel unten.
+- Eine Division durch 0 hält den Mikrocontroller an dieser Stelle an (es kommen auch keine Interrupts mehr). Ebenso `/` des kleinsten vorzeichenbehafteten Werts durch `-1`.
+- Ein `int` ist nicht verwendbar (Kompilierfehler), da es keine feste Breite hat. Verwenden Sie einen Typ fester Breite wie `i16` oder `u16`. Auch Adressen lassen sich mit Ganzzahlen fester Breite berechnen. Was beim Kompilieren feststeht, ist verwendbar, etwa eine als Zahl geschriebene Adresse und ein `int` einer `defconstant`.
+- Reicht der Stack für eine Rekursion nicht aus, hält der Mikrocontroller an.
+- Eine C-Funktion wird mit `defffi` deklariert; die für AVR kompilierte Objektdatei wird mit `--link FILE` übergeben.
+- Eine Schleife, die nichts tut, wird ab `-O1` entfernt. Lesen Sie in einer Warteschleife zum Beispiel ein Register.
+- Wenn `main` endet, hält der Mikrocontroller an.
+- Mit `--linker-script FILE` lässt sich die Speicheraufteilung ändern. Ohne Angabe sind es 32 KiB Flash abzüglich der letzten 512 Bytes des Bootloaders und 2 KiB RAM. RAM-Adressen werden mit addiertem `0x800000` geschrieben, etwa `0x800100`.
+- Das Rechnen mit `f32` und `f64` übernehmen Hilfsfunktionen. Die benutzten kommen in den Flash (die für `f64` sind größer).
+- Gelinkt wird wie in Abschnitt 3.8 mit dem Linker der rustup-Toolchain.
+
+Ein Beispiel, das die LED mit einem Timer-Interrupt blinken lässt. Ein Interrupt wird im Register des jeweiligen Geräts eingeschaltet.
+
+```lisp
+(defconstant (PINB int) #x23)
+(defconstant (DDRB int) #x24)
+(defconstant (LED u8) 32)
+(defconstant (TIMSK1 int) #x6F)
+(defconstant (TCCR1B int) #x81)
+(defvar (ticks u16) 0)
+
+#[interrupt(13)]                                  ; Überlauf von Timer 1
+(defun on-overflow () ()
+  (unsafe (volatile-write-u8 PINB LED))           ; umschalten
+  (setf ticks (+ ticks 1))
+  ())
+
+(defun main () ()
+  (unsafe (volatile-write-u8 DDRB LED)
+          (volatile-write-u8 TIMSK1 1)            ; Überlauf-Interrupt einschalten
+          (volatile-write-u8 TCCR1B 3))           ; mit 1/64 des Takts zählen
+  (while true))
+```
+
+- Ein Programm mit einem Handler lässt Interrupts zu, sobald die globalen Variablen initialisiert sind. Richten Sie die Geräte am Anfang von `main` ein.
+- `enable-interrupt` und `#[exception(NAME)]` sind nicht verwendbar (Übersetzungsfehler).
+- Während ein Handler läuft, warten andere Interrupts. Wie jede andere Funktion kann ein Handler die Laufzeit nicht verwenden.
+- Ein einzelnes Lesen oder Schreiben einer globalen Variable wird nicht von einem Handler unterbrochen, auch nicht bei Werten von zwei Byte oder mehr. Dazu werden Interrupts beim Lesen einer Variable gesperrt, die ein Handler schreibt, und beim Schreiben einer Variable, die ein Handler liest oder schreibt; eine Warnung beim Kompilieren nennt die Variable. Zwischen Lesen und Schreiben einer Aktualisierung (`(setf n (+ n 1))`) kann ein Interrupt kommen. Um eine Variable zu aktualisieren, die auch ein Handler schreibt, lesen Sie das Statusregister (Adresse `#x5F`) und merken es sich, schreiben 0 hinein, um Interrupts anzuhalten, und schreiben danach den gemerkten Wert zurück.
+- Ein Interrupt ohne Handler hält den Mikrocontroller an.
 
 ## 4. Dumps
 

@@ -13,7 +13,7 @@
 //! `compile-file`'s linker step needs.
 //!
 //! Every function here is declared under the exact same ABI as a compiled
-//! typelisp function (`unsafe extern "C" fn(*const i64, u32) -> i64`,
+//! typelisp function (`unsafe extern "C" fn(*const Word, u32) -> Word`,
 //! `typelisp::compile::CompiledSignature`) — so the existing cross-function-
 //! call wiring (JIT: the `externals` list of
 //! `typelisp::compile::CompiledFn::new`; AOT: ordinary linker symbol
@@ -41,6 +41,10 @@
 // with it). These two re-exports are that reference. They generate no code and
 // have no callers on purpose — deleting them as dead would make every
 // `println` and every `read` in a compiled program fail to link.
+#![cfg_attr(not(feature = "std"), no_std)]
+
+extern crate alloc;
+
 pub use typelisp_print;
 pub use typelisp_read;
 
@@ -51,36 +55,35 @@ pub mod mem_limit;
 pub mod c_mem;
 pub mod ffi_callback;
 pub mod integer;
-#[cfg(not(target_family = "wasm"))]
-pub mod net;
+pub mod interrupt;
 pub mod rational;
-#[cfg(not(target_family = "wasm"))]
-pub mod net_builtin;
-#[cfg(not(target_family = "wasm"))]
-pub mod x509;
-pub mod os;
 pub mod readtable;
+pub mod result_value;
 pub mod sched;
 pub mod shared;
 pub mod stream;
 pub mod stream_builtin;
 pub mod sys_builtin;
 
-/// Returns `args[0] + 1` if `argc >= 1`, otherwise `0`. No real runtime
-/// behavior depends on this — see the module doc comment.
+/// What [`stream_shim!`] names from this crate, so that a crate expanding it
+/// needs nothing else in scope.
+#[doc(hidden)]
+pub mod __shim {
+    pub use alloc::format;
+    pub use alloc::vec::Vec;
+    pub use typelisp_mem::symbols::well_known_symbol;
+    pub use typelisp_mem::{Value, Word};
+}
+
+/// Returns `x + 1`. No real runtime behavior depends on this — see the
+/// module doc comment.
 ///
 /// # Safety
 ///
-/// If `argc >= 1`, `args` must be non-null and point to at least one valid,
-/// readable `i64` — exactly what every compiled-function call site already
-/// guarantees for its own `args` array.
+/// None.
 #[no_mangle]
-pub unsafe extern "C" fn rt_ping(args: *const i64, argc: u32) -> i64 {
-    if argc >= 1 {
-        *args + 1
-    } else {
-        0
-    }
+pub unsafe extern "C" fn rt_ping(x: isize) -> isize {
+    x + 1
 }
 
 // The compiled calling convention — the tagged-word encoding, the active
@@ -90,7 +93,7 @@ pub unsafe extern "C" fn rt_ping(args: *const i64, argc: u32) -> i64 {
 // `typelisp` crate reaches for several of these as `typelisp_rt::...`, which
 // is where they have always been from its point of view.
 pub use typelisp_abi::{
-    active_heap, decode, encode, fatal, raise, set_active_heap, tagged_arg,
+    active_heap, decode, encode, fatal, raise, set_active_heap,
     unwind_interpreted_error, CompiledPanic, CompiledThrow, InterpretedUnwind,
 };
 
@@ -137,11 +140,11 @@ pub use io_shims::*;
 
 #[cfg(test)]
 mod tests {
-    use typelisp_mem::{Heap, PathId, StrId, Value};
+    use typelisp_mem::{Heap, PathId, StrId, Value, Word};
 
     use super::{
         active_heap, decode, encode, reset_global_table, rt_car, rt_cdr, rt_cons, rt_global_get, rt_global_new, rt_global_set,
-        rt_heap_init, rt_heap_live_count, rt_ping, rt_pop_sexpr_root, rt_push_permanent_sexpr_root, rt_push_sexpr_root, rt_root_count,
+        rt_heap_init, rt_heap_live_count, rt_ping, rt_pop_sexpr_root, rt_push_sexpr_root, rt_root_count,
         rt_char_equalp, rt_set_car, rt_set_cdr, rt_set_sexpr_root, rt_str_append, rt_str_eq, rt_str_equalp, rt_str_length, rt_str_lt,
         rt_str_new, rt_str_ref, rt_hashtable_bucket_count, rt_hashtable_bucket_delete, rt_hashtable_bucket_key,
         rt_hashtable_bucket_put, rt_hashtable_bucket_value, rt_hashtable_count, rt_hashtable_entries,
@@ -152,20 +155,14 @@ mod tests {
 
     #[test]
     fn rt_ping_adds_one_to_its_first_argument() {
-        let args = [41i64];
-        assert_eq!(unsafe { rt_ping(args.as_ptr(), 1) }, 42);
-    }
-
-    #[test]
-    fn rt_ping_returns_zero_with_no_arguments() {
-        assert_eq!(unsafe { rt_ping(std::ptr::null(), 0) }, 0);
+        assert_eq!(unsafe { rt_ping(41) }, 42);
     }
 
     #[test]
     fn rt_heap_live_count_reflects_the_registered_heaps_real_state() {
         let mut heap = Heap::with_capacity(8);
         set_active_heap(&mut heap as *mut Heap);
-        assert_eq!(unsafe { rt_heap_live_count(std::ptr::null(), 0) }, 0);
+        assert_eq!(unsafe { rt_heap_live_count() }, 0);
 
         // Goes through `rt_cons`, not `heap.cons(...)` directly: once `heap`
         // has been registered as the active `Heap` via a raw pointer, every
@@ -176,15 +173,14 @@ mod tests {
         // invalidates the raw pointer `set_active_heap` was given, which
         // `rt_heap_live_count`'s own `active_heap()` call below then trips.
         let cons_args = [encode(Value::Int(1)), encode(Value::Empty)];
-        unsafe { rt_cons(cons_args.as_ptr(), 2) };
-        assert_eq!(unsafe { rt_heap_live_count(std::ptr::null(), 0) }, 1);
+        unsafe { rt_cons(cons_args[0], cons_args[1]) };
+        assert_eq!(unsafe { rt_heap_live_count() }, 1);
     }
 
     #[test]
     fn rt_heap_init_registers_a_freshly_created_heap() {
-        let args = [4i64];
-        assert_eq!(unsafe { rt_heap_init(args.as_ptr(), 1) }, 0);
-        assert_eq!(unsafe { rt_heap_live_count(std::ptr::null(), 0) }, 0);
+        assert_eq!(unsafe { rt_heap_init(4, 0, 0) }, 0);
+        assert_eq!(unsafe { rt_heap_live_count() }, 0);
 
         // `rt_heap_init` deliberately never frees the `Heap` it allocates
         // (see its own doc comment — it must outlive every compiled function
@@ -198,12 +194,12 @@ mod tests {
             let heap_ptr = active_heap() as *mut Heap;
             drop(Box::from_raw(heap_ptr));
         }
-        set_active_heap(std::ptr::null_mut());
+        set_active_heap(core::ptr::null_mut());
     }
 
     #[test]
     fn encode_decode_round_trips_every_immediate_variant() {
-        for n in [0i64, 1, -1, 42, -42, i64::MIN >> 1, i64::MAX >> 1] {
+        for n in [0i64, 1, -1, 42, -42, (Word::MIN >> 1) as i64, (Word::MAX >> 1) as i64] {
             assert_eq!(decode(encode(Value::Int(n))), Value::Int(n), "Int({})", n);
         }
         for c in ['a', 'Z', '0', '\u{10FFFF}', '\0'] {
@@ -235,11 +231,11 @@ mod tests {
         let car_in = encode(Value::Int(1));
         let cdr_in = encode(Value::Int(2));
         let cons_args = [car_in, cdr_in];
-        let pair = unsafe { rt_cons(cons_args.as_ptr(), 2) };
+        let pair = unsafe { rt_cons(cons_args[0], cons_args[1]) };
 
         let one_arg = [pair];
-        assert_eq!(decode(unsafe { rt_car(one_arg.as_ptr(), 1) }), Value::Int(1));
-        assert_eq!(decode(unsafe { rt_cdr(one_arg.as_ptr(), 1) }), Value::Int(2));
+        assert_eq!(decode(unsafe { rt_car(one_arg[0]) }), Value::Int(1));
+        assert_eq!(decode(unsafe { rt_cdr(one_arg[0]) }), Value::Int(2));
     }
 
     #[test]
@@ -248,16 +244,16 @@ mod tests {
         set_active_heap(&mut heap as *mut Heap);
 
         let cons_args = [encode(Value::Int(1)), encode(Value::Int(2))];
-        let pair = unsafe { rt_cons(cons_args.as_ptr(), 2) };
+        let pair = unsafe { rt_cons(cons_args[0], cons_args[1]) };
 
         let set_car_args = [pair, encode(Value::Int(99))];
-        assert_eq!(unsafe { rt_set_car(set_car_args.as_ptr(), 2) }, 0, "set-car returns Unit (0)");
+        assert_eq!(unsafe { rt_set_car(set_car_args[0], set_car_args[1]) }, 0, "set-car returns Unit (0)");
         let set_cdr_args = [pair, encode(Value::Empty)];
-        assert_eq!(unsafe { rt_set_cdr(set_cdr_args.as_ptr(), 2) }, 0, "set-cdr returns Unit (0)");
+        assert_eq!(unsafe { rt_set_cdr(set_cdr_args[0], set_cdr_args[1]) }, 0, "set-cdr returns Unit (0)");
 
         let one_arg = [pair];
-        assert_eq!(decode(unsafe { rt_car(one_arg.as_ptr(), 1) }), Value::Int(99));
-        assert_eq!(decode(unsafe { rt_cdr(one_arg.as_ptr(), 1) }), Value::Empty);
+        assert_eq!(decode(unsafe { rt_car(one_arg[0]) }), Value::Int(99));
+        assert_eq!(decode(unsafe { rt_cdr(one_arg[0]) }), Value::Empty);
     }
 
     /// Forces a real `Heap::gc()` (capacity 4, more than 4 conses follow)
@@ -271,8 +267,8 @@ mod tests {
         set_active_heap(&mut heap as *mut Heap);
 
         let precious_args = [encode(Value::Int(111)), encode(Value::Int(222))];
-        let precious = unsafe { rt_cons(precious_args.as_ptr(), 2) };
-        let pushed = unsafe { rt_push_sexpr_root(&precious as *const i64, 1) };
+        let precious = unsafe { rt_cons(precious_args[0], precious_args[1]) };
+        let pushed = unsafe { rt_push_sexpr_root(precious) };
         assert_eq!(pushed, precious, "rt_push_sexpr_root returns its argument unchanged");
 
         // Exhausts the remaining 3 free cells and forces at least one GC;
@@ -280,15 +276,15 @@ mod tests {
         // the time the next one runs.
         for i in 0..20 {
             let args = [encode(Value::Int(i)), encode(Value::Int(i))];
-            unsafe { rt_cons(args.as_ptr(), 2) };
+            unsafe { rt_cons(args[0], args[1]) };
         }
 
-        let popped = unsafe { rt_pop_sexpr_root(std::ptr::null(), 0) };
+        let popped = unsafe { rt_pop_sexpr_root() };
         assert_eq!(popped, precious, "the popped root is the same value that was pushed");
 
         let one_arg = [precious];
-        assert_eq!(decode(unsafe { rt_car(one_arg.as_ptr(), 1) }), Value::Int(111));
-        assert_eq!(decode(unsafe { rt_cdr(one_arg.as_ptr(), 1) }), Value::Int(222));
+        assert_eq!(decode(unsafe { rt_car(one_arg[0]) }), Value::Int(111));
+        assert_eq!(decode(unsafe { rt_cdr(one_arg[0]) }), Value::Int(222));
     }
 
     /// The negative case `rt_push_sexpr_root`'s test above guards against:
@@ -306,65 +302,18 @@ mod tests {
         set_active_heap(&mut heap as *mut Heap);
 
         let unrooted_args = [encode(Value::Int(111)), encode(Value::Int(222))];
-        let unrooted = unsafe { rt_cons(unrooted_args.as_ptr(), 2) };
+        let unrooted = unsafe { rt_cons(unrooted_args[0], unrooted_args[1]) };
         // Deliberately not pushed as a root.
 
         for i in 0..20 {
             let args = [encode(Value::Int(i)), encode(Value::Int(i))];
-            unsafe { rt_cons(args.as_ptr(), 2) };
+            unsafe { rt_cons(args[0], args[1]) };
         }
 
         let one_arg = [unrooted];
-        let car_after = decode(unsafe { rt_car(one_arg.as_ptr(), 1) });
-        let cdr_after = decode(unsafe { rt_cdr(one_arg.as_ptr(), 1) });
+        let car_after = decode(unsafe { rt_car(one_arg[0]) });
+        let cdr_after = decode(unsafe { rt_cdr(one_arg[0]) });
         assert_ne!((car_after, cdr_after), (Value::Int(111), Value::Int(222)));
-    }
-
-    /// [`rt_push_permanent_sexpr_root`]'s own version of
-    /// [`rt_push_sexpr_root_protects_a_value_across_a_gc_triggered_by_other_allocations`]
-    /// — protects a value across a forced `gc()` with *no* matching pop at
-    /// all (unlike the ordinary root, which the other test still pops at
-    /// the end).
-    #[test]
-    fn rt_push_permanent_sexpr_root_protects_a_value_across_a_gc_with_no_matching_pop() {
-        let mut heap = Heap::with_capacity(4);
-        set_active_heap(&mut heap as *mut Heap);
-
-        let precious_args = [encode(Value::Int(111)), encode(Value::Int(222))];
-        let precious = unsafe { rt_cons(precious_args.as_ptr(), 2) };
-        let pushed = unsafe { rt_push_permanent_sexpr_root(&precious as *const i64, 1) };
-        assert_eq!(pushed, precious, "rt_push_permanent_sexpr_root returns its argument unchanged");
-
-        for i in 0..20 {
-            let args = [encode(Value::Int(i)), encode(Value::Int(i))];
-            unsafe { rt_cons(args.as_ptr(), 2) };
-        }
-
-        let one_arg = [precious];
-        assert_eq!(decode(unsafe { rt_car(one_arg.as_ptr(), 1) }), Value::Int(111));
-        assert_eq!(decode(unsafe { rt_cdr(one_arg.as_ptr(), 1) }), Value::Int(222));
-    }
-
-    /// A permanent root pushed in between an ordinary push/pop pair must
-    /// not desync that pair's LIFO accounting — the reason
-    /// [`rt_push_permanent_sexpr_root`] feeds a separate `Vec`
-    /// (`Heap::push_permanent_root`) rather than the same stack
-    /// [`rt_push_sexpr_root`]/[`rt_pop_sexpr_root`] share.
-    #[test]
-    fn rt_push_permanent_sexpr_root_does_not_desync_an_interleaved_ordinary_root_pop() {
-        let mut heap = Heap::with_capacity(8);
-        set_active_heap(&mut heap as *mut Heap);
-
-        let ordinary_args = [encode(Value::Int(1)), encode(Value::Int(1))];
-        let ordinary = unsafe { rt_cons(ordinary_args.as_ptr(), 2) };
-        unsafe { rt_push_sexpr_root(&ordinary as *const i64, 1) };
-
-        let permanent_args = [encode(Value::Int(2)), encode(Value::Int(2))];
-        let permanent = unsafe { rt_cons(permanent_args.as_ptr(), 2) };
-        unsafe { rt_push_permanent_sexpr_root(&permanent as *const i64, 1) };
-
-        let popped = unsafe { rt_pop_sexpr_root(std::ptr::null(), 0) };
-        assert_eq!(popped, ordinary, "the ordinary root pops, unaffected by the permanent push");
     }
 
     /// The problem [`rt_set_sexpr_root`] exists to fix, reproduced directly:
@@ -385,25 +334,25 @@ mod tests {
         // `(let ((s (Cons (Int 1) (Int 1)))) ...)` — bind-let-values pushes
         // a root for the *original* value.
         let original_args = [encode(Value::Int(1)), encode(Value::Int(1))];
-        let original = unsafe { rt_cons(original_args.as_ptr(), 2) };
-        unsafe { rt_push_sexpr_root(&original as *const i64, 1) };
+        let original = unsafe { rt_cons(original_args[0], original_args[1]) };
+        unsafe { rt_push_sexpr_root(original) };
 
         // `(setf s (Cons (Int 111) (Int 222)))` — overwrites s's own slot
         // with this new value, but (without rt_set_sexpr_root) no root is
         // ever pushed or updated for it.
         let reassigned_args = [encode(Value::Int(111)), encode(Value::Int(222))];
-        let reassigned = unsafe { rt_cons(reassigned_args.as_ptr(), 2) };
+        let reassigned = unsafe { rt_cons(reassigned_args[0], reassigned_args[1]) };
 
         // Many unrelated allocations, forcing real gc() calls under a tiny
         // heap — same technique as the un-rooted-value test above.
         for i in 0..20 {
             let args = [encode(Value::Int(i)), encode(Value::Int(i))];
-            unsafe { rt_cons(args.as_ptr(), 2) };
+            unsafe { rt_cons(args[0], args[1]) };
         }
 
         let one_arg = [reassigned];
-        let car_after = decode(unsafe { rt_car(one_arg.as_ptr(), 1) });
-        let cdr_after = decode(unsafe { rt_cdr(one_arg.as_ptr(), 1) });
+        let car_after = decode(unsafe { rt_car(one_arg[0]) });
+        let cdr_after = decode(unsafe { rt_cdr(one_arg[0]) });
         assert_ne!(
             (car_after, cdr_after),
             (Value::Int(111), Value::Int(222)),
@@ -424,34 +373,34 @@ mod tests {
         let mut heap = Heap::with_capacity(4);
         set_active_heap(&mut heap as *mut Heap);
 
-        let idx = unsafe { rt_root_count(std::ptr::null(), 0) };
+        let idx = unsafe { rt_root_count() };
         let original_args = [encode(Value::Int(1)), encode(Value::Int(1))];
-        let original = unsafe { rt_cons(original_args.as_ptr(), 2) };
-        unsafe { rt_push_sexpr_root(&original as *const i64, 1) };
+        let original = unsafe { rt_cons(original_args[0], original_args[1]) };
+        unsafe { rt_push_sexpr_root(original) };
 
         let reassigned_args = [encode(Value::Int(111)), encode(Value::Int(222))];
-        let reassigned = unsafe { rt_cons(reassigned_args.as_ptr(), 2) };
+        let reassigned = unsafe { rt_cons(reassigned_args[0], reassigned_args[1]) };
         let set_args = [idx, reassigned];
-        let returned = unsafe { rt_set_sexpr_root(set_args.as_ptr(), 2) };
+        let returned = unsafe { rt_set_sexpr_root(set_args[0], set_args[1]) };
         assert_eq!(returned, reassigned, "rt_set_sexpr_root returns its new-value argument unchanged");
 
         for i in 0..20 {
             let args = [encode(Value::Int(i)), encode(Value::Int(i))];
-            unsafe { rt_cons(args.as_ptr(), 2) };
+            unsafe { rt_cons(args[0], args[1]) };
         }
 
         let one_arg = [reassigned];
-        assert_eq!(decode(unsafe { rt_car(one_arg.as_ptr(), 1) }), Value::Int(111));
-        assert_eq!(decode(unsafe { rt_cdr(one_arg.as_ptr(), 1) }), Value::Int(222));
+        assert_eq!(decode(unsafe { rt_car(one_arg[0]) }), Value::Int(111));
+        assert_eq!(decode(unsafe { rt_cdr(one_arg[0]) }), Value::Int(222));
 
-        let popped = unsafe { rt_pop_sexpr_root(std::ptr::null(), 0) };
+        let popped = unsafe { rt_pop_sexpr_root() };
         assert_eq!(popped, reassigned, "popping the binding's root now yields the reassigned value, not the original");
     }
 
     /// The word of the type at `path` (walked down the module tree from the
     /// root) applied to the types `args` are the words of — what a compiled
     /// call site reads out of its type table and hands the shims.
-    fn make_type(path: &[&str], args: &[i64]) -> i64 {
+    fn make_type(path: &[&str], args: &[Word]) -> Word {
         use typelisp_mem::symbols::{child_ns, intern_in, NsId};
         let (name, modules) = path.split_last().expect("a path names something");
         let ns = modules.iter().fold(NsId::ROOT, |ns, seg| child_ns(ns, seg));
@@ -469,8 +418,8 @@ mod tests {
     /// path (here, another `rt_*` call) rather than reborrowing the original
     /// `&mut heap` binding directly, which Stacked Borrows treats as
     /// invalidating the raw pointer.
-    fn make_str(s: &str) -> i64 {
-        let args: Vec<i64> = s.chars().map(|c| c as i64).collect();
+    fn make_str(s: &str) -> Word {
+        let args: Vec<Word> = s.chars().map(|c| c as Word).collect();
         unsafe { rt_str_new(args.as_ptr(), args.len() as u32) }
     }
 
@@ -491,7 +440,7 @@ mod tests {
         let mut heap = Heap::with_capacity(8);
         set_active_heap(&mut heap as *mut Heap);
 
-        let tagged = unsafe { rt_str_new(std::ptr::null(), 0) };
+        let tagged = unsafe { rt_str_new(core::ptr::null(), 0) };
         match decode(tagged) {
             Value::Str(id) => assert_eq!(&*unsafe { active_heap() }.string(id), ""),
             other => panic!("expected a Str, got {:?}", other),
@@ -504,7 +453,7 @@ mod tests {
         set_active_heap(&mut heap as *mut Heap);
 
         let tagged = make_str("héllo");
-        assert_eq!(unsafe { rt_str_length([tagged].as_ptr(), 1) }, 5);
+        assert_eq!(unsafe { rt_str_length(tagged) }, 5);
     }
 
     #[test]
@@ -514,7 +463,7 @@ mod tests {
 
         let tagged = make_str("hi");
         let args = [tagged, 1];
-        assert_eq!(unsafe { rt_str_ref(args.as_ptr(), 2) }, 'i' as i64);
+        assert_eq!(unsafe { rt_str_ref(args[0], args[1]) }, 'i' as u32);
     }
 
     #[test]
@@ -525,8 +474,8 @@ mod tests {
         let a = make_str("hi");
         let b = make_str("hi");
         let c = make_str("bye");
-        assert_eq!(unsafe { rt_str_eq([a, b].as_ptr(), 2) }, 1, "separately allocated, equal content");
-        assert_eq!(unsafe { rt_str_eq([a, c].as_ptr(), 2) }, 0);
+        assert!(unsafe { rt_str_eq(a, b) }, "separately allocated, equal content");
+        assert!(!unsafe { rt_str_eq(a, c) });
     }
 
     #[test]
@@ -538,20 +487,20 @@ mod tests {
         let b = make_str("hello");
         let c = make_str("HELLO");
         let d = make_str("world");
-        assert_eq!(unsafe { rt_str_equalp([a, b].as_ptr(), 2) }, 1, "differ only in case");
-        assert_eq!(unsafe { rt_str_equalp([a, c].as_ptr(), 2) }, 1);
-        assert_eq!(unsafe { rt_str_equalp([a, d].as_ptr(), 2) }, 0);
-        assert_eq!(unsafe { rt_str_eq([a, b].as_ptr(), 2) }, 0, "plain `eq` still distinguishes case");
+        assert!(unsafe { rt_str_equalp(a, b) }, "differ only in case");
+        assert!(unsafe { rt_str_equalp(a, c) });
+        assert!(!unsafe { rt_str_equalp(a, d) });
+        assert!(!unsafe { rt_str_eq(a, b) }, "plain `eq` still distinguishes case");
     }
 
     #[test]
     fn rt_char_equalp_is_ascii_case_insensitive() {
         // `char` args are raw code points, not tagged Sexprs — no active heap
         // is needed.
-        assert_eq!(unsafe { rt_char_equalp(['A' as i64, 'a' as i64].as_ptr(), 2) }, 1, "A equalp a");
-        assert_eq!(unsafe { rt_char_equalp(['A' as i64, 'A' as i64].as_ptr(), 2) }, 1);
-        assert_eq!(unsafe { rt_char_equalp(['A' as i64, 'b' as i64].as_ptr(), 2) }, 0);
-        assert_eq!(unsafe { rt_char_equalp(['1' as i64, '1' as i64].as_ptr(), 2) }, 1, "non-letters compare by value");
+        assert!(unsafe { rt_char_equalp('A' as u32, 'a' as u32) }, "A equalp a");
+        assert!(unsafe { rt_char_equalp('A' as u32, 'A' as u32) });
+        assert!(!unsafe { rt_char_equalp('A' as u32, 'b' as u32) });
+        assert!(unsafe { rt_char_equalp('1' as u32, '1' as u32) }, "non-letters compare by value");
     }
 
     #[test]
@@ -562,9 +511,9 @@ mod tests {
         let a = make_str("abc");
         let b = make_str("abd");
         let a2 = make_str("abc");
-        assert_eq!(unsafe { rt_str_lt([a, b].as_ptr(), 2) }, 1);
-        assert_eq!(unsafe { rt_str_lt([b, a].as_ptr(), 2) }, 0);
-        assert_eq!(unsafe { rt_str_lt([a, a2].as_ptr(), 2) }, 0, "equal content is not strictly less");
+        assert!(unsafe { rt_str_lt(a, b) });
+        assert!(!unsafe { rt_str_lt(b, a) });
+        assert!(!unsafe { rt_str_lt(a, a2) }, "equal content is not strictly less");
     }
 
     #[test]
@@ -574,7 +523,7 @@ mod tests {
 
         let a = make_str("foo");
         let b = make_str("bar");
-        let tagged = unsafe { rt_str_append([a, b].as_ptr(), 2) };
+        let tagged = unsafe { rt_str_append(a, b) };
         match decode(tagged) {
             Value::Str(id) => assert_eq!(&*unsafe { active_heap() }.string(id), "foobar"),
             other => panic!("expected a Str, got {:?}", other),
@@ -603,8 +552,8 @@ mod tests {
 
         let get_x = [tagged, 0];
         let get_y = [tagged, 1];
-        assert_eq!(decode(unsafe { rt_struct_field_get(get_x.as_ptr(), 2) }), Value::Int(1));
-        assert_eq!(decode(unsafe { rt_struct_field_get(get_y.as_ptr(), 2) }), Value::Int(2));
+        assert_eq!(decode(unsafe { rt_struct_field_get(get_x[0], get_x[1]) }), Value::Int(1));
+        assert_eq!(decode(unsafe { rt_struct_field_get(get_y[0], get_y[1]) }), Value::Int(2));
     }
 
     #[test]
@@ -645,8 +594,8 @@ mod tests {
             other => panic!("expected a boxed enum, got {:?}", other),
         }
 
-        assert_eq!(unsafe { rt_data_variant([tagged].as_ptr(), 1) }, 0);
-        assert_eq!(decode(unsafe { rt_data_field([tagged, 0].as_ptr(), 2) }), Value::Int(42));
+        assert_eq!(unsafe { rt_data_variant(tagged) }, 0);
+        assert_eq!(decode(unsafe { rt_data_field(tagged, 0) }), Value::Int(42));
     }
 
     #[test]
@@ -666,7 +615,7 @@ mod tests {
             }
             other => panic!("expected a boxed enum, got {:?}", other),
         }
-        assert_eq!(unsafe { rt_data_variant([tagged].as_ptr(), 1) }, 1);
+        assert_eq!(unsafe { rt_data_variant(tagged) }, 1);
     }
 
     /// A rooted enum box keeps its heap-referencing field alive across a
@@ -706,8 +655,8 @@ mod tests {
         // slot 0 (masked): a tagged int; slot 1 (unmasked): raw float bits,
         // stored and handed back verbatim.
         let tagged_int = encode(Value::Int(7));
-        let raw_bits = (1.5f64).to_bits() as i64;
-        let fn_ptr = 0x1000i64; // opaque at this layer — only stored
+        let raw_bits = (1.5f64).to_bits() as Word;
+        let fn_ptr = 0x1000isize; // opaque at this layer — only stored
         let args = [fn_ptr, 0b01, tagged_int, raw_bits];
         let clo = unsafe { rt_closure_new(args.as_ptr(), 4) };
 
@@ -719,10 +668,10 @@ mod tests {
             }
             other => panic!("expected a boxed compiled closure, got {:?}", other),
         }
-        assert_eq!(unsafe { rt_closure_fnptr([clo].as_ptr(), 1) }, fn_ptr);
-        assert_eq!(unsafe { rt_closure_env_len([clo].as_ptr(), 1) }, 2);
-        assert_eq!(unsafe { rt_closure_env_get([clo, 0].as_ptr(), 2) }, tagged_int);
-        assert_eq!(unsafe { rt_closure_env_get([clo, 1].as_ptr(), 2) }, raw_bits);
+        assert_eq!(unsafe { rt_closure_fnptr(clo) }, fn_ptr);
+        assert_eq!(unsafe { rt_closure_env_len(clo) }, 2);
+        assert_eq!(unsafe { rt_closure_env_get(clo, 0) }, tagged_int);
+        assert_eq!(unsafe { rt_closure_env_get(clo, 1) }, raw_bits);
     }
 
     /// A rooted compiled closure keeps its captured cell — and through it
@@ -736,16 +685,16 @@ mod tests {
         set_active_heap(&mut heap as *mut Heap);
 
         let cons = heap.cons(Value::Int(7), Value::Empty).expect("cons");
-        let cell = unsafe { rt_cell_new([encode(cons)].as_ptr(), 1) };
+        let cell = unsafe { rt_cell_new(encode(cons)) };
         let clo = unsafe { rt_closure_new([0x1000, 0b1, cell].as_ptr(), 3) };
         let boxed = decode(clo);
 
         heap.push_root(boxed);
         heap.gc();
 
-        let got_cell = unsafe { rt_closure_env_get([clo, 0].as_ptr(), 2) };
+        let got_cell = unsafe { rt_closure_env_get(clo, 0) };
         assert_eq!(got_cell, cell, "the captured cell slot survives verbatim");
-        let contents = unsafe { rt_cell_get([got_cell].as_ptr(), 1) };
+        let contents = unsafe { rt_cell_get(got_cell) };
         assert_eq!(heap.car(decode(contents)).expect("car"), Value::Int(7));
     }
 
@@ -754,10 +703,10 @@ mod tests {
         let mut heap = Heap::with_capacity(8);
         set_active_heap(&mut heap as *mut Heap);
 
-        let cell = unsafe { rt_cell_new([encode(Value::Int(1))].as_ptr(), 1) };
-        assert_eq!(unsafe { rt_cell_get([cell].as_ptr(), 1) }, encode(Value::Int(1)));
-        assert_eq!(unsafe { rt_cell_set([cell, encode(Value::Int(2))].as_ptr(), 2) }, 0, "cell-set returns Unit (0)");
-        assert_eq!(unsafe { rt_cell_get([cell].as_ptr(), 1) }, encode(Value::Int(2)));
+        let cell = unsafe { rt_cell_new(encode(Value::Int(1))) };
+        assert_eq!(unsafe { rt_cell_get(cell) }, encode(Value::Int(1)));
+        assert_eq!(unsafe { rt_cell_set(cell, encode(Value::Int(2))) }, 0, "cell-set returns Unit (0)");
+        assert_eq!(unsafe { rt_cell_get(cell) }, encode(Value::Int(2)));
 
         // The very same heap object is what the interpreter's own cell API
         // sees — a compiled `setf` and an interp `setf` mutate one binding.
@@ -769,7 +718,7 @@ mod tests {
         assert!(h.is_cell(id));
         assert_eq!(h.cell_get(id), Value::Int(2));
         h.cell_set(id, Value::Int(3));
-        assert_eq!(unsafe { rt_cell_get([cell].as_ptr(), 1) }, encode(Value::Int(3)));
+        assert_eq!(unsafe { rt_cell_get(cell) }, encode(Value::Int(3)));
     }
 
     /// An unreachable compiled closure is swept like any other box. (Neither
@@ -802,12 +751,12 @@ mod tests {
         let tagged = unsafe { rt_struct_new(args.as_ptr(), 3) };
 
         let set_args = [tagged, 0, encode(Value::Int(99))];
-        assert_eq!(unsafe { rt_struct_field_set(set_args.as_ptr(), 3) }, 0, "field-set returns Unit (0)");
+        assert_eq!(unsafe { rt_struct_field_set(set_args[0], set_args[1], set_args[2]) }, 0, "field-set returns Unit (0)");
 
         let get_x = [tagged, 0];
         let get_y = [tagged, 1];
-        assert_eq!(decode(unsafe { rt_struct_field_get(get_x.as_ptr(), 2) }), Value::Int(99));
-        assert_eq!(decode(unsafe { rt_struct_field_get(get_y.as_ptr(), 2) }), Value::Int(2), "the other field is untouched");
+        assert_eq!(decode(unsafe { rt_struct_field_get(get_x[0], get_x[1]) }), Value::Int(99));
+        assert_eq!(decode(unsafe { rt_struct_field_get(get_y[0], get_y[1]) }), Value::Int(2), "the other field is untouched");
     }
 
     #[test]
@@ -816,11 +765,11 @@ mod tests {
         set_active_heap(&mut heap as *mut Heap);
 
         let empty = unsafe { rt_struct_new([make_type(&["Vector"], &[])].as_ptr(), 1) };
-        assert_eq!(unsafe { rt_struct_field_count([empty].as_ptr(), 1) }, 0, "empty vector has length 0");
+        assert_eq!(unsafe { rt_struct_field_count(empty) }, 0, "empty vector has length 0");
 
         let three = [make_type(&["Vector"], &[]), encode(Value::Int(10)), encode(Value::Int(20)), encode(Value::Int(30))];
         let tagged = unsafe { rt_struct_new(three.as_ptr(), 4) };
-        assert_eq!(unsafe { rt_struct_field_count([tagged].as_ptr(), 1) }, 3, "raw count, not a tagged Sexpr Int");
+        assert_eq!(unsafe { rt_struct_field_count(tagged) }, 3, "raw count, not a tagged Sexpr Int");
     }
 
     #[test]
@@ -828,28 +777,28 @@ mod tests {
         let mut heap = Heap::with_capacity(64);
         set_active_heap(&mut heap as *mut Heap);
 
-        let ht = unsafe { rt_hashtable_new([make_type(&["HashTable"], &[make_type(&["i32"], &[]), make_type(&["i32"], &[])]), encode(Value::Empty), encode(Value::Empty)].as_ptr(), 3) };
-        assert_eq!(unsafe { rt_hashtable_count([ht].as_ptr(), 1) }, 0, "a fresh map is empty");
+        let ht = unsafe { rt_hashtable_new(make_type(&["HashTable"], &[make_type(&["i32"], &[]), make_type(&["i32"], &[])]), encode(Value::Empty), encode(Value::Empty)) };
+        assert_eq!(unsafe { rt_hashtable_count(ht) }, 0, "a fresh map is empty");
 
         // Two int->int entries (keys/values as raw tagged `Sexpr` ints). The
         // hash and the index are the caller's: this layer never computes
         // either, which is what lets a `defstruct` be a key.
-        assert_eq!(unsafe { rt_hashtable_bucket_put([ht, 1, 0, encode(Value::Int(1)), encode(Value::Int(10))].as_ptr(), 5) }, 0);
-        assert_eq!(unsafe { rt_hashtable_bucket_put([ht, 2, 0, encode(Value::Int(2)), encode(Value::Int(20))].as_ptr(), 5) }, 0);
+        assert_eq!(unsafe { rt_hashtable_bucket_put(ht, 1, 0, encode(Value::Int(1)), encode(Value::Int(10))) }, 0);
+        assert_eq!(unsafe { rt_hashtable_bucket_put(ht, 2, 0, encode(Value::Int(2)), encode(Value::Int(20))) }, 0);
         // Writing at an index that already exists overwrites rather than
         // appending, so the count doesn't grow.
-        assert_eq!(unsafe { rt_hashtable_bucket_put([ht, 1, 0, encode(Value::Int(1)), encode(Value::Int(99))].as_ptr(), 5) }, 0);
-        assert_eq!(unsafe { rt_hashtable_count([ht].as_ptr(), 1) }, 2, "two distinct keys");
+        assert_eq!(unsafe { rt_hashtable_bucket_put(ht, 1, 0, encode(Value::Int(1)), encode(Value::Int(99))) }, 0);
+        assert_eq!(unsafe { rt_hashtable_count(ht) }, 2, "two distinct keys");
 
         // `keys` builds a `Vector` whose field count matches the entry count.
-        let keys = unsafe { rt_hashtable_keys([ht, make_type(&["Vector"], &[make_type(&["i32"], &[])])].as_ptr(), 2) };
+        let keys = unsafe { rt_hashtable_keys(ht, make_type(&["Vector"], &[make_type(&["i32"], &[])])) };
         match decode(keys) {
             Value::Boxed(id) => assert_eq!(unsafe { active_heap() }.struct_field_count(id), 2),
             other => panic!("expected a boxed vector, got {:?}", other),
         }
 
         // `entries` builds a `Vector` of `cons-cell`s, one per entry.
-        let entries = unsafe { rt_hashtable_entries([ht, make_type(&["Vector"], &[make_type(&["std", "sexpr", "cons-cell"], &[make_type(&["i32"], &[]), make_type(&["i32"], &[])])])].as_ptr(), 2) };
+        let entries = unsafe { rt_hashtable_entries(ht, make_type(&["Vector"], &[make_type(&["std", "sexpr", "cons-cell"], &[make_type(&["i32"], &[]), make_type(&["i32"], &[])])])) };
         match decode(entries) {
             Value::Boxed(id) => {
                 let h = unsafe { active_heap() };
@@ -872,24 +821,24 @@ mod tests {
         let mut heap = Heap::with_capacity(64);
         set_active_heap(&mut heap as *mut Heap);
 
-        let ht = unsafe { rt_hashtable_new([make_type(&["HashTable"], &[make_type(&["i32"], &[]), make_type(&["i32"], &[])]), encode(Value::Empty), encode(Value::Empty)].as_ptr(), 3) };
+        let ht = unsafe { rt_hashtable_new(make_type(&["HashTable"], &[make_type(&["i32"], &[]), make_type(&["i32"], &[])]), encode(Value::Empty), encode(Value::Empty)) };
         let hash = 5;
-        assert_eq!(unsafe { rt_hashtable_bucket_count([ht, hash].as_ptr(), 2) }, 0, "no bucket yet");
+        assert_eq!(unsafe { rt_hashtable_bucket_count(ht, hash) }, 0, "no bucket yet");
 
-        unsafe { rt_hashtable_bucket_put([ht, hash, 0, encode(Value::Int(7)), encode(Value::Int(70))].as_ptr(), 5) };
-        unsafe { rt_hashtable_bucket_put([ht, hash, 1, encode(Value::Int(8)), encode(Value::Int(80))].as_ptr(), 5) };
-        assert_eq!(unsafe { rt_hashtable_bucket_count([ht, hash].as_ptr(), 2) }, 2);
-        assert_eq!(unsafe { rt_hashtable_count([ht].as_ptr(), 1) }, 2, "the table counts every bucket");
+        unsafe { rt_hashtable_bucket_put(ht, hash, 0, encode(Value::Int(7)), encode(Value::Int(70))) };
+        unsafe { rt_hashtable_bucket_put(ht, hash, 1, encode(Value::Int(8)), encode(Value::Int(80))) };
+        assert_eq!(unsafe { rt_hashtable_bucket_count(ht, hash) }, 2);
+        assert_eq!(unsafe { rt_hashtable_count(ht) }, 2, "the table counts every bucket");
 
-        assert_eq!(decode(unsafe { rt_hashtable_bucket_key([ht, hash, 0].as_ptr(), 3) }), Value::Int(7));
-        assert_eq!(decode(unsafe { rt_hashtable_bucket_value([ht, hash, 1].as_ptr(), 3) }), Value::Int(80));
+        assert_eq!(decode(unsafe { rt_hashtable_bucket_key(ht, hash, 0) }), Value::Int(7));
+        assert_eq!(decode(unsafe { rt_hashtable_bucket_value(ht, hash, 1) }), Value::Int(80));
 
-        unsafe { rt_hashtable_bucket_delete([ht, hash, 0].as_ptr(), 3) };
-        assert_eq!(unsafe { rt_hashtable_bucket_count([ht, hash].as_ptr(), 2) }, 1, "the other survives");
-        assert_eq!(decode(unsafe { rt_hashtable_bucket_key([ht, hash, 0].as_ptr(), 3) }), Value::Int(8), "and moves up");
+        unsafe { rt_hashtable_bucket_delete(ht, hash, 0) };
+        assert_eq!(unsafe { rt_hashtable_bucket_count(ht, hash) }, 1, "the other survives");
+        assert_eq!(decode(unsafe { rt_hashtable_bucket_key(ht, hash, 0) }), Value::Int(8), "and moves up");
 
-        unsafe { rt_hashtable_bucket_delete([ht, hash, 0].as_ptr(), 3) };
-        assert_eq!(unsafe { rt_hashtable_count([ht].as_ptr(), 1) }, 0, "an emptied bucket is dropped");
+        unsafe { rt_hashtable_bucket_delete(ht, hash, 0) };
+        assert_eq!(unsafe { rt_hashtable_count(ht) }, 0, "an emptied bucket is dropped");
     }
 
     #[test]
@@ -898,12 +847,12 @@ mod tests {
         set_active_heap(&mut heap as *mut Heap);
 
         let tagged = unsafe { rt_struct_new([make_type(&["Vector"], &[])].as_ptr(), 1) };
-        assert_eq!(unsafe { rt_struct_push_field([tagged, encode(Value::Int(7))].as_ptr(), 2) }, 0, "push returns Unit (0)");
-        assert_eq!(unsafe { rt_struct_push_field([tagged, encode(Value::Int(8))].as_ptr(), 2) }, 0);
+        assert_eq!(unsafe { rt_struct_push_field(tagged, encode(Value::Int(7))) }, 0, "push returns Unit (0)");
+        assert_eq!(unsafe { rt_struct_push_field(tagged, encode(Value::Int(8))) }, 0);
 
-        assert_eq!(unsafe { rt_struct_field_count([tagged].as_ptr(), 1) }, 2, "grew from 0 to 2");
-        assert_eq!(decode(unsafe { rt_struct_field_get([tagged, 0].as_ptr(), 2) }), Value::Int(7));
-        assert_eq!(decode(unsafe { rt_struct_field_get([tagged, 1].as_ptr(), 2) }), Value::Int(8), "second push lands at index 1");
+        assert_eq!(unsafe { rt_struct_field_count(tagged) }, 2, "grew from 0 to 2");
+        assert_eq!(decode(unsafe { rt_struct_field_get(tagged, 0) }), Value::Int(7));
+        assert_eq!(decode(unsafe { rt_struct_field_get(tagged, 1) }), Value::Int(8), "second push lands at index 1");
     }
 
     #[test]
@@ -912,13 +861,13 @@ mod tests {
         set_active_heap(&mut heap as *mut Heap);
 
         let tagged = unsafe { rt_struct_new([make_type(&["Vector"], &[])].as_ptr(), 1) };
-        unsafe { rt_struct_push_field([tagged, encode(Value::Int(7))].as_ptr(), 2) };
-        unsafe { rt_struct_push_field([tagged, encode(Value::Int(8))].as_ptr(), 2) };
+        unsafe { rt_struct_push_field(tagged, encode(Value::Int(7))) };
+        unsafe { rt_struct_push_field(tagged, encode(Value::Int(8))) };
 
-        assert_eq!(decode(unsafe { rt_struct_pop_field([tagged].as_ptr(), 1) }), Value::Int(8), "pop returns the last-pushed element");
-        assert_eq!(unsafe { rt_struct_field_count([tagged].as_ptr(), 1) }, 1, "shrank from 2 to 1");
-        assert_eq!(decode(unsafe { rt_struct_pop_field([tagged].as_ptr(), 1) }), Value::Int(7));
-        assert_eq!(unsafe { rt_struct_field_count([tagged].as_ptr(), 1) }, 0, "empty after popping both elements");
+        assert_eq!(decode(unsafe { rt_struct_pop_field(tagged) }), Value::Int(8), "pop returns the last-pushed element");
+        assert_eq!(unsafe { rt_struct_field_count(tagged) }, 1, "shrank from 2 to 1");
+        assert_eq!(decode(unsafe { rt_struct_pop_field(tagged) }), Value::Int(7));
+        assert_eq!(unsafe { rt_struct_field_count(tagged) }, 0, "empty after popping both elements");
         // Popping past empty aborts the process (panicking across an `extern
         // "C"` boundary can't unwind — the same "abort, don't unwind"
         // convention every other `rt_*` bounds violation follows, see
@@ -938,25 +887,25 @@ mod tests {
         set_active_heap(&mut heap as *mut Heap);
 
         let inner_args = [encode(Value::Int(111)), encode(Value::Int(222))];
-        let inner_cons = unsafe { rt_cons(inner_args.as_ptr(), 2) };
+        let inner_cons = unsafe { rt_cons(inner_args[0], inner_args[1]) };
 
         let type_name = make_type(&["wrapper"], &[]);
         let struct_args = [type_name, inner_cons];
         let boxed = unsafe { rt_struct_new(struct_args.as_ptr(), 2) };
-        unsafe { rt_push_sexpr_root(&boxed as *const i64, 1) };
+        unsafe { rt_push_sexpr_root(boxed) };
 
         // Exhaust the remaining free cells with unrelated garbage to force a
         // real GC.
         for i in 0..20 {
             let args = [encode(Value::Int(i)), encode(Value::Int(i))];
-            unsafe { rt_cons(args.as_ptr(), 2) };
+            unsafe { rt_cons(args[0], args[1]) };
         }
 
         let get_field = [boxed, 0];
-        let field = unsafe { rt_struct_field_get(get_field.as_ptr(), 2) };
+        let field = unsafe { rt_struct_field_get(get_field[0], get_field[1]) };
         let one_arg = [field];
-        assert_eq!(decode(unsafe { rt_car(one_arg.as_ptr(), 1) }), Value::Int(111));
-        assert_eq!(decode(unsafe { rt_cdr(one_arg.as_ptr(), 1) }), Value::Int(222));
+        assert_eq!(decode(unsafe { rt_car(one_arg[0]) }), Value::Int(111));
+        assert_eq!(decode(unsafe { rt_cdr(one_arg[0]) }), Value::Int(222));
     }
 
     /// The negative-case counterpart to the test above — an *unrooted*
@@ -969,7 +918,7 @@ mod tests {
         set_active_heap(&mut heap as *mut Heap);
 
         let inner_args = [encode(Value::Int(111)), encode(Value::Int(222))];
-        let inner_cons = unsafe { rt_cons(inner_args.as_ptr(), 2) };
+        let inner_cons = unsafe { rt_cons(inner_args[0], inner_args[1]) };
 
         let type_name = make_type(&["wrapper"], &[]);
         let struct_args = [type_name, inner_cons];
@@ -978,7 +927,7 @@ mod tests {
 
         for i in 0..20 {
             let args = [encode(Value::Int(i)), encode(Value::Int(i))];
-            unsafe { rt_cons(args.as_ptr(), 2) };
+            unsafe { rt_cons(args[0], args[1]) };
         }
         unsafe { active_heap() }.gc();
 
@@ -999,11 +948,11 @@ mod tests {
         set_active_heap(&mut heap as *mut Heap);
 
         let initial = [encode(Value::Int(42))];
-        let id = unsafe { rt_global_new(initial.as_ptr(), 1) };
+        let id = unsafe { rt_global_new(initial[0]) };
         assert_eq!(id, 0, "the first global on a freshly reset table gets id 0");
 
         let id_args = [id];
-        assert_eq!(decode(unsafe { rt_global_get(id_args.as_ptr(), 1) }), Value::Int(42));
+        assert_eq!(decode(unsafe { rt_global_get(id_args[0]) }), Value::Int(42));
     }
 
     /// `rt_global_set` overwrites a global's value in place; a later
@@ -1015,20 +964,20 @@ mod tests {
         set_active_heap(&mut heap as *mut Heap);
 
         let initial = [encode(Value::Int(1))];
-        let id = unsafe { rt_global_new(initial.as_ptr(), 1) };
+        let id = unsafe { rt_global_new(initial[0]) };
 
         let set_args = [id, encode(Value::Int(99))];
-        let returned = unsafe { rt_global_set(set_args.as_ptr(), 2) };
+        let returned = unsafe { rt_global_set(set_args[0], set_args[1]) };
         assert_eq!(decode(returned), Value::Int(99), "rt_global_set returns its new value unchanged");
 
         let id_args = [id];
-        assert_eq!(decode(unsafe { rt_global_get(id_args.as_ptr(), 1) }), Value::Int(99));
+        assert_eq!(decode(unsafe { rt_global_get(id_args[0]) }), Value::Int(99));
     }
 
     /// A global's id (`rt_global_new`'s return value) is a small sequential
     /// counter driven purely by `rt_global_new` call order — an unrelated
-    /// permanent-root push (`rt_push_permanent_sexpr_root`, what ordinary
-    /// boxed-struct field construction uses) interleaved between two
+    /// permanent-root push (`Heap::push_permanent_root`)
+    /// interleaved between two
     /// globals must not perturb that numbering, even though both features
     /// share the same underlying `Heap::permanent_roots` storage.
     #[test]
@@ -1038,25 +987,22 @@ mod tests {
         set_active_heap(&mut heap as *mut Heap);
 
         let first = [encode(Value::Int(10))];
-        let first_id = unsafe { rt_global_new(first.as_ptr(), 1) };
+        let first_id = unsafe { rt_global_new(first[0]) };
 
-        let unrelated = [encode(Value::Int(-1))];
-        unsafe { rt_push_permanent_sexpr_root(unrelated.as_ptr(), 1) };
+        heap.push_permanent_root(Value::Int(-1));
 
         let second = [encode(Value::Int(20))];
-        let second_id = unsafe { rt_global_new(second.as_ptr(), 1) };
+        let second_id = unsafe { rt_global_new(second[0]) };
 
         assert_eq!((first_id, second_id), (0, 1));
         let first_args = [first_id];
         let second_args = [second_id];
-        assert_eq!(decode(unsafe { rt_global_get(first_args.as_ptr(), 1) }), Value::Int(10));
-        assert_eq!(decode(unsafe { rt_global_get(second_args.as_ptr(), 1) }), Value::Int(20));
+        assert_eq!(decode(unsafe { rt_global_get(first_args[0]) }), Value::Int(10));
+        assert_eq!(decode(unsafe { rt_global_get(second_args[0]) }), Value::Int(20));
     }
 
     /// A global survives a forced `gc()` triggered by unrelated allocations
-    /// with no matching pop at all — the same permanent-root protection
-    /// [`rt_push_permanent_sexpr_root_protects_a_value_across_a_gc_with_no_matching_pop`]
-    /// proves for its own direct use of `Heap::push_permanent_root`.
+    /// with no matching pop at all: it is a permanent root.
     #[test]
     fn rt_global_protects_its_value_across_a_gc_triggered_by_other_allocations() {
         reset_global_table();
@@ -1064,19 +1010,19 @@ mod tests {
         set_active_heap(&mut heap as *mut Heap);
 
         let precious_args = [encode(Value::Int(111)), encode(Value::Int(222))];
-        let precious = unsafe { rt_cons(precious_args.as_ptr(), 2) };
+        let precious = unsafe { rt_cons(precious_args[0], precious_args[1]) };
         let initial = [precious];
-        let id = unsafe { rt_global_new(initial.as_ptr(), 1) };
+        let id = unsafe { rt_global_new(initial[0]) };
 
         for i in 0..20 {
             let args = [encode(Value::Int(i)), encode(Value::Int(i))];
-            unsafe { rt_cons(args.as_ptr(), 2) };
+            unsafe { rt_cons(args[0], args[1]) };
         }
 
         let id_args = [id];
-        let surviving = unsafe { rt_global_get(id_args.as_ptr(), 1) };
+        let surviving = unsafe { rt_global_get(id_args[0]) };
         let one_arg = [surviving];
-        assert_eq!(decode(unsafe { rt_car(one_arg.as_ptr(), 1) }), Value::Int(111));
-        assert_eq!(decode(unsafe { rt_cdr(one_arg.as_ptr(), 1) }), Value::Int(222));
+        assert_eq!(decode(unsafe { rt_car(one_arg[0]) }), Value::Int(111));
+        assert_eq!(decode(unsafe { rt_cdr(one_arg[0]) }), Value::Int(222));
     }
 }

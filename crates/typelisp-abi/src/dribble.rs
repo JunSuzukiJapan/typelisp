@@ -23,56 +23,43 @@
 //! interpreters in one process, on different threads, and a global file
 //! handle would let one test's dribble collect another's output.
 
-use std::cell::RefCell;
-use std::fs::File;
-use std::io::{BufWriter, Write};
+use alloc::boxed::Box;
+use alloc::string::String;
+use core::cell::RefCell;
 
-thread_local! {
-    /// This thread's open dribble file, if any.
-    static DRIBBLE: RefCell<Option<BufWriter<File>>> = const { RefCell::new(None) };
+/// Where a dribble is recorded: a file, opened by the runtime crate that has
+/// files (`typelisp-rt-sys`). This crate only keeps the open one and copies
+/// the session into it.
+pub trait Sink {
+    /// Copies `text` in, and makes it readable at once. `false` when it could
+    /// not, which stops the recording ([`note`]).
+    fn write(&mut self, text: &str) -> bool;
+    /// Flushes and closes: the error a full disk shows up as, here or
+    /// nowhere.
+    fn finish(self: Box<Self>) -> Result<(), String>;
 }
 
-/// Starts recording into `path`, truncating it — CL's `(dribble path)`.
+typelisp_mem::thread_local! {
+    /// This thread's open dribble, if any.
+    static DRIBBLE: RefCell<Option<Box<dyn Sink>>> = const { RefCell::new(None) };
+}
+
+/// Puts `sink` in the place of the open dribble, and returns the one it
+/// replaces for the caller to [`Sink::finish`]. `None` stops recording.
 ///
-/// Starting a second one closes the first, which is what CL says happens when
-/// `dribble` is called while a dribble is already open.
-pub fn start(path: &str) -> std::io::Result<()> {
-    let f = File::create(path)?;
-    DRIBBLE.with(|cell| {
-        let mut slot = cell.borrow_mut();
-        if let Some(old) = slot.take() {
-            drop(old);
-        }
-        *slot = Some(BufWriter::new(f));
-    });
-    Ok(())
+/// CL's `(dribble path)` while a dribble is already open closes the first,
+/// and `(dribble)` with no argument closes the open one; both are this.
+pub fn replace(sink: Option<Box<dyn Sink>>) -> Option<Box<dyn Sink>> {
+    DRIBBLE.with(|cell| core::mem::replace(&mut *cell.borrow_mut(), sink))
 }
 
-/// Stops recording and closes the file — CL's `(dribble)` with no argument.
-/// A no-op when nothing is being recorded, as CL's is.
-pub fn stop() -> std::io::Result<()> {
-    let mut w = match DRIBBLE.with(|cell| cell.borrow_mut().take()) {
-        Some(w) => w,
-        None => return Ok(()),
-    };
-    w.flush()
-}
-
-/// Whether a dribble file is open.
-pub fn is_open() -> bool {
-    DRIBBLE.with(|cell| cell.borrow().is_some())
-}
-
-/// Copies `text` into the open dribble file, if there is one.
+/// Copies `text` into the open dribble, if there is one.
 ///
 /// Deliberately infallible: this is called from the middle of writing to
 /// stdout, and a program's `println` must not start failing because the
 /// dribble file's disk filled up. A write error stops the recording rather
 /// than propagating — the alternative is an error channel on every print in
 /// the language, for a facility that is a convenience.
-///
-/// Flushed on every note, for the same reason `write_stdout` flushes: a
-/// dribble file is read while the session is still running.
 pub fn note(text: &str) {
     if text.is_empty() {
         return;
@@ -80,7 +67,7 @@ pub fn note(text: &str) {
     DRIBBLE.with(|cell| {
         let mut slot = cell.borrow_mut();
         let Some(w) = slot.as_mut() else { return };
-        if w.write_all(text.as_bytes()).and_then(|()| w.flush()).is_err() {
+        if !w.write(text) {
             *slot = None;
         }
     });

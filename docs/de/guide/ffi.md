@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/ffi.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
+<!-- translated-from: docs/ja/guide/ffi.md @ dff3b51792f6d9c49bb8802bd3d3fb6e168edd92 -->
 # C-FFI (defffi)
 
 Dieser Leitfaden erklärt, wie man aus typelisp C-Funktionen aufruft. Die Liste der deklarierbaren Typen und
@@ -46,7 +46,7 @@ Vorgesehen ist, `unsafe` auf eine Stelle zu beschränken und nach außen eine ge
 | `bool` | `bool` (`_Bool`) |
 | `()` | `void` |
 | `string` | `const char *` |
-| `c-long` / `c-ulong` | `long` / `unsigned long` (auch `size_t`, `int64_t` usw.) |
+| `c-long` / `c-ulong` | `long` / `unsigned long` (auch `size_t` usw.) |
 | `ptr` | Jeder Zeiger (`void *`, `FILE *` usw.) |
 | `(ptr T)` | Ein Zeiger auf `T` ([Abschnitt 7](#7-c-structs)) |
 
@@ -63,10 +63,10 @@ Vorgesehen ist, `unsafe` auf eine Stelle zu beschränken und nach außen eine ge
 ### `c-long` / `c-ulong` / `ptr`
 
 Diese Typen gibt es nur, um Werte über die Grenze zu C zu reichen, und sie **unterstützen keine Arithmetik**.
-Um einen davon als typelisp-Ganzzahl zu verwenden, wandelt man ihn mit `as` um.
+Um einen davon als typelisp-Ganzzahl zu verwenden, wandelt man ihn mit `as` um. Ihre Breite ist die von C auf der Maschine, auf der das Programm läuft (64 Bit für `c-long` und Zeiger auf 64-Bit-macOS und -Linux, 32 Bit, wenn `--target` wasm32 oder einen Cortex-M angibt).
 
 ```lisp
-(as int (unsafe (c-strlen s)))      ; int verliert nichts vom 64-Bit-Wert
+(as int (unsafe (c-strlen s)))      ; int verliert nichts vom Wert
 (try-as i32 (unsafe (c-strlen s)))  ; None, wenn er nicht in ein i32 passt
 (unsafe (c-malloc 16))              ; Ganzzahlliterale lassen sich direkt übergeben
 ```

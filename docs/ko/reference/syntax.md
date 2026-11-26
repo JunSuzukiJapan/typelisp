@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ ac5a6b3adada21a0a55e0e1c4b0e1fabf4854908 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 1b5dc6ac828d8e4a95800a91218b5e9dffe83f98 -->
 # typelisp 문법 레퍼런스
 
 typelisp는 S 식으로 쓰는 정적 타입 Lisp이다. 내장 함수와 메서드의 목록은 [내장 함수](functions/README.md), 타입 목록은
@@ -55,7 +55,7 @@ typelisp는 S 식으로 쓰는 정적 타입 Lisp이다. 내장 함수와 메서
   정해지고(`(the #{i32 f64} #{1 2.0})`), 문맥이 없으면 각 요소 자신의 타입이 된다(`#{"foo" 123}`는 `#{string int}`). 요소는
   1~12개. 평가할 때마다 새 튜플이 만들어진다. 계산한 값으로 만들려면 `(tuple a b)`를 쓴다. S 식 데이터가 기대되는 곳에서는 요소가 모두 데이터인 튜플, 곧
   `Sexpr`의 `Tuple` 변형이 된다.
-- **속성**: `#[test]`는 다음 폼에 붙는 표시입니다(Rust와 같은 표기). 현재 속성은 `test` 하나뿐이며 `defun`에 붙입니다([3.16 `#[test]`](#316-test--테스트-함수)). `read`로 읽으면 `(%internal::attribute (test) form)`이라는 리스트가 됩니다.
+- **속성**: `#[test]`는 다음 폼에 붙이는 표시입니다(Rust와 같은 표기). 속성은 `test`, `interrupt(N)`, `exception(NAME)` 세 가지이며 모두 `defun`에 붙입니다([3.16 `#[test]`](#316-test--테스트-함수), [3.17 인터럽트 핸들러](#317-interruptn--exceptionname--인터럽트-핸들러)). 인자가 있는 속성은 이름 바로 뒤에 괄호를 붙여 씁니다. `read`로 읽으면 `(%internal::attribute (test) form)`, `(%internal::attribute ((interrupt 7)) form)` 리스트가 됩니다.
 - **빈 리스트 `()`**: 문맥에 따라 `Unit` 타입의 값이거나 `Option<Sexpr>`의 `None`이다. **`Sexpr`에는 빈 리스트 변형이
   없다.** `Sexpr`는 "비어 있지 않은 S 식"을 뜻하며, S 식 데이터의 타입은 `Option<Sexpr>`이다([4.3 match](#43-match--패턴-매칭)의
   "`Option<Sexpr>`의 패턴" 참고).
@@ -298,7 +298,7 @@ typelisp 쪽 이름과 C의 심볼 이름을 따로 쓸 수 있는 것은 typeli
 #### ptr / c-long / c-ulong — 원시 워드
 
 `ptr`은 불투명 포인터(`void *`, `FILE *`, 또는 선언이 뜻한 무엇이든)이다. `c-long` / `c-ulong`은 C의 `long` /
-`unsigned long`이다(`size_t`, `int64_t`, `intptr_t`도).
+`unsigned long`이다(`size_t`, `intptr_t`도).
 
 ```lisp
 (defffi (c-malloc "malloc") (c-ulong) ptr)
@@ -309,14 +309,14 @@ typelisp 쪽 이름과 C의 심볼 이름을 따로 쓸 수 있는 것은 typeli
 ```
 
 **`i64` / `u64`라고 부르지 않는 것은 의도된 것이다.** 이 언어에는 64비트 정수 타입이 없다. 태그 붙은 즉시값은 63비트뿐이기
-때문이다([2장](#2-타입-표기)). `c-long`이라는 이름은 "이것은 이 언어의 정수가 아니라 C와의 경계를 넘는 워드"라고 말한다.
+때문이다([2장](#2-타입-표기)). `c-long`이라는 이름은 "이것은 이 언어의 정수가 아니라 C와의 경계를 넘는 워드"라고 말한다. 폭은 컴파일 대상의 C `long`과 같다(64bit macOS와 Linux에서는 64bit, wasm32와 Cortex-M에서는 32bit).
 
 **산술은 없다.** `(+ x 1)`은 쓸 수 없다. 제공할 수 있지만 제공하지 않는 것은, 어디에도 저장할 수 없고 폭이 다른 모든 수와
 다른 값에 계산이 돌지 않게 하기 위해서이다. 64비트 정수 타입을 뺀 것과 같은 이유이다. 있는 것은 **변환뿐이다**.
 
 ```lisp
 (as i32 (unsafe (c-strlen "hello")))         ; 반환된 것을 읽는다
-(as int (unsafe (c-strlen s)))               ; 정확히 읽으려면 이것(int는 64비트를 잃지 않는다)
+(as int (unsafe (c-strlen s)))               ; 정확히 읽으려면 이것(int는 값을 잃지 않는다)
 (try-as i32 (unsafe (c-strlen s)))           ; 들어가는지 묻는다
 (as c-ulong n)                               ; 다른 정수에서 만든다
 ```
@@ -431,7 +431,7 @@ C와 같은 배치의 구조체를 선언한다. 최상위의 `unsafe` 안에만
 
 필드에 쓸 수 있는 타입은 `i8` `i16` `i32` `u8` `u16` `u32` `c-long` `c-ulong` `f32` `f64` `bool` `ptr`, 타입 있는 포인터
 `(ptr T)`, 그리고 다른 `def-c-struct`(값으로 포함)이다. 배치(각 필드의 오프셋, 구조체의 크기와 정렬)는 C의 규칙으로
-계산된다(LP64를 전제로 한다). 자기 자신을 가리키는 필드는 쓸 수 있지만 자기 자신을 포함할 수는 없다.
+계산된다(`c-long`과 포인터의 폭, `f64`의 정렬은 컴파일 대상의 C에 맞춘다). 자기 자신을 가리키는 필드는 쓸 수 있지만 자기 자신을 포함할 수는 없다.
 
 ```lisp
 (unsafe
@@ -452,6 +452,7 @@ C와 같은 배치의 구조체를 선언한다. 최상위의 `unsafe` 안에만
 | `(c-alloc T)` / `(c-alloc T n)` | `T`를 `n`개(생략하면 1개) 할당한다. 내용은 0으로 채워진다. `(ptr T)`를 반환한다 |
 | `(c-ref p i)` | `p`에서 `i`번째 요소의 포인터. 할당한 범위를 벗어나면 오류 |
 | `(c-deref p)` / `(setf (c-deref p) v)` | `p`가 가리키는 스칼라를 읽기 / 쓰기 |
+| `(volatile-read-u32 addr)` / `(volatile-write-u32 addr v)` | 주소 `addr`(`int`, 또는 `u16` 같은 폭이 정해진 정수)의 레지스터를 읽거나 쓴다. 반드시 그 자리에서 한 번. `-u8`, `-u16`도 같다 |
 | `p::field` / `(setf p::field v)` | 구조체의 필드를 읽기 / 쓰기. 포함된 구조체인 필드를 읽으면 그 주소(`(ptr 안쪽-타입)`)를 얻는다 |
 | `(as ptr p)` | 타입을 잊고 `ptr`로 만든다(`qsort`의 `void *` 같은 데 넘기기 위해). 반대 방향의 변환은 없다 |
 
@@ -1137,6 +1138,34 @@ test result: FAILED. 1 passed; 1 failed; 0 filtered out
 
 테스트 안에서 `print`한 내용은 그대로 표준 출력으로 나갑니다(가로채지 않음). 조사를 위한 출력에는 표준 오류 출력에 쓰는 `eprint`/`eprintln`([출력](functions/printing.md))을 사용하면 프로그램의 출력과 섞이지 않습니다.
 
+### 3.17 `#[interrupt(N)]` / `#[exception(NAME)]` — 인터럽트 핸들러
+
+```lisp
+(use std::board::enable-interrupt)
+(defvar (*received* int) 0)
+
+#[interrupt(7)]
+(defun on-uart () ()
+  (unsafe (volatile-write-u32 #x4000400C 1))   ; 인터럽트의 원인을 지운다
+  (setf *received* (+ *received* 1))
+  ())
+
+(defun main () ()
+  (enable-interrupt 7)
+  ...)
+```
+
+마이크로컨트롤러용으로 컴파일한 프로그램([컴파일](../guide/compile.md)의 3.8절)에서, 인터럽트가 올 때 호출되는 함수를 씁니다. `#[interrupt(N)]`은 주변 장치 인터럽트 `N`(0~239)의, `#[exception(NAME)]`은 코어 예외 `NAME`의 핸들러가 됩니다. `NAME`은 `NonMaskableInt`, `MemoryManagement`, `BusFault`, `UsageFault`, `SVCall`, `DebugMonitor`, `PendSV`, `SysTick` 중 하나입니다(`HardFault`는 런타임이 맡아 프로그램을 끝냅니다).
+
+- Arduino Uno용에서는 번호를 세는 법과 활성화하는 방법이 다르고, `#[exception(NAME)]`과 `enable-interrupt`는 쓸 수 없습니다([컴파일](../guide/compile.md) 3.9절). 아래 설명 가운데 런타임에 관한 것은 Cortex-M의 것입니다.
+- 인자를 받지 않고 `()`를 반환하는 최상위 `defun`에 붙입니다(타입 매개변수도 받을 수 없습니다). 인터럽트 하나에 핸들러는 하나, 함수 하나가 맡는 인터럽트도 하나입니다.
+- 주변 장치 인터럽트는 `(enable-interrupt N)`으로 켤 때까지 오지 않습니다(`(disable-interrupt N)`으로 멈춥니다. [시스템](functions/system.md) 참고). SysTick 같은 예외는 그 예외를 일으키도록 레지스터를 설정하면 옵니다.
+- 핸들러는 인터럽트가 온 그 자리에서 바로 실행됩니다. 다만 런타임의 처리(할당, GC, 출력, 태스크 전환 등) 도중에 오면, 그 처리가 끝난 뒤에 실행됩니다. 핸들러끼리는 서로 끼어들지 않습니다.
+- 핸들러 안에서는 GC가 일어나지 않습니다(필요하면 힙을 늘립니다). 전역 변수 같은 프로그램의 상태는 그대로 읽고 쓸 수 있습니다.
+- 핸들러는 기다릴 수 없습니다. `sleep`을 쓰는 핸들러는 컴파일 오류입니다. 채널 수신처럼 기다릴지가 실행 시간에 정해지는 연산은 기다리지 않아도 될 때만 쓸 수 있고, 기다리게 되면 panic입니다.
+- 핸들러 밖으로 나가는 `panic`과 `throw`는 잡히지 않았을 때와 같이 프로그램을 끝냅니다.
+- 인터프리터나 마이크로컨트롤러 이외를 대상으로 한 컴파일에서는 인터럽트가 오지 않습니다. 인터프리터에서는 핸들러를 보통 함수처럼 호출할 수 있습니다(테스트에 쓸 수 있습니다). 마이크로컨트롤러 이외를 대상으로 한 `typl -c`는 핸들러가 있으면 컴파일 오류입니다.
+
 ## 4. 바인딩과 조건 분기
 
 ```lisp
@@ -1549,6 +1578,8 @@ CL의 이름 없는 `loop`는 `block nil`을 세우지만, 여기에는 `nil`이
 (todo)                              ; (panic "todo")로 전개된다. defmacro
 (as Type expr)                      ; 수/문자의 타입 변환. 실패할 수 있는 변환은 실패하면 panic
 (try-as Type expr)                  ; as와 같지만 결과를 Option<Type>으로 반환한다(실패하면 None)
+(size-of Type)                      ; Type 값의 바이트 수(int)
+(size-of-val expr)                  ; expr의 타입 값의 바이트 수(int). expr은 평가하지 않는다
 (print control args...)             ; 서식을 전개해 표준 출력에 쓴다(줄바꿈 없음)
 (println control args...)           ; 같다(끝에 줄바꿈)
 (format dest control args...)       ; CL의 format. 전개한 string을 반환한다
@@ -1591,6 +1622,29 @@ CL의 이름 없는 `loop`는 `block nil`을 세우지만, 여기에는 `nil`이
 
 `rational`에서는 `int`(`as`는 버림, `try-as`는 정수일 때만 성공)·`ratio`·`f64`로, `int`/`ratio`에서는
 `rational`로 변환할 수 있다.
+
+`size-of`/`size-of-val`은 C의 `sizeof`에 해당한다. 답은 컴파일 시에 정해지는 상수이며, 코드가 동작하는 타깃에서의 크기이다:
+
+| 타입 | 바이트 수 |
+|---|---|
+| `i8` `u8` `bool` | 1 |
+| `i16` `u16` | 2 |
+| `i32` `u32` `f32` `char` | 4 |
+| `f64` | 8 |
+| `c-long` `c-ulong` | 타깃의 C `long`과 같음 |
+| `ptr` `(ptr T)` | 타깃의 포인터와 같음 |
+| `def-c-struct` | C 구조체와 같음(패딩 포함) |
+| `()` | 0 |
+| 그 밖의 것(`int`, `string`, `defstruct`의 타입 등) | 워드 하나(타깃의 포인터와 같음). 값 자체이거나 값이 있는 곳을 나타낸다 |
+
+```lisp
+(size-of u16)                       ; => 2
+(size-of-val (as i8 5))             ; => 1
+(let ((x 1.0)) (size-of-val x))     ; => 8
+```
+
+제네릭 함수의 타입 매개변수도 쓸 수 있으며, 호출마다의 타입으로 정해진다. `!`에는 값이 없으므로 에러이다.
+`def-c-struct`의 타입은 `unsafe` 밖에서도 쓸 수 있다.
 
 `documentation`은 `quote`/`compile`처럼 `name`을 평가하지 않고 평가되지 않은 맨 심볼 / `::` 경로로 읽는 특수 형식이다. CL의
 `(documentation 'name 'function)`과 달리 타입 인수를 받지 않는다. `name`을 변수 → 함수 → 타입 → 트레이트 → 매크로 순서로
@@ -1931,9 +1985,9 @@ OS를 기다린다.
 - **`typl`의 워커는 최상위 평가 한 번 동안만 산다.** REPL이 입력을 기다리는 동안과 최상위 형식 사이에서는 다른 스레드가
   태스크를 진행하지 않는다(남은 태스크는 다음 평가에서 이어서 실행된다). 평가가 끝날 때 각 스레드가 지금의 한 단계를 마치기를
   기다리므로, `thread` 안에서 계속 블로킹하는 C 함수(`defffi`)가 있으면 그것이 반환될 때까지 평가가 끝나지 않는다.
-- **워커에서의 인쇄**: 해석 실행되는 `print-object` 메서드나, `~/name/`이 호출하는 해석 실행의 함수·메서드는
-  다른 스레드에서 실행할 수 없으므로, 그런 값을 다른 스레드에서 인쇄하면 `(panic ...)`과 같은 취급의
-  panic이 된다(`(compile T::print-object)`를 하거나 메인 태스크에서 인쇄한다).
+- **워커에서의 인쇄**: 해석 실행되는 `print-object` 메서드는 다른 스레드에서 실행할 수 없으므로, 그런 값을
+  다른 스레드에서 인쇄하면 `(panic ...)`과 같은 취급의 panic이 된다(`(compile T::print-object)`를 하거나
+  메인 태스크에서 인쇄한다).
 - **데이터 경합은 정의되지 않는다**(Go와 같은 입장). `Mutex<T>`・`Chan<T>`를 거치지 않고 여러 태스크가 같은 값을 바꾼 결과는
   보장되지 않는다.
 - **`task`는 값을 반환한다.** Go의 `go` 문과 달리 `Task<T>`를 반환하며 `(wait t)`로 결과를 얻을 수 있다.

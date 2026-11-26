@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ ac5a6b3adada21a0a55e0e1c4b0e1fabf4854908 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 1b5dc6ac828d8e4a95800a91218b5e9dffe83f98 -->
 # typelisp 语法参考
 
 typelisp 是一种静态类型的 Lisp，语法采用 S 表达式。内置函数和方法的一览见[内置函数](functions/README.md)，类型一览见
@@ -47,7 +47,7 @@ typelisp 是一种静态类型的 Lisp，语法采用 S 表达式。内置函数
 - **向量**：`#(1 2 3)`（与 CL 相同）。内容全部是字面量，不会求值——`#(a b)` 中的 `a` 是符号而不是变量。元素类型由上下文决定（`(the Vector<i32> #(1 2))`），没有上下文时取第一个元素的类型（`#(1 2 3)` 是 `Vector<int>`）。元素类型必须一致，`#(1 "a")` 是类型错误。既没有元素也没有上下文的 `#()` 也是类型错误。每次求值都会创建新的向量。在期望 S 表达式数据的位置（`(the Option<Sexpr> #(1 x))`、`'#(..)`、`read` 读到的数据），它是元素全部为数据的 `Vector<Option<Sexpr>>`——即 `Sexpr` 的 `Vector` 变体。
 - **数组**：`#2A((1 2) (3 4))`（与 CL 相同）。`#` 与 `A` 之间的数是维数，内容中列表嵌套的前这么多层就是各个维度。`#0A x` 是只有一个元素的零维数组。同一层的列表长度不一致是读取错误。类型的确定方式与向量相同，结果是 `Array<T>`（没有元素时需要上下文，例如 `(the Array<f64> #2A(()))`）。作为 S 表达式数据，它是 `Array<Option<Sexpr>>`——即 `Sexpr` 的 `Array` 变体。
 - **元组**：`#{"foo" 123 45.6}`。内容全部是字面量，不求值（`#{a b}` 的 `a` 是符号）。各元素的类型按位置由上下文决定（`(the #{i32 f64} #{1 2.0})`），没有上下文时就是各元素自身的类型（`#{"foo" 123}` 是 `#{string int}`）。元素为 1～12 个。每次求值都会产生新的元组。要用计算出的值构造元组，使用 `(tuple a b)`。在期望 S 表达式数据的位置，它是元素全部为数据的元组——即 `Sexpr` 的 `Tuple` 变体。
-- **属性**：`#[test]` 是附加在下一个形式上的标记（与 Rust 的写法相同）。目前唯一的属性是 `test`，加在 `defun` 上（[3.16 `#[test]`](#316-test--测试函数)）。用 `read` 读取时，它成为列表 `(%internal::attribute (test) form)`。
+- **属性**：`#[test]` 是附在下一个形式上的标记（写法与 Rust 相同）。属性有 `test`、`interrupt(N)`、`exception(NAME)` 三个，都附在 `defun` 上（[3.16 `#[test]`](#316-test--测试函数)、[3.17 中断处理程序](#317-interruptn--exceptionname--中断处理程序)）。带参数的属性在名字后面紧接括号书写。用 `read` 读取，会成为 `(%internal::attribute (test) form)`、`(%internal::attribute ((interrupt 7)) form)` 这样的列表。
 - **空列表 `()`**：根据上下文，是 `Unit` 类型的值，或者是 `Option<Sexpr>` 的 `None`。**`Sexpr` 没有空列表的变体**——`Sexpr`
   表示"非空的 S 表达式"，S 表达式数据的类型是 `Option<Sexpr>`（见 [4.3 match](#43-match--模式匹配) 的"`Option<Sexpr>` 的模式"）。
 - **quote/quasiquote/unquote**：
@@ -257,7 +257,7 @@ CL 中对应的是 `(declaim (ftype (function (i32) bool) even2))`，但那伴�
 #### ptr / c-long / c-ulong —— 原始机器字
 
 `ptr` 是不透明指针（`void *`、`FILE *`，或者声明所指的任何东西）。`c-long` / `c-ulong` 是 C 的 `long` / `unsigned long`
-（`size_t`、`int64_t`、`intptr_t` 也一样）。
+（`size_t`、`intptr_t` 也一样）。
 
 ```lisp
 (defffi (c-malloc "malloc") (c-ulong) ptr)
@@ -268,14 +268,14 @@ CL 中对应的是 `(declaim (ftype (function (i32) bool) even2))`，但那伴�
 ```
 
 **不叫 `i64` / `u64` 是有意的。** 本语言没有 64 位整数类型——带标签的立即值只有 63 位（[第 2 章](#2-类型的写法)）。`c-long`
-这个名字在说"这是跨越与 C 边界的字，不是本语言的整数"。
+这个名字在说"这是跨越与 C 边界的字，不是本语言的整数"。宽度与编译目标的 C 的 `long` 相同（64 位的 macOS 和 Linux 上为 64 位，wasm32 和 Cortex-M 上为 32 位）。
 
 **没有算术。** 不能写 `(+ x 1)`。能提供却没有提供，是为了不让无处保存、宽度与其他所有数都不同的值参与计算——与去掉 64 位整数
 类型的理由相同。有的**只是转换**：
 
 ```lisp
 (as i32 (unsafe (c-strlen "hello")))         ; 读取返回的东西
-(as int (unsafe (c-strlen s)))               ; 要精确读取用这个（int 不会丢失 64 位）
+(as int (unsafe (c-strlen s)))               ; 要精确读取用这个（int 不会丢失值）
 (try-as i32 (unsafe (c-strlen s)))           ; 询问能否放下
 (as c-ulong n)                               ; 从其他整数创建
 ```
@@ -384,7 +384,7 @@ C 函数的调用只能写在 `unsafe` 中，所以只有在 `unsafe` 中才能�
 声明与 C 布局相同的结构体。只能写在顶层的 `unsafe` 中（那个 `unsafe` 中只能写 `def-c-struct`）。可以在名字之后放置文档字符串。
 
 字段可以写的类型是 `i8` `i16` `i32` `u8` `u16` `u32` `c-long` `c-ulong` `f32` `f64` `bool` `ptr`、类型化指针 `(ptr T)`，以及
-其他 `def-c-struct`（按值嵌入）。布局（各字段的偏移、结构体的大小和对齐）按 C 的规则计算（以 LP64 为前提）。可以写指向自身的
+其他 `def-c-struct`（按值嵌入）。布局（各字段的偏移、结构体的大小和对齐）按 C 的规则计算（`c-long` 和指针的宽度以及 `f64` 的对齐遵循编译目标的 C）。可以写指向自身的
 字段，但不能嵌入自身。
 
 ```lisp
@@ -406,6 +406,7 @@ C 函数的调用只能写在 `unsafe` 中，所以只有在 `unsafe` 中才能�
 | `(c-alloc T)` / `(c-alloc T n)` | 分配 `n` 个（省略时 1 个）`T`。内容填充为 0。返回 `(ptr T)` |
 | `(c-ref p i)` | 从 `p` 起第 `i` 个元素的指针。超出分配范围时是错误 |
 | `(c-deref p)` / `(setf (c-deref p) v)` | 读取／写入 `p` 所指的标量 |
+| `(volatile-read-u32 addr)` / `(volatile-write-u32 addr v)` | 读取或写入地址 `addr`（`int`，或 `u16` 等固定宽度的整数）处的寄存器，在该位置恰好一次。`-u8`、`-u16` 同样 |
 | `p::field` / `(setf p::field v)` | 读取／写入结构体的字段。读取嵌入的结构体字段得到其地址（`(ptr 内部类型)`） |
 | `(as ptr p)` | 忘掉类型变为 `ptr`（为了传给 `qsort` 的 `void *` 之类）。没有反方向的转换 |
 
@@ -1055,6 +1056,34 @@ test result: FAILED. 1 passed; 1 failed; 0 filtered out
 
 测试中 `print` 的内容会直接输出到标准输出（不捕获）。用于调查的输出，使用写到标准错误输出的 `eprint`/`eprintln`（[打印](functions/printing.md)），就不会与程序的输出混在一起。
 
+### 3.17 `#[interrupt(N)]` / `#[exception(NAME)]` — 中断处理程序
+
+```lisp
+(use std::board::enable-interrupt)
+(defvar (*received* int) 0)
+
+#[interrupt(7)]
+(defun on-uart () ()
+  (unsafe (volatile-write-u32 #x4000400C 1))   ; 清除引发中断的原因
+  (setf *received* (+ *received* 1))
+  ())
+
+(defun main () ()
+  (enable-interrupt 7)
+  ...)
+```
+
+在为微控制器编译的程序中（[编译](../guide/compile.md) 的 3.8 节），这里写的是中断到来时被调用的函数。`#[interrupt(N)]` 使函数成为外设中断 `N`（0～239）的处理程序，`#[exception(NAME)]` 使其成为内核异常 `NAME` 的处理程序，`NAME` 是 `NonMaskableInt`, `MemoryManagement`, `BusFault`, `UsageFault`, `SVCall`, `DebugMonitor`, `PendSV`, `SysTick` 之一（`HardFault` 由运行时负责，会结束程序）。
+
+- 面向 Arduino Uno 时，编号方式和启用方法不同，且不能使用 `#[exception(NAME)]` 和 `enable-interrupt`（[编译](../guide/compile.md) 3.9 节）。下面说明中涉及运行时的内容是针对 Cortex-M 的。
+- 附在不接受参数并返回 `()` 的顶层 `defun` 上（也不能有类型参数）。一个中断只有一个处理程序，一个函数也只处理一个中断。
+- 外设中断在用 `(enable-interrupt N)` 启用之前不会到来（用 `(disable-interrupt N)` 停止。参见 [系统](functions/system.md)）。SysTick 等异常只要把寄存器设为引发它就会到来。
+- 处理程序在中断到来的地方立即执行。但若在运行时的处理（分配、GC、输出、任务切换等）途中到来，则等该处理结束后再执行。处理程序之间不会互相打断。
+- 处理程序中不会发生 GC（需要时会扩大堆）。程序的状态（全局变量等）可以照常读写。
+- 处理程序不能等待。使用 `sleep` 的处理程序会产生编译错误。像从通道接收这样是否等待在运行时才决定的操作，只有在无需等待时才能使用，若需要等待则会 panic。
+- 离开处理程序的 `panic` 和 `throw` 会像未被捕获时一样结束程序。
+- 在解释器中以及面向微控制器以外目标的编译中，中断不会到来。在解释器中，处理程序可以像普通函数一样调用（可用于测试）。面向微控制器以外目标的 `typl -c`，若有处理程序会产生编译错误。
+
 ## 4. 绑定与条件分支
 
 ```lisp
@@ -1445,6 +1474,8 @@ CL 用裸符号书写子句词（`(loop for i from 1 to 3 collect i)`），但�
 (todo)                              ; 展开为 (panic "todo")。defmacro
 (as Type expr)                      ; 数值/字符的类型转换。可能失败的转换失败时 panic
 (try-as Type expr)                  ; 与 as 相同，但以 Option<Type> 返回结果（失败时为 None）
+(size-of Type)                      ; Type 的值的字节数（int）
+(size-of-val expr)                  ; expr 的类型的值的字节数（int）。不求值 expr
 (print control args...)             ; 展开格式写到标准输出（不换行）
 (println control args...)           ; 同上（末尾换行）
 (format dest control args...)       ; CL 的 format。返回展开结果的 string
@@ -1485,6 +1516,28 @@ CL 用裸符号书写子句词（`(loop for i from 1 to 3 collect i)`），但�
 
 从 `rational` 可以转换为 `int`（`as` 截断，`try-as` 仅在为整数时成功）、`ratio` 和 `f64`；从
 `int`/`ratio` 可以转换为 `rational`。
+
+`size-of`/`size-of-val` 相当于 C 的 `sizeof`。答案是编译时确定的常量，即代码运行的目标上的大小：
+
+| 类型 | 字节数 |
+|---|---|
+| `i8` `u8` `bool` | 1 |
+| `i16` `u16` | 2 |
+| `i32` `u32` `f32` `char` | 4 |
+| `f64` | 8 |
+| `c-long` `c-ulong` | 与目标的 C `long` 相同 |
+| `ptr` `(ptr T)` | 与目标的指针相同 |
+| `def-c-struct` | 与 C 结构体相同（含填充） |
+| `()` | 0 |
+| 其余（`int`、`string`、`defstruct` 的类型等） | 一个字（与目标的指针相同）。是值本身，或表示值所在的位置 |
+
+```lisp
+(size-of u16)                       ; => 2
+(size-of-val (as i8 5))             ; => 1
+(let ((x 1.0)) (size-of-val x))     ; => 8
+```
+
+也可以写泛型函数的类型参数，由每次调用的类型决定。`!` 没有值，因此是错误。`def-c-struct` 的类型在 `unsafe` 之外也可以写。
 
 `documentation` 与 `quote`/`compile` 一样是不求值 `name`、作为未求值的裸符号/`::` 路径读取的特殊形式。与 CL 的
 `(documentation 'name 'function)` 不同，不接受类型参数——按变量→函数→类型→trait→宏的顺序（与把裸标识符作为表达式求值时的优先级
@@ -1793,9 +1846,8 @@ typl --image session.typld             # REPL 也一样
   线程，之后一直留在那里**（不会回去）。长时间的处理中途只要接触过一次解释执行的代码，剩余部分就在解释器的线程上运行。
 - **`typl` 的工作线程只存活一次顶层求值的时间。** 在 REPL 等待输入期间以及顶层形式之间，其他线程不推进任务（剩下的任务在下次求值时
   接着运行）。求值结束时会等待各线程完成当前的一步，所以如果 `thread` 中有持续阻塞的 C 函数（`defffi`），在它返回之前求值不会结束。
-- **worker 上的打印**：解释执行的 `print-object` 方法，以及 `~/name/` 所调用的解释执行的函数和方法，
-  不能在其他线程上运行，所以在其他线程打印这样的值会产生与 `(panic ...)` 同等对待的 panic
-  （`(compile T::print-object)`，或者从主任务打印）。
+- **worker 上的打印**：解释执行的 `print-object` 方法不能在其他线程上运行，所以在其他线程打印这样的值
+  会产生与 `(panic ...)` 同等对待的 panic（`(compile T::print-object)`，或者从主任务打印）。
 - **数据竞争是未定义的**（与 Go 立场相同）。不经过 `Mutex<T>`・`Chan<T>` 从多个任务修改同一个值的结果没有保证。
 - **`task` 返回值。** 与 Go 的 `go` 语句不同，它返回 `Task<T>`，用 `(wait t)` 可以取得结果。
 - **没有 nil 通道。** Go 的 fan-in 惯用法（把关闭的通道设为 `nil` 以从 `select` 的分支中去掉）无法写出，所以为每个输入启动一个任务，

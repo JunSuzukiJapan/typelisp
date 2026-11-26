@@ -23,6 +23,12 @@
 //! [`PrintEnv`], which the interpreter implements directly and an AOT-linked
 //! executable implements from tables its startup code registers.
 
+#![cfg_attr(not(feature = "std"), no_std)]
+
+extern crate alloc;
+
+use typelisp_mem::prelude::*;
+
 use typelisp_mem::{Heap, TypeId, Value};
 
 pub mod aot;
@@ -83,21 +89,6 @@ pub trait PrintEnv {
     /// value that isn't a string), which the printer propagates rather than
     /// swallowing.
     fn print_object(&self, heap: &mut Heap, v: Value, escape: bool) -> Result<Option<String>, String>;
-
-    /// `~/name/`'s rendering of `v` — CL's function-call directive, with
-    /// `colon` and `at` carrying the directive's own `:` and `@` flags.
-    ///
-    /// **`name` is what the checker resolved the directive to**, not the name
-    /// written: the function's path (`m::brief`) or the method's
-    /// `type''method`. The checker resolved `(name arg colon at)` at the site
-    /// for every argument the directive can meet (`format::call_sites`) and
-    /// handed the engine the control string with that name in place
-    /// (`format::rename_calls`), so nothing is looked up by name here — the
-    /// definition is fetched by what it is, and it was type-checked against
-    /// the type of the value now being handed to it.
-    ///
-    /// The definition is `((x T) (colon bool) (at bool)) -> string`.
-    fn format_call(&self, heap: &mut Heap, name: &str, v: Value, colon: bool, at: bool) -> Result<String, String>;
 }
 
 /// The type of boxed value `id`, or `None` when the box is neither a struct

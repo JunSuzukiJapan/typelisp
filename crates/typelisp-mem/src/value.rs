@@ -20,10 +20,12 @@
 //! the same reason `Str` isn't stored inline. The public surface is entirely
 //! safe.
 
-use std::collections::HashMap;
-use std::fmt;
+use crate::prelude::*;
+use crate::collections::HashMap;
+use core::fmt;
 
 use crate::symbols::{StdModule, SymRef};
+use crate::fixed::{Fixed, FixedType};
 use num_bigint::BigInt;
 use num_rational::BigRational;
 
@@ -85,7 +87,7 @@ impl Cell {
         Cell {
             car: Value::Empty,
             cdr: Value::Empty,
-            next_free: std::ptr::null_mut(),
+            next_free: core::ptr::null_mut(),
             mark: false,
             car_loc: LocId::NONE,
             self_loc: LocId::NONE,
@@ -200,7 +202,29 @@ pub const BUILTIN_TYPES: &[(StdModule, &str, &[TypeId])] = &[
     (StdModule::OPTION, "Option", &[TypeId::SEXPR]),
     (StdModule::VEC, "Vector", &[TypeId::OPTION_SEXPR]),
     (StdModule::ARRAY, "Array", &[TypeId::OPTION_SEXPR]),
+    (StdModule::INTERNAL, "format-out", &[]),
 ];
+
+/// The definitions a [`crate::TypeSpec`] of the runtime names besides
+/// [`BUILTIN_TYPES`]', none of which an executable's runtime makes a value
+/// of: `string-input-stream` is only the parameter of a reader macro's
+/// function type (the prelude makes the stream it is handed), and
+/// `EvalError` is made by the interpreter alone, which an executable has
+/// only when it calls `eval` — and then it registers every type.
+/// `tests/type_identity_guard_test.rs` holds every `TypeSpec` the runtime
+/// writes to a primitive, a row of `BUILTIN_TYPES` or one of these, so that
+/// a new type the runtime makes is not missed by [`runtime_builds`].
+pub const NAMED_NOT_BUILT: &[(StdModule, &str)] = &[(StdModule::EVAL, "EvalError"), (StdModule::IO, "string-input-stream")];
+
+/// Whether an executable's runtime can make a value of `ty` itself, with
+/// no compiled code naming the type: a primitive, or a type defined by a
+/// row of [`BUILTIN_TYPES`], whatever its type arguments. A value of any
+/// other type is made by compiled code, which reads the type out of its
+/// module's type table to hand it over.
+pub fn runtime_builds(ty: TypeId) -> bool {
+    let crate::TypeShape::Named(ns, sym, _) = crate::type_shape(ty) else { return false };
+    ns == StdModule::PRIMITIVE.ns() || BUILTIN_TYPES.iter().any(|(module, name, _)| module.ns() == ns && sym.name() == *name)
+}
 
 impl TypeId {
     pub const OPTION: TypeId = TypeId(0);
@@ -230,6 +254,10 @@ impl TypeId {
     pub const SEXPR_VECTOR: TypeId = TypeId(17);
     /// The box a `Sexpr`'s `array` variant is: what `#nA(..)` reads as.
     pub const SEXPR_ARRAY: TypeId = TypeId(18);
+    /// The buffer an expanded `format`/`print`/`println` writes into
+    /// (`typelisp_print::format::ops`): a native box, which the collector
+    /// frees with whatever was written to it.
+    pub const FORMAT_OUT: TypeId = TypeId(19);
 
     pub fn as_u32(&self) -> u32 {
         self.0
@@ -325,21 +353,59 @@ pub enum FloatBox {
     F64(f64),
 }
 
-/// A boxed narrow integer, read back as the type it actually is.
+/// A boxed fixed-width integer, read back as the type it actually is.
 ///
-/// The integer counterpart of [`FloatBox`], and for the same reason: `i8`,
-/// `i16`, `u8`, `u16` and `u32` all ride in an `i64` carrier, so the carrier
-/// alone cannot say which of the five it is. Reading one out means being told.
-///
-/// `width` is in bits and `signed` says which end the value was extended
-/// from; `value` is normalized (`crate::normalize_int`'s invariant: the word
-/// *is* the number the type names, sign-extended or zero-extended into 64
-/// bits), so `value` may be compared and printed directly.
+/// The integer counterpart of [`FloatBox`], and for the same reason: the six
+/// widths all ride in an `i64` carrier, so the carrier alone cannot say which
+/// of them it is. Each variant holds the value as its own Rust type, so
+/// reading one out means being told the type.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct NarrowInt {
-    pub width: u8,
-    pub signed: bool,
-    pub value: i64,
+pub enum NarrowInt {
+    I8(i8),
+    I16(i16),
+    I32(i32),
+    U8(u8),
+    U16(u16),
+    U32(u32),
+}
+
+impl NarrowInt {
+    /// The box for `word` read as `ty` — `None` for a C word, which has no
+    /// `Sexpr` variant.
+    pub fn new(ty: FixedType, word: i64) -> Option<NarrowInt> {
+        Some(match ty {
+            FixedType::I8 => NarrowInt::I8(word as i8),
+            FixedType::I16 => NarrowInt::I16(word as i16),
+            FixedType::I32 => NarrowInt::I32(word as i32),
+            FixedType::U8 => NarrowInt::U8(word as u8),
+            FixedType::U16 => NarrowInt::U16(word as u16),
+            FixedType::U32 => NarrowInt::U32(word as u32),
+            FixedType::I64 | FixedType::U64 => return None,
+        })
+    }
+
+    pub fn ty(self) -> FixedType {
+        match self {
+            NarrowInt::I8(_) => FixedType::I8,
+            NarrowInt::I16(_) => FixedType::I16,
+            NarrowInt::I32(_) => FixedType::I32,
+            NarrowInt::U8(_) => FixedType::U8,
+            NarrowInt::U16(_) => FixedType::U16,
+            NarrowInt::U32(_) => FixedType::U32,
+        }
+    }
+
+    /// The value in the 64-bit word it travels in outside the box.
+    pub fn word(self) -> i64 {
+        match self {
+            NarrowInt::I8(v) => v.to_word(),
+            NarrowInt::I16(v) => v.to_word(),
+            NarrowInt::I32(v) => v.to_word(),
+            NarrowInt::U8(v) => v.to_word(),
+            NarrowInt::U16(v) => v.to_word(),
+            NarrowInt::U32(v) => v.to_word(),
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -349,7 +415,7 @@ pub(crate) enum BoxedObj {
     /// width could drift from the type.
     Float32(f32),
     Float64(f64),
-    /// An `i8`/`i16`/`u8`/`u16`/`u32`, carrying its own width and signedness.
+    /// An `i8`/`i16`/`i32`/`u8`/`u16`/`u32`, as the type it is.
     ///
     /// Boxed for the same reason a float is: the tagged word has three bits
     /// of tag and all eight patterns are spoken for, so a value that must
@@ -556,6 +622,10 @@ pub(crate) enum BoxedObj {
 /// standalone language value.
 #[derive(Clone, Debug)]
 pub(crate) enum StructPayload {
+    /// Rust data of a subsystem above this crate, which this layer only
+    /// stores: nothing in it is a heap value, so the mark phase traces
+    /// nothing. See [`Native`].
+    Native(Native),
     Fields(Vec<Value>),
     /// The buckets, then the table's hash function and test function: the
     /// two function values it was made with (`:test`), which the prelude's
@@ -563,6 +633,24 @@ pub(crate) enum StructPayload {
     Map(HashMap<i64, Vec<(Value, Value)>>, [Value; 2]),
     Frame(HashMap<String, Value>),
     Frames(Vec<BoxId>),
+}
+
+/// The data behind a [`StructPayload::Native`] box: owned by the box and
+/// dropped when the collector frees it. The box is what makes it the
+/// collector's to free: a value reachable from nowhere is garbage whether or
+/// not the code that made it ran to its end (a `throw` out of the middle of
+/// a `format` leaves its output buffer behind, and nothing else could tell
+/// that buffer from one still being written).
+///
+/// Shared rather than owned outright only because a [`BoxedObj`] is `Clone`;
+/// nothing copies a native box.
+#[derive(Clone)]
+pub(crate) struct Native(pub(crate) alloc::sync::Arc<crate::sync::Mutex<Box<dyn core::any::Any + Send>>>);
+
+impl core::fmt::Debug for Native {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.write_str("Native(..)")
+    }
 }
 
 /// A Lisp value — the runtime encoding of `Sexpr`.
@@ -622,10 +710,10 @@ mod tests {
     /// atom can ever have. See [`Cell`]'s doc comment.
     #[test]
     fn a_cell_is_seven_words() {
-        assert_eq!(std::mem::size_of::<Value>(), 16, "a tagged value is two words");
-        assert_eq!(std::mem::size_of::<LocId>(), 4);
+        assert_eq!(core::mem::size_of::<Value>(), 16, "a tagged value is two words");
+        assert_eq!(core::mem::size_of::<LocId>(), 4);
         assert_eq!(
-            std::mem::size_of::<Cell>(),
+            core::mem::size_of::<Cell>(),
             56,
             "car(16) + cdr(16) + next_free(8) + mark(1, padded) + two LocIds(8)"
         );

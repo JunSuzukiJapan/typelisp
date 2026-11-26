@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ 7622044725db7d28dabb691d82e592367d9284e8 -->
+<!-- translated-from: docs/ja/guide/compile.md @ 1b5dc6ac828d8e4a95800a91218b5e9dffe83f98 -->
 # Biên dịch
 
 Nếu bạn không làm gì thêm, chương trình typelisp chạy trong trình thông dịch. Ngoài ra còn có hai
@@ -219,7 +219,148 @@ const code = await run({ write: (fd, text) => { /* ví dụ hiển thị lên tr
 - Trong trình duyệt, hãy phục vụ `hello.wasm` qua HTTP từ cùng chỗ với `hello.mjs` (không nạp được từ `file://`).
 - `sleep` chờ bằng `Atomics.wait`. Trình duyệt chỉ cho phép việc này trong Worker của trang được cô lập cross-origin, nên hãy chạy chương trình dùng `sleep` trong Worker.
 - Giờ địa phương (`decode-universal-time` khi bỏ `zone`, v.v.) được tính theo múi giờ mà `Date` của JavaScript báo.
-- Ngoài những thứ không dùng được ở mục 3.6, các thao tác với tệp và thư mục là **lỗi biên dịch**. Đầu vào chuẩn được đọc là rỗng, và `(command-line-args)` là một vector rỗng.
+- Ngoài những gì không dùng được ở mục 3.6, các thao tác với tệp và thư mục, biến môi trường, `(command-line-args)`, thư mục home và `dribble` là **lỗi biên dịch**. Đầu vào chuẩn được đọc là rỗng.
+
+### 3.8 Biên dịch cho vi điều khiển (Cortex-M)
+
+Với `--target thumbv7em-none-eabihf`, `typl -c` tạo tệp thực thi (ELF) cho bo mạch Cortex-M4F hoặc M7 không có hệ điều hành. Nếu không có `-o`, tên là tên mã nguồn với `.typl` đổi thành `.elf`. Với `--target thumbv8m.main-none-eabihf`, là cho bo mạch Cortex-M33.
+
+```sh
+$ typl -c hello.typl --target thumbv7em-none-eabihf          # tạo hello.elf
+$ qemu-system-arm -M mps2-an386 -nographic \
+    -semihosting-config enable=on,target=native -kernel hello.elf   # chạy trên Cortex-M4 của QEMU
+$ typl -c hello.typl --target thumbv8m.main-none-eabihf
+$ qemu-system-arm -M mps2-an505 -nographic \
+    -semihosting-config enable=on,target=native -kernel hello.elf   # chạy trên Cortex-M33 của QEMU
+```
+
+- `typl` cài bằng `install.sh` dùng được ngay. Để cài bằng `cargo install`, chạy `rustup target add thumbv7em-none-eabihf thumbv8m.main-none-eabihf` rồi cài với `--features embedded` (`--features wasm,embedded` cho cả hai). Với bản build gỡ lỗi của `typl` trong kho mã, chạy `scripts/build-embedded-runtime.sh`. Việc liên kết dùng trình liên kết của toolchain rustup.
+- Cho biết bộ nhớ của bo mạch bằng `--linker-script FILE`. Tệp được viết như `memory.x` của `cortex-m-rt`: địa chỉ và kích thước của FLASH và RAM. Một dòng như `_typelisp_stack_size = 32K;` đặt phần RAM mà ngăn xếp dùng (mặc định 64KiB); phần RAM còn lại là heap. Không có tùy chọn này thì dùng bố trí của `mps2-an386` (`mps2-an505` cho Cortex-M33) trong QEMU.
+
+  ```
+  MEMORY
+  {
+    FLASH : ORIGIN = 0x08000000, LENGTH = 512K
+    RAM : ORIGIN = 0x20000000, LENGTH = 128K
+  }
+  _typelisp_stack_size = 16K;
+  ```
+
+- `--board-functions` chọn ai cung cấp đầu ra, đầu vào, kết thúc và đồng hồ (các hàm của bo mạch).
+  - `semihosting` (mặc định): qua semihosting, để chạy trong QEMU (`-semihosting-config enable=on`) hoặc trình gỡ lỗi.
+  - `c`: bo mạch cung cấp chúng dưới dạng hàm C. Truyền bằng `--link FILE` một tệp đối tượng hoặc thư viện tĩnh định nghĩa các hàm dưới đây (`--link` có thể lặp lại; thư viện của nhà sản xuất mà `defffi` gọi cũng truyền như vậy).
+
+  ```c
+  void     typelisp_host_write(int32_t fd, const uint8_t *p, size_t len); // fd 1 là đầu ra chuẩn, 2 là lỗi chuẩn
+  size_t   typelisp_host_read(int32_t fd, uint8_t *p, size_t len);        // fd 0; số byte đã đọc, 0 khi hết
+  void     typelisp_host_exit(int32_t code);                              // không trở về
+  uint64_t typelisp_host_now_us(void);                                    // micro giây của đồng hồ không bao giờ lùi
+  int64_t  typelisp_host_unix_us(void);                                   // micro giây kể từ 1970-01-01
+  void     typelisp_host_sleep_us(uint64_t us);                           // chờ us micro giây
+  ```
+
+- Thanh ghi của bo mạch (thiết bị ngoại vi ánh xạ vào bộ nhớ) được đọc bằng `volatile-read-u8`, `volatile-read-u16` và `volatile-read-u32`, và được ghi bằng `volatile-write-u8`, `volatile-write-u16` và `volatile-write-u32`. Địa chỉ được truyền dưới dạng `int` hoặc số nguyên có độ rộng cố định như `u16`, và giá trị đọc được có kiểu theo độ rộng (`u8`, v.v.). Mỗi lệnh đọc hoặc ghi đúng một lần, tại nơi nó được viết; trình biên dịch không bỏ đi hay di chuyển nó. Tất cả chỉ dùng được bên trong `unsafe`. Địa chỉ âm, hoặc không phải bội số của độ rộng, là lỗi thời gian chạy trước khi đọc hay ghi bất cứ thứ gì.
+
+  ```lisp
+  ;; UART 0 của mps2-an386 trong QEMU: dữ liệu 0x40004000, trạng thái 0x40004004, điều khiển 0x40004008
+  (defun put-byte ((c u32)) ()
+    (unsafe
+      (loop (when (= (logand (volatile-read-u32 #x40004004) 1) 0) (break)))   ; chờ khi đang gửi
+      (volatile-write-u32 #x40004000 c)))
+
+  (defun main () ()
+    (unsafe (volatile-write-u32 #x40004008 1))                               ; bật gửi
+    (put-byte 104) (put-byte 105) (put-byte 10))                             ; "hi" và xuống dòng
+  ```
+
+- Viết hàm được gọi khi có ngắt đến dưới dạng `defun` có thuộc tính `#[interrupt(N)]` (ngắt ngoại vi `N`) hoặc như `#[exception(SysTick)]`. Bật ngắt bằng `(enable-interrupt N)`. Trình xử lý chạy ngay; chỉ khi ngắt đến giữa lúc runtime đang làm việc thì nó chạy sau khi công việc đó xong. Trình xử lý không thể chờ (`sleep` là lỗi biên dịch). Chi tiết ở mục 3.17 của [tài liệu tham khảo cú pháp](../reference/syntax.md).
+
+  ```lisp
+  (use std::board::enable-interrupt)
+
+  #[interrupt(5)]
+  (defun on-five () ()
+    (println "interrupt 5"))
+
+  (defun main () ()
+    (enable-interrupt 5)
+    (unsafe (volatile-write-u32 #xE000E200 (as u32 32))))   ; tự gây ra ngắt 5 (thanh ghi chờ xử lý của NVIC)
+  ```
+
+- Runtime khởi động chương trình (bảng vector và chuẩn bị RAM) và cấp phát bộ nhớ. Một HardFault hoặc ngắt không được xử lý kết thúc chương trình với mã thoát của panic (1).
+- `throw`/`catch`/`panic`, số lớn, phân số và số thực dấu phẩy động, cùng tác vụ, kênh và `sleep` hoạt động như trong tệp thực thi. Các tác vụ chạy lần lượt trên lõi duy nhất. Có thể dùng hàm C (`defffi`).
+- Chương trình dùng thứ bo mạch không có là **lỗi biên dịch**: ngoài những gì không dùng được ở mục 3.7, còn `eval` và `macroexpand`. Giờ địa phương không xác định (như ở mục 3.6).
+- Vùng cons bắt đầu với 1024 ô và lớn lên khi cần. `--heap-cells`, `--max-memory`, `--no-cons`, `-O<N>` và `--release` dùng như bình thường.
+
+### 3.9 Biên dịch cho Arduino Uno (AVR)
+
+Với `--target avr-atmega328p`, `typl` tạo tệp thực thi (ELF) cho vi điều khiển của Arduino Uno (ATmega328P). Chương trình sau làm nhấp nháy đèn LED trên bo mạch.
+
+```lisp
+(defconstant (PINB int) #x23)
+(defconstant (DDRB int) #x24)
+(defconstant (LED u8) 32)                         ; PB5
+
+(defun wait-a-bit () ()
+  (let ((i (the u32 0)))
+    (while (< i (the u32 400000))
+      (unsafe (volatile-read-u8 PINB))
+      (setf i (+ i 1)))
+    ()))
+
+(defun main () ()
+  (unsafe (volatile-write-u8 DDRB LED))           ; đặt làm ngõ ra
+  (while true
+    (unsafe (volatile-write-u8 PINB LED))         ; đảo trạng thái
+    (wait-a-bit)))
+```
+
+```sh
+$ typl -c blink.typl --target avr-atmega328p -O2   # tạo ra blink.elf
+$ qemu-system-avr -M uno -display none -serial stdio -bios blink.elf   # chạy trong QEMU
+```
+
+- Không có runtime, nên chương trình dùng runtime là **lỗi biên dịch**. Lỗi cho biết cần gì và đi tới đó qua những hàm nào. Những thứ dùng được: phép tính trên số nguyên có độ rộng cố định (từ `i8` đến `u32`), `f32`, `f64`, `bool` và `char`, lời gọi hàm (kể cả đệ quy), rẽ nhánh, vòng lặp, `defvar` và `defconstant` chứa các giá trị đó, `volatile-read-u8` cùng các hàm tương tự, và lời gọi hàm C.
+- Những thứ không dùng được: giá trị nằm trên heap như chuỗi, danh sách và struct; `catch` và lời gọi giá trị hàm; lời gọi hàm C nhận chuỗi hoặc hàm; các hàm toán học của số dấu phẩy động như `sin` và `expt` (`sqrt` và các phép làm tròn như `floor` thì dùng được).
+- Trình xử lý ngắt được viết bằng `#[interrupt(N)]` ([Cú pháp](../reference/syntax.md), mục 3.17). `N` là số hiệu ngắt của ATmega328P, từ 1 đến 25 với reset tính là 0 (tràn bộ định thời 1 là 13). Xem ví dụ bên dưới.
+- Chia cho 0 làm vi điều khiển dừng ngay tại đó (cũng không còn ngắt nào đến). Phép `/` của giá trị có dấu nhỏ nhất cho `-1` cũng vậy.
+- Không dùng được `int` (là lỗi biên dịch), vì nó không có độ rộng cố định. Hãy dùng kiểu có độ rộng cố định như `i16` hoặc `u16`. Địa chỉ cũng tính được bằng số nguyên có độ rộng cố định. Những thứ có giá trị được xác định khi biên dịch thì dùng được, như địa chỉ viết bằng số và `int` của `defconstant`.
+- Khi đệ quy làm hết ngăn xếp thì vi điều khiển dừng.
+- Khai báo hàm C bằng `defffi`, và truyền tệp đối tượng đã biên dịch cho AVR bằng `--link FILE`.
+- Vòng lặp không làm gì sẽ bị xóa từ `-O1` trở lên. Trong vòng lặp chờ, hãy đọc một thanh ghi chẳng hạn.
+- Khi `main` kết thúc, vi điều khiển dừng lại.
+- Bố trí bộ nhớ được thay đổi bằng `--linker-script FILE`. Nếu bỏ qua, đó là 32 KiB flash trừ 512 byte cuối của bộ nạp khởi động, và 2 KiB RAM. Địa chỉ RAM được viết cộng thêm `0x800000`, ví dụ `0x800100`.
+- Phép tính trên `f32` và `f64` do các hàm hỗ trợ thực hiện. Những hàm được dùng sẽ nằm trong flash (các hàm của `f64` lớn hơn).
+- Việc liên kết dùng trình liên kết của toolchain rustup như ở mục 3.8.
+
+Ví dụ nháy LED bằng ngắt của bộ định thời. Ngắt được bật trong thanh ghi của chính thiết bị.
+
+```lisp
+(defconstant (PINB int) #x23)
+(defconstant (DDRB int) #x24)
+(defconstant (LED u8) 32)
+(defconstant (TIMSK1 int) #x6F)
+(defconstant (TCCR1B int) #x81)
+(defvar (ticks u16) 0)
+
+#[interrupt(13)]                                  ; tràn bộ định thời 1
+(defun on-overflow () ()
+  (unsafe (volatile-write-u8 PINB LED))           ; đảo trạng thái
+  (setf ticks (+ ticks 1))
+  ())
+
+(defun main () ()
+  (unsafe (volatile-write-u8 DDRB LED)
+          (volatile-write-u8 TIMSK1 1)            ; bật ngắt tràn
+          (volatile-write-u8 TCCR1B 3))           ; đếm ở 1/64 xung nhịp
+  (while true))
+```
+
+- Chương trình có trình xử lý sẽ nhận ngắt ngay khi các biến toàn cục được khởi tạo xong. Hãy thiết lập thiết bị ở đầu `main`.
+- Không dùng được `enable-interrupt` và `#[exception(NAME)]` (lỗi biên dịch).
+- Trong lúc một trình xử lý chạy, các ngắt khác phải chờ. Như mọi hàm khác, trình xử lý không dùng được runtime.
+- Một lần đọc hoặc ghi biến toàn cục không bị trình xử lý xen vào giữa, kể cả với giá trị từ hai byte trở lên. Để làm vậy, ngắt được tắt khi đọc biến mà trình xử lý ghi và khi ghi biến mà trình xử lý đọc hoặc ghi, và biến đó được nêu trong cảnh báo khi biên dịch. Giữa lúc đọc và lúc ghi của một phép cập nhật (`(setf n (+ n 1))`) thì ngắt có thể đến. Để cập nhật biến mà trình xử lý cũng ghi, hãy đọc và giữ lại thanh ghi trạng thái (địa chỉ `#x5F`), ghi 0 vào đó để dừng ngắt, rồi ghi lại giá trị đã giữ.
+- Ngắt không có trình xử lý sẽ làm vi điều khiển dừng.
 
 ## 4. Dump
 

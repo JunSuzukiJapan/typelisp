@@ -40,12 +40,8 @@ fn compile_and_capture(name: &str, source: &str) -> (i32, String) {
     (code, String::from_utf8_lossy(&out.stderr).into_owned())
 }
 
-/// `~/name/` in a standalone executable.
-///
-/// An AOT program has no table of definitions to fetch one from by name, so
-/// `compile_file` emits one `rt_format_call_method` registration per
-/// definition the checker resolved a directive to
-/// (`Checker::format_call_targets`), beside the `print-object` ones. Exit
+/// `~/name/` in a standalone executable: the directive is a call of the
+/// definition the checker resolved it to, compiled with its caller. Exit
 /// code 0 means the directive produced exactly what the interpreter produces
 /// for the same program.
 #[test]
@@ -62,6 +58,53 @@ fn a_call_directive_dispatches_in_a_compiled_executable() {
         ),
         0
     );
+}
+
+/// The prelude's types print with their own `print-object` in an
+/// executable. An executable registers the `print-object` of a type only when
+/// its code can make a value of it (`compile::aot::live_types`), and
+/// these are made by prelude functions the program calls (`complex`,
+/// `pathname`, `decode-universal-time`) or by builtins of the runtime
+/// (`FileError`, `ParseFloatError`, `ReadError`), which count only when the
+/// executable reaches them (`compile::aot::made`).
+#[test]
+fn the_preludes_types_print_with_their_print_object_in_an_executable() {
+    let program = r#"(use std::time::decode-universal-time)
+           (use std::time::encode-universal-time)
+           (use std::fs::open-input)
+           (use std::path::parse-namestring)
+           (use std::num::parse-float)
+           (use std::reader::read)
+           (defun main () ()
+             (println "~a" (complex 1.0 2.0))
+             (println "~a" (parse-namestring "a/b.txt"))
+             (println "~a" (decode-universal-time (encode-universal-time 0 0 0 1 1 2000 0) 0))
+             (match (open-input "/nonexistent-dir/no-such-file")
+               ((Ok _) (println "opened"))
+               ((Err e) (println "~s" e)))
+             (match (parse-float "x")
+               ((Ok f) (println "~a" f))
+               ((Err e) (println "~s" e)))
+             (match (read "(1 2")
+               ((Ok _) (println "read"))
+               ((Err e) (println "~s" e))))"#;
+    let dir = tmp_dir();
+    let interpreted_path = dir.join("prelude_print_objects_interp.typl");
+    std::fs::write(&interpreted_path, format!("{}\n(main)", program)).expect("failed to write test source file");
+    let interpreted = Command::new(env!("CARGO_BIN_EXE_typl")).arg(&interpreted_path).output().expect("failed to run typl");
+    let expected = String::from_utf8_lossy(&interpreted.stdout).into_owned();
+    assert!(
+        expected.starts_with("#C(1.0 2.0)\na/b.txt\n#<decoded-time 2000-01-01 00:00:00 +00:00 Sat>\n#<fileerror "),
+        "{}{}",
+        expected,
+        String::from_utf8_lossy(&interpreted.stderr)
+    );
+    let src_path = dir.join("prelude_print_objects.typl");
+    let out_path = dir.join("prelude_print_objects");
+    std::fs::write(&src_path, program).expect("failed to write test source file");
+    typelisp::compile::aot::compile_file(src_path.to_str().unwrap(), out_path.to_str().unwrap()).expect("compile_file failed");
+    let compiled = Command::new(&out_path).output().expect("failed to run the compiled executable");
+    assert_eq!(String::from_utf8_lossy(&compiled.stdout), expected, "{}", String::from_utf8_lossy(&compiled.stderr));
 }
 
 /// An `impl` for each instantiation of a generic type: the executable
@@ -241,6 +284,28 @@ fn printer_variables_take_effect_in_a_compiled_executable() {
 /// either way: written from that module, which the program runs in, so by its
 /// last segment. The `eval` is checked in that same module, so a bare name
 /// still reaches the program's own type.
+/// The same without `eval`: the executable writes the names from the entry
+/// file's module by itself, with no checker in it to say so.
+#[test]
+fn the_entry_files_types_print_with_its_module_without_eval() {
+    let dir = tmp_dir();
+    let src_path = dir.join("entry_module_no_eval.typl");
+    let out_path = dir.join("entry_module_no_eval");
+    std::fs::write(
+        &src_path,
+        r#"(defstruct point (x int) (y int))
+           (defun main () () (println "~s" (make-instance 'point :x 1 :y 2)))
+           (main)"#,
+    )
+    .expect("failed to write test source file");
+    typelisp::compile::aot::compile_file(src_path.to_str().unwrap(), out_path.to_str().unwrap())
+        .expect("compile_file failed");
+    let compiled = Command::new(&out_path).output().expect("failed to run the compiled executable");
+    let interpreted = Command::new(env!("CARGO_BIN_EXE_typl")).arg(&src_path).output().expect("failed to run typl");
+    assert_eq!(String::from_utf8_lossy(&interpreted.stdout), "#<point x: 1 y: 2>\n");
+    assert_eq!(String::from_utf8_lossy(&compiled.stdout), "#<point x: 1 y: 2>\n");
+}
+
 #[test]
 fn the_entry_files_types_print_with_its_module_as_under_typl() {
     let dir = tmp_dir();
@@ -1121,12 +1186,11 @@ fn an_uncaught_throw_reaching_the_entry_point_exits_rather_than_aborting() {
     assert!(stderr.contains("no enclosing (catch 'nobody)"), "stderr was: {}", stderr);
 }
 
-/// A runtime failure the *runtime* raises — here a zero divisor inside
-/// `rt_int_div` — ends an AOT executable the same way an explicit
+/// A runtime failure the *runtime* raises — here a zero divisor, raised by
+/// `rt_int_div_fault` — ends an AOT executable the same way an explicit
 /// `(panic ...)` does: message on stderr, exit code 1.
 ///
-/// It used to abort with 134 instead, because `rt_int_div` reached
-/// `typelisp_rt::fatal()`. That it now unwinds all the way to `rt_run_entry`
+/// That it unwinds all the way to `rt_run_entry`
 /// is what makes an AOT program's arithmetic failures reportable rather than
 /// fatal; `tests/runtime_error_parity_test.rs` covers the same failures on the
 /// interpreted and JIT paths.

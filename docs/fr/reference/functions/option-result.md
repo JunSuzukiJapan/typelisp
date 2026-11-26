@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/option-result.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
+<!-- translated-from: docs/ja/reference/functions/option-result.md @ dff3b51792f6d9c49bb8802bd3d3fb6e168edd92 -->
 # Option, Result et types d'erreur
 
 ## 1. `Option<T>` / `Result<T,E>`
@@ -65,7 +65,7 @@ Une boîte n'est utilisée que lorsqu'une valeur de `T` ne peut pas être distin
 |---|---|---|
 | `Option<U>` (imbriqué) | Boîte | Le `None` intérieur serait la même valeur que le `None` extérieur |
 | `()` | Boîte | La valeur de `()` est la valeur de la liste vide elle-même |
-| `ptr` / `c-long` / `c-ulong` | Boîte | Les 64 bits sont tous de la valeur ; il ne reste pas de place pour les distinguer |
+| `ptr` / `c-long` / `c-ulong` | Boîte | Tous les bits sont de la valeur ; il ne reste pas de place pour les distinguer |
 | Tout le reste | Pas de boîte | — |
 
 La représentation est décidée par le seul type et ne peut pas se lire dans une valeur. À l'affichage, `(Some ...)`/

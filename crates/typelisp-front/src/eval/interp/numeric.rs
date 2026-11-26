@@ -6,138 +6,84 @@ use num_rational::BigRational;
 use num_traits::{FromPrimitive, ToPrimitive, Zero};
 use crate::{wk, Heap, SymRef, TypeId, Value};
 use crate::eval::value::EvalError;
-use typelisp_mem::IntArg;
+use typelisp_mem::fixed::{self, Fault, Fixed, FixedType};
+use typelisp_mem::{with_fixed, IntArg};
 use super::{expect_str, rt_i64};
 
-/// Evaluate a built-in integer arithmetic/comparison instance method
-/// (`registry::int_assoc`), at the receiver type's own `width` and
-/// signedness.
-///
-/// One function for all six integer types, but *not* one behaviour: a type
-/// name means its width and its signedness and nothing else
-/// (`types::int_width_signed`), so every arithmetic result is cut back to
-/// that width here. The operands arrive already normalized — that is the
-/// invariant every producer of an integer maintains — which is what lets the
-/// comparisons, the division and the remainder below stay plain `i64`
-/// operations for the unsigned types too: a normalized `u32` is a
-/// non-negative `i64`.
-pub(super) fn eval_int_builtin(name: SymRef, args: &[Value], width: u32, signed: bool) -> Option<Result<Value, EvalError>> {
-    let (a, b) = match (args.first(), args.get(1)) {
-        (Some(Value::Int(a)), Some(Value::Int(b))) => (*a, *b),
-        _ => return Some(Err(EvalError::Internal(format!("{}: expected two integers", name)))),
-    };
-    let norm = |v: i64| Value::Int(crate::types::normalize_int(v, width, signed));
-    let v = match name.well_known() {
-        // Wrapping, then cut: the low `width` bits of a 64-bit sum are the
-        // sum's own low `width` bits, so the wide operation is a correct way
-        // to compute the narrow one. `wrapping_*` rather than `+`/`-`/`*`
-        // only because Rust's own overflow check would fire on the 64-bit
-        // intermediate, which is not the overflow anyone asked about.
-        wk::M_OP_ADD => norm(a.wrapping_add(b)),
-        wk::M_OP_SUB => norm(a.wrapping_sub(b)),
-        wk::M_OP_MUL => norm(a.wrapping_mul(b)),
-        wk::M_OP_DIV => {
-            if b == 0 {
-                return Some(Err(EvalError::Panic("divide by zero".into())));
+/// Evaluate a built-in method of a fixed-width integer receiver of type `ty`
+/// (`typeck::builtins::primitive::fixed_width`, and the C words' casts): the
+/// instance of `typelisp_mem::fixed` for that type, which is what the method
+/// means. `None` for a method the type has no built-in body for.
+pub(super) fn eval_fixed_builtin(heap: &mut Heap, method: SymRef, args: &[Value], ty: FixedType, ret_type: TypeId) -> Option<Result<Value, EvalError>> {
+    with_fixed!(ty, T => fixed_builtin::<T>(heap, method, args, ret_type).transpose())
+}
+
+fn fixed_builtin<T: Fixed>(heap: &mut Heap, method: SymRef, args: &[Value], ret_type: TypeId) -> Result<Option<Value>, EvalError> {
+    // A compiled field holds one past the fixnum range as the `int` it is
+    // worth.
+    let args: Vec<Value> = args
+        .iter()
+        .map(|v| match v {
+            Value::Boxed(id) if heap.is_bignum(*id) => i64::try_from(&*heap.bignum_value(*id)).map_or(*v, Value::Int),
+            _ => *v,
+        })
+        .collect();
+    let args = &args[..];
+    let arg = |i: usize| rt_i64(&args[i]).map(T::from_word);
+    let num = |v: T| Value::Int(v.to_word());
+    let fault = |f: Fault| EvalError::Panic(f.message());
+    Ok(Some(match method.well_known() {
+        wk::M_OP_ADD => num(fixed::add(arg(0)?, arg(1)?)),
+        wk::M_OP_SUB => num(fixed::sub(arg(0)?, arg(1)?)),
+        wk::M_OP_MUL => num(fixed::mul(arg(0)?, arg(1)?)),
+        wk::M_OP_DIV => num(fixed::div(arg(0)?, arg(1)?).map_err(fault)?),
+        wk::M_MOD => num(fixed::modulo(arg(0)?, arg(1)?).map_err(fault)?),
+        wk::M_REM => num(fixed::rem(arg(0)?, arg(1)?).map_err(fault)?),
+        wk::M_MAX => num(fixed::max(arg(0)?, arg(1)?)),
+        wk::M_MIN => num(fixed::min(arg(0)?, arg(1)?)),
+        wk::M_LOGAND => num(fixed::logand(arg(0)?, arg(1)?)),
+        wk::M_LOGIOR => num(fixed::logior(arg(0)?, arg(1)?)),
+        wk::M_LOGXOR => num(fixed::logxor(arg(0)?, arg(1)?)),
+        wk::M_LOGTEST => Value::Bool(fixed::logtest(arg(0)?, arg(1)?)),
+        wk::M_OP_LT => Value::Bool(arg(0)? < arg(1)?),
+        wk::M_OP_LE => Value::Bool(arg(0)? <= arg(1)?),
+        wk::M_OP_GT => Value::Bool(arg(0)? > arg(1)?),
+        wk::M_OP_GE => Value::Bool(arg(0)? >= arg(1)?),
+        wk::RETIRED_EQUALS | wk::M_EQ | wk::M_EQL | wk::M_EQUAL | wk::M_EQUALP => Value::Bool(arg(0)? == arg(1)?),
+        wk::M_OP_NE => Value::Bool(arg(0)? != arg(1)?),
+        wk::M_ASH => num(fixed::ash(arg(0)?, bit_count(heap, &args[1])?)),
+        wk::M_LOGBITP => Value::Bool(fixed::logbitp(arg(0)?, bit_count(heap, &args[1])?)),
+        wk::M_LOGNOT => num(fixed::lognot(arg(0)?)),
+        wk::M_LOGCOUNT => num(fixed::logcount(arg(0)?)),
+        wk::M_INTEGER_LENGTH => num(fixed::integer_length(arg(0)?)),
+        wk::M_INT_TO_FLOAT => heap.alloc_f64(fixed::to_float(arg(0)?)),
+        wk::M_INT_TO_INT => heap.canonical_int(fixed::to_int(arg(0)?)),
+        wk::M_INT_TO_RATIO => ratio_rt(heap, BigRational::from_integer(BigInt::from(fixed::to_int(arg(0)?)))),
+        wk::M_INT_TO_CHAR => int_to_char(args)?,
+        wk::M_TRY_INT_TO_CHAR => try_int_to_char(heap, args, ret_type)?,
+        _ => match width_cast_target(method) {
+            Some((false, to)) => with_fixed!(to, U => Value::Int(fixed::cast::<T, U>(arg(0)?).to_word())),
+            Some((true, to)) => {
+                let fits = with_fixed!(to, U => fixed::try_cast::<T, U>(arg(0)?).map(|u| Value::Int(u.to_word())));
+                heap.alloc_option(ret_type, fits)
             }
-            // The one overflow a division has: the most negative value over
-            // `-1`, whose quotient is one past the type's maximum. CL would
-            // widen to a bignum, but the *declared* type of this expression
-            // is a fixed width and a checked program cannot be handed a wider
-            // result than it asked for — so it fails, with `rt_int_div`'s
-            // wording. Unsigned types have no such case (no negative
-            // operands), and the check below says so by construction.
-            if signed && b == -1 && a == crate::types::normalize_int(1i64 << (width - 1), width, true) {
-                return Some(Err(EvalError::Panic(format!("arithmetic overflow: {} / {}", a, b))));
-            }
-            norm(a / b)
-        }
-        wk::M_MOD => {
-            if b == 0 {
-                return Some(Err(EvalError::Panic("mod by zero".into())));
-            }
-            // CL `mod`: floored remainder, result takes the sign of the
-            // divisor (`-7 mod 3 = 2`). The most-negative-over-`-1` case that
-            // traps for `/` is mathematically 0 here, and `wrapping_rem`
-            // answers exactly that.
-            let r = a.wrapping_rem(b);
-            norm(if r != 0 && (r < 0) != (b < 0) { r + b } else { r })
-        }
-        wk::M_OP_LT => Value::Bool(a < b),
-        wk::M_OP_LE => Value::Bool(a <= b),
-        wk::M_OP_GT => Value::Bool(a > b),
-        wk::M_OP_GE => Value::Bool(a >= b),
-        wk::RETIRED_EQUALS => Value::Bool(a == b),
-        wk::M_OP_NE => Value::Bool(a != b),
-        wk::M_MAX => norm(a.max(b)),
-        wk::M_MIN => norm(a.min(b)),
-        // Bitwise: the operands' bits above `width` are the extension, and
-        // the result's have to be the extension of the *result* — which for
-        // an unsigned `and`/`or`/`xor` they already are, but for `xor` on
-        // signed operands (or `lognot`, below) they are not.
-        wk::M_LOGAND => norm(a & b),
-        wk::M_LOGIOR => norm(a | b),
-        wk::M_LOGXOR => norm(a ^ b),
-        // `(ash integer count)`: positive `count` shifts left, negative
-        // shifts right (arithmetic — sign-extending), matching CL §12.10.
-        // Shifts by `width` or more places are clamped rather than handed to
-        // Rust's `<<`/`>>`: the result at that point is just `0` (left), and
-        // for a right shift `0` or, for a signed negative operand, `-1` —
-        // the sign bit smeared across every bit.
-        wk::M_ASH => {
-            let w = i64::from(width);
-            norm(if b >= 0 {
-                if b >= w { 0 } else { a.wrapping_shl(b as u32) }
-            } else if -b >= w {
-                if signed && a < 0 { -1 } else { 0 }
-            } else {
-                a >> (-b)
-            })
-        }
-        // Past the type's width there is no bit to read: for a signed value
-        // every one of them is the sign, for an unsigned value every one is
-        // zero.
-        // `a` is the integer and `b` the bit position — the argument order
-        // reversed when the position became an `i32` (`registry::int_assoc`).
-        wk::M_LOGBITP => Value::Bool(if b >= i64::from(width) { signed && a < 0 } else { (a >> b) & 1 == 1 }),
-        wk::M_LOGTEST => Value::Bool((a & b) != 0),
-        _ => unreachable!(),
-    };
-    Some(Ok(v))
+            None => return Ok(None),
+        },
+    }))
 }
 
-/// `lognot` at the receiver's width: complement, then cut — the complement of
-/// a normalized value is not itself normalized (`(lognot (the u8 0))` is
-/// `255`, not `-1`).
-pub(super) fn int_lognot(args: &[Value], width: u32, signed: bool) -> Result<Value, EvalError> {
-    Ok(Value::Int(crate::types::normalize_int(!rt_i64(&args[0])?, width, signed)))
+/// A shift distance or a bit position: an `int`, which has to be a fixnum to
+/// be either. A bignum is refused as `untag-int` refuses it.
+fn bit_count(heap: &Heap, v: &Value) -> Result<i64, EvalError> {
+    match v {
+        Value::Int(n) => Ok(*n),
+        Value::Boxed(id) if heap.is_bignum(*id) => Err(EvalError::Panic("an integer argument does not fit a fixnum".to_string())),
+        other => Err(EvalError::Internal(format!("expected an int, got {:?}", other))),
+    }
 }
 
-/// CL's `logcount` at the receiver's width: the number of one bits in a
-/// non-negative value, of zero bits in a negative one — counted inside
-/// `width`, not across the 64-bit word the value is carried in.
-pub(super) fn int_logcount(args: &[Value], width: u32) -> Result<Value, EvalError> {
-    let n = rt_i64(&args[0])?;
-    let mask = if width == 64 { !0u64 } else { (1u64 << width) - 1 };
-    let bits = (n as u64) & mask;
-    Ok(Value::Int(i64::from(if n >= 0 { bits.count_ones() } else { (!bits & mask).count_ones() })))
-}
-
-/// CL's `integer-length` at the receiver's width: the bits needed to
-/// represent the value excluding the sign.
-pub(super) fn int_integer_length(args: &[Value], width: u32) -> Result<Value, EvalError> {
-    let n = rt_i64(&args[0])?;
-    let v = if n >= 0 { n as u64 } else { !(n as u64) };
-    let mask = if width == 64 { !0u64 } else { (1u64 << width) - 1 };
-    Ok(Value::Int(i64::from(64 - (v & mask).leading_zeros())))
-}
-
-/// A float operand's number, whichever width labels it.
-///
-/// The arithmetic below computes in binary64 and rounds afterwards
-/// ([`float_at`]), so an operand is read as `f64` here — an `f32` widens
-/// exactly. The width is not lost by doing so: it is the *receiver's declared
-/// type* that decides the rounding and the result box, not the operand's box.
+/// A float operand's number, whichever width labels it. An `f32` widens
+/// exactly, so [`FloatWidth::of`] gets it back unchanged.
 fn expect_float(heap: &Heap, v: &Value) -> Result<f64, EvalError> {
     match v {
         Value::Boxed(id) => match heap.float_box(*id) {
@@ -146,17 +92,6 @@ fn expect_float(heap: &Heap, v: &Value) -> Result<f64, EvalError> {
             None => Err(EvalError::Internal(format!("expected a float, got {:?}", v))),
         },
         other => Err(EvalError::Internal(format!("expected a float, got {:?}", other))),
-    }
-}
-
-/// `int->float` (`registry::int_assoc`): widen an integer to `f64`. Every
-/// width holds its number sign- or zero-extended in one `Value::Int(i64)`
-/// (see `eval_int_builtin`'s doc comment), so one implementation covers all
-/// six — the carrier already says which number it is.
-pub(super) fn int_to_float(heap: &mut Heap, args: &[Value]) -> Result<Value, EvalError> {
-    match args.first() {
-        Some(Value::Int(n)) => Ok(heap.alloc_f64(*n as f64)),
-        other => Err(EvalError::Internal(format!("int->float: expected an integer, got {:?}", other))),
     }
 }
 
@@ -192,58 +127,104 @@ pub(super) fn try_int_to_char(heap: &mut Heap, args: &[Value], ret_type: TypeId)
     }
 }
 
-/// Evaluate a built-in `f64` arithmetic/comparison instance method
-/// (`registry::float_assoc`). Unlike [`eval_int_builtin`], `/` never panics on
-/// a zero divisor — IEEE-754 division yields `inf`/`NaN` instead, the natural
-/// float semantics (no "can't express nonzero" gap to plug). `mod`/`rem` are
-/// defined in `prelude.rs` as typelisp methods (`a - b*floor|truncate(a/b)`).
-pub(super) fn eval_float_builtin(heap: &mut Heap, name: SymRef, args: &[Value], single: bool) -> Option<Result<Value, EvalError>> {
-    let (a, b) = match (args.first().map(|v| expect_float(heap, v)), args.get(1).map(|v| expect_float(heap, v))) {
-        (Some(Ok(a)), Some(Ok(b))) => (a, b),
-        _ => return Some(Err(EvalError::Internal(format!("{}: expected two floats", name)))),
+/// One float width, as the Rust type that is it: an `f32` operation is
+/// computed in `f32` and an `f64` one in `f64`, as compiled code computes
+/// them.
+trait FloatWidth: num_traits::Float {
+    /// An operand of this width, read out of its box.
+    fn of(v: f64) -> Self;
+    fn boxed(self, heap: &mut Heap) -> Value;
+    fn round_ties_even(self) -> Self;
+}
+
+impl FloatWidth for f32 {
+    fn of(v: f64) -> Self {
+        v as f32
+    }
+    fn boxed(self, heap: &mut Heap) -> Value {
+        heap.alloc_f32(self)
+    }
+    fn round_ties_even(self) -> Self {
+        f32::round_ties_even(self)
+    }
+}
+
+impl FloatWidth for f64 {
+    fn of(v: f64) -> Self {
+        v
+    }
+    fn boxed(self, heap: &mut Heap) -> Value {
+        heap.alloc_f64(self)
+    }
+    fn round_ties_even(self) -> Self {
+        f64::round_ties_even(self)
+    }
+}
+
+/// Evaluate a built-in arithmetic, comparison or transcendental method of a
+/// float receiver (`typeck::builtins::primitive::float`), at the receiver's
+/// width (`single` for `f32`). `/` never panics on a zero divisor — IEEE-754
+/// division yields `inf`/`NaN` instead. `max`/`min` are
+/// `typelisp_mem::float`'s. `mod`/`rem` are defined in `prelude.rs` as
+/// typelisp methods (`a - b*floor|truncate(a/b)`).
+pub(super) fn eval_float_builtin(heap: &mut Heap, method: SymRef, args: &[Value], single: bool) -> Option<Result<Value, EvalError>> {
+    if single { float_builtin::<f32>(heap, method, args) } else { float_builtin::<f64>(heap, method, args) }.transpose()
+}
+
+fn float_builtin<F: FloatWidth>(heap: &mut Heap, method: SymRef, args: &[Value]) -> Result<Option<Value>, EvalError> {
+    let a = F::of(expect_float(heap, &args[0])?);
+    let b = match args.get(1) {
+        Some(v) => Some(F::of(expect_float(heap, v)?)),
+        None => None,
     };
-    let v = match name.well_known() {
-        wk::M_OP_ADD => float_at(heap, a + b, single),
-        wk::M_OP_SUB => float_at(heap, a - b, single),
-        wk::M_OP_MUL => float_at(heap, a * b, single),
-        wk::M_OP_DIV => float_at(heap, a / b, single),
-        wk::M_OP_LT => Value::Bool(a < b),
-        wk::M_OP_LE => Value::Bool(a <= b),
-        wk::M_OP_GT => Value::Bool(a > b),
-        wk::M_OP_GE => Value::Bool(a >= b),
-        wk::RETIRED_EQUALS => Value::Bool(a == b),
-        wk::M_OP_NE => Value::Bool(a != b),
-        wk::M_MAX => float_at(heap, a.max(b), single),
-        wk::M_MIN => float_at(heap, a.min(b), single),
-        _ => unreachable!(),
+    let b = || b.ok_or_else(|| EvalError::Internal(format!("{}: expected two floats", method)));
+    let v = match method.well_known() {
+        wk::M_OP_ADD => a + b()?,
+        wk::M_OP_SUB => a - b()?,
+        wk::M_OP_MUL => a * b()?,
+        wk::M_OP_DIV => a / b()?,
+        wk::M_MAX => typelisp_mem::float::max(a, b()?),
+        wk::M_MIN => typelisp_mem::float::min(a, b()?),
+        wk::M_EXPT => a.powf(b()?),
+        wk::M_OP_LT => return Ok(Some(Value::Bool(a < b()?))),
+        wk::M_OP_LE => return Ok(Some(Value::Bool(a <= b()?))),
+        wk::M_OP_GT => return Ok(Some(Value::Bool(a > b()?))),
+        wk::M_OP_GE => return Ok(Some(Value::Bool(a >= b()?))),
+        wk::RETIRED_EQUALS | wk::M_EQ | wk::M_EQL | wk::M_EQUAL | wk::M_EQUALP => return Ok(Some(Value::Bool(a == b()?))),
+        wk::M_OP_NE => return Ok(Some(Value::Bool(a != b()?))),
+        wk::M_SQRT => a.sqrt(),
+        wk::M_FLOOR => a.floor(),
+        wk::M_CEILING => a.ceil(),
+        wk::M_ROUND => FloatWidth::round_ties_even(a),
+        wk::M_TRUNCATE => a.trunc(),
+        wk::M_SIN => a.sin(),
+        wk::M_COS => a.cos(),
+        wk::M_TAN => a.tan(),
+        wk::M_ASIN => a.asin(),
+        wk::M_ACOS => a.acos(),
+        wk::M_ATAN => a.atan(),
+        wk::M_SINH => a.sinh(),
+        wk::M_COSH => a.cosh(),
+        wk::M_TANH => a.tanh(),
+        wk::M_ASINH => a.asinh(),
+        wk::M_ACOSH => a.acosh(),
+        wk::M_ATANH => a.atanh(),
+        wk::M_EXP => a.exp(),
+        wk::M_LOG => a.ln(),
+        _ => return Ok(None),
     };
-    Some(Ok(v))
+    Ok(Some(v.boxed(heap)))
 }
 
 /// `v` boxed at the receiver's precision: rounded to binary32 first when the
-/// receiver is `f32`.
-///
-/// The *arithmetic* is the one the type names: it is computed in binary64 and
-/// rounded here, which is what makes `f32` binary32 rather than a label on an
-/// `f64` (`docs/ja/reference/functions/numbers.md` §1). And the box is the one the type names
-/// too — an `f32` result goes in an `f32` box, so that everything downstream
-/// (printing, `eql`, a dump) can still tell which width it is.
+/// receiver is `f32`. The box is the one the type names, so that everything
+/// downstream (printing, `eql`, a dump) can still tell which width it is.
 fn float_at(heap: &mut Heap, v: f64, single: bool) -> Value {
     if single {
         heap.alloc_f32(v as f32)
     } else {
         heap.alloc_f64(v)
     }
-}
-
-pub(super) fn float_unary(heap: &mut Heap, args: &[Value], f: fn(f64) -> f64, single: bool) -> Result<Value, EvalError> {
-    let r = f(expect_float(heap, &args[0])?);
-    Ok(float_at(heap, r, single))
-}
-
-pub(super) fn float_expt(heap: &mut Heap, args: &[Value], single: bool) -> Result<Value, EvalError> {
-    let r = expect_float(heap, &args[0])?.powf(expect_float(heap, &args[1])?);
-    Ok(float_at(heap, r, single))
 }
 
 /// `float->f32`/`float->f64` (`registry::float_assoc`): a cast between the
@@ -265,43 +246,25 @@ pub(super) fn try_float_to_f32(heap: &mut Heap, args: &[Value], ret_type: TypeId
     Ok(heap.alloc_option(ret_type, narrowed))
 }
 
-/// `int->i8`/`int->u32`/... (`registry::int_assoc`): a cast between two
-/// integer widths — truncating, which is what a width cast means.
-pub(super) fn int_to_width(args: &[Value], width: u32, signed: bool) -> Result<Value, EvalError> {
-    Ok(Value::Int(crate::types::normalize_int(rt_i64(&args[0])?, width, signed)))
-}
-
-/// `try-int->i8`/... (`registry::int_assoc`): [`int_to_width`] asked as a
-/// question — `None` when the value does not fit the target width, which is
-/// exactly when truncating would change it.
-pub(super) fn try_int_to_width(heap: &mut Heap, args: &[Value], width: u32, signed: bool, ret_type: TypeId) -> Result<Value, EvalError> {
-    let n = rt_i64(&args[0])?;
-    let fits = crate::types::normalize_int(n, width, signed) == n;
-    Ok(heap.alloc_option(ret_type, fits.then_some(Value::Int(n))))
-}
-
 /// Whether `method` is a `try-int->W` cast rather than an `int->W` one, and
-/// `W`'s width and signedness — `None` for any other method. The pairs are
-/// [`crate::types::int_width_signed`]'s, for the targets
-/// `registry::int_assoc` gives these casts.
-pub(super) fn width_cast_target(method: SymRef) -> Option<(bool, u32, bool)> {
+/// `W` — `None` for any other method. The targets are the ones
+/// `typeck::builtins::primitive::width_casts` gives these casts.
+pub(super) fn width_cast_target(method: SymRef) -> Option<(bool, FixedType)> {
     Some(match method.well_known() {
-        wk::M_INT_TO_I8 => (false, 8, true),
-        wk::M_INT_TO_I16 => (false, 16, true),
-        wk::M_INT_TO_I32 => (false, 32, true),
-        wk::M_INT_TO_U8 => (false, 8, false),
-        wk::M_INT_TO_U16 => (false, 16, false),
-        wk::M_INT_TO_U32 => (false, 32, false),
-        wk::M_INT_TO_C_LONG => (false, 64, true),
-        wk::M_INT_TO_C_ULONG => (false, 64, false),
-        wk::M_TRY_INT_TO_I8 => (true, 8, true),
-        wk::M_TRY_INT_TO_I16 => (true, 16, true),
-        wk::M_TRY_INT_TO_I32 => (true, 32, true),
-        wk::M_TRY_INT_TO_U8 => (true, 8, false),
-        wk::M_TRY_INT_TO_U16 => (true, 16, false),
-        wk::M_TRY_INT_TO_U32 => (true, 32, false),
-        wk::M_TRY_INT_TO_C_LONG => (true, 64, true),
-        wk::M_TRY_INT_TO_C_ULONG => (true, 64, false),
+        wk::M_INT_TO_I8 => (false, FixedType::I8),
+        wk::M_INT_TO_I16 => (false, FixedType::I16),
+        wk::M_INT_TO_I32 => (false, FixedType::I32),
+        wk::M_INT_TO_U8 => (false, FixedType::U8),
+        wk::M_INT_TO_U16 => (false, FixedType::U16),
+        wk::M_INT_TO_U32 => (false, FixedType::U32),
+        wk::M_INT_TO_C_LONG => (false, FixedType::I64),
+        wk::M_INT_TO_C_ULONG => (false, FixedType::U64),
+        wk::M_TRY_INT_TO_I8 => (true, FixedType::I8),
+        wk::M_TRY_INT_TO_I16 => (true, FixedType::I16),
+        wk::M_TRY_INT_TO_I32 => (true, FixedType::I32),
+        wk::M_TRY_INT_TO_U8 => (true, FixedType::U8),
+        wk::M_TRY_INT_TO_U16 => (true, FixedType::U16),
+        wk::M_TRY_INT_TO_U32 => (true, FixedType::U32),
         _ => return None,
     })
 }
@@ -498,31 +461,15 @@ pub(super) fn integer_unary(heap: &mut Heap, args: &[Value], name: SymRef) -> Re
     Ok(v)
 }
 
-/// `int->W`/`try-int->W` on an `int` receiver: the cast truncates to the
-/// target (`int_to_width`'s meaning), and the question is answered exactly —
-/// a bignum fits a 64-bit C word when it is in that word's range, and never
-/// fits anything narrower.
-pub(super) fn integer_to_width(heap: &mut Heap, args: &[Value], width: u32, signed: bool, try_variant: bool, ret_type: TypeId) -> Result<Value, EvalError> {
+/// `int->W`/`try-int->W` on an `int` receiver: `typelisp_mem::fixed`'s
+/// `from_int` and `try_from_int` at the target `to`.
+pub(super) fn integer_to_width(heap: &mut Heap, args: &[Value], to: FixedType, try_variant: bool, ret_type: TypeId) -> Result<Value, EvalError> {
     let a = expect_int(heap, &args[0])?;
     if !try_variant {
-        return Ok(Value::Int(crate::types::normalize_int(a.low_word(), width, signed)));
+        return Ok(with_fixed!(to, U => Value::Int(fixed::from_int::<U>(a).to_word())));
     }
-    let fits = match &a {
-        IntArg::Fix(n) => crate::types::normalize_int(*n, width, signed) == *n,
-        IntArg::Big(n) => width == 64 && if signed { n.to_i64().is_some() } else { n.to_u64().is_some() },
-    };
-    let word = a.low_word();
-    Ok(heap.alloc_option(ret_type, fits.then_some(Value::Int(word))))
-}
-
-/// `int->int` on a fixed-width receiver (`(as int x)`): exact widening.
-/// `c-ulong` is the one receiver whose 64 bits are unsigned, so its word is
-/// read as such; every narrower unsigned type is already non-negative in the
-/// register.
-pub(super) fn width_to_int(heap: &mut Heap, args: &[Value], width: u32, signed: bool) -> Result<Value, EvalError> {
-    let word = rt_i64(&args[0])?;
-    let n = if !signed && width == 64 { i128::from(word as u64) } else { i128::from(word) };
-    Ok(heap.canonical_int(n))
+    let fits = with_fixed!(to, U => fixed::try_from_int::<U>(&a).map(|u| Value::Int(u.to_word())));
+    Ok(heap.alloc_option(ret_type, fits))
 }
 
 /// `int->float`/`int->ratio`/`int->char`/`try-int->char` on an `int`
@@ -645,11 +592,6 @@ pub(super) fn rational_unary(heap: &mut Heap, name: SymRef, args: &[Value], ret_
     })
 }
 
-/// `int->ratio` (`registry::int_assoc`): always-exact widening.
-pub(super) fn int_to_ratio(heap: &mut Heap, args: &[Value]) -> Result<Value, EvalError> {
-    Ok(ratio_rt(heap, BigRational::from_integer(BigInt::from(rt_i64(&args[0])?))))
-}
-
 /// `float->int` (`registry::float_assoc`): truncating toward zero into the
 /// arbitrary-precision `int` — exact for every finite float, whatever its
 /// magnitude (CL's `truncate`). Panics on a non-finite float (`NaN`/`inf`):
@@ -661,6 +603,22 @@ pub(super) fn float_to_int(heap: &mut Heap, args: &[Value]) -> Result<Value, Eva
         return Err(EvalError::Panic(format!("float->int: {} is not finite", f)));
     }
     Ok(heap.int_from_bigint(BigInt::from_f64(f.trunc()).expect("a finite float truncates to a representable BigInt")))
+}
+
+/// `float->i8` and the other fixed widths: the low bits of [`float_to_int`]'s
+/// answer.
+pub(super) fn float_to_fixed(heap: &mut Heap, method: SymRef, args: &[Value], ret_type: TypeId) -> Result<Value, EvalError> {
+    let to = match method.well_known() {
+        wk::M_FLOAT_TO_I8 => FixedType::I8,
+        wk::M_FLOAT_TO_I16 => FixedType::I16,
+        wk::M_FLOAT_TO_I32 => FixedType::I32,
+        wk::M_FLOAT_TO_U8 => FixedType::U8,
+        wk::M_FLOAT_TO_U16 => FixedType::U16,
+        wk::M_FLOAT_TO_U32 => FixedType::U32,
+        _ => unreachable!("float_to_fixed: {}", method.name()),
+    };
+    let n = float_to_int(heap, args)?;
+    integer_to_width(heap, &[n], to, false, ret_type)
 }
 
 /// `float->ratio` (`registry::float_assoc`): widening and *exact* — every

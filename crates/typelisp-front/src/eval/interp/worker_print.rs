@@ -23,6 +23,7 @@
 //! if a drive is running and a worker may be printing now
 //! ([`Interp::printer_tables_changed`]).
 
+use typelisp_mem::Word;
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
@@ -118,7 +119,6 @@ const WORKER_PRINT_HOOKS: typelisp_print::runtime::PrintHooks = typelisp_print::
         typelisp_print::aot::field_name_in(&snapshot.field_names, &snapshot.field_templates, ty, index)
     },
     print_object: worker_print_object,
-    format_call: worker_format_call,
     opts: |heap| {
         let snapshot = current();
         typelisp_print::runtime::read_opts(heap, &|name| snapshot.global(heap, name))
@@ -143,7 +143,8 @@ fn worker_print_object(heap: &mut Heap, v: Value, escape: bool) -> Result<Option
         Some(PrintMethod::Interpreted) => return Err(interpreted_off_main(&format!("print-object of `{}`", type_path))),
         Some(PrintMethod::Compiled { address, abi, receiver }) => (*address, *abi, receiver.clone()),
     };
-    let args = [encode(heap, v, &receiver)?, i64::from(escape)];
+    let mut args: Vec<Word> = typelisp_mem::value_words(encode(heap, v, &receiver)?, super::crossing_bits(&receiver)).collect();
+    args.push(Word::from(escape));
     PRINTING.with(|p| p.borrow_mut().push(v));
     let result = call(address, abi, &args);
     PRINTING.with(|p| {
@@ -155,30 +156,6 @@ fn worker_print_object(heap: &mut Heap, v: Value, escape: bool) -> Result<Option
     }
 }
 
-/// `Interp::format_call`, from the snapshot.
-fn worker_format_call(heap: &mut Heap, name: &str, v: Value, colon: bool, at: bool) -> Result<String, String> {
-    let snapshot = current();
-    let (address, abi, receiver) = match snapshot.defs.iter().find(|(target, _)| target.link_name() == name).map(|(_, m)| m) {
-        None => return Err(format!("format: ~/{}/ — no such definition", name)),
-        Some(PrintMethod::Interpreted) => return Err(interpreted_off_main(&format!("`{}`, which a ~/name/ directive calls,", name))),
-        Some(PrintMethod::Compiled { address, abi, receiver }) => (*address, *abi, receiver.clone()),
-    };
-    // A narrow integer is a box in a `Sexpr` and a plain word as a
-    // parameter — opened on the way in, as `Interp::format_call` does.
-    let receiver_value = match v {
-        Value::Boxed(id) if receiver == Repr::Narrow => match heap.narrow_box(id) {
-            Some(n) => Value::Int(n.value),
-            None => v,
-        },
-        _ => v,
-    };
-    let args = [encode(heap, receiver_value, &receiver)?, i64::from(colon), i64::from(at)];
-    match call(address, abi, &args)? {
-        Value::Str(id) => Ok(heap.string(id).to_string()),
-        other => Err(format!("format: ~/{}/ returned {:?}, not a string", name, other)),
-    }
-}
-
 fn encode(heap: &Heap, v: Value, repr: &Repr) -> Result<i64, String> {
     super::encode_crossing_value(heap, &v, repr).map_err(|e| e.to_string())
 }
@@ -186,9 +163,9 @@ fn encode(heap: &Heap, v: Value, repr: &Repr) -> Result<i64, String> {
 /// Calls a printer method's compiled body and reads back its tagged string
 /// — a failure inside it (a `(panic ...)`) comes back as the printer's error,
 /// as `Interp::enter`'s does on the interpreter's thread.
-fn call(address: usize, abi: u8, args: &[i64]) -> Result<Value, String> {
+fn call(address: usize, abi: u8, args: &[Word]) -> Result<Value, String> {
     crate::eval::crossing::catch_compiled_panic(|| super::call_body(address, abi, args))
-        .map(typelisp_rt::decode)
+        .map(|v| typelisp_rt::decode(v as Word))
         .map_err(|e| e.to_string())
 }
 
@@ -248,7 +225,7 @@ impl Interp {
         let mut bodies = self.printer_bodies.borrow_mut();
         for f in defs {
             let print_object = matches!(f.target, crate::CompileTarget::Method(..)) && super::is_print_object_sig(&f);
-            if !print_object && super::format_call_receiver_is_word(&f).is_none() {
+            if !print_object {
                 continue;
             }
             let entry = match (f.compiled.borrow().as_ref(), f.sig.as_ref()) {

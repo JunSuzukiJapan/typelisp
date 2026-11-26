@@ -303,8 +303,8 @@ fn plain_sub_forms(heap: &Heap, form: Value, tag: SymRef) -> Result<Vec<Value>, 
     let parts = core::fields(heap, form)?;
     let from = |n: usize| -> Vec<Value> { parts.iter().skip(n).copied().collect() };
     Ok(match tag.well_known() {
-        // path, representations, then the arguments.
-        wk::CALL => from(2),
+        // path, result, representations, then the arguments.
+        wk::CALL => from(3),
         // type, method, instance, result, representations, result key, then
         // the arguments.
         wk::ASSOC => from(6),
@@ -339,7 +339,7 @@ fn plain_sub_forms(heap: &Heap, form: Value, tag: SymRef) -> Result<Vec<Value>, 
         // are refused a lowering by the bridge; walking them correctly is what
         // lets that refusal be the error a user sees.
         wk::STEP => from(0),
-        wk::RETURN | wk::PANIC | wk::DYN_VALUE | wk::UNTAG_INT | wk::TAG_INT => from(0),
+        wk::RETURN | wk::PANIC | wk::DYN_VALUE | wk::UNTAG_INT | wk::TAG_INT | wk::LLVM_SIZE_OF_VALUE => from(0),
         // `(some-of REPR E)` / `(box-option TYPE E)` — the operand only;
         // neither the representation nor the type is a form (each is a list
         // headed by a symbol, `field-get`'s trap below).
@@ -382,8 +382,9 @@ fn plain_sub_forms(heap: &Heap, form: Value, tag: SymRef) -> Result<Vec<Value>, 
         // The boxed value, past the vtable tables and the value's own
         // representation.
         wk::DYN_NEW => from(5),
-        // type, method, slot, table, representations, then the arguments.
-        wk::DYN_CALL => from(5),
+        // type, method, slot, table, result, representations, then the
+        // arguments.
+        wk::DYN_CALL => from(6),
         _ => {
             return Err(Error::TypeError(format!(
                 "compile: the free-variable walk does not know the tag `{}`",

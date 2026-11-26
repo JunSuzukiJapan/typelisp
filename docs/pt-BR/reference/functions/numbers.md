@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/numbers.md @ 676864f7e6cf8e950e51aadacecd49695c8545a8 -->
+<!-- translated-from: docs/ja/reference/functions/numbers.md @ 1b5dc6ac828d8e4a95800a91218b5e9dffe83f98 -->
 # Números
 
 Operações sobre inteiros, números de ponto flutuante, racionais, números complexos e booleanos, e outras
@@ -71,11 +71,10 @@ largura. `c-long` / `c-ulong` só têm conversões:
 | `int->i8` … `int->u32` | `(int->W x)` | `T→W` | As mesmas conversões de largura do capítulo 1. Os valores que não cabem são truncados |
 | `try-int->i8` … `try-int->u32` | `(try-int->W x)` | `T→Option<W>` | A mesma conversão como pergunta |
 | `int->c-long` `int->c-ulong` | `(int->W x)` | `T→W` | O caminho de entrada, a partir da outra palavra bruta e dos tipos inteiros do capítulo 1 |
-| `try-int->c-long` `try-int->c-ulong` | `(try-int->W x)` | `T→Option<W>` | Igual ao acima |
 | `int->int` | `(int->int x)` | `T→int` | **Sempre exata**. A forma honesta de ler um `size_t` que não cabe em um `i32` |
 
 `(as i32 x)` / `(try-as i32 x)` / `(as int x)` / `(as c-ulong n)` é o que estas fazem, e as conversões existem
-para todo par com os tipos inteiros do capítulo 1. `ptr` nem sequer tem esta tabela: não se oferece nenhuma
+para todo par com os tipos inteiros do capítulo 1. Não há forma `try-` para uma palavra crua: `Option<c-long>` colocaria uma palavra crua dentro de outro tipo, o que não pode ser escrito. `ptr` nem sequer tem esta tabela: não se oferece nenhuma
 forma de ler um ponteiro como número. É um valor que só é passado, recebido e entregue a outra função C.
 
 **Também não podem ser impressas.** `(println "~a" x)` não aceita uma palavra bruta (ela não tem
@@ -141,6 +140,7 @@ execução ("an integer argument does not fit a fixnum").
 | `log` (dois argumentos) | `(log x base)` | `(f64,f64)→f64` | Logaritmo em uma base dada. Expandido para `(/ (log x) (log base))` (capítulo 8) |
 | `floor-div` `ceiling-div` `round-div` `truncate-div` | `(op a b)` | `(f64,f64)→cons-cell<f64,f64>` | Correspondem às versões de dois argumentos do CL (`(floor 7.0 2.0)`→quociente 3, resto 1). O mesmo desenho das funções homônimas do capítulo 1 (`car`=quociente, `cdr`=resto) |
 | `float->int` | `(float->int x)` | `f64→int` | Converte para `int` truncando em direção a zero (o `truncate` do CL; exato para valores finitos de qualquer tamanho). Panic com infinito e NaN. Para uma largura fixa, use `(as i32 x)` |
+| `float->i8` `float->i16` `float->i32` `float->u8` `float->u16` `float->u32` | `(op x)` | `f64→i8` | Converte para o tipo os bits baixos do que `float->int` dá (sem passar por `int`). Infinito e NaN causam panic. O que está por trás de `(as i16 x)` |
 | `float->ratio` | `(float->ratio x)` | `f64→ratio` | Converte para `ratio` como o racional binário exato (o `rational` do CL) |
 | `float->f32` `float->f64` | `(op x)` | `f64→f32` / `f64→f64` | Converte entre larguras de ponto flutuante. `float->f32` arredonda para o mais próximo, `float->f64` é sempre exata. O que `(as f32 x)` faz |
 | `try-float->f32` `try-float->f64` | `(op x)` | `f64→Option<f32>` / `→Option<f64>` | A mesma conversão como pergunta. `None` se o arredondamento mudar o valor (ampliar para `f64` é sempre `Some`). O que `(try-as f32 x)` faz |
@@ -330,7 +330,7 @@ Constantes de limites numéricos (CLHS 12.1.4.2 / 12.1.3):
 
 | Nome | Tipo | Descrição |
 |---|---|---|
-| `most-positive-fixnum` / `most-negative-fixnum` | `int` | O limite superior / inferior de um valor imediato de 63 bits (2^62-1 / -2^62). Um `int` além deles vira bignum |
+| `most-positive-fixnum` / `most-negative-fixnum` | `int` | O limite superior / inferior de um valor imediato de 63 bits (2^62-1 / -2^62; em wasm32 e Cortex-M são 31 bits, 2^30-1 / -2^30). Um `int` além deles vira bignum |
 | `most-positive-double-float` / `most-negative-double-float` | `f64` | Os maiores / menores valores finitos |
 | `least-positive-double-float` / `least-negative-double-float` | `f64` | A menor magnitude não nula, incluindo os subnormais |
 | `least-positive-normalized-double-float` / `least-negative-normalized-double-float` | `f64` | O mesmo, limitado a números normalizados |

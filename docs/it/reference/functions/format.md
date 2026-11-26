@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/format.md @ 59f6f286d9081f10d4e2d72836362c3efc3e42af -->
+<!-- translated-from: docs/ja/reference/functions/format.md @ 9657f5a39527be80deea76fe60ecc58ab1752689 -->
 # Direttive di formato
 
 Le direttive scritte nelle stringhe di controllo di `print`/`println`/`format`. Coprono quasi tutte le
@@ -109,13 +109,14 @@ se la direttiva porta `:` e `@`.
 - La risoluzione del nome è la stessa di una chiamata ([Riferimento della sintassi 3.10](../syntax.md#310-module--use--namespace)). Se il
   tipo dell'argomento ha un metodo `name`, viene chiamato quello; altrimenti la funzione visibile `name`.
   Una funzione di un modulo si può indicare con il suo percorso (`~/m::shout/`).
-- Si può chiamare una funzione o un metodo scritto in typelisp che riceve l'argomento, `colon` e `at` così
-  come sono e restituisce una `string`. Le funzioni integrate non si possono chiamare.
+- Si chiama una funzione o un metodo che riceve l'argomento, `colon` e `at` e restituisce una
+  `string`. Si possono chiamare anche quelli integrati.
 - **Che cosa chiamare si decide al controllo.** Il controllore trova ogni argomento che può raggiungere quel
   `~/name/`, tenendo conto degli spostamenti di `~*` e `~[`, e risolve il nome per il tipo di ciascuno. Se
-  uno di essi non si risolve è un errore al controllo, e lo è anche il caso in cui gli argomenti possibili
-  chiamerebbero due definizioni diverse. A tempo di esecuzione non si cerca alcun nome, quindi funziona allo
-  stesso modo negli eseguibili AOT.
+  uno di essi non si risolve è un errore al controllo. Gli argomenti possibili possono chiamare definizioni
+  diverse secondo il tipo; a tempo di esecuzione si chiama quella del tipo dell'argomento effettivamente
+  raggiunto. A tempo di esecuzione non si cerca alcun nome, quindi funziona allo stesso modo negli
+  eseguibili AOT.
 - **Non si può usare dentro `~{`, `~:{`, `~:@{` né `~<...~:>`** (errore al controllo). Il tipo degli
   elementi di un argomento lista è `Sexpr`, che non può stabilire che cosa chiamare. `~@{` percorre gli
   argomenti restanti della chiamata, i cui tipi sono noti, quindi lì si può usare.

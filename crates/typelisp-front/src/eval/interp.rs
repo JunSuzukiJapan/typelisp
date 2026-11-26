@@ -55,6 +55,7 @@ mod core_test_support;
 mod task_body;
 
 /// What those worker threads print with.
+#[cfg(not(target_family = "wasm"))]
 mod worker_print;
 
 mod compiled;
@@ -71,6 +72,8 @@ mod strings;
 mod equality;
 pub(crate) use compiled::*;
 pub(crate) use builtins::*;
+// What the worker threads' printer snapshot reads (`worker_print`).
+#[cfg(not(target_family = "wasm"))]
 pub(crate) use printing::*;
 use read_hooks::*;
 pub use numeric::*;
@@ -199,7 +202,7 @@ pub trait CompiledBody {
     /// Provided, not required: the address is the only thing that varies per
     /// implementor. A `(panic ...)` in the body comes back as a raise waiting
     /// on the thread, which the caller's `catch_compiled_panic` takes.
-    fn call(&self, args: &[i64]) -> i64 {
+    fn call(&self, args: &[typelisp_mem::Word]) -> i64 {
         call_body(self.address(), self.body_abi(), args)
     }
 }
@@ -264,14 +267,18 @@ pub struct Interp {
     /// `Interp::install_crew`.
     pub(crate) crew_installed: std::cell::Cell<bool>,
     /// What the crew's threads print with — see `worker_print`.
+    #[cfg(not(target_family = "wasm"))]
     pub(crate) worker_print: worker_print::SharedSnapshot,
     /// How many times what [`Self::worker_print`] copies has changed, and
     /// which of those the published snapshot reflects — see
     /// `Interp::printer_tables_changed`.
+    #[cfg(not(target_family = "wasm"))]
     pub(crate) print_generation: std::cell::Cell<u64>,
+    #[cfg(not(target_family = "wasm"))]
     pub(crate) published_generation: std::cell::Cell<u64>,
     /// The compiled bodies the published snapshot names, kept alive while a
     /// worker may be calling one — see `worker_print`.
+    #[cfg(not(target_family = "wasm"))]
     pub(crate) printer_bodies: RefCell<Vec<Rc<dyn CompiledBody>>>,
     /// Whether this is an `eval`-carrying executable's interpreter, whose
     /// program prints through the executable's own registration tables
@@ -417,7 +424,7 @@ pub struct Interp {
     /// or `lambda` shares between evaluations; the body is rooted
     /// permanently when its definition is made, so its cells are never
     /// reused for another form and a key cannot come to name something else.
-    pub thread_entries: RefCell<HashMap<Vec<i64>, Path>>,
+    pub thread_entries: RefCell<HashMap<Vec<typelisp_mem::Word>, Path>>,
 }
 
 /// Why `compile::driver::precheck_compilable` says no.
@@ -538,14 +545,16 @@ impl Interp {
             step_quiet_depth: Cell::new(usize::MAX),
             dump_sources: RefCell::new(Vec::new()),
             recording: RefCell::new(None),
-            scheduler: std::sync::Arc::new(typelisp_rt::sched::SchedShared::new().unwrap_or_else(|e| {
-                typelisp_rt::fatal(&format!("the scheduler could not be set up: {}", e))
-            })),
+            scheduler: std::sync::Arc::new(typelisp_rt::sched::SchedShared::new()),
             driving: std::cell::Cell::new(false),
             crew_installed: std::cell::Cell::new(false),
+            #[cfg(not(target_family = "wasm"))]
             worker_print: Default::default(),
+            #[cfg(not(target_family = "wasm"))]
             print_generation: std::cell::Cell::new(1),
+            #[cfg(not(target_family = "wasm"))]
             published_generation: std::cell::Cell::new(0),
+            #[cfg(not(target_family = "wasm"))]
             printer_bodies: RefCell::new(Vec::new()),
             executable_printer: std::cell::Cell::new(false),
         }
@@ -931,14 +940,15 @@ use crate::sexpr_variant::{
 /// The `(width, signed)` pair each narrow-integer `Sexpr` variant names, or
 /// `None` for every other variant — the one table mapping between the two,
 /// read by `match_sexpr_core`, `construct_sexpr_core` and the accessors.
-pub(crate) fn narrow_variant(variant: usize) -> Option<(u8, bool)> {
+pub(crate) fn narrow_variant(variant: usize) -> Option<typelisp_mem::fixed::FixedType> {
+    use typelisp_mem::fixed::FixedType;
     Some(match variant {
-        SEXPR_I8 => (8, true),
-        SEXPR_I16 => (16, true),
-        SEXPR_U8 => (8, false),
-        SEXPR_U16 => (16, false),
-        SEXPR_U32 => (32, false),
-        SEXPR_I32 => (32, true),
+        SEXPR_I8 => FixedType::I8,
+        SEXPR_I16 => FixedType::I16,
+        SEXPR_U8 => FixedType::U8,
+        SEXPR_U16 => FixedType::U16,
+        SEXPR_U32 => FixedType::U32,
+        SEXPR_I32 => FixedType::I32,
         _ => return None,
     })
 }
@@ -1027,3 +1037,11 @@ thread_local! {
     static ACTIVE_INTERP: std::cell::Cell<*const Interp> = const { std::cell::Cell::new(std::ptr::null()) };
 }
 
+/// No worker thread prints on WebAssembly, which has none, so there is no
+/// snapshot of the printer's tables to keep (`worker_print`).
+#[cfg(target_family = "wasm")]
+impl Interp {
+    pub fn printer_tables_changed(&self) {}
+
+    fn refresh_print_snapshot(&self) {}
+}

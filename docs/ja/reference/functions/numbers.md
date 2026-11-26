@@ -65,11 +65,11 @@ CL の派生カタログ（`abs`/`signum`/`gcd`/`lcm`/`isqrt`/`expt` と 9 章�
 | `int->i8` … `int->u32` | `(int->W x)` | `T→W` | 1 章と同じ幅変換。入らない値は切り詰める |
 | `try-int->i8` … `try-int->u32` | `(try-int->W x)` | `T→Option<W>` | 同じ変換を問いとして |
 | `int->c-long` `int->c-ulong` | `(int->W x)` | `T→W` | 生の語どうし、および 1 章の整数型から作る入口 |
-| `try-int->c-long` `try-int->c-ulong` | `(try-int->W x)` | `T→Option<W>` | 同上 |
 | `int->int` | `(int->int x)` | `T→int` | **常に正確**。`i32` に入らない `size_t` を読む正直な方法 |
 
 `(as i32 x)` / `(try-as i32 x)` / `(as int x)` / `(as c-ulong n)` がこれらの実体で、変換は
-1 章の整数型との全ペアにある。`ptr` にはこの表も付かない——ポインタを数として読む道は用意して
+1 章の整数型との全ペアにある。C の語への `try-` 形は無い。`Option<c-long>` は C の語を別の型の
+中に入れることになり、書けないため。`ptr` にはこの表も付かない——ポインタを数として読む道は用意して
 いない。渡す・受け取る・別の C 関数へ渡し直すだけの値。
 
 **印字もできない。** `(println "~a" x)` は生の語を受けない（`Sexpr` 表現を持たないため）ので、
@@ -132,6 +132,7 @@ fixnum に入らない値を渡すと実行時エラー（「an integer argument
 | `log`（2引数） | `(log x base)` | `(f64,f64)→f64` | 底を指定した対数。`(/ (log x) (log base))` へ展開される（8 章） |
 | `floor-div` `ceiling-div` `round-div` `truncate-div` | `(op a b)` | `(f64,f64)→cons-cell<f64,f64>` | CL の2引数版（`(floor 7.0 2.0)`→商3・剰余1）に相当。1 章の同名関数と同じ設計（`car`=商、`cdr`=剰余） |
 | `float->int` | `(float->int x)` | `f64→int` | ゼロ方向への切り捨てで `int` へ変換（CL の `truncate`。どんな大きさの有限値でも正確）。無限大・NaN は panic。固定幅が要るなら `(as i32 x)` |
+| `float->i8` `float->i16` `float->i32` `float->u8` `float->u16` `float->u32` | `(op x)` | `f64→i8` など | `float->int` の答えの下位ビットをその型にしたもの（`int` を経由しない）。無限大・NaN は panic。`(as i16 x)` の実体 |
 | `float->ratio` | `(float->ratio x)` | `f64→ratio` | 正確な二進有理数として `ratio` へ変換（CL の `rational`） |
 | `float->f32` `float->f64` | `(op x)` | `f64→f32` / `f64→f64` | 浮動小数点の幅の変換。`float->f32` は最近接へ丸め、`float->f64` は常に正確。`(as f32 x)` の実体 |
 | `try-float->f32` `try-float->f64` | `(op x)` | `f64→Option<f32>` / `→Option<f64>` | 同じ変換を問いとして。丸めで値が変わるなら `None`（`f64` への拡大は常に `Some`）。`(try-as f32 x)` の実体 |
@@ -313,7 +314,7 @@ CL の `numberp`/`integerp`/`floatp` 等の**型述語は無い**——静的型
 
 | 名前 | 型 | 説明 |
 |---|---|---|
-| `most-positive-fixnum` / `most-negative-fixnum` | `int` | 63bit 即値の上限／下限（2^62-1 / -2^62）。これを超えた `int` は多倍長になる |
+| `most-positive-fixnum` / `most-negative-fixnum` | `int` | 63bit 即値の上限／下限（2^62-1 / -2^62。wasm32 と Cortex-M では 31bit で、2^30-1 / -2^30）。これを超えた `int` は多倍長になる |
 | `most-positive-double-float` / `most-negative-double-float` | `f64` | 有限で最大／最小 |
 | `least-positive-double-float` / `least-negative-double-float` | `f64` | 非正規化数を含む、0 でない最小の絶対値 |
 | `least-positive-normalized-double-float` / `least-negative-normalized-double-float` | `f64` | 正規化数に限った同じもの |

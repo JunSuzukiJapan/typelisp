@@ -64,7 +64,7 @@ fn loading_the_prelude_installs_native_bodies() {
         m("i32", "abs"),
         m("int", "signum"),
         m("f64", "rem"),
-        m("i8", "rem"),
+        m("i8", "print"),
     ] {
         assert!(interp.is_compiled(&target), "`{:?}` should have a compiled body after load_prelude", target);
     }

@@ -6,7 +6,7 @@
 //! the machine or the network. What the tests check beyond "bytes cross":
 //! that a task waiting on a socket **parks** rather than stopping the
 //! thread — the property every socket operation is built around
-//! (`typelisp_rt::net`'s module docs) — and that an interpreted turn of the
+//! (`typelisp_rt_posix::net`'s module docs) — and that an interpreted turn of the
 //! prelude's wait loop and a compiled one see the same answers.
 
 extern crate typelisp;

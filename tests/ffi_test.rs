@@ -67,9 +67,8 @@ fn passes_and_returns_a_double() {
 
 #[test]
 fn passes_and_returns_a_float() {
-    // `f32` crosses the compiled boundary as the bits of its value widened to
-    // `f64`, so the thunk has to narrow on the way in and widen on the way
-    // out. Getting either half wrong gives a number, just not this one.
+    // `f32` crosses as its own 32 bits; reading an `f64`'s there, or the
+    // other way round, gives a number, just not this one.
     assert_eq!(float(r#"(defffi (c-fabsf "fabsf") (f32) f32) (unsafe (c-fabsf (the f32 -2.5)))"#), 2.5);
 }
 
@@ -228,9 +227,9 @@ fn a_c_word_is_read_as_an_int_by_the_declaration_s_signedness() {
 
 #[test]
 fn a_compiled_body_reads_a_c_word_the_same_way() {
-    // The interpreter reads the word in `int_to_bignum` and compiled code in
-    // `rt_uint_to_bignum`, chosen by the island from the receiver's `int-wsig`
-    // — two places, one answer.
+    // The interpreter reads the word as `typelisp_mem::fixed::to_int` at the
+    // receiver's type and compiled code calls `rt_integer_from_c_ulong`, chosen
+    // by the island from the receiver's type — two places, one answer.
     assert_eq!(
         text(
             r#"

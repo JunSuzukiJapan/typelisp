@@ -37,7 +37,8 @@ Usage:
   typl [OPTIONS]                                 start the REPL
   typl [OPTIONS] FILE [ARGS...]                  run FILE; ARGS are its (command-line-args)
   typl [--lib-dir DIR] [-O<N>] -c SOURCE [-o OUTPUT] [--heap-cells N]
-       [--max-memory SIZE] [--no-cons] [--target TARGET]
+       [--max-memory SIZE] [--no-cons] [--target TARGET] [--linker-script FILE]
+       [--board-functions WHO] [--link FILE]
                                                  compile SOURCE to an executable
   typl [OPTIONS] test [FILE.typl] [FILTER]       run the #[test] functions of the
                                                  project here (or of FILE) whose
@@ -65,7 +66,19 @@ Options:
   --target TARGET        after -c: build for TARGET instead of this machine:
                          wasm32-wasip1 makes a WASI module, wasm32-unknown-unknown
                          a module and the JavaScript that runs it (default
-                         OUTPUT: SOURCE with .wasm)
+                         OUTPUT: SOURCE with .wasm), thumbv7em-none-eabihf an
+                         ELF executable for a Cortex-M4F/M7 board and
+                         thumbv8m.main-none-eabihf one for a Cortex-M33 board
+                         (default OUTPUT: SOURCE with .elf)
+  --linker-script FILE   after --target for a board: the board's flash and
+                         RAM, as a memory.x (default: those of QEMU's
+                         mps2-an386 for a Cortex-M4, mps2-an505 for an M33)
+  --board-functions WHO  after --target for a board: who gives the board's
+                         output, input, exit and clock: semihosting (QEMU or
+                         a debugger; the default) or c (the board's
+                         typelisp_host_* C functions, given with --link)
+  --link FILE            after --target for a board: an object or static
+                         library to link with (repeatable)
   --feature NAME         add a feature for #+/#- (repeatable)
   --on-redefine=POLICY   on redefinition: warn (default), error or silent
   --remove-lib           remove the library this typl wrote for compiled
@@ -209,15 +222,15 @@ fn main() -> rustyline::Result<()> {
     // different vector run by `typl` than run as an AOT executable, where
     // element 0 is the program and element 1 the first argument. Installing
     // it here, before any user code, is what makes the two agree; see
-    // `typelisp_rt::sys_builtin::COMMAND_LINE_ARGS`.
+    // `typelisp_rt_sys::env::COMMAND_LINE_ARGS`.
     if let Some(pos) = args.iter().position(|a| !a.starts_with("--")) {
-        typelisp_rt::sys_builtin::set_command_line_args(args[pos..].to_vec());
+        typelisp_rt_sys::env::set_command_line_args(args[pos..].to_vec());
         std::process::exit(run_file(&args[pos], heap_cells, features, image));
     }
     // The REPL has no script, so its command line is just `typl` itself —
     // set explicitly rather than left to the process argv, which would leak
     // `--heap-cells` and friends into a program's view of its arguments.
-    typelisp_rt::sys_builtin::set_command_line_args(vec!["typl".to_string()]);
+    typelisp_rt_sys::env::set_command_line_args(vec!["typl".to_string()]);
     repl(heap_cells, features, image)
 }
 
@@ -231,13 +244,16 @@ fn compile_command(flag: &str, args: &[String], heap_cells: Option<usize>) -> i3
     let mut source = None;
     let mut output = None;
     let mut options = typelisp::compile::aot::BuildOptions { heap_cells, ..Default::default() };
+    // The last flag given that only a board takes.
+    let mut board_only = None;
+    let mut board_functions = false;
     let mut it = args.iter();
     while let Some(a) = it.next() {
         if a == "--no-cons" {
             options.no_cons = true;
         } else if let Some(v) = flag_value(a, "--target", &mut it) {
             let Some(v) = v else {
-                eprintln!("--target: needs a target (wasm32-wasip1 or wasm32-unknown-unknown)");
+                eprintln!("--target: needs a target (wasm32-wasip1, wasm32-unknown-unknown, {})", typelisp::compile::aot::Target::board_names());
                 return 1;
             };
             match typelisp::compile::aot::Target::parse(v) {
@@ -247,6 +263,36 @@ fn compile_command(flag: &str, args: &[String], heap_cells: Option<usize>) -> i3
                     return 1;
                 }
             }
+        } else if let Some(v) = flag_value(a, "--board-functions", &mut it) {
+            let Some(v) = v else {
+                eprintln!("--board-functions: needs semihosting or c");
+                return 1;
+            };
+            match typelisp::compile::aot::BoardFunctions::parse(v) {
+                Ok(who) => {
+                    options.board_functions = who;
+                    board_only = Some("--board-functions");
+                    board_functions = true;
+                }
+                Err(e) => {
+                    eprintln!("{}", e);
+                    return 1;
+                }
+            }
+        } else if let Some(v) = flag_value(a, "--link", &mut it) {
+            let Some(v) = v else {
+                eprintln!("--link: needs an object or static library");
+                return 1;
+            };
+            options.link.push(PathBuf::from(v));
+            board_only = Some("--link");
+        } else if let Some(v) = flag_value(a, "--linker-script", &mut it) {
+            let Some(v) = v else {
+                eprintln!("--linker-script: needs the board's memory.x");
+                return 1;
+            };
+            options.linker_script = Some(PathBuf::from(v));
+            board_only = Some("--linker-script");
         } else if let Some(v) = flag_value(a, "--max-memory", &mut it) {
             let Some(v) = v else {
                 eprintln!("--max-memory: needs a size in bytes (K, M or G may follow)");
@@ -280,12 +326,24 @@ fn compile_command(flag: &str, args: &[String], heap_cells: Option<usize>) -> i3
         } else if source.is_none() && !a.starts_with('-') {
             source = Some(PathBuf::from(a));
         } else {
-            eprintln!("{}: unexpected argument `{}` (usage: typl {} SOURCE [-o OUTPUT] [--release] [-O<N>] [--max-memory SIZE] [--no-cons] [--target TARGET])", flag, a, flag);
+            eprintln!("{}: unexpected argument `{}` (usage: typl {} SOURCE [-o OUTPUT] [--release] [-O<N>] [--max-memory SIZE] [--no-cons] [--target TARGET] [--linker-script FILE] [--board-functions WHO] [--link FILE])", flag, a, flag);
+            return 1;
+        }
+    }
+    if let Some(flag) = board_only.filter(|_| options.target.board().is_none()) {
+        eprintln!("{}: only for a board (--target {})", flag, typelisp::compile::aot::Target::board_names());
+        return 1;
+    }
+    if !options.target.has_runtime() {
+        // What these are for is the runtime's.
+        let runtime_only = [("--board-functions", board_functions), ("--heap-cells", heap_cells.is_some()), ("--max-memory", options.max_memory.is_some())];
+        if let Some((flag, _)) = runtime_only.iter().find(|(_, given)| *given) {
+            eprintln!("{}: the target {} has no runtime", flag, options.target.name());
             return 1;
         }
     }
     let Some(source) = source else {
-        eprintln!("{}: needs a source file (usage: typl {} SOURCE [-o OUTPUT] [--release] [-O<N>] [--max-memory SIZE] [--no-cons] [--target TARGET])", flag, flag);
+        eprintln!("{}: needs a source file (usage: typl {} SOURCE [-o OUTPUT] [--release] [-O<N>] [--max-memory SIZE] [--no-cons] [--target TARGET] [--linker-script FILE] [--board-functions WHO] [--link FILE])", flag, flag);
         return 1;
     };
     let output = match output {
@@ -293,6 +351,7 @@ fn compile_command(flag: &str, args: &[String], heap_cells: Option<usize>) -> i3
         None if source.extension().is_some_and(|e| e == "typl") => match options.target {
             typelisp::compile::aot::Target::Host => source.with_extension(""),
             typelisp::compile::aot::Target::Wasip1 | typelisp::compile::aot::Target::Wasm32Unknown => source.with_extension("wasm"),
+            typelisp::compile::aot::Target::Thumbv7em | typelisp::compile::aot::Target::Thumbv8mMain | typelisp::compile::aot::Target::AvrAtmega328p => source.with_extension("elf"),
         },
         None => {
             eprintln!("{}: {} does not end in .typl, so give the executable's name with -o", flag, source.display());

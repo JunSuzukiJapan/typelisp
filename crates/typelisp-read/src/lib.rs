@@ -14,6 +14,10 @@
 //! cons cells and `Loc`s; it has never known about types, scopes or
 //! evaluation.
 
+#![cfg_attr(not(feature = "std"), no_std)]
+
+extern crate alloc;
+
 pub mod reader;
 pub mod runtime;
 pub mod shim;

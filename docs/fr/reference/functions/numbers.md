@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/numbers.md @ 676864f7e6cf8e950e51aadacecd49695c8545a8 -->
+<!-- translated-from: docs/ja/reference/functions/numbers.md @ 1b5dc6ac828d8e4a95800a91218b5e9dffe83f98 -->
 # Nombres
 
 Les opérations sur les entiers, les nombres à virgule flottante, les rationnels, les nombres complexes et les
@@ -72,11 +72,10 @@ type doté d'une largeur. `c-long` / `c-ulong` n'ont que des conversions :
 | `int->i8` … `int->u32` | `(int->W x)` | `T→W` | Les mêmes conversions de largeur qu'au chapitre 1. Les valeurs qui ne tiennent pas sont tronquées |
 | `try-int->i8` … `try-int->u32` | `(try-int->W x)` | `T→Option<W>` | La même conversion sous forme de question |
 | `int->c-long` `int->c-ulong` | `(int->W x)` | `T→W` | Le chemin d'entrée, depuis l'autre mot brut et depuis les types entiers du chapitre 1 |
-| `try-int->c-long` `try-int->c-ulong` | `(try-int->W x)` | `T→Option<W>` | Idem |
 | `int->int` | `(int->int x)` | `T→int` | **Toujours exacte**. La façon honnête de lire un `size_t` qui ne tient pas dans un `i32` |
 
 `(as i32 x)` / `(try-as i32 x)` / `(as int x)` / `(as c-ulong n)` font exactement cela, et les conversions existent
-pour toutes les paires avec les types entiers du chapitre 1. `ptr` n'a même pas ce tableau : aucun moyen n'est
+pour toutes les paires avec les types entiers du chapitre 1. Il n'y a pas de forme `try-` vers un mot brut : `Option<c-long>` placerait un mot brut dans un autre type, ce qui ne peut pas s'écrire. `ptr` n'a même pas ce tableau : aucun moyen n'est
 fourni pour lire un pointeur comme un nombre. C'est une valeur qu'on ne fait que passer, recevoir et transmettre à
 une autre fonction C.
 
@@ -143,6 +142,7 @@ d'exécution (« an integer argument does not fit a fixnum »).
 | `log` (deux arguments) | `(log x base)` | `(f64,f64)→f64` | Logarithme dans une base donnée. Développé en `(/ (log x) (log base))` (chapitre 8) |
 | `floor-div` `ceiling-div` `round-div` `truncate-div` | `(op a b)` | `(f64,f64)→cons-cell<f64,f64>` | Correspondent aux versions à deux arguments de CL (`(floor 7.0 2.0)`→quotient 3, reste 1). Même conception que les fonctions de même nom au chapitre 1 (`car`=quotient, `cdr`=reste) |
 | `float->int` | `(float->int x)` | `f64→int` | Convertit en `int` en tronquant vers zéro (le `truncate` de CL ; exact pour les valeurs finies de toute taille). Panic sur l'infini et NaN. Pour une largeur fixe, utilisez `(as i32 x)` |
+| `float->i8` `float->i16` `float->i32` `float->u8` `float->u16` `float->u32` | `(op x)` | `f64→i8` | Convertit dans ce type les bits de poids faible de ce que donne `float->int` (sans passer par `int`). L'infini et NaN provoquent un panic. Ce sur quoi repose `(as i16 x)` |
 | `float->ratio` | `(float->ratio x)` | `f64→ratio` | Convertit en `ratio` comme rationnel binaire exact (le `rational` de CL) |
 | `float->f32` `float->f64` | `(op x)` | `f64→f32` / `f64→f64` | Convertit entre largeurs flottantes. `float->f32` arrondit au plus proche, `float->f64` est toujours exact. Ce que fait `(as f32 x)` |
 | `try-float->f32` `try-float->f64` | `(op x)` | `f64→Option<f32>` / `→Option<f64>` | La même conversion sous forme de question. `None` si l'arrondi change la valeur (l'élargissement en `f64` est toujours `Some`). Ce que fait `(try-as f32 x)` |
@@ -334,7 +334,7 @@ Constantes de limites numériques (CLHS 12.1.4.2 / 12.1.3) :
 
 | Nom | Type | Description |
 |---|---|---|
-| `most-positive-fixnum` / `most-negative-fixnum` | `int` | Les limites supérieure / inférieure d'une valeur immédiate sur 63 bits (2^62-1 / -2^62). Un `int` au-delà devient un bignum |
+| `most-positive-fixnum` / `most-negative-fixnum` | `int` | Les limites supérieure / inférieure d'une valeur immédiate sur 63 bits (2^62-1 / -2^62 ; 31 bits sur wasm32 et Cortex-M, 2^30-1 / -2^30). Un `int` au-delà devient un bignum |
 | `most-positive-double-float` / `most-negative-double-float` | `f64` | Les plus grande / plus petite valeurs finies |
 | `least-positive-double-float` / `least-negative-double-float` | `f64` | La plus petite grandeur non nulle, sous-normaux compris |
 | `least-positive-normalized-double-float` / `least-negative-normalized-double-float` | `f64` | Idem, limité aux nombres normalisés |

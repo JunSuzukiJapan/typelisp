@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ 7622044725db7d28dabb691d82e592367d9284e8 -->
+<!-- translated-from: docs/ja/guide/compile.md @ 1b5dc6ac828d8e4a95800a91218b5e9dffe83f98 -->
 # Kompilasi
 
 Jika Anda tidak melakukan apa-apa lagi, program typelisp berjalan di interpreter. Selain itu ada dua
@@ -225,7 +225,148 @@ const code = await run({ write: (fd, text) => { /* misalnya tampilkan di halaman
 - Di peramban, sajikan `hello.wasm` lewat HTTP dari tempat yang sama dengan `hello.mjs` (tidak bisa dimuat dari `file://`).
 - `sleep` menunggu dengan `Atomics.wait`. Peramban hanya mengizinkannya di dalam Worker pada halaman yang terisolasi lintas asal, jadi jalankan program yang memakai `sleep` di dalam Worker.
 - Waktu lokal (`decode-universal-time` tanpa `zone`, dan seterusnya) dihitung dengan zona waktu yang dilaporkan `Date` milik JavaScript.
-- Selain yang tidak bisa dipakai di bagian 3.6, operasi berkas dan direktori adalah **galat kompilasi**. Masukan standar terbaca kosong, dan `(command-line-args)` adalah vektor kosong.
+- Selain yang tidak dapat dipakai di bagian 3.6, operasi berkas dan direktori, variabel lingkungan, `(command-line-args)`, direktori home, dan `dribble` adalah **galat kompilasi**. Masukan standar dibaca sebagai kosong.
+
+### 3.8 Mengompilasi untuk mikrokontroler (Cortex-M)
+
+Dengan `--target thumbv7em-none-eabihf`, `typl -c` membuat berkas eksekusi (ELF) untuk papan Cortex-M4F atau M7 tanpa sistem operasi. Tanpa `-o`, namanya mengikuti sumber dengan `.typl` diganti `.elf`. Dengan `--target thumbv8m.main-none-eabihf`, untuk papan Cortex-M33.
+
+```sh
+$ typl -c hello.typl --target thumbv7em-none-eabihf          # membuat hello.elf
+$ qemu-system-arm -M mps2-an386 -nographic \
+    -semihosting-config enable=on,target=native -kernel hello.elf   # jalankan di Cortex-M4 milik QEMU
+$ typl -c hello.typl --target thumbv8m.main-none-eabihf
+$ qemu-system-arm -M mps2-an505 -nographic \
+    -semihosting-config enable=on,target=native -kernel hello.elf   # jalankan di Cortex-M33 milik QEMU
+```
+
+- `typl` yang dipasang dengan `install.sh` dapat langsung dipakai. Untuk memasang dengan `cargo install`, jalankan `rustup target add thumbv7em-none-eabihf thumbv8m.main-none-eabihf`, lalu pasang dengan `--features embedded` (`--features wasm,embedded` untuk keduanya). Dengan build debug `typl` di repositori, jalankan `scripts/build-embedded-runtime.sh`. Penautan memakai linker toolchain rustup.
+- Berikan memori papan dengan `--linker-script FILE`. Ditulis seperti `memory.x` milik `cortex-m-rt`: alamat dan ukuran FLASH dan RAM. Baris seperti `_typelisp_stack_size = 32K;` menentukan berapa banyak RAM yang dipakai stack (64KiB jika tidak diberikan); sisa RAM adalah heap. Tanpa opsi ini, tata letaknya milik `mps2-an386` (`mps2-an505` untuk Cortex-M33) di QEMU.
+
+  ```
+  MEMORY
+  {
+    FLASH : ORIGIN = 0x08000000, LENGTH = 512K
+    RAM : ORIGIN = 0x20000000, LENGTH = 128K
+  }
+  _typelisp_stack_size = 16K;
+  ```
+
+- `--board-functions` memilih siapa yang memberikan keluaran, masukan, penghentian, dan jam (fungsi papan).
+  - `semihosting` (bawaan): lewat semihosting, untuk menjalankan di QEMU (`-semihosting-config enable=on`) atau debugger.
+  - `c`: papan memberikannya sebagai fungsi C. Berikan dengan `--link FILE` objek atau pustaka statis yang mendefinisikan fungsi di bawah (`--link` dapat diulang; pustaka vendor yang dipanggil `defffi` diberikan dengan cara yang sama).
+
+  ```c
+  void     typelisp_host_write(int32_t fd, const uint8_t *p, size_t len); // fd 1 keluaran standar, 2 galat standar
+  size_t   typelisp_host_read(int32_t fd, uint8_t *p, size_t len);        // fd 0; byte yang dibaca, 0 di akhir
+  void     typelisp_host_exit(int32_t code);                              // tidak kembali
+  uint64_t typelisp_host_now_us(void);                                    // mikrodetik pada jam yang tidak pernah mundur
+  int64_t  typelisp_host_unix_us(void);                                   // mikrodetik sejak 1970-01-01
+  void     typelisp_host_sleep_us(uint64_t us);                           // menunggu us mikrodetik
+  ```
+
+- Register papan (periferal yang dipetakan ke memori) dibaca dengan `volatile-read-u8`, `volatile-read-u16`, dan `volatile-read-u32`, dan ditulis dengan `volatile-write-u8`, `volatile-write-u16`, dan `volatile-write-u32`. Alamat diberikan sebagai `int` atau bilangan bulat berlebar tetap seperti `u16`, dan nilai yang dibaca bertipe sesuai lebarnya (`u8` dan seterusnya). Masing-masing membaca atau menulis tepat sekali, di tempat ia ditulis; kompiler tidak menghilangkan atau memindahkannya. Semuanya hanya dapat digunakan di dalam `unsafe`. Alamat yang negatif, atau bukan kelipatan lebarnya, adalah galat waktu jalan sebelum apa pun dibaca atau ditulis.
+
+  ```lisp
+  ;; UART 0 dari mps2-an386 QEMU: data 0x40004000, status 0x40004004, kontrol 0x40004008
+  (defun put-byte ((c u32)) ()
+    (unsafe
+      (loop (when (= (logand (volatile-read-u32 #x40004004) 1) 0) (break)))   ; tunggu selama sedang mengirim
+      (volatile-write-u32 #x40004000 c)))
+
+  (defun main () ()
+    (unsafe (volatile-write-u32 #x40004008 1))                               ; aktifkan pengiriman
+    (put-byte 104) (put-byte 105) (put-byte 10))                             ; "hi" dan baris baru
+  ```
+
+- Tulis fungsi yang dipanggil saat interupsi datang sebagai `defun` dengan atribut `#[interrupt(N)]` (interupsi periferal `N`) atau seperti `#[exception(SysTick)]`. Aktifkan interupsi dengan `(enable-interrupt N)`. Penangan berjalan saat itu juga; hanya jika datang di tengah pekerjaan runtime ia berjalan setelah pekerjaan itu selesai. Penangan tidak dapat menunggu (`sleep` adalah galat kompilasi). Rinciannya ada di bagian 3.17 [referensi sintaks](../reference/syntax.md).
+
+  ```lisp
+  (use std::board::enable-interrupt)
+
+  #[interrupt(5)]
+  (defun on-five () ()
+    (println "interrupt 5"))
+
+  (defun main () ()
+    (enable-interrupt 5)
+    (unsafe (volatile-write-u32 #xE000E200 (as u32 32))))   ; picu sendiri interupsi 5 (register pending milik NVIC)
+  ```
+
+- Runtime memulai program (tabel vektor dan menyiapkan RAM) dan mengalokasikan memori. HardFault atau interupsi tanpa penangan mengakhiri program dengan kode keluar panic (1).
+- `throw`/`catch`/`panic`, bilangan besar, pecahan, dan bilangan titik mengambang, serta tugas, kanal, dan `sleep` berperilaku seperti pada berkas eksekusi. Tugas berjalan bergiliran di satu inti. Fungsi C (`defffi`) dapat dipakai.
+- Program yang memakai sesuatu yang tidak dimiliki papan adalah **galat kompilasi**: selain yang tidak dapat dipakai di bagian 3.7, `eval` dan `macroexpand`. Waktu lokal tidak diketahui (seperti di bagian 3.6).
+- Arena cons dimulai dengan 1024 sel dan tumbuh saat diperlukan. `--heap-cells`, `--max-memory`, `--no-cons`, `-O<N>`, dan `--release` bekerja seperti biasa.
+
+### 3.9 Mengompilasi untuk Arduino Uno (AVR)
+
+Dengan `--target avr-atmega328p`, dibuat berkas executable (ELF) untuk mikrokontroler Arduino Uno (ATmega328P). Program berikut mengedipkan LED pada papan.
+
+```lisp
+(defconstant (PINB int) #x23)
+(defconstant (DDRB int) #x24)
+(defconstant (LED u8) 32)                         ; PB5
+
+(defun wait-a-bit () ()
+  (let ((i (the u32 0)))
+    (while (< i (the u32 400000))
+      (unsafe (volatile-read-u8 PINB))
+      (setf i (+ i 1)))
+    ()))
+
+(defun main () ()
+  (unsafe (volatile-write-u8 DDRB LED))           ; jadikan keluaran
+  (while true
+    (unsafe (volatile-write-u8 PINB LED))         ; balikkan
+    (wait-a-bit)))
+```
+
+```sh
+$ typl -c blink.typl --target avr-atmega328p -O2   # menghasilkan blink.elf
+$ qemu-system-avr -M uno -display none -serial stdio -bios blink.elf   # jalankan di QEMU
+```
+
+- Tidak ada runtime, jadi program yang memakai runtime adalah **galat kompilasi**. Galat menyebutkan apa yang diperlukan dan melalui fungsi mana hal itu dicapai. Yang dapat dipakai: perhitungan bilangan bulat berlebar tetap (`i8` sampai `u32`), `f32`, `f64`, `bool`, dan `char`, pemanggilan fungsi (juga yang rekursif), percabangan, perulangan, `defvar` dan `defconstant` yang berisi nilai tersebut, `volatile-read-u8` dan sejenisnya, serta pemanggilan fungsi C.
+- Yang tidak dapat dipakai: nilai yang berada di heap seperti string, list, dan struct; `catch` dan pemanggilan nilai fungsi; pemanggilan fungsi C yang menerima string atau fungsi; fungsi matematika bilangan titik mengambang seperti `sin` dan `expt` (`sqrt` dan pembulatan seperti `floor` dapat dipakai).
+- Penangan interupsi ditulis `#[interrupt(N)]` ([Sintaks](../reference/syntax.md), bagian 3.17). `N` adalah nomor interupsi ATmega328P, 1 sampai 25 dengan reset dihitung 0 (luapan timer 1 adalah 13). Lihat contoh di bawah.
+- Pembagian dengan 0 menghentikan mikrokontroler di tempat itu (interupsi pun tidak datang lagi). Begitu pula `/` dari nilai bertanda terkecil dengan `-1`.
+- `int` tidak dapat dipakai (galat kompilasi), karena lebarnya tidak tetap. Pakai tipe berlebar tetap seperti `i16` atau `u16`. Alamat juga dapat dihitung dengan bilangan bulat berlebar tetap. Yang nilainya ditentukan saat kompilasi dapat dipakai, seperti alamat yang ditulis sebagai angka dan `int` pada `defconstant`.
+- Bila rekursi kehabisan stack, mikrokontroler berhenti.
+- Deklarasikan fungsi C dengan `defffi`, dan berikan berkas objek yang dikompilasi untuk AVR dengan `--link FILE`.
+- Perulangan yang tidak melakukan apa-apa dihapus pada `-O1` ke atas. Dalam perulangan yang menunggu, bacalah misalnya sebuah register.
+- Ketika `main` berakhir, mikrokontroler berhenti.
+- Tata letak memori diubah dengan `--linker-script FILE`. Jika dihilangkan, yang dipakai adalah flash 32 KiB dikurangi 512 byte terakhir milik bootloader, dan RAM 2 KiB. Alamat RAM ditulis dengan ditambah `0x800000`, seperti `0x800100`.
+- Perhitungan `f32` dan `f64` dilakukan oleh fungsi pembantu. Yang dipakai masuk ke flash (yang untuk `f64` lebih besar).
+- Penautan memakai linker dari toolchain rustup, seperti pada bagian 3.8.
+
+Contoh yang mengedipkan LED dengan interupsi timer. Interupsi diaktifkan di register perangkatnya sendiri.
+
+```lisp
+(defconstant (PINB int) #x23)
+(defconstant (DDRB int) #x24)
+(defconstant (LED u8) 32)
+(defconstant (TIMSK1 int) #x6F)
+(defconstant (TCCR1B int) #x81)
+(defvar (ticks u16) 0)
+
+#[interrupt(13)]                                  ; luapan timer 1
+(defun on-overflow () ()
+  (unsafe (volatile-write-u8 PINB LED))           ; balikkan
+  (setf ticks (+ ticks 1))
+  ())
+
+(defun main () ()
+  (unsafe (volatile-write-u8 DDRB LED)
+          (volatile-write-u8 TIMSK1 1)            ; aktifkan interupsi luapan
+          (volatile-write-u8 TCCR1B 3))           ; hitung pada 1/64 clock
+  (while true))
+```
+
+- Program yang punya penangan menerima interupsi begitu variabel globalnya selesai diinisialisasi. Atur perangkat di awal `main`.
+- `enable-interrupt` dan `#[exception(NAME)]` tidak dapat dipakai (galat kompilasi).
+- Selama sebuah penangan berjalan, interupsi lain menunggu. Seperti fungsi lain, penangan tidak dapat memakai runtime.
+- Satu pembacaan atau penulisan variabel global tidak disela oleh penangan, juga untuk nilai dua byte atau lebih. Untuk itu interupsi dimatikan saat membaca variabel yang ditulis penangan dan saat menulis variabel yang dibaca atau ditulis penangan, dan variabel itu disebutkan dalam peringatan saat kompilasi. Di antara pembacaan dan penulisan sebuah pembaruan (`(setf n (+ n 1))`) interupsi dapat datang. Untuk memperbarui variabel yang juga ditulis penangan, baca dan simpan register status (alamat `#x5F`), tulis 0 untuk menghentikan interupsi, lalu tulis kembali nilai yang disimpan.
+- Interupsi tanpa penangan menghentikan mikrokontroler.
 
 ## 4. Dump
 

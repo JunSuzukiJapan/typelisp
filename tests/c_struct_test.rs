@@ -103,6 +103,18 @@ fn embedded_structs_and_pointer_fields() {
     assert_eq!(int(&format!("{}(compile f)(f)", src)), 7);
 }
 
+/// A `f32` field, stored and loaded by compiled and interpreted code alike.
+#[test]
+fn a_float_field_keeps_its_value() {
+    let src = "(unsafe (def-c-struct sample (a f32) (b f32)))
+               (defun f ((x f32)) f32
+                 (unsafe (let ((s (c-alloc sample))) (setf s::a x) (setf s::b (the f32 0.5)) (* s::a s::b))))";
+    for compile in ["", "(compile f)"] {
+        let program = format!("{}{}(= (f (the f32 -2.5)) (the f32 -1.25))", src, compile);
+        assert_eq!(eval(&program).expect("evaluation failed").1, Value::Bool(true));
+    }
+}
+
 #[test]
 fn an_unset_pointer_field_is_a_null_pointer() {
     let src = "(unsafe (def-c-struct node (v i32) (next (ptr node))))

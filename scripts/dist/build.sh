@@ -40,11 +40,14 @@
 #   for: the toolchain's std, LLVM and zstd. A binary that claims a lower one
 #   would start on a macOS its code was not built for.
 #
-# - Built with `--features wasm`: typl holds the runtimes `typl -c --target
-#   wasm32-wasip1` and `--target wasm32-unknown-unknown` link, so the toolchain
-#   this runs with is a rustup one with both targets added
-#   (`rustup target add wasm32-wasip1 wasm32-unknown-unknown`). The checks at
-#   the end run the modules under Node.
+# - Built with `--features wasm,embedded`: typl holds the runtimes `typl -c
+#   --target wasm32-wasip1`, `--target wasm32-unknown-unknown`, `--target
+#   thumbv7em-none-eabihf` and `--target thumbv8m.main-none-eabihf` link, so
+#   the toolchain this runs with is a rustup one with the four targets added
+#   (`rustup target add wasm32-wasip1 wasm32-unknown-unknown
+#   thumbv7em-none-eabihf thumbv8m.main-none-eabihf`). The checks at the end
+#   run the modules under Node and the boards' executables under QEMU
+#   (`qemu-system-arm`).
 #
 # A cargo of its own in target/dist/build, so the ordinary release build in
 # target/release is left as it was.
@@ -176,7 +179,7 @@ pinned=(
     --config "env.MACOSX_DEPLOYMENT_TARGET.value=\"$minos\"" --config env.MACOSX_DEPLOYMENT_TARGET.force=true
 )
 for bin in typl typl-lsp; do
-    cargo "${pinned[@]}" rustc --locked --release --features wasm --target-dir "$dist/build" --bin "$bin" -- -L "native=$static_zstd"
+    cargo "${pinned[@]}" rustc --locked --release --features wasm,embedded --target-dir "$dist/build" --bin "$bin" -- -L "native=$static_zstd"
 done
 
 typl="$dist/build/release/typl"
@@ -213,6 +216,14 @@ printf '(defun main () i32 (println "ok") 0)\n' > "$work/aot.typl"
 [ "$(node --no-warnings scripts/run-wasi.mjs "$work/aot-wasi.wasm")" = ok ] || { echo "error: the wasm32-wasip1 check failed" >&2; exit 1; }
 "$typl" -c "$work/aot.typl" -o "$work/aot-js.wasm" --target wasm32-unknown-unknown
 [ "$(node "$work/aot-js.mjs")" = ok ] || { echo "error: the wasm32-unknown-unknown check failed" >&2; exit 1; }
+# And an executable for a board, run on QEMU's Cortex-M4 board.
+"$typl" -c "$work/aot.typl" -o "$work/aot.elf" --target thumbv7em-none-eabihf
+[ "$(qemu-system-arm -M mps2-an386 -nographic -semihosting-config enable=on,target=native -kernel "$work/aot.elf" < /dev/null)" = ok ] ||
+    { echo "error: the thumbv7em-none-eabihf check failed" >&2; exit 1; }
+# And on its Cortex-M33 board.
+"$typl" -c "$work/aot.typl" -o "$work/aot33.elf" --target thumbv8m.main-none-eabihf
+[ "$(qemu-system-arm -M mps2-an505 -nographic -semihosting-config enable=on,target=native -kernel "$work/aot33.elf" < /dev/null)" = ok ] ||
+    { echo "error: the thumbv8m.main-none-eabihf check failed" >&2; exit 1; }
 
 version="$("$typl" --version | awk '{ print $2 }')"
 name="typelisp-$version-$arch"

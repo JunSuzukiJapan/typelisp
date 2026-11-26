@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/numbers.md @ 676864f7e6cf8e950e51aadacecd49695c8545a8 -->
+<!-- translated-from: docs/ja/reference/functions/numbers.md @ 1b5dc6ac828d8e4a95800a91218b5e9dffe83f98 -->
 # Sayılar
 
 Tamsayılar, kayan noktalı sayılar, rasyonel sayılar, karmaşık sayılar ve mantıksal değerler üzerindeki
@@ -71,11 +71,10 @@ türe geçin. `c-long` / `c-ulong`'un yalnızca dönüşümleri vardır:
 | `int->i8` … `int->u32` | `(int->W x)` | `T→W` | 1. bölümdekiyle aynı genişlik dönüşümleri. Sığmayan değerler kırpılır |
 | `try-int->i8` … `try-int->u32` | `(try-int->W x)` | `T→Option<W>` | Aynı dönüşüm bir soru olarak |
 | `int->c-long` `int->c-ulong` | `(int->W x)` | `T→W` | Diğer ham sözcükten ve 1. bölümün tamsayı türlerinden giriş yolu |
-| `try-int->c-long` `try-int->c-ulong` | `(try-int->W x)` | `T→Option<W>` | Yukarıdakiyle aynı |
 | `int->int` | `(int->int x)` | `T→int` | **Her zaman tam**. Bir `i32`'ye sığmayan bir `size_t`'yi okumanın dürüst yolu |
 
 Bunların yaptığı şeyler `(as i32 x)` / `(try-as i32 x)` / `(as int x)` / `(as c-ulong n)`'dir ve
-dönüşümler 1. bölümün tamsayı türleriyle her çift için vardır. `ptr`'nin bu tablosu bile yoktur: bir
+dönüşümler 1. bölümün tamsayı türleriyle her çift için vardır. Ham sözcüğe giden bir `try-` biçimi yoktur: `Option<c-long>` ham bir sözcüğü başka bir türün içine koyar ve bu yazılamaz. `ptr`'nin bu tablosu bile yoktur: bir
 işaretçiyi sayı olarak okumanın yolu sağlanmamıştır. Yalnızca geçirilen, alınan ve başka bir C
 fonksiyonuna iletilen bir değerdir.
 
@@ -143,6 +142,7 @@ sayısı vb.) `int` kabul eder, ancak bir fixnum'a sığmayan bir değer geçirm
 | `log` (iki bağımsız değişken) | `(log x base)` | `(f64,f64)→f64` | Verilen tabanda logaritma. `(/ (log x) (log base))`'e açılır (8. bölüm) |
 | `floor-div` `ceiling-div` `round-div` `truncate-div` | `(op a b)` | `(f64,f64)→cons-cell<f64,f64>` | CL'nin iki bağımsız değişkenli sürümlerine karşılık gelir (`(floor 7.0 2.0)`→bölüm 3, kalan 1). 1. bölümdeki aynı adlı fonksiyonlarla aynı tasarım (`car`=bölüm, `cdr`=kalan) |
 | `float->int` | `(float->int x)` | `f64→int` | Sıfıra doğru keserek `int`'e çevirir (CL'nin `truncate`'i; her boyuttaki sonlu değerler için tam). Sonsuzluk ve NaN'da panic olur. Sabit bir genişlik için `(as i32 x)` kullanın |
+| `float->i8` `float->i16` `float->i32` `float->u8` `float->u16` `float->u32` | `(op x)` | `f64→i8` | `float->int`'in cevabının düşük bitlerini o türe çevirir (`int` üzerinden geçmeden). Sonsuz ve NaN panic verir. `(as i16 x)`'in özü |
 | `float->ratio` | `(float->ratio x)` | `f64→ratio` | Tam ikili rasyonel olarak bir `ratio`'ya çevirir (CL'nin `rational`'ı) |
 | `float->f32` `float->f64` | `(op x)` | `f64→f32` / `f64→f64` | Kayan noktalı genişlikler arasında dönüştürür. `float->f32` en yakına yuvarlar, `float->f64` her zaman tamdır. `(as f32 x)`'in yaptığı şey |
 | `try-float->f32` `try-float->f64` | `(op x)` | `f64→Option<f32>` / `→Option<f64>` | Aynı dönüşüm bir soru olarak. Yuvarlama değeri değiştiriyorsa `None` (`f64`'e genişletme her zaman `Some`'dır). `(try-as f32 x)`'in yaptığı şey |
@@ -333,7 +333,7 @@ Sayısal sınır sabitleri (CLHS 12.1.4.2 / 12.1.3):
 
 | Ad | Tür | Açıklama |
 |---|---|---|
-| `most-positive-fixnum` / `most-negative-fixnum` | `int` | 63 bitlik anlık değerin üst / alt sınırı (2^62-1 / -2^62). Bunları aşan bir `int` bignum olur |
+| `most-positive-fixnum` / `most-negative-fixnum` | `int` | 63 bitlik anlık değerin üst / alt sınırı (2^62-1 / -2^62; wasm32 ve Cortex-M üzerinde 31 bit, 2^30-1 / -2^30). Bunları aşan bir `int` bignum olur |
 | `most-positive-double-float` / `most-negative-double-float` | `f64` | En büyük / en küçük sonlu değerler |
 | `least-positive-double-float` / `least-negative-double-float` | `f64` | Alt normaller dahil en küçük sıfırdan farklı büyüklük |
 | `least-positive-normalized-double-float` / `least-negative-normalized-double-float` | `f64` | Aynısı, normalleştirilmiş sayılarla sınırlı |

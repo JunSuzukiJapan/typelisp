@@ -293,11 +293,9 @@ fn the_runtime_result_types_match_the_registry() {
         );
     };
 
-    for (name, spec) in typelisp_rt::stream_builtin::RESULT_TYPES
-        .iter()
-        .chain(typelisp_rt::sys_builtin::RESULT_TYPES)
-        .chain(typelisp_rt::net_builtin::RESULT_TYPES)
-    {
+    use typelisp::compile::externs::{BuiltinTypeRow, BUILTIN_TYPE_TABLES};
+    let rows_of = |row: BuiltinTypeRow| BUILTIN_TYPE_TABLES.iter().filter(move |t| t.row == row).flat_map(|t| t.rows.iter());
+    for (name, spec) in rows_of(BuiltinTypeRow::Result) {
         let name = typelisp_mem::BUILTIN_SYMBOLS[*name as usize];
         check(spec, &sig_of(name).ret, &format!("`{}`'s result", name));
     }
@@ -315,7 +313,7 @@ fn the_runtime_result_types_match_the_registry() {
             other => panic!("`{}` returns {:?}, which has no payload type", name, other),
         }
     };
-    for (name, spec) in typelisp_rt::stream_builtin::INNER_TYPES.iter().chain(typelisp_rt::net_builtin::INNER_TYPES) {
+    for (name, spec) in rows_of(BuiltinTypeRow::Inner) {
         let name = typelisp_mem::BUILTIN_SYMBOLS[*name as usize];
         check(spec, &ok_payload(name), &format!("`{}`'s inner value", name));
     }
@@ -482,4 +480,147 @@ fn the_scan_covers_the_files_the_invariant_lives_in() {
     ] {
         assert!(files.contains(&expected.to_string()), "scan missed {}", expected);
     }
+}
+
+/// Every type the runtime writes as a `TypeSpec` is a primitive, a
+/// definition a row of `BUILTIN_TYPES` names (which `typelisp_mem::
+/// runtime_builds` answers for), or one `NAMED_NOT_BUILT` says the
+/// runtime makes no value of. An executable leaves out the `print-object`
+/// of a type it finds no code making a value of (`compile::aot::live_types`),
+/// and code that makes one at run time from a `TypeSpec` is invisible to
+/// that search, so a definition missing here would print as an internal
+/// error.
+#[test]
+fn every_type_the_runtime_writes_out_is_one_it_is_known_to_build() {
+    let rows = std::fs::read_to_string(repo_root().join("crates/typelisp-mem/src/value.rs")).expect("reading value.rs");
+    let mut files = Vec::new();
+    collect(&repo_root().join("src"), &mut files);
+    let crates = std::fs::read_dir(repo_root().join("crates")).expect("reading crates/");
+    for entry in crates {
+        collect(&entry.expect("a crate's directory").path().join("src"), &mut files);
+    }
+    assert!(files.len() > 50, "the scan found only {} files — is the walk broken?", files.len());
+    let mut missing = Vec::new();
+    for file in &files {
+        let text = std::fs::read_to_string(file).expect("reading a source file");
+        // `Named(StdModule::X, "name"`, its parts possibly on lines of their
+        // own.
+        let mut rest = text.as_str();
+        while let Some(at) = rest.find("Named(") {
+            rest = &rest[at + "Named(".len()..];
+            let spec = rest.trim_start();
+            let Some(module) = spec.strip_prefix("StdModule::") else { continue };
+            let module: String = module.chars().take_while(|c| c.is_ascii_uppercase() || *c == '_').collect();
+            let after = spec["StdModule::".len() + module.len()..].trim_start();
+            let Some(after) = after.strip_prefix(',') else { continue };
+            let Some(name) = after.trim_start().strip_prefix('"').and_then(|s| s.split('"').next()) else { continue };
+            if module == "PRIMITIVE" {
+                continue;
+            }
+            let row = format!("(StdModule::{}, \"{}\"", module, name);
+            if !rows.contains(&row) {
+                missing.push(format!("{}: StdModule::{} `{}`", file.display(), module, name));
+            }
+        }
+    }
+    assert!(
+        missing.is_empty(),
+        "the runtime writes these types without `BUILTIN_TYPES` or `NAMED_NOT_BUILT` (crates/typelisp-mem/src/value.rs) \
+         naming them — a definition the runtime makes values of goes in `BUILTIN_TYPES`, one it only names in \
+         `NAMED_NOT_BUILT` with the reason:\n  {}",
+        missing.join("\n  ")
+    );
+}
+
+/// The places in the runtime that make a value of a type an executable
+/// registers only when it reaches a builtin making one
+/// (`src/compile/aot/made.rs`): each type's constant, and the functions that
+/// make such a value for more than one builtin. The builtins in `made.rs`
+/// were read off these places; one more, or one fewer, means a builtin may
+/// make the value that the table does not list, and an executable calling it
+/// would fail to print the value. The interpreter (`typelisp-front`) is left
+/// out: an executable has it only when it calls `eval`, and then registers
+/// every type.
+#[test]
+fn the_places_that_make_a_tracked_type_are_the_ones_made_rs_was_read_off() {
+    let names = [
+        "TypeId::FILE_ERROR",
+        "TypeId::NET_ERROR",
+        "TypeId::READ_ERROR",
+        "TypeId::PARSE_FLOAT_ERROR",
+        "TypeId::PARSE_INT_ERROR",
+        "TypeId::UNIVERSAL_TIME",
+        "TypeId::INTERNAL_TIME",
+        "TypeId::HEAP_INFO",
+        "universal_time_value(",
+        "internal_time_value(",
+        "heap_info(",
+        "read_builtin_with(",
+        "read_datum_at_builtin_with(",
+    ];
+    let expected: &[(&str, &str, usize)] = &[
+        ("crates/typelisp-read/src/shim.rs", "TypeId::READ_ERROR", 2),
+        ("crates/typelisp-read/src/shim.rs", "read_builtin_with(", 2),
+        ("crates/typelisp-read/src/shim.rs", "read_datum_at_builtin_with(", 2),
+        ("crates/typelisp-rt-posix/src/net_builtin.rs", "TypeId::NET_ERROR", 1),
+        ("crates/typelisp-rt-posix/src/sys.rs", "TypeId::FILE_ERROR", 2),
+        ("crates/typelisp-rt-posix/src/sys.rs", "internal_time_value(", 1),
+        ("crates/typelisp-rt-sys/src/dribble.rs", "TypeId::FILE_ERROR", 2),
+        ("crates/typelisp-rt-sys/src/fs_builtin.rs", "TypeId::FILE_ERROR", 1),
+        ("crates/typelisp-rt-sys/src/fs_builtin.rs", "universal_time_value(", 1),
+        ("crates/typelisp-rt/src/stream_builtin.rs", "TypeId::FILE_ERROR", 1),
+        ("crates/typelisp-rt/src/sys_builtin.rs", "TypeId::HEAP_INFO", 1),
+        ("crates/typelisp-rt/src/sys_builtin.rs", "TypeId::INTERNAL_TIME", 1),
+        ("crates/typelisp-rt/src/sys_builtin.rs", "TypeId::PARSE_FLOAT_ERROR", 1),
+        ("crates/typelisp-rt/src/sys_builtin.rs", "TypeId::UNIVERSAL_TIME", 1),
+        ("crates/typelisp-rt/src/sys_builtin.rs", "heap_info(", 2),
+        ("crates/typelisp-rt/src/sys_builtin.rs", "internal_time_value(", 2),
+        ("crates/typelisp-rt/src/sys_builtin.rs", "universal_time_value(", 2),
+    ];
+    let mut files = Vec::new();
+    for entry in std::fs::read_dir(repo_root().join("crates")).expect("reading crates/") {
+        let dir = entry.expect("a crate's directory").path();
+        if dir.ends_with("typelisp-front") {
+            continue;
+        }
+        collect(&dir.join("src"), &mut files);
+    }
+    let mut found: Vec<(String, &str, usize)> = Vec::new();
+    for file in &files {
+        let relative = file.strip_prefix(repo_root()).expect("a file under the repository").to_string_lossy().replace('\\', "/");
+        if relative == "crates/typelisp-mem/src/value.rs" {
+            continue;
+        }
+        let text = std::fs::read_to_string(file).expect("reading a source file");
+        for name in names {
+            // A whole name: `TypeId::FILE_ERROR` is not `TypeId::FILE_ERROR_X`,
+            // and `heap_info(` is not `eval_heap_info(`.
+            let count = text
+                .lines()
+                .filter(|line| !line.trim_start().starts_with("//"))
+                .map(|line| {
+                    line.match_indices(name)
+                        .filter(|(at, _)| {
+                            let before = line[..*at].chars().next_back();
+                            let after = line[at + name.len()..].chars().next();
+                            !before.is_some_and(|c| c.is_alphanumeric() || c == '_')
+                                && !after.is_some_and(|c| name.ends_with(|n: char| n.is_alphanumeric() || n == '_') && (c.is_alphanumeric() || c == '_'))
+                        })
+                        .count()
+                })
+                .sum::<usize>();
+            if count > 0 {
+                found.push((relative.clone(), name, count));
+            }
+        }
+    }
+    found.sort();
+    let mut expected: Vec<(String, &str, usize)> = expected.iter().map(|(f, n, c)| (f.to_string(), *n, *c)).collect();
+    expected.sort();
+    assert_eq!(
+        found, expected,
+        "the places that make a FileError, NetError, ReadError, ParseFloatError, ParseIntError, universal-time, \
+         internal-time or heap-info changed: bring the builtins in src/compile/aot/made.rs up to date with them, \
+         then this list"
+    );
 }

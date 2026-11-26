@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/ffi.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
+<!-- translated-from: docs/ja/guide/ffi.md @ dff3b51792f6d9c49bb8802bd3d3fb6e168edd92 -->
 # C FFI (defffi)
 
 यह गाइड बताती है कि typelisp से C फ़ंक्शन कैसे कॉल करें। जो टाइप घोषित किए जा सकते हैं उनकी सूची और प्रतिबंध [सिंटैक्स संदर्भ 3.3](../reference/syntax.md#33-defffi--c-फ़ंक्शन-घोषित-करना-ffi) में हैं।
@@ -43,7 +43,7 @@
 | `bool` | `bool` (`_Bool`) |
 | `()` | `void` |
 | `string` | `const char *` |
-| `c-long` / `c-ulong` | `long` / `unsigned long` (`size_t`, `int64_t` आदि भी) |
+| `c-long` / `c-ulong` | `long` / `unsigned long` (`size_t` आदि भी) |
 | `ptr` | कोई भी पॉइंटर (`void *`, `FILE *` आदि) |
 | `(ptr T)` | `T` की ओर पॉइंटर ([खंड 7](#7-c-struct)) |
 
@@ -55,10 +55,10 @@
 
 ### `c-long` / `c-ulong` / `ptr`
 
-ये टाइप केवल C के साथ सीमा पार मान पास करने के लिए हैं, और **कोई अंकगणित सपोर्ट नहीं करते**। किसी को typelisp के पूर्णांक के रूप में उपयोग करने के लिए उसे `as` से बदलें।
+ये टाइप केवल C के साथ सीमा पार मान पास करने के लिए हैं, और **कोई अंकगणित सपोर्ट नहीं करते**। किसी को typelisp के पूर्णांक के रूप में उपयोग करने के लिए उसे `as` से बदलें। इनकी चौड़ाई उस मशीन के C जितनी होती है जिस पर प्रोग्राम चलता है (64-बिट macOS और Linux पर `c-long` और पॉइंटर दोनों 64 बिट, और `--target` में wasm32 या Cortex-M देने पर 32 बिट)।
 
 ```lisp
-(as int (unsafe (c-strlen s)))      ; int 64-बिट मान का कुछ भी नहीं खोता
+(as int (unsafe (c-strlen s)))      ; int मान का कुछ भी नहीं खोता
 (try-as i32 (unsafe (c-strlen s)))  ; यदि i32 में न समाए तो None
 (unsafe (c-malloc 16))              ; पूर्णांक लिटरल जस के तस पास किए जा सकते हैं
 ```

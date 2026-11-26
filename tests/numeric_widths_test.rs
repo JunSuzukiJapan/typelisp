@@ -105,8 +105,8 @@ fn arithmetic_wraps_at_the_types_own_width() {
 /// rejected with "integer literal -3 is out of range for u8 (0..=255)", and
 /// there was no other spelling of "shift right" to reach for. Half the
 /// integer types simply had no right shift. Nothing under the checker had to
-/// change to fix it — `eval_int_builtin` and `rt_int_ash` both already read
-/// the operand as a signed count — which is the sign that the *type* was the
+/// change to fix it — both engines already read the operand as a signed
+/// count — which is the sign that the *type* was the
 /// only thing that had ever been wrong.
 #[test]
 fn a_shift_distance_is_an_i32_at_every_width() {

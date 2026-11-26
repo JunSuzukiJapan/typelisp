@@ -1,5 +1,7 @@
 //! Symbols, paths, strings and the boxed objects: allocation and access.
 
+use crate::prelude::*;
+use core::sync::atomic::Ordering;
 use crate::symbols::{self, SymRef};
 use crate::value::{BoxId, BoxedObj, FloatBox, NarrowInt, PathId, StrId, StructPayload, TypeId, Value};
 use super::{Heap, NAMES_HELD, NamesGuard};
@@ -75,12 +77,12 @@ impl Heap {
     /// The symbol segments of an interned path.
     ///
     /// Returns a mapped read guard rather than `&[SymRef]`: the table lives
-    /// behind `shared.interning`'s lock, and `parking_lot::RwLockReadGuard`
+    /// behind `shared.interning`'s lock, and `crate::sync::RwLockReadGuard`
     /// is what lets this narrow "the whole table, read-locked" down to "this
     /// one entry" while keeping the lock held for exactly the guard's
     /// lifetime (see `HeapShared`'s doc comment).
-    pub fn path_segments(&self, id: PathId) -> parking_lot::MappedRwLockReadGuard<'_, [SymRef]> {
-        parking_lot::RwLockReadGuard::map(self.shared.interning.read_recursive(), |i| i.paths[id.0 as usize].as_slice())
+    pub fn path_segments(&self, id: PathId) -> crate::sync::MappedRwLockReadGuard<'_, [SymRef]> {
+        crate::sync::RwLockReadGuard::map(self.shared.interning.read_recursive(), |i| i.paths[id.0 as usize].as_slice())
     }
 
     // ---- strings ----------------------------------------------------------
@@ -88,13 +90,16 @@ impl Heap {
     /// Store a string, returning its `Value::Str`. Strings are GC-collected.
     pub fn alloc_string(&mut self, s: String) -> Value {
         self.debug_assert_not_native("alloc_string");
-        Value::Str(StrId(self.shared.strings.write().store.alloc(s)))
+        let mut strings = self.shared.strings.write();
+        let id = strings.store.alloc(s);
+        self.shared.spare_strings.store(strings.store.spare_bytes(), Ordering::Relaxed);
+        Value::Str(StrId(id))
     }
 
     /// The contents of a stored string. See `path_segments`'s doc comment
     /// for why this returns a mapped guard rather than `&str`.
-    pub fn string(&self, id: StrId) -> parking_lot::MappedRwLockReadGuard<'_, str> {
-        parking_lot::RwLockReadGuard::map(self.shared.strings.read_recursive(), |s| {
+    pub fn string(&self, id: StrId) -> crate::sync::MappedRwLockReadGuard<'_, str> {
+        crate::sync::RwLockReadGuard::map(self.shared.strings.read_recursive(), |s| {
             s.store.slots[id.0 as usize].as_deref().expect("dangling StrId")
         })
     }
@@ -107,12 +112,15 @@ impl Heap {
     /// whatever `Value`s the payload itself holds (see [`gc`](Self::gc)).
     ///
     /// Not a safepoint, and neither is [`alloc_string`](Self::alloc_string):
-    /// neither has ever collected, so callers hold unrooted values across
-    /// them (a struct's fields, on their way into `obj`), and letting
-    /// another thread's collection run here would sweep those.
+    /// callers hold unrooted values across them (a struct's fields, on their
+    /// way into `obj`), which a collection here would sweep. What they
+    /// allocate is collected at the next [`safepoint`](Self::safepoint).
     pub(super) fn alloc_boxed(&mut self, obj: BoxedObj) -> Value {
         self.debug_assert_not_native("alloc_boxed");
-        Value::Boxed(BoxId(self.shared.boxes.write().alloc(obj)))
+        let mut boxes = self.shared.boxes.write();
+        let id = boxes.alloc(obj);
+        self.shared.spare_boxes.store(boxes.spare_bytes(), Ordering::Relaxed);
+        Value::Boxed(BoxId(id))
     }
 
     /// Store an `f64`, returning its `Value::Boxed` — `Sexpr`'s `f64`
@@ -171,23 +179,11 @@ impl Heap {
 
     /// Store an `i8`/`i16`/`i32`/`u8`/`u16`/`u32`, returning its
     /// `Value::Boxed` — the runtime representation of those six `Sexpr`
-    /// variants.
-    ///
-    /// `value` is normalized on the way in rather than trusted, so the box's
-    /// contents satisfy [`NarrowInt`]'s invariant no matter what the caller
-    /// had in its register. `i32` boxes like the rest since `int` took the
-    /// bare fixnum word: inside a `Sexpr` the word alone no longer says
-    /// which of the two it is.
-    ///
-    /// Panics on a width not in `{8, 16, 32}` — an internal-invariant trap
-    /// like [`f64_value`](Self::f64_value)'s, since the caller reaches here
-    /// from a declared type.
-    pub fn alloc_narrow(&mut self, width: u8, signed: bool, value: i64) -> Value {
-        if !matches!(width, 8 | 16 | 32) {
-            panic!("alloc_narrow: {}{} is not a boxed integer type", if signed { "i" } else { "u" }, width);
-        }
-        let value = crate::normalize_int(value, u32::from(width), signed);
-        self.alloc_boxed(BoxedObj::Narrow(NarrowInt { width, signed, value }))
+    /// variants. `i32` boxes like the rest since `int` took the bare fixnum
+    /// word: inside a `Sexpr` the word alone no longer says which of the two
+    /// it is.
+    pub fn alloc_narrow(&mut self, n: NarrowInt) -> Value {
+        self.alloc_boxed(BoxedObj::Narrow(n))
     }
 
     /// A boxed narrow integer, as the type it actually is — `None` when `id`
@@ -209,9 +205,9 @@ impl Heap {
     /// [`is_f32`](Self::is_f32)/[`is_f64`](Self::is_f64). There is no
     /// width-agnostic `is_narrow` for the same reason there is no
     /// `is_float`.
-    pub fn is_narrow(&self, id: BoxId, width: u8, signed: bool) -> bool {
+    pub fn is_narrow(&self, id: BoxId, ty: crate::fixed::FixedType) -> bool {
         match &self.shared.boxes.read_recursive().slots[id.0 as usize] {
-            Some(BoxedObj::Narrow(n)) => n.width == width && n.signed == signed,
+            Some(BoxedObj::Narrow(n)) => n.ty() == ty,
             _ => false,
         }
     }
@@ -230,14 +226,13 @@ impl Heap {
         match &self.shared.boxes.read_recursive().slots[id.0 as usize] {
             Some(BoxedObj::Float32(_)) => Some("f32"),
             Some(BoxedObj::Float64(_)) => Some("f64"),
-            Some(BoxedObj::Narrow(n)) => Some(match (n.width, n.signed) {
-                (8, true) => "i8",
-                (16, true) => "i16",
-                (8, false) => "u8",
-                (16, false) => "u16",
-                (32, false) => "u32",
-                (32, true) => "i32",
-                (w, s) => panic!("primitive_box_type_name: a narrow box of an unknown width {}{}", if s { "i" } else { "u" }, w),
+            Some(BoxedObj::Narrow(n)) => Some(match n {
+                NarrowInt::I8(_) => "i8",
+                NarrowInt::I16(_) => "i16",
+                NarrowInt::I32(_) => "i32",
+                NarrowInt::U8(_) => "u8",
+                NarrowInt::U16(_) => "u16",
+                NarrowInt::U32(_) => "u32",
             }),
             // A bignum box is an `int`: the `bignum` type was folded into it.
             Some(BoxedObj::Bignum(_)) => Some("int"),
@@ -255,7 +250,28 @@ impl Heap {
     /// exists for the tests of that invariant, which need the one shape
     /// nothing else may make.
     pub fn alloc_bignum_unchecked(&mut self, n: num_bigint::BigInt) -> Value {
+        self.box_bignum(n)
+    }
+
+    /// Stores `n` in a bignum box: every bignum is made here, and the first
+    /// one made installs how a bignum is written in a message
+    /// ([`bignum_text`](Self::bignum_text)).
+    fn box_bignum(&mut self, n: num_bigint::BigInt) -> Value {
+        TYPELISP_BIGNUM_TEXT.store(decimal as fn(&num_bigint::BigInt) -> String as *mut (), core::sync::atomic::Ordering::Relaxed);
         self.alloc_boxed(BoxedObj::Bignum(n))
+    }
+
+    /// The bignum in `id` in decimal, for a message. Through what the
+    /// bignum's maker installed: writing a `BigInt` is linked into an
+    /// executable only when the program can make one.
+    pub fn bignum_text(&self, id: BoxId) -> String {
+        let text = TYPELISP_BIGNUM_TEXT.load(core::sync::atomic::Ordering::Relaxed);
+        if text.is_null() {
+            panic!("internal error: a bignum box exists and nothing made one");
+        }
+        // SAFETY: only ever `decimal`'s address, stored by `box_bignum`.
+        let text: fn(&num_bigint::BigInt) -> String = unsafe { core::mem::transmute(text) };
+        text(&self.bignum_value(id))
     }
 
     /// An `int` from a machine-wide result: a fixnum when the value fits
@@ -271,7 +287,7 @@ impl Heap {
         if n >= i128::from(crate::tagged::FIXNUM_MIN) && n <= i128::from(crate::tagged::FIXNUM_MAX) {
             Value::Int(n as i64)
         } else {
-            self.alloc_boxed(BoxedObj::Bignum(num_bigint::BigInt::from(n)))
+            self.box_bignum(num_bigint::BigInt::from(n))
         }
     }
 
@@ -281,7 +297,7 @@ impl Heap {
     pub fn int_from_bigint(&mut self, n: num_bigint::BigInt) -> Value {
         match i64::try_from(&n) {
             Ok(v) if crate::tagged::fixnum_fits(v) => Value::Int(v),
-            _ => self.alloc_boxed(BoxedObj::Bignum(n)),
+            _ => self.box_bignum(n),
         }
     }
 
@@ -298,8 +314,8 @@ impl Heap {
     /// [`f64_value`](Self::f64_value).
     /// See `path_segments`'s doc comment for why this returns a mapped guard
     /// rather than `&num_bigint::BigInt`.
-    pub fn bignum_value(&self, id: BoxId) -> parking_lot::MappedRwLockReadGuard<'_, num_bigint::BigInt> {
-        parking_lot::RwLockReadGuard::map(self.shared.boxes.read_recursive(), |b| match &b.slots[id.0 as usize] {
+    pub fn bignum_value(&self, id: BoxId) -> crate::sync::MappedRwLockReadGuard<'_, num_bigint::BigInt> {
+        crate::sync::RwLockReadGuard::map(self.shared.boxes.read_recursive(), |b| match &b.slots[id.0 as usize] {
             Some(BoxedObj::Bignum(n)) => n,
             _ => panic!("BoxId does not hold a Bignum"),
         })
@@ -324,8 +340,8 @@ impl Heap {
     /// `BoxedObj::Ratio` — same convention as [`bignum_value`](Self::bignum_value).
     /// See `path_segments`'s doc comment for why this returns a mapped guard
     /// rather than `&num_rational::BigRational`.
-    pub fn ratio_value(&self, id: BoxId) -> parking_lot::MappedRwLockReadGuard<'_, num_rational::BigRational> {
-        parking_lot::RwLockReadGuard::map(self.shared.boxes.read_recursive(), |b| match &b.slots[id.0 as usize] {
+    pub fn ratio_value(&self, id: BoxId) -> crate::sync::MappedRwLockReadGuard<'_, num_rational::BigRational> {
+        crate::sync::RwLockReadGuard::map(self.shared.boxes.read_recursive(), |b| match &b.slots[id.0 as usize] {
             Some(BoxedObj::Ratio(r)) => r,
             _ => panic!("BoxId does not hold a Ratio"),
         })
@@ -580,13 +596,13 @@ impl Heap {
     /// `Arc`, not `Rc`: the handle must stay a valid liveness proof no
     /// matter which thread ends up holding it or running `gc()` — see
     /// `shared.cell_registry`'s doc comment.
-    pub fn alloc_cell(&mut self, v: Value) -> std::sync::Arc<BoxId> {
+    pub fn alloc_cell(&mut self, v: Value) -> alloc::sync::Arc<BoxId> {
         let id = match self.alloc_boxed(BoxedObj::Cell(v)) {
             Value::Boxed(id) => id,
             _ => unreachable!("alloc_boxed always returns Value::Boxed"),
         };
-        let rc = std::sync::Arc::new(id);
-        self.shared.cell_registry.lock().unwrap().push(std::sync::Arc::downgrade(&rc));
+        let rc = alloc::sync::Arc::new(id);
+        self.shared.cell_registry.lock().push(alloc::sync::Arc::downgrade(&rc));
         rc
     }
 
@@ -791,4 +807,15 @@ impl Heap {
             _ => panic!("BoxId does not hold a CompiledClosure"),
         }
     }
+}
+
+/// How [`Heap::bignum_text`] writes a bignum, installed by
+/// [`Heap::box_bignum`]. An exported symbol, so that the optimizer does not
+/// take the one value ever stored for the only one it can hold and call
+/// `decimal` directly.
+#[no_mangle]
+static TYPELISP_BIGNUM_TEXT: core::sync::atomic::AtomicPtr<()> = core::sync::atomic::AtomicPtr::new(core::ptr::null_mut());
+
+fn decimal(n: &num_bigint::BigInt) -> String {
+    n.to_string()
 }

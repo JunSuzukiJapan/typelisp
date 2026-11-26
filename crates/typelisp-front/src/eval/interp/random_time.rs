@@ -95,11 +95,6 @@ pub(super) fn eval_get_internal_real_time(heap: &mut Heap, _args: &[Value]) -> R
     Ok(typelisp_rt::sys_builtin::internal_time_value(heap, now))
 }
 
-pub(super) fn eval_get_internal_run_time(heap: &mut Heap, _args: &[Value]) -> Result<Value, EvalError> {
-    let used = typelisp_rt::sys_builtin::get_internal_run_time();
-    Ok(typelisp_rt::sys_builtin::internal_time_value(heap, used))
-}
-
 /// The two `i32` arguments of the time-zone builtins. Unreachable through
 /// the checker, so the error is the internal-shape one every other builtin
 /// argument mismatch here reports.

@@ -58,6 +58,8 @@ use std::collections::{HashMap, HashSet};
 
 use typelisp_mem::{wk, ConcreteNames, Error, Heap, RootScope, SymRef, Value, BUILTIN_SYMBOLS};
 
+use crate::compile::carriers::Carrier;
+
 use crate::check::core::{self, Items};
 use crate::check::repr::Repr;
 use crate::types::{path_is_builtin, Path};
@@ -400,7 +402,10 @@ fn to_island_here(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Error>
         // word is ordinary) rather than in the island's own tagged
         // arithmetic, where the shift would overflow again.
         wk::INT_ANY_WIDTH => match core::field(heap, form, 0) {
-            Some(Value::Int(n)) => int_node(heap, n),
+            Some(Value::Int(n)) => {
+                let repr = core::field(heap, form, 1).and_then(|r| Repr::read(heap, r)).ok_or_else(|| malformed(heap, form))?;
+                int_node(heap, n, Carrier::of(&repr))
+            }
             _ => Err(malformed(heap, form)),
         },
         // An `int` literal: the same two halves under its own tag, which is
@@ -408,21 +413,18 @@ fn to_island_here(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Error>
         // rather than the raw word `compile-int-any-width` produces. The
         // island cannot tell the two apart from the number.
         wk::INT => match core::field(heap, form, 0) {
-            Some(Value::Int(n)) => core::tagged(heap, wk::INT, &[half((n as u64) >> 32), half(n as u64)]),
+            Some(Value::Int(n)) => int_literal(heap, n),
             _ => Err(malformed(heap, form)),
         },
         wk::UNIT => core::tagged(heap, wk::UNIT, &[]),
         // The literal's payload is the *already rounded* number — an `f32`
-        // literal arrives as the binary32 value widened into binary64 — so
-        // the constant this emits is right for either width without the node
-        // having to name one. What the width does decide is the box, and that
-        // travels the other channel: `Repr::field_kind` (2 for `f64`, 11 for
-        // `f32`), which is what `compile-sexpr-field` reads.
+        // literal's is the binary32 value — and the box says which width it
+        // is, which is the type of the constant.
         wk::FLOAT_ANY_WIDTH => {
-            let bits = match core::field(heap, form, 0) {
+            let (carrier, bits) = match core::field(heap, form, 0) {
                 Some(Value::Boxed(id)) => match heap.float_box(id) {
-                    Some(typelisp_mem::FloatBox::F32(f)) => f64::from(f).to_bits(),
-                    Some(typelisp_mem::FloatBox::F64(f)) => f.to_bits(),
+                    Some(typelisp_mem::FloatBox::F32(f)) => (Carrier::F32, f64::from(f).to_bits()),
+                    Some(typelisp_mem::FloatBox::F64(f)) => (Carrier::F64, f.to_bits()),
                     None => return Err(malformed(heap, form)),
                 },
                 _ => return Err(malformed(heap, form)),
@@ -434,7 +436,7 @@ fn to_island_here(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Error>
             core::tagged(
                 heap,
                 wk::FLOAT_ANY_WIDTH,
-                &[half(bits >> 32), half(bits)],
+                &[Value::Int(carrier.code()), half(bits >> 32), half(bits)],
             )
         }
         wk::BIGNUM => match core::field(heap, form, 0) {
@@ -727,8 +729,9 @@ fn to_island_here(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Error>
         }
         // The `int` boundary's two sides (`check::lower::int_boundary_raw`): the
         // operand translated like any other, the tag kept, and the island
-        // does the shift.
-        wk::UNTAG_INT | wk::TAG_INT => {
+        // does the shift. `std::dbg::llvm-size-of`'s node the same way: the
+        // island asks LLVM the size of the operand's type.
+        wk::UNTAG_INT | wk::TAG_INT | wk::LLVM_SIZE_OF_VALUE => {
             let inner = core::field(heap, form, 0).ok_or_else(|| malformed(heap, form))?;
             let mut f = Items::new(heap);
             let v = to_island(f.heap(), inner, cx)?;
@@ -923,12 +926,12 @@ fn translate_let(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Error> 
 /// about these nodes is decided by their own translations.
 fn call_node_shape(tag: u32) -> Option<(usize, usize)> {
     match tag {
-        // `(call PATH (R...) ARG...)`
-        wk::CALL => Some((2, 1)),
+        // `(call PATH RET-R (R...) ARG...)`
+        wk::CALL => Some((3, 2)),
         // `(assoc PATH SYM INSTANCE RET-R (R...) RET-KEY ARG...)`
         wk::ASSOC => Some((6, 4)),
-        // `(dyn-call PATH SYM SLOT VTABLE (R...) ARG...)`
-        wk::DYN_CALL => Some((5, 4)),
+        // `(dyn-call PATH SYM SLOT VTABLE RET-R (R...) ARG...)`
+        wk::DYN_CALL => Some((6, 5)),
         // `(apply CALLEE RET-R (R...) ARG...)`
         wk::APPLY => Some((3, 2)),
         _ => None,
@@ -1097,7 +1100,8 @@ fn translate_tag(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Error> 
     f.finish(wk::TAG)
 }
 
-/// `(call PATH (R...) E...)` -> `(call "name" (kind . form)...)`.
+/// `(call PATH RET-R (R...) E...)` -> `(call "name" carrier (kind .
+/// form)...)`, `carrier` how the answer is carried ([`Carrier::code`]).
 ///
 /// The island looks the callee up by the name written here and nothing else:
 /// the mangled name `driver::compile_scc`/`compile::aot` declare an ordinary
@@ -1108,14 +1112,29 @@ fn translate_tag(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Error> 
 /// longer re-derives the second one.
 fn translate_call(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Error> {
     let parts = core::fields(heap, form)?;
-    if parts.len() < 2 {
+    if parts.len() < 3 {
         return Err(malformed(heap, form));
     }
     let path = core::definition_value(parts[0]).ok_or_else(|| malformed(heap, form))?;
-    let reprs = repr_list(heap, parts[1])?;
-    let args = parts[2..].to_vec();
+    let ret = Repr::read(heap, parts[1]).ok_or_else(|| malformed(heap, form))?;
+    let reprs = repr_list(heap, parts[2])?;
+    let args = parts[3..].to_vec();
 
     let name = callee_symbol_name(&path);
+    // An address written as a number is the number, however wide an `int`
+    // a word holds.
+    if name == "rt_c_address" {
+        if let [arg] = &args[..] {
+            let literal = match (core::op_wk(heap, *arg), core::field(heap, *arg, 0)) {
+                (Some(wk::INT), Some(Value::Int(n))) => u64::try_from(n).ok(),
+                (Some(wk::BIGNUM), Some(Value::Boxed(id))) if heap.is_bignum(id) => u64::try_from(&*heap.bignum_value(id)).ok(),
+                _ => None,
+            };
+            if let Some(n) = literal.filter(|n| crate::compile::carriers::is_address(*n)) {
+                return int_node(heap, n as i64, Carrier::Word);
+            }
+        }
+    }
     // A builtin that **puts the task down** is not a call, and the island must
     // not emit one: the shim only records what is being waited for, and the
     // activation has to end with `STATUS_SUSPEND` so the driver can come back
@@ -1123,8 +1142,6 @@ fn translate_call(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Error>
     // there is nothing in the frame's value slot to decode on the way back
     // (`compile-catch`'s own `kind = 0` means the same thing).
     if name.starts_with(crate::compile::externs::RT_SUSPEND_PREFIX) {
-        // A `call` node carries its arguments' representations and not its
-        // result's, so the one free suspension with a typed answer is named.
         let kind = if name == crate::compile::externs::RT_SUSPEND_BOOL_ANSWER { Repr::Bool.field_kind() } else { 0 };
         return suspend_node(heap, &name, kind, None, &reprs, &args, cx, None);
     }
@@ -1143,6 +1160,7 @@ fn translate_call(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Error>
 
     let mut f = Items::new(heap);
     f.push(name_v);
+    f.push(Value::Int(Carrier::of(&ret).code()));
     arg_pairs(&mut f, &reprs, &args, cx)?;
     let call = f.finish(wk::CALL)?;
     let Some(to_main) = to_main else { return Ok(call) };
@@ -1277,6 +1295,7 @@ fn translate_assoc(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Error
             let name_v = heap.alloc_string(shim.to_string());
             let mut f = Items::new(heap);
             f.push(name_v);
+            f.push(Value::Int(Carrier::of(&ret).code()));
             arg_pairs(&mut f, &reprs, &args, cx)?;
             return f.finish(wk::CALL);
         }
@@ -1285,11 +1304,12 @@ fn translate_assoc(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Error
         let opid = Value::Int(llvm_op_id(key, method.name()));
         let mut f = Items::new(heap);
         f.push(opid);
+        f.push(Value::Int(Carrier::of(&ret).code()));
         arg_pairs(&mut f, &reprs, &args, cx)?;
         return f.finish(wk::LLVM_OP);
     }
 
-    // The generic path: `(assoc TYPE METHOD INSTANCE SYMBOL ARG...)`. The
+    // The generic path: `(assoc TYPE METHOD INSTANCE SYMBOL CARRIER ARG...)`. The
     // island dispatches the methods it lowers itself on the type and method
     // names, and calls every other one by `SYMBOL`
     // ([`ConcreteNames::method_symbol`]), the name its body was compiled
@@ -1302,6 +1322,7 @@ fn translate_assoc(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Error
     f.push(Value::Bool(instance));
     let symbol_v = f.heap().alloc_string(symbol);
     f.push(symbol_v);
+    f.push(Value::Int(Carrier::of(&ret).code()));
     arg_pairs(&mut f, &reprs, &args, cx)?;
     f.finish(wk::ASSOC)
 }
@@ -1573,12 +1594,8 @@ pub fn function_parts(
     Ok((param_list, body_v))
 }
 
-/// `(defvar PATH R MUTABLE E)` -> `(global-init kind value)`, the node
+/// `(defvar PATH R MUTABLE E)` -> `(global-init id kind value)`, the node
 /// the ahead-of-time compiler's synthesized initializer sequence runs.
-///
-/// There is no id to look up for the global being defined — the runtime
-/// assigns one by call order as the sequence runs — though the initializer may
-/// well refer to *other* globals, which is what `Ctx::globals` is still for.
 ///
 /// `None` for anything that is not a `defvar`.
 pub fn global_init(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Option<Value>, Error> {
@@ -1590,18 +1607,17 @@ pub fn global_init(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Option<Value
     // (`typeck::defvar`). An initializer built here runs exactly once,
     // when the storage is created, so there is never an earlier binding for
     // the two to differ over.
-    let (repr, value) = match parts[..] {
-        [_, repr, _, value] | [_, repr, _, value, Value::Bool(_)] => (repr, value),
+    let value = match parts[..] {
+        [_, _, _, value] | [_, _, _, value, Value::Bool(_)] => value,
         _ => return Err(malformed(heap, form)),
     };
-    let repr = Repr::read(heap, repr).ok_or_else(|| malformed(heap, form))?;
+    let (id, kind) = global_id_and_kind(heap, form, cx)?;
     let cells = names_captured_by_nested(heap, std::slice::from_ref(&value))?;
     let inner = cx.with_cell_names(&cells);
 
     let mut f = Items::new(heap);
-    // A global's storage always holds a properly tagged value, so this is the
-    // field classification — the same one a `global` read untags with.
-    f.push(Value::Int(repr.field_kind()));
+    f.push(Value::Int(id));
+    f.push(Value::Int(kind));
     let v = to_island(f.heap(), value, inner)?;
     f.push(v);
     Ok(Some(f.finish(wk::GLOBAL_INIT)?))
@@ -1704,9 +1720,9 @@ fn quoted_form(heap: &mut Heap, datum: Value) -> Result<Value, Error> {
     match datum {
         Value::Empty => sexpr_construct(heap, SEXPR_NIL, &[]),
         // An `int` node's payload is the *tagged* word: the `(int HI LO)`
-        // literal (a fixnum, `compile-int-literal`), never the raw
+        // literal (a fixnum, `compile-int-literal`) or a bignum's, never the raw
         // `int-any-width` one — the `int` variant passes its argument through.
-        Value::Int(n) => sexpr_leaf(heap, SEXPR_INT, |h| core::tagged(h, wk::INT, &[half((n as u64) >> 32), half(n as u64)])),
+        Value::Int(n) => sexpr_leaf(heap, SEXPR_INT, |h| int_literal(h, n)),
         Value::Bool(b) => sexpr_leaf(heap, SEXPR_BOOL, |h| core::tagged(h, wk::BOOL, &[Value::Bool(b)])),
         Value::Char(c) => sexpr_leaf(heap, SEXPR_CHAR, |h| core::tagged(h, wk::CHAR, &[Value::Char(c)])),
         Value::Str(id) => {
@@ -1731,7 +1747,7 @@ fn quoted_form(heap: &mut Heap, datum: Value) -> Result<Value, Error> {
         Value::Boxed(id) if heap.is_f32(id) => {
             let bits = f64::from(heap.f32_value(id)).to_bits();
             sexpr_leaf(heap, SEXPR_F32, move |h| {
-                core::tagged(h, wk::FLOAT_ANY_WIDTH, &[half(bits >> 32), half(bits)])
+                core::tagged(h, wk::FLOAT_ANY_WIDTH, &[Value::Int(Carrier::F32.code()), half(bits >> 32), half(bits)])
             })
         }
         Value::Boxed(id) if heap.is_f64(id) => {
@@ -1740,7 +1756,7 @@ fn quoted_form(heap: &mut Heap, datum: Value) -> Result<Value, Error> {
                 core::tagged(
                     h,
                     wk::FLOAT_ANY_WIDTH,
-                    &[half(bits >> 32), half(bits)],
+                    &[Value::Int(Carrier::F64.code()), half(bits >> 32), half(bits)],
                 )
             })
         }
@@ -1909,8 +1925,8 @@ fn translate_dyn_upcast(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, 
     f.finish(wk::DYN_UPCAST)
 }
 
-/// `(dyn-call PATH SYM N ((PATH SYM)...) (R...) E...)` -> `(dyn-call slot
-/// (kind . recv) (kind . arg)...)`.
+/// `(dyn-call PATH SYM N ((PATH SYM)...) RET-R (R...) E...)` -> `(dyn-call
+/// slot carrier (kind . recv) (kind . arg)...)`.
 ///
 /// The slot is the method's position in the trait's own method order, fixed at
 /// check time, so the emitted code reads the receiver's vtable id, indexes
@@ -1918,14 +1934,16 @@ fn translate_dyn_upcast(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, 
 /// time.
 fn translate_dyn_call(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Error> {
     let parts = core::fields(heap, form)?;
-    if parts.len() < 5 {
+    if parts.len() < 6 {
         return Err(malformed(heap, form));
     }
     let Value::Int(slot) = parts[2] else { return Err(malformed(heap, form)) };
-    let reprs = repr_list(heap, parts[4])?;
-    let args = parts[5..].to_vec();
+    let ret = Repr::read(heap, parts[4]).ok_or_else(|| malformed(heap, form))?;
+    let reprs = repr_list(heap, parts[5])?;
+    let args = parts[6..].to_vec();
     let mut f = Items::new(heap);
     f.push(Value::Int(slot));
+    f.push(Value::Int(Carrier::of(&ret).code()));
     arg_pairs(&mut f, &reprs, &args, cx)?;
     f.finish(wk::DYN_CALL)
 }
@@ -1935,11 +1953,22 @@ fn translate_dyn_call(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Er
 fn name_kind_list(heap: &mut Heap, names: &[(SymRef, Repr)], cx: Ctx) -> Result<Value, Error> {
     let mut f = Items::new(heap);
     for (name, repr) in names {
-        let kind = Value::Int(cx.binding_kind(f.heap(), *name, repr)?);
+        let kind = Value::Int(param_kind(cx.binding_kind(f.heap(), *name, repr)?, repr));
         let p = core::pair(f.heap(), Value::Symbol(*name), kind)?;
         f.push(p);
     }
     f.finish_list()
+}
+
+/// The kind a parameter or a captured value is listed under: its binding's,
+/// and where that says only that the collector does not follow it (`0`), the
+/// number of how it is carried, negated. It arrives in a word and nothing
+/// else says what is in it.
+fn param_kind(binding: i64, repr: &Repr) -> i64 {
+    match binding {
+        0 => -Carrier::of(repr).code(),
+        kind => kind,
+    }
 }
 
 /// A `(SYM R)` parameter list, as names with their representations.
@@ -2146,9 +2175,11 @@ fn translate_labels(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Erro
     };
     f.push(defs_out);
 
-    // The trailing body binds no parameters of its own, but a `let` inside it
-    // can still be captured by something nested further in.
-    let mut trailing_cells = captured_cells.clone();
+    // The trailing body is the enclosing function's: what is a cell there is
+    // one here, whether or not a def of this block captures it. It binds no
+    // parameters of its own, but a `let` inside it can still be captured by
+    // something nested further in.
+    let mut trailing_cells = captured_cells.union(cx.cell_names).copied().collect::<HashSet<SymRef>>();
     trailing_cells.extend(names_captured_by_nested(f.heap(), &body)?);
     let trailing = Ctx { cell_names: &trailing_cells, ..base };
     let body_v = body_form(f.heap(), &body, trailing)?;
@@ -2169,9 +2200,8 @@ fn translate_apply(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Error
         return Err(malformed(heap, form));
     }
     let callee = parts[0];
-    // Field 1 is the return representation, which only the interpreter reads
-    // (`Interp::apply_core`) — the island's `apply`/`apply-indirect` take
-    // argument pairs and nothing else.
+    let ret = Repr::read(heap, parts[1]).ok_or_else(|| malformed(heap, form))?;
+    let carrier = Value::Int(Carrier::of(&ret).code());
     let reprs = repr_list(heap, parts[2])?;
     let args = parts[3..].to_vec();
 
@@ -2180,6 +2210,7 @@ fn translate_apply(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Error
             let name_v = heap.alloc_string(heap.symbol_spelling(name).to_string());
             let mut f = Items::new(heap);
             f.push(name_v);
+            f.push(carrier);
             arg_pairs(&mut f, &reprs, &args, cx)?;
             f.finish(wk::APPLY)
         }
@@ -2188,6 +2219,7 @@ fn translate_apply(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Error
             let mut f = Items::new(heap);
             let callee_v = to_island(f.heap(), callee, cx)?;
             f.push(callee_v);
+            f.push(carrier);
             arg_pairs(&mut f, &reprs, &args, cx)?;
             f.finish(wk::APPLY_INDIRECT)
         }
@@ -2244,7 +2276,7 @@ fn translate_immediate_lambda_call(
     translate_labels(&mut s, block, cx)
 }
 
-/// `(fnref PATH (R...))` -> a non-capturing `lambda` that
+/// `(fnref PATH (R...) RET-R)` -> a non-capturing `lambda` that
 /// forwards every argument to the named function.
 ///
 /// A top-level function used as a value reaches the very same closure
@@ -2258,11 +2290,13 @@ fn translate_fnref(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Error
         .and_then(core::definition_value)
         .ok_or_else(|| malformed(heap, form))?;
     let reprs = repr_list(heap, core::field(heap, form, 1).ok_or_else(|| malformed(heap, form))?)?;
+    let ret = core::field(heap, form, 2).and_then(|r| Repr::read(heap, r)).ok_or_else(|| malformed(heap, form))?;
     let target = callee_symbol_name(&path);
     forwarding_lambda(heap, "fnref", &reprs, cx, |heap, forwarded| {
         let name_v = heap.alloc_string(target);
         let mut f = Items::new(heap);
         f.push(name_v);
+        f.push(Value::Int(Carrier::of(&ret).code()));
         f.extend(forwarded.iter().copied());
         f.finish(wk::CALL)
     })
@@ -2281,7 +2315,7 @@ fn builtin_receiver(type_name: &Path) -> Value {
     }
 }
 
-/// `(methodref PATH SYM (R...) RET-KEY)` -> the same forwarding wrapper, onto an
+/// `(methodref PATH SYM (R...) RET-KEY RET-R)` -> the same forwarding wrapper, onto an
 /// instance method instead. Its receiver is simply the first parameter, the
 /// same convention an ordinary method call uses.
 fn translate_methodref(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Error> {
@@ -2290,6 +2324,7 @@ fn translate_methodref(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, E
         .ok_or_else(|| malformed(heap, form))?;
     let method = symbol_field(heap, form, 1)?;
     let reprs = repr_list(heap, core::field(heap, form, 2).ok_or_else(|| malformed(heap, form))?)?;
+    let ret = core::field(heap, form, 4).and_then(|r| Repr::read(heap, r)).ok_or_else(|| malformed(heap, form))?;
     forwarding_lambda(heap, "method", &reprs, cx, move |heap, forwarded| {
         let symbol = ConcreteNames::method_symbol(path, &method);
         let mut f = Items::new(heap);
@@ -2299,6 +2334,7 @@ fn translate_methodref(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, E
         f.push(Value::Bool(true));
         let symbol_v = f.heap().alloc_string(symbol);
         f.push(symbol_v);
+        f.push(Value::Int(Carrier::of(&ret).code()));
         f.extend(forwarded.iter().copied());
         f.finish(wk::ASSOC)
     })
@@ -2709,9 +2745,8 @@ fn translate_pattern(heap: &mut Heap, pat: Value, value: &Repr, cx: Ctx) -> Resu
             f.push(Value::Int(value.binding_kind()));
             f.finish(wk::PAT_BIND)
         }
-        // The island compares against one `const-word`, whatever the literal's
-        // kind, so the conversion happens here: there is no `char`/`bool` to
-        // `i64` primitive in the compiled language to do it there.
+        // The island makes the constant at the type of the value under test,
+        // whatever the literal's kind, so all it needs is the bits.
         wk::PAT_LIT => {
             let lit = core::field(heap, pat, 0).ok_or_else(|| malformed(heap, pat))?;
             let n = match (core::op_wk(heap, lit), core::field(heap, lit, 0)) {
@@ -3015,21 +3050,25 @@ fn half(bits: u64) -> Value {
     Value::Int((bits & 0xFFFF_FFFF) as u32 as i32 as i64)
 }
 
-/// `(int HI LO)` — an integer literal as two 32-bit halves.
+/// `(int-any-width CARRIER HI LO)` — an integer constant as two 32-bit halves
+/// and how it is carried.
 ///
-/// One helper rather than three call sites writing `(int N)`, because the
-/// split is not an optimization: this island reads a `Sexpr` int back through
-/// its 3-bit tag, so a one-word payload silently loses everything above bit
-/// 60 (`4611686018427387903` compiled to `-1` while the interpreter returned
-/// it whole). `compile-int-any-width` reassembles the halves in LLVM, where a full
-/// 64-bit word is ordinary. `float_form` has taken the same two-half shape
-/// since it was written, for the same reason.
-fn int_node(heap: &mut Heap, n: i64) -> Result<Value, Error> {
-    core::tagged(
-        heap,
-        wk::INT_ANY_WIDTH,
-        &[half((n as u64) >> 32), half(n as u64)],
-    )
+/// Split because this island reads a `Sexpr` int back through its tag, so a
+/// one-word payload silently loses everything above bit 60
+/// (`4611686018427387903` compiled to `-1` while the interpreter returned it
+/// whole).
+fn int_node(heap: &mut Heap, n: i64, carrier: Carrier) -> Result<Value, Error> {
+    core::tagged(heap, wk::INT_ANY_WIDTH, &[Value::Int(carrier.code()), half((n as u64) >> 32), half(n as u64)])
+}
+
+/// The `int` literal `n`: `(int HI LO)`, a fixnum, or the bignum it is where
+/// the code being produced has a word too narrow for it.
+fn int_literal(heap: &mut Heap, n: i64) -> Result<Value, Error> {
+    if crate::compile::carriers::fixnum_fits(n) {
+        core::tagged(heap, wk::INT, &[half((n as u64) >> 32), half(n as u64)])
+    } else {
+        bignum_form(heap, &num_bigint::BigInt::from(n))
+    }
 }
 
 /// `(str (int c0) (int c1) ...)` for a compile-time-known string.
@@ -3041,7 +3080,7 @@ fn int_node(heap: &mut Heap, n: i64) -> Result<Value, Error> {
 fn str_form(heap: &mut Heap, s: &str) -> Result<Value, Error> {
     let mut f = Items::new(heap);
     for c in s.chars() {
-        let node = int_node(f.heap(), c as i64)?;
+        let node = int_node(f.heap(), c as i64, Carrier::of(&Repr::Char))?;
         f.push(node);
     }
     f.finish(wk::STR)
@@ -3058,10 +3097,10 @@ fn bignum_form(heap: &mut Heap, n: &num_bigint::BigInt) -> Result<Value, Error> 
         num_bigint::Sign::Plus => 1,
     };
     let mut f = Items::new(heap);
-    let s = int_node(f.heap(), sign_val)?;
+    let s = int_node(f.heap(), sign_val, Carrier::Word)?;
     f.push(s);
     for d in digits {
-        let node = int_node(f.heap(), d as i64)?;
+        let node = int_node(f.heap(), d as i64, Carrier::Word)?;
         f.push(node);
     }
     f.finish(wk::BIGNUM)
@@ -3212,15 +3251,15 @@ mod tests {
 
     /// A `point` with two int fields and an `option` over a `sexpr`, which is
     /// enough to show both a struct's and an enum's field kinds.
-    const DEFS: [&str; 2] = ["(defstruct ::point (int-any-width int-any-width))", "(defenum ::std::option::Option (None Some) (() (sexpr)))"];
+    const DEFS: [&str; 2] = ["(defstruct ::point (i32 i32))", "(defenum ::std::option::Option (None Some) (() (sexpr)))"];
 
     #[test]
     fn the_word_sized_literals_pass_through_unchanged() {
-        assert_eq!(bridged("(int-any-width 42)"), "(int-any-width 0 42)");
+        assert_eq!(bridged("(int-any-width 42 i32)"), "(int-any-width 65 0 42)");
         // Each half is a bit pattern read back as a signed `i32` (`half`),
         // so a negative literal's halves print negative rather than as the
         // 32-bit numbers they stand for.
-        assert_eq!(bridged("(int-any-width -7)"), "(int-any-width -1 -7)");
+        assert_eq!(bridged("(int-any-width -7 i32)"), "(int-any-width 65 -1 -7)");
         assert_eq!(bridged("(bool true)"), "(bool true)");
         assert_eq!(bridged(r"(char #\a)"), r"(char #\a)");
         assert_eq!(bridged("(unit)"), "(unit)");
@@ -3233,7 +3272,7 @@ mod tests {
     fn a_float_is_split_into_two_halves_that_reassemble() {
         let printed = bridged("(float-any-width 2.0)");
         let bits = 2.0f64.to_bits();
-        assert_eq!(printed, format!("(float-any-width {} {})", bits >> 32, bits & 0xFFFF_FFFF));
+        assert_eq!(printed, format!("(float-any-width 4 {} {})", bits >> 32, bits & 0xFFFF_FFFF));
         // Neither half has anything in the top three bits the tag needs.
         for half in [bits >> 32, bits & 0xFFFF_FFFF] {
             assert_eq!((half as i64) << 3 >> 3, half as i64);
@@ -3242,7 +3281,7 @@ mod tests {
 
     #[test]
     fn a_string_becomes_one_node_per_character() {
-        assert_eq!(bridged(r#"(str "hi")"#), "(str (int-any-width 0 104) (int-any-width 0 105))");
+        assert_eq!(bridged(r#"(str "hi")"#), "(str (int-any-width 64 0 104) (int-any-width 64 0 105))");
         assert_eq!(bridged(r#"(str "")"#), "(str)");
     }
 
@@ -3254,9 +3293,9 @@ mod tests {
     /// Its digits are `0, 0, 1`, which also shows the ordering.
     #[test]
     fn a_bignum_becomes_its_sign_and_digits() {
-        assert_eq!(bridged("(bignum 18446744073709551616)"), "(bignum (int-any-width 0 1) (int-any-width 0 0) (int-any-width 0 0) (int-any-width 0 1))");
-        assert_eq!(bridged("(bignum -18446744073709551616)"), "(bignum (int-any-width -1 -1) (int-any-width 0 0) (int-any-width 0 0) (int-any-width 0 1))");
-        assert_eq!(bridged("(ratio 1/3)"), "(ratio (bignum (int-any-width 0 1) (int-any-width 0 1)) (bignum (int-any-width 0 1) (int-any-width 0 3)))");
+        assert_eq!(bridged("(bignum 18446744073709551616)"), "(bignum (int-any-width 0 0 1) (int-any-width 0 0 0) (int-any-width 0 0 0) (int-any-width 0 0 1))");
+        assert_eq!(bridged("(bignum -18446744073709551616)"), "(bignum (int-any-width 0 -1 -1) (int-any-width 0 0 0) (int-any-width 0 0 0) (int-any-width 0 0 1))");
+        assert_eq!(bridged("(ratio 1/3)"), "(ratio (bignum (int-any-width 0 0 1) (int-any-width 0 0 1)) (bignum (int-any-width 0 0 1) (int-any-width 0 0 3)))");
     }
 
     #[test]
@@ -3269,25 +3308,25 @@ mod tests {
     #[test]
     fn a_let_carries_each_bindings_kind() {
         assert_eq!(
-            bridged("(let ((x int-any-width (int-any-width 1))) (var x))"),
-            r#"(let (((x . 0) int-any-width 0 1)) (var "x" false))"#
+            bridged("(let ((x i32 (int-any-width 1 i32))) (var x))"),
+            r#"(let (((x . 0) int-any-width 65 0 1)) (var "x" false))"#
         );
         // A `sexpr` binding is the one that needs a GC root, hence kind 2.
         assert_eq!(
             bridged(r#"(let ((s sexpr (str "a"))) (var s))"#),
-            r#"(let (((s . 2) str (int-any-width 0 97))) (var "s" false))"#
+            r#"(let (((s . 2) str (int-any-width 64 0 97))) (var "s" false))"#
         );
         // `progn` is a `let` with no bindings, on both sides.
-        assert_eq!(bridged("(let () (int-any-width 1) (int-any-width 2))"), "(let () (int-any-width 0 1) (int-any-width 0 2))");
+        assert_eq!(bridged("(let () (int-any-width 1 i32) (int-any-width 2 i32))"), "(let () (int-any-width 65 0 1) (int-any-width 65 0 2))");
     }
 
     #[test]
     fn if_and_panic_keep_their_shape() {
         assert_eq!(
-            bridged("(if (bool true) (int-any-width 1) (int-any-width 2))"),
-            "(if false (bool true) (int-any-width 0 1) (int-any-width 0 2))"
+            bridged("(if (bool true) (int-any-width 1 i32) (int-any-width 2 i32))"),
+            "(if false (bool true) (int-any-width 65 0 1) (int-any-width 65 0 2))"
         );
-        assert_eq!(bridged(r#"(panic (str "boom"))"#), "(panic (str (int-any-width 0 98) (int-any-width 0 111) (int-any-width 0 111) (int-any-width 0 109)))");
+        assert_eq!(bridged(r#"(panic (str "boom"))"#), "(panic (str (int-any-width 64 0 98) (int-any-width 64 0 111) (int-any-width 64 0 111) (int-any-width 64 0 109)))");
     }
 
     /// Each argument becomes `(kind . form)`, and the kind is the argument's
@@ -3296,38 +3335,38 @@ mod tests {
     #[test]
     fn a_call_tags_every_argument_with_its_kind() {
         assert_eq!(
-            bridged("(call ::f (int-any-width sexpr) (int-any-width 1) (int-any-width 2))"),
-            r#"(call "tl_f" (0 int-any-width 0 1) (2 int-any-width 0 2))"#
+            bridged("(call ::f i32 (i32 sexpr) (int-any-width 1 i32) (int-any-width 2 i32))"),
+            r#"(call "tl_f" 65 (0 int-any-width 65 0 1) (2 int-any-width 65 0 2))"#
         );
-        assert_eq!(bridged("(call ::f ())"), r#"(call "tl_f")"#);
+        assert_eq!(bridged("(call ::f i32 ())"), r#"(call "tl_f" 65)"#);
         // A module-qualified callee mangles by its full path, so `m::inc` and
         // a root `inc` cannot collide on one symbol.
-        assert_eq!(bridged("(call ::m::inc ())"), r#"(call "tl_m::inc")"#);
+        assert_eq!(bridged("(call ::m::inc i32 ())"), r#"(call "tl_m::inc" 65)"#);
         // A free builtin with no typelisp body is named for the runtime shim
         // that *is* its implementation, not mangled — and the naming happens
         // here, so the island has nothing to re-derive
         // (`interp::rt_builtin_symbol`).
         assert_eq!(
-            bridged("(call ::std::sexpr::sexpr-car (sexpr) (var xs))"),
-            r#"(call "rt_car" (2 var "xs" false))"#
+            bridged("(call ::std::sexpr::sexpr-car sexpr (sexpr) (var xs))"),
+            r#"(call "rt_car" 0 (2 var "xs" false))"#
         );
         // (`sym`'s kind is `0`: an interned symbol is a tagged word the
         // collector never reclaims, so it needs no root — `Repr::class`.)
         assert_eq!(
-            bridged("(call ::std::symbol::symbol->string (sym) (var s))"),
-            r#"(call "rt_sym_name" (0 var "s" false))"#
+            bridged("(call ::std::symbol::symbol->string str (sym) (var s))"),
+            r#"(call "rt_sym_name" 0 (0 var "s" false))"#
         );
     }
 
     #[test]
     fn an_ordinary_method_call_is_named_by_its_qualified_type() {
         assert_eq!(
-            bridged("(assoc ::std::primitive::i32 + true int-any-width (int-any-width int-any-width) (type-named ::std::primitive::i32) (var a) (var b))"),
-            r#"(assoc i32 "+" true "tl_std::primitive::i32''+" (0 var "a" false) (0 var "b" false))"#
+            bridged("(assoc ::std::primitive::i32 + true i32 (i32 i32) (type-named ::std::primitive::i32) (var a) (var b))"),
+            r#"(assoc i32 "+" true "tl_std::primitive::i32''+" 65 (0 var "a" false) (0 var "b" false))"#
         );
         assert_eq!(
-            bridged("(assoc ::m::point area true int-any-width (struct) (type-named ::std::primitive::i32) (var p))"),
-            r#"(assoc () "area" true "tl_m::point''area" (2 var "p" false))"#
+            bridged("(assoc ::m::point area true i32 (struct) (type-named ::std::primitive::i32) (var p))"),
+            r#"(assoc () "area" true "tl_m::point''area" 65 (2 var "p" false))"#
         );
         // Only the standard library's type is named for the island: a type
         // that shadows a built-in's name is not taken for it.
@@ -3339,9 +3378,9 @@ mod tests {
                     h.names().shadow(shadowing(), "i32").expect("`i32` is not a reserved word");
                 },
                 &[],
-                "(assoc ::shadowing::i32 + true int-any-width (int-any-width int-any-width) (type-named ::shadowing::i32) (var a) (var b))"
+                "(assoc ::shadowing::i32 + true i32 (i32 i32) (type-named ::shadowing::i32) (var a) (var b))"
             ),
-            r#"(assoc () "+" true "tl_shadowing::i32''+" (0 var "a" false) (0 var "b" false))"#
+            r#"(assoc () "+" true "tl_shadowing::i32''+" 65 (0 var "a" false) (0 var "b" false))"#
         );
     }
 
@@ -3350,8 +3389,8 @@ mod tests {
     #[test]
     fn a_vector_builtin_becomes_an_operation_carrying_its_element_kind() {
         assert_eq!(
-            bridged("(assoc ::std::vec::Vector get true int-any-width ((vector int-any-width) int-any-width) (type-named ::std::primitive::i32) (var v) (int-any-width 0))"),
-            r#"(vector-op "get" 1 (var "v" false) (int-any-width 0 0))"#
+            bridged("(assoc ::std::vec::Vector get true i32 ((vector i32) i32) (type-named ::std::primitive::i32) (var v) (int-any-width 0 i32))"),
+            r#"(vector-op "get" 265 (var "v" false) (int-any-width 65 0 0))"#
         );
         // A `sexpr` element is already tagged, so it passes through as kind 6.
         assert_eq!(
@@ -3361,7 +3400,7 @@ mod tests {
         // `new` has no receiver and no element to tag; the result is what
         // says it is a vector at all.
         assert_eq!(
-            bridged("(assoc ::std::vec::Vector new false (vector int-any-width) () (type-named ::std::vec::Vector (type-named ::std::primitive::i32)))"),
+            bridged("(assoc ::std::vec::Vector new false (vector i32) () (type-named ::std::vec::Vector (type-named ::std::primitive::i32)))"),
             format!(r#"(vector-op "new" 0 {})"#, type_nodes("(type-named ::std::vec::Vector (type-named ::std::primitive::i32))"))
         );
     }
@@ -3373,14 +3412,14 @@ mod tests {
     #[test]
     fn a_hash_table_builtin_carries_both_key_and_value_kinds() {
         assert_eq!(
-            bridged("(assoc ::std::collections::HashTable bucket-put true unit ((hashtable str int-any-width) int-any-width int-any-width str int-any-width) (type-unit) (var h) (var n) (var i) (var k) (var x))"),
-            r#"(hashtable-op "bucket-put" 6 1 () (var "h" false) (var "n" false) (var "i" false) (var "k" false) (var "x" false))"#
+            bridged("(assoc ::std::collections::HashTable bucket-put true unit ((hashtable str i32) i32 i32 str i32) (type-unit) (var h) (var n) (var i) (var k) (var x))"),
+            r#"(hashtable-op "bucket-put" 6 265 () (var "h" false) (var "n" false) (var "i" false) (var "k" false) (var "x" false))"#
         );
         // A bucket read builds no box, so the name slot stays empty; the
         // island decodes the result by `key-kind`/`val-kind` instead.
         assert_eq!(
-            bridged("(assoc ::std::collections::HashTable bucket-value true int-any-width ((hashtable str int-any-width) int-any-width int-any-width) (type-named ::std::primitive::i32) (var h) (var n) (var i))"),
-            r#"(hashtable-op "bucket-value" 6 1 () (var "h" false) (var "n" false) (var "i" false))"#
+            bridged("(assoc ::std::collections::HashTable bucket-value true i32 ((hashtable str i32) i32 i32) (type-named ::std::primitive::i32) (var h) (var n) (var i))"),
+            r#"(hashtable-op "bucket-value" 6 265 () (var "h" false) (var "n" false) (var "i" false))"#
         );
     }
 
@@ -3389,11 +3428,11 @@ mod tests {
     /// name strings.
     #[test]
     fn an_llvm_method_becomes_an_operation_id() {
-        let printed = bridged("(assoc ::%core::llvm-builder const-word true handle (handle int-any-width) (type-named ::%core::llvm-value) (var b) (int-any-width 42))");
+        let printed = bridged("(assoc ::%core::llvm-builder const-word true handle (handle i32) (type-named ::%core::llvm-value) (var b) (int-any-width 42 i32))");
         assert_eq!(
             printed,
             format!(
-                r#"(llvm-op {} (0 var "b" false) (0 int-any-width 0 42))"#,
+                r#"(llvm-op {} 0 (0 var "b" false) (0 int-any-width 65 0 42))"#,
                 llvm_op_id("llvm-builder", "const-word")
             )
         );
@@ -3408,8 +3447,8 @@ mod tests {
         let printed = bridged("(assoc ::std::collections::Scope get true enum ((scope handle) str) (type-named ::std::option::Option (type-named ::%core::llvm-value)) (var e) (var n))");
         assert!(printed.starts_with("(llvm-op "), "expected a native-scope op, got {}", printed);
         assert_eq!(
-            bridged("(assoc ::std::collections::Scope get true enum ((scope int-any-width) str) (type-named ::std::option::Option (type-named ::std::primitive::i32)) (var e) (var n))"),
-            r#"(assoc Scope "get" true "tl_std::collections::Scope''get" (2 var "e" false) (2 var "n" false))"#
+            bridged("(assoc ::std::collections::Scope get true enum ((scope i32) str) (type-named ::std::option::Option (type-named ::std::primitive::i32)) (var e) (var n))"),
+            r#"(assoc Scope "get" true "tl_std::collections::Scope''get" 0 (2 var "e" false) (2 var "n" false))"#
         );
     }
 
@@ -3421,8 +3460,8 @@ mod tests {
     #[test]
     fn a_construct_tags_its_fields_from_its_own_representations() {
         assert_eq!(
-            bridged_with(&DEFS, "(construct ::point (type-named ::point) 0 true (int-any-width int-any-width) (int-any-width 1) (int-any-width 2))"),
-            format!("(construct false true {} 0 (1 int-any-width 0 1) (1 int-any-width 0 2))", type_nodes("(type-named ::point)"))
+            bridged_with(&DEFS, "(construct ::point (type-named ::point) 0 true (i32 i32) (int-any-width 1 i32) (int-any-width 2 i32))"),
+            format!("(construct false true {} 0 (265 int-any-width 65 0 1) (265 int-any-width 65 0 2))", type_nodes("(type-named ::point)"))
         );
         // An enum field of `sexpr` is already tagged, hence the passthrough
         // kind 6.
@@ -3433,8 +3472,8 @@ mod tests {
         // `sexpr`'s own variants take untagged fields: their shapes follow
         // from the variant number, so the island derives them.
         assert_eq!(
-            bridged_with(&DEFS, &format!("(construct ::std::sexpr::Sexpr (type-named ::std::sexpr::Sexpr) {SEXPR_CONS} false (sexpr sexpr) (int-any-width 1) (int-any-width 2))")),
-            format!("(construct true false () {SEXPR_CONS} (int-any-width 0 1) (int-any-width 0 2))")
+            bridged_with(&DEFS, &format!("(construct ::std::sexpr::Sexpr (type-named ::std::sexpr::Sexpr) {SEXPR_CONS} false (sexpr sexpr) (int-any-width 1 i32) (int-any-width 2 i32))")),
+            format!("(construct true false () {SEXPR_CONS} (int-any-width 65 0 1) (int-any-width 65 0 2))")
         );
     }
 
@@ -3443,8 +3482,8 @@ mod tests {
     #[test]
     fn a_construct_needs_no_definition_recorded() {
         assert_eq!(
-            bridged_with(&[], "(construct ::point (type-named ::point) 0 true (int-any-width int-any-width) (int-any-width 1) (int-any-width 2))"),
-            format!("(construct false true {} 0 (1 int-any-width 0 1) (1 int-any-width 0 2))", type_nodes("(type-named ::point)"))
+            bridged_with(&[], "(construct ::point (type-named ::point) 0 true (i32 i32) (int-any-width 1 i32) (int-any-width 2 i32))"),
+            format!("(construct false true {} 0 (265 int-any-width 65 0 1) (265 int-any-width 65 0 2))", type_nodes("(type-named ::point)"))
         );
     }
 
@@ -3453,7 +3492,7 @@ mod tests {
     /// kind.
     #[test]
     fn a_construct_whose_arity_disagrees_with_its_representations_is_refused() {
-        let e = refused_with(&DEFS, "(construct ::point (type-named ::point) 0 true (int-any-width int-any-width) (int-any-width 1))");
+        let e = refused_with(&DEFS, "(construct ::point (type-named ::point) 0 true (i32 i32) (int-any-width 1 i32))");
         assert!(e.contains("has 2 fields, constructed with 1"), "{}", e);
     }
 
@@ -3464,7 +3503,7 @@ mod tests {
     /// wrong box shape.
     #[test]
     fn a_pattern_on_an_unrecorded_type_is_refused() {
-        let e = refused_with(&[], "(match (var v) struct ((pat-ctor ::point (type-named ::point) 0 false (int-any-width int-any-width) (pat-wild) (pat-wild)) (int-any-width 1)))");
+        let e = refused_with(&[], "(match (var v) struct ((pat-ctor ::point (type-named ::point) 0 false (i32 i32) (pat-wild) (pat-wild)) (int-any-width 1 i32)))");
         assert!(e.contains("no definition recorded"), "{}", e);
     }
 
@@ -3473,11 +3512,11 @@ mod tests {
     /// narrowing primitive — but it can measure a list.
     #[test]
     fn a_field_access_encodes_its_index_as_a_list_length() {
-        assert_eq!(bridged("(field-get (var p) 0 int-any-width)"), r#"(field-get () 1 (var "p" false))"#);
+        assert_eq!(bridged("(field-get (var p) 0 i32)"), r#"(field-get () 265 (var "p" false))"#);
         assert_eq!(bridged("(field-get (var p) 2 sexpr)"), r#"(field-get (false false) 6 (var "p" false))"#);
         assert_eq!(
-            bridged("(field-set (var p) 1 int-any-width (int-any-width 5))"),
-            r#"(field-set (false) 1 (var "p" false) (int-any-width 0 5))"#
+            bridged("(field-set (var p) 1 i32 (int-any-width 5 i32))"),
+            r#"(field-set (false) 265 (var "p" false) (int-any-width 65 0 5))"#
         );
     }
 
@@ -3493,14 +3532,14 @@ mod tests {
     #[test]
     fn a_match_pairs_every_pattern_with_its_body() {
         assert_eq!(
-            bridged_with(&DEFS, "(match (var v) enum ((pat-ctor ::std::option::Option (type-named ::std::option::Option (type-named ::std::sexpr::Sexpr)) 0 false ()) (int-any-width 0)) ((pat-ctor ::std::option::Option (type-named ::std::option::Option (type-named ::std::sexpr::Sexpr)) 1 false (sexpr) (pat-bind x)) (var x)))"),
-            r#"(match false (var "v" false) (((pat-ctor 0 () 1 () false ()) int-any-width 0 0) ((pat-ctor 1 ((pat-bind "x" 2)) 1 (6) false ()) var "x" false)) 2)"#
+            bridged_with(&DEFS, "(match (var v) enum ((pat-ctor ::std::option::Option (type-named ::std::option::Option (type-named ::std::sexpr::Sexpr)) 0 false ()) (int-any-width 0 i32)) ((pat-ctor ::std::option::Option (type-named ::std::option::Option (type-named ::std::sexpr::Sexpr)) 1 false (sexpr) (pat-bind x)) (var x)))"),
+            r#"(match false (var "v" false) (((pat-ctor 0 () 1 () false ()) int-any-width 65 0 0) ((pat-ctor 1 ((pat-bind "x" 2)) 1 (6) false ()) var "x" false)) 2)"#
         );
         // A struct scrutinee: pattern kind 2, and the field kinds come from
         // the `defstruct`.
         assert_eq!(
-            bridged_with(&DEFS, "(match (var p) struct ((pat-ctor ::point (type-named ::point) 0 false (int-any-width int-any-width) (pat-bind a) (pat-wild)) (var a)))"),
-            r#"(match false (var "p" false) (((pat-ctor 0 ((pat-bind "a" 0) (pat-wild)) 2 (1 1) false ()) var "a" false)) 2)"#
+            bridged_with(&DEFS, "(match (var p) struct ((pat-ctor ::point (type-named ::point) 0 false (i32 i32) (pat-bind a) (pat-wild)) (var a)))"),
+            r#"(match false (var "p" false) (((pat-ctor 0 ((pat-bind "a" 0) (pat-wild)) 2 (265 265) false ()) var "a" false)) 2)"#
         );
     }
 
@@ -3510,8 +3549,8 @@ mod tests {
     #[test]
     fn a_multi_form_arm_body_becomes_a_progn() {
         assert_eq!(
-            bridged_with(&DEFS, "(match (var v) sexpr ((pat-wild) (int-any-width 1) (int-any-width 2)))"),
-            r#"(match false (var "v" false) (((pat-wild) let () (int-any-width 0 1) (int-any-width 0 2))) 2)"#
+            bridged_with(&DEFS, "(match (var v) sexpr ((pat-wild) (int-any-width 1 i32) (int-any-width 2 i32)))"),
+            r#"(match false (var "v" false) (((pat-wild) let () (int-any-width 65 0 1) (int-any-width 65 0 2))) 2)"#
         );
     }
 
@@ -3522,7 +3561,7 @@ mod tests {
     fn a_literal_pattern_is_reduced_to_one_integer() {
         let printed = bridged_with(
             &DEFS,
-            r"(match (var v) sexpr ((pat-lit (int-any-width 7)) (int-any-width 1)) ((pat-lit (bool true)) (int-any-width 2)) ((pat-lit (char #\A)) (int-any-width 3)))",
+            r"(match (var v) sexpr ((pat-lit (int-any-width 7 i32)) (int-any-width 1 i32)) ((pat-lit (bool true)) (int-any-width 2 i32)) ((pat-lit (char #\A)) (int-any-width 3 i32)))",
         );
         assert!(printed.contains("(pat-lit 0 7)"), "{}", printed);
         assert!(printed.contains("(pat-lit 0 1)"), "{}", printed);
@@ -3534,9 +3573,9 @@ mod tests {
     /// placeholder.
     #[test]
     fn only_a_downcast_pattern_carries_a_type_name() {
-        let plain = bridged_with(&DEFS, "(match (var v) sexpr ((pat-ctor ::point (type-named ::point) 0 false (int-any-width int-any-width) (pat-wild) (pat-wild)) (int-any-width 1)))");
-        assert!(plain.contains("(pat-ctor 0 ((pat-wild) (pat-wild)) 2 (1 1) false ())"), "{}", plain);
-        let down = bridged_with(&DEFS, "(match (var v) sexpr ((pat-ctor ::point (type-named ::point) 0 true (int-any-width int-any-width) (pat-wild) (pat-wild)) (int-any-width 1)))");
+        let plain = bridged_with(&DEFS, "(match (var v) sexpr ((pat-ctor ::point (type-named ::point) 0 false (i32 i32) (pat-wild) (pat-wild)) (int-any-width 1 i32)))");
+        assert!(plain.contains("(pat-ctor 0 ((pat-wild) (pat-wild)) 2 (265 265) false ())"), "{}", plain);
+        let down = bridged_with(&DEFS, "(match (var v) sexpr ((pat-ctor ::point (type-named ::point) 0 true (i32 i32) (pat-wild) (pat-wild)) (int-any-width 1 i32)))");
         assert!(down.contains(&format!("true {})", type_nodes("(type-named ::point)"))), "{}", down);
         // A whole-value type test always tests, so it always carries one.
         let tt = bridged_with(&DEFS, "(match (var v) sexpr ((pat-typetest ::point (type-named ::point) (pat-bind p)) (var p)))");
@@ -3554,8 +3593,8 @@ mod tests {
     #[test]
     fn a_match_on_a_scalar_translates_and_asks_for_no_root() {
         assert_eq!(
-            bridged_with(&DEFS, "(match (var n) int-any-width ((pat-lit (int-any-width 1)) (int-any-width 10)))"),
-            r#"(match false (var "n" false) (((pat-lit 0 1) int-any-width 0 10)) 0)"#
+            bridged_with(&DEFS, "(match (var n) i32 ((pat-lit (int-any-width 1 i32)) (int-any-width 10 i32)))"),
+            r#"(match false (var "n" false) (((pat-lit 0 1) int-any-width 65 0 10)) 0)"#
         );
     }
 
@@ -3565,7 +3604,7 @@ mod tests {
     fn a_value_pattern_crosses_as_a_name_and_a_test() {
         let printed = bridged_with(
             &DEFS,
-            r#"(match (var s) str ((pat-guard $match-scrut (assoc ::std::primitive::string equals true bool (str str) (type-named ::std::primitive::bool) (var $match-scrut) (str "a"))) (int-any-width 1)) ((pat-wild) (int-any-width 0)))"#,
+            r#"(match (var s) str ((pat-guard $match-scrut (assoc ::std::primitive::string equals true bool (str str) (type-named ::std::primitive::bool) (var $match-scrut) (str "a"))) (int-any-width 1 i32)) ((pat-wild) (int-any-width 0 i32)))"#,
         );
         assert!(printed.contains(r#"(pat-guard "$match-scrut" (assoc string "equals" true "tl_std::primitive::string''equals""#), "{}", printed);
         // A `str` scrutinee is a heap pointer, so this one *is* rooted.
@@ -3580,16 +3619,16 @@ mod tests {
     #[test]
     fn set_takes_its_kind_from_the_binding_it_targets() {
         assert_eq!(
-            bridged("(let ((x int-any-width (int-any-width 1))) (set x (int-any-width 2)))"),
-            r#"(let (((x . 0) int-any-width 0 1)) (set "x" 0 (int-any-width 0 2)))"#
+            bridged("(let ((x i32 (int-any-width 1 i32))) (set x (int-any-width 2 i32)))"),
+            r#"(let (((x . 0) int-any-width 65 0 1)) (set "x" 0 (int-any-width 65 0 2)))"#
         );
         // A `sexpr` binding is the one with a GC root to keep in step.
         assert_eq!(
             bridged(r#"(let ((s sexpr (str "a"))) (set s (str "b")))"#),
-            r#"(let (((s . 2) str (int-any-width 0 97))) (set "s" 2 (str (int-any-width 0 98))))"#
+            r#"(let (((s . 2) str (int-any-width 64 0 97))) (set "s" 2 (str (int-any-width 64 0 98))))"#
         );
         // An inner binding shadows an outer one of a different kind.
-        let shadowed = bridged(r#"(let ((x sexpr (str "a"))) (let ((x int-any-width (int-any-width 1))) (set x (int-any-width 2))))"#);
+        let shadowed = bridged(r#"(let ((x sexpr (str "a"))) (let ((x i32 (int-any-width 1 i32))) (set x (int-any-width 2 i32))))"#);
         assert!(shadowed.contains(r#"(set "x" 0"#), "the inner binding should win: {}", shadowed);
     }
 
@@ -3597,15 +3636,15 @@ mod tests {
     /// island would need a kind, and there is nothing honest to give it.
     #[test]
     fn assigning_to_a_name_that_is_not_in_scope_is_refused() {
-        let e = refused("(set nope (int-any-width 1))");
+        let e = refused("(set nope (int-any-width 1 i32))");
         assert!(e.contains("`nope`, which is not in scope"), "{}", e);
     }
 
     #[test]
     fn a_loop_keeps_its_body_untagged() {
         assert_eq!(
-            bridged("(loop unit (int-any-width 1) (break))"),
-            "(loop 0 (int-any-width 0 1) (break))"
+            bridged("(loop unit (int-any-width 1 i32) (break))"),
+            "(loop 0 (int-any-width 65 0 1) (break))"
         );
         assert_eq!(bridged("(break)"), "(break)");
     }
@@ -3617,7 +3656,7 @@ mod tests {
     #[test]
     fn a_loop_carries_its_own_binding_kind() {
         assert_eq!(bridged("(loop sexpr (break))"), "(loop 2 (break))");
-        assert_eq!(bridged("(loop int-any-width (break))"), "(loop 0 (break))");
+        assert_eq!(bridged("(loop i32 (break))"), "(loop 0 (break))");
     }
 
     /// The same field on the two other forms that own a merge slot, trailing
@@ -3626,18 +3665,18 @@ mod tests {
     #[test]
     fn a_block_and_an_unwind_protect_carry_their_merge_slots_kind() {
         assert_eq!(
-            bridged(r#"(block (str "b") (let () (int-any-width 1)) int-any-width)"#),
-            r#"(block "b" (let () (int-any-width 0 1)) 0)"#
+            bridged(r#"(block (str "b") (let () (int-any-width 1 i32)) i32)"#),
+            r#"(block "b" (let () (int-any-width 65 0 1)) 0)"#
         );
         // Hand-written core, so the repr is set independently of the forms:
         // what is being pinned down is the field's position and its meaning.
         assert_eq!(
-            bridged("(unwind-protect (int-any-width 2) (int-any-width 1) sexpr)"),
-            "(unwind-protect (int-any-width 0 2) (int-any-width 0 1) 2)"
+            bridged("(unwind-protect (int-any-width 2 i32) (int-any-width 1 i32) sexpr)"),
+            "(unwind-protect (int-any-width 65 0 2) (int-any-width 65 0 1) 2)"
         );
         assert_eq!(
-            bridged("(unwind-protect (int-any-width 2) (int-any-width 1) int-any-width)"),
-            "(unwind-protect (int-any-width 0 2) (int-any-width 0 1) 0)"
+            bridged("(unwind-protect (int-any-width 2 i32) (int-any-width 1 i32) i32)"),
+            "(unwind-protect (int-any-width 65 0 2) (int-any-width 65 0 1) 0)"
         );
     }
 
@@ -3645,7 +3684,7 @@ mod tests {
     /// shape to compile rather than two.
     #[test]
     fn return_always_carries_a_value() {
-        assert_eq!(bridged("(return (int-any-width 3))"), "(return false (int-any-width 0 3))");
+        assert_eq!(bridged("(return (int-any-width 3 i32))"), "(return false (int-any-width 65 0 3))");
         assert_eq!(bridged("(return)"), "(return false (unit))");
     }
 
@@ -3653,11 +3692,11 @@ mod tests {
     /// time, and a kind that says how to untag the stored value.
     #[test]
     fn a_global_becomes_its_promoted_id_and_kind() {
-        assert_eq!(bridged("(global ::counter int-any-width)"), "(global 3 1)");
+        assert_eq!(bridged("(global ::counter i32)"), "(global 3 265)");
         assert_eq!(bridged("(global ::m::total sexpr)"), "(global 7 6)");
         assert_eq!(
-            bridged("(set-global ::counter int-any-width (int-any-width 5))"),
-            "(set-global 3 1 (int-any-width 0 5))"
+            bridged("(set-global ::counter i32 (int-any-width 5 i32))"),
+            "(set-global 3 265 (int-any-width 65 0 5))"
         );
     }
 
@@ -3665,7 +3704,7 @@ mod tests {
     /// and this walk have gone out of step.
     #[test]
     fn an_unpromoted_global_is_refused() {
-        let e = refused("(global ::missing int-any-width)");
+        let e = refused("(global ::missing i32)");
         assert!(e.contains("was not promoted before translation"), "{}", e);
     }
 
@@ -3677,9 +3716,9 @@ mod tests {
     /// The name is process-wide unique, so the assertion matches around it.
     #[test]
     fn a_lambda_lists_its_captures_and_parameters() {
-        let printed = bridged("(lambda ((x int-any-width)) int-any-width (var x))");
+        let printed = bridged("(lambda ((x i32)) i32 (var x))");
         assert!(
-            printed.ends_with(r#" () ((x . 0)) (var "x" false))"#),
+            printed.ends_with(r#" () ((x . -65)) (var "x" false))"#),
             "unexpected lambda shape: {}",
             printed
         );
@@ -3691,22 +3730,22 @@ mod tests {
     /// one place visible in another.
     #[test]
     fn a_captured_binding_becomes_a_cell() {
-        let printed = bridged("(let ((n int-any-width (int-any-width 1))) (lambda () int-any-width (var n)))");
+        let printed = bridged("(let ((n i32 (int-any-width 1 i32))) (lambda () i32 (var n)))");
         // The binding itself gains the island's `10 +` cell marker over the
         // int field classification.
-        assert!(printed.starts_with("(let (((n . 11) int-any-width 0 1))"), "the binder should create the cell: {}", printed);
+        assert!(printed.starts_with("(let (((n . 275) int-any-width 65 0 1))"), "the binder should create the cell: {}", printed);
         // The capture is a cell in the closure that receives it...
-        assert!(printed.contains("((n . 11))"), "{}", printed);
+        assert!(printed.contains("((n . 275))"), "{}", printed);
         // ...and the reference reads through it.
-        assert!(printed.contains(r#"(cellvar "n" 1)"#), "{}", printed);
+        assert!(printed.contains(r#"(cellvar "n" 265)"#), "{}", printed);
     }
 
     /// A binding no closure captures stays an ordinary slot, so the cell
     /// machinery is not simply always on.
     #[test]
     fn an_uncaptured_binding_stays_a_plain_slot() {
-        let printed = bridged("(let ((n int-any-width (int-any-width 1))) (lambda ((m int-any-width)) int-any-width (var m)))");
-        assert!(printed.starts_with("(let (((n . 0)) int-any-width 0 1))") || printed.contains("(n . 0)"), "{}", printed);
+        let printed = bridged("(let ((n i32 (int-any-width 1 i32))) (lambda ((m i32)) i32 (var m)))");
+        assert!(printed.starts_with("(let (((n . 0)) int-any-width 65 0 1))") || printed.contains("(n . 0)"), "{}", printed);
         assert!(!printed.contains("cellvar"), "nothing is captured here: {}", printed);
     }
 
@@ -3714,8 +3753,8 @@ mod tests {
     /// is a different island tag from an ordinary one.
     #[test]
     fn assigning_a_captured_binding_writes_through_the_cell() {
-        let printed = bridged("(let ((n int-any-width (int-any-width 1))) (lambda () unit (set n (int-any-width 2))))");
-        assert!(printed.contains(r#"(cellset "n" 1 (int-any-width 0 2))"#), "{}", printed);
+        let printed = bridged("(let ((n i32 (int-any-width 1 i32))) (lambda () unit (set n (int-any-width 2 i32))))");
+        assert!(printed.contains(r#"(cellset "n" 265 (int-any-width 65 0 2))"#), "{}", printed);
     }
 
     /// `labels` siblings are callable directly, through the function
@@ -3724,8 +3763,8 @@ mod tests {
     #[test]
     fn labels_siblings_are_called_directly() {
         let printed =
-            bridged("(labels ((go ((i int-any-width)) int-any-width (var i))) (apply (var go) int-any-width (int-any-width) (int-any-width 1)))");
-        assert_eq!(printed, r#"(labels () (("go" ((i . 0)) (var "i" false))) (apply "go" (0 int-any-width 0 1)))"#);
+            bridged("(labels ((go ((i i32)) i32 (var i))) (apply (var go) i32 (i32) (int-any-width 1 i32)))");
+        assert_eq!(printed, r#"(labels () (("go" ((i . -65)) (var "i" false))) (apply "go" 65 (0 int-any-width 65 0 1)))"#);
     }
 
     /// A `labels` block captures what its defs refer to from outside, and
@@ -3733,18 +3772,18 @@ mod tests {
     #[test]
     fn a_labels_block_captures_what_its_defs_refer_to() {
         let printed = bridged(
-            "(let ((k int-any-width (int-any-width 5))) (labels ((go ((i int-any-width)) int-any-width (var k))) (apply (var go) int-any-width (int-any-width) (int-any-width 1))))",
+            "(let ((k i32 (int-any-width 5 i32))) (labels ((go ((i i32)) i32 (var k))) (apply (var go) i32 (i32) (int-any-width 1 i32))))",
         );
-        assert!(printed.contains("(labels ((k . 11))"), "the captured list should be a cell: {}", printed);
-        assert!(printed.contains(r#"(cellvar "k" 1)"#), "{}", printed);
+        assert!(printed.contains("(labels ((k . 275))"), "the captured list should be a cell: {}", printed);
+        assert!(printed.contains(r#"(cellvar "k" 265)"#), "{}", printed);
     }
 
     /// Calling something that is not a sibling dispatches through the value.
     #[test]
     fn an_unknown_callee_is_dispatched_indirectly() {
         assert_eq!(
-            bridged("(let ((f fn (var g))) (apply (var f) int-any-width (int-any-width) (int-any-width 1)))"),
-            r#"(let (((f . 2) var "g" false)) (apply-indirect (var "f" false) (0 int-any-width 0 1)))"#
+            bridged("(let ((f fn (var g))) (apply (var f) i32 (i32) (int-any-width 1 i32)))"),
+            r#"(let (((f . 2) var "g" false)) (apply-indirect (var "f" false) 65 (0 int-any-width 65 0 1)))"#
         );
     }
 
@@ -3753,10 +3792,10 @@ mod tests {
     /// at all.
     #[test]
     fn an_immediately_invoked_lambda_becomes_a_labels_block() {
-        let printed = bridged("(apply (lambda ((x int-any-width)) int-any-width (var x)) int-any-width (int-any-width) (int-any-width 2))");
+        let printed = bridged("(apply (lambda ((x i32)) i32 (var x)) i32 (i32) (int-any-width 2 i32))");
         assert!(printed.starts_with("(labels () ((\"__lambda$"), "{}", printed);
-        assert!(printed.ends_with(r#"((x . 0)) (var "x" false))) (apply "__lambda$0" (0 int-any-width 0 2)))"#)
-            || printed.contains(r#"((x . 0)) (var "x" false)))"#), "{}", printed);
+        assert!(printed.ends_with(r#"((x . -65)) (var "x" false))) (apply "__lambda$0" 65 (0 int-any-width 65 0 2)))"#)
+            || printed.contains(r#"((x . -65)) (var "x" false)))"#), "{}", printed);
         assert!(!printed.contains("apply-indirect"), "it does not escape: {}", printed);
     }
 
@@ -3765,10 +3804,10 @@ mod tests {
     /// a second runtime representation.
     #[test]
     fn a_function_reference_becomes_a_forwarding_closure() {
-        let printed = bridged("(fnref ::f (int-any-width int-any-width))");
+        let printed = bridged("(fnref ::f (i32 i32) i32)");
         assert!(
             printed.ends_with(
-                r#" () ((arg0 . 0) (arg1 . 0)) (call "tl_f" (0 var "arg0" false) (0 var "arg1" false)))"#
+                r#" () ((arg0 . -65) (arg1 . -65)) (call "tl_f" 65 (0 var "arg0" false) (0 var "arg1" false)))"#
             ),
             "{}",
             printed
@@ -3777,9 +3816,9 @@ mod tests {
 
     #[test]
     fn a_method_reference_forwards_onto_the_method() {
-        let printed = bridged("(methodref ::point area (struct) \"i32\")");
+        let printed = bridged("(methodref ::point area (struct) \"i32\" i32)");
         assert!(
-            printed.ends_with(r#" () ((arg0 . 2)) (assoc () "area" true "tl_point''area" (2 var "arg0" false)))"#),
+            printed.ends_with(r#" () ((arg0 . 2)) (assoc () "area" true "tl_point''area" 65 (2 var "arg0" false)))"#),
             "{}",
             printed
         );
@@ -3798,23 +3837,23 @@ mod tests {
         assert_eq!(bridged(r"(quote #\a)"), r"(construct true false () 3 (char #\a))");
         assert_eq!(
             bridged(r#"(quote "hi")"#),
-            "(construct true false () 6 (str (int-any-width 0 104) (int-any-width 0 105)))"
+            "(construct true false () 6 (str (int-any-width 64 0 104) (int-any-width 64 0 105)))"
         );
         // A symbol is interned at run time rather than stored, hence a marker
         // past the variant numbering: its name, then its home's segments —
         // here `%core`, the module this IR text is read in.
         assert_eq!(
             bridged("(quote foo)"),
-            "(construct true false () 100 (str (int-any-width 0 102) (int-any-width 0 111) (int-any-width 0 111)) \
-             (str (int-any-width 0 37) (int-any-width 0 99) (int-any-width 0 111) (int-any-width 0 114) (int-any-width 0 101)))"
+            "(construct true false () 100 (str (int-any-width 64 0 102) (int-any-width 64 0 111) (int-any-width 64 0 111)) \
+             (str (int-any-width 64 0 37) (int-any-width 64 0 99) (int-any-width 64 0 111) (int-any-width 64 0 114) (int-any-width 64 0 101)))"
         );
         assert_eq!(bridged("(sym foo)"), bridged("(quote foo)"));
         // A path's segments each become a symbol, named by its module as a
         // quoted symbol is: `m` the root's, `x` `m`'s.
         assert_eq!(
             bridged("(quote m::x)"),
-            "(construct true false () 101 (construct true false () 100 (str (int-any-width 0 109))) \
-             (construct true false () 100 (str (int-any-width 0 120)) (str (int-any-width 0 109))))"
+            "(construct true false () 101 (construct true false () 100 (str (int-any-width 64 0 109))) \
+             (construct true false () 100 (str (int-any-width 64 0 120)) (str (int-any-width 64 0 109))))"
         );
     }
 
@@ -3837,8 +3876,8 @@ mod tests {
         assert_eq!(printed, r#"(dyn-new 11 (2 var "p" false))"#);
         assert_eq!(bridged_with_dyn("(dyn-upcast ::drawable (var d))"), r#"(dyn-upcast 22 (2 var "d" false))"#);
         assert_eq!(
-            bridged_with_dyn("(dyn-call shape area 0 ((point area)) (dyn) (var d))"),
-            r#"(dyn-call 0 (2 var "d" false))"#
+            bridged_with_dyn("(dyn-call shape area 0 ((point area)) i32 (dyn) (var d))"),
+            r#"(dyn-call 0 65 (2 var "d" false))"#
         );
         assert_eq!(bridged_with_dyn("(dyn-value (var d))"), r#"(dyn-value (2 var "d" false))"#);
     }
@@ -3856,7 +3895,7 @@ mod tests {
     fn the_boxed_values_kind_follows_its_representation() {
         let as_struct = bridged_with_dyn(r#"(dyn-new (type-named ::point) ::shape ((::point area)) () struct (var p))"#);
         let as_enum = bridged_with_dyn(r#"(dyn-new (type-named ::point) ::shape ((::point area)) () enum (var p))"#);
-        let as_int = bridged_with_dyn(r#"(dyn-new (type-named ::point) ::shape ((::point area)) () int-any-width (var p))"#);
+        let as_int = bridged_with_dyn(r#"(dyn-new (type-named ::point) ::shape ((::point area)) () i32 (var p))"#);
         assert!(as_struct.contains("(2 var"), "{}", as_struct);
         assert!(as_enum.contains("(2 var"), "{}", as_enum);
         assert!(as_int.contains("(0 var"), "{}", as_int);
@@ -3892,13 +3931,13 @@ mod tests {
     #[test]
     fn a_defun_becomes_the_boundary_triple() {
         let (name, params, body) =
-            top_level(&[], "(defun ::m::add ((a int-any-width) (b int-any-width)) int-any-width (assoc ::std::primitive::i32 + true int-any-width (int-any-width int-any-width) (type-named ::std::primitive::i32) (var a) (var b)))")
+            top_level(&[], "(defun ::m::add ((a i32) (b i32)) i32 (assoc ::std::primitive::i32 + true i32 (i32 i32) (type-named ::std::primitive::i32) (var a) (var b)))")
                 .expect("a defun is compiled");
         assert_eq!(name, "tl_m::add");
-        assert_eq!(params, "((a . 0) (b . 0))");
-        assert_eq!(body, r#"(assoc i32 "+" true "tl_std::primitive::i32''+" (0 var "a" false) (0 var "b" false))"#);
+        assert_eq!(params, "((a . -65) (b . -65))");
+        assert_eq!(body, r#"(assoc i32 "+" true "tl_std::primitive::i32''+" 65 (0 var "a" false) (0 var "b" false))"#);
         // The same mangling a call to it produces.
-        assert!(bridged("(call ::m::add ())").contains(r#""tl_m::add""#));
+        assert!(bridged("(call ::m::add i32 ())").contains(r#""tl_m::add""#));
     }
 
     /// A method mangles through the type path, so two same-named types in
@@ -3906,18 +3945,18 @@ mod tests {
     #[test]
     fn a_defmethod_mangles_through_its_type() {
         let (name, params, body) =
-            top_level(&[], "(defmethod ::m::point area false ((self struct)) int-any-width (field-get (var self) 0 int-any-width))")
+            top_level(&[], "(defmethod ::m::point area false ((self struct)) i32 (field-get (var self) 0 i32))")
                 .expect("a defmethod is compiled");
         assert_eq!(name, "tl_m::point''area");
         assert_eq!(params, "((self . 2))");
-        assert_eq!(body, r#"(field-get () 1 (var "self" false))"#);
+        assert_eq!(body, r#"(field-get () 265 (var "self" false))"#);
     }
 
     /// A multi-form body collapses to a `progn`, the same as everywhere else.
     #[test]
     fn a_multi_form_body_collapses() {
-        let (_, _, body) = top_level(&[], "(defun ::f () unit (int-any-width 1) (unit))").expect("compiled");
-        assert_eq!(body, "(let () (int-any-width 0 1) (unit))");
+        let (_, _, body) = top_level(&[], "(defun ::f () unit (int-any-width 1 i32) (unit))").expect("compiled");
+        assert_eq!(body, "(let () (int-any-width 65 0 1) (unit))");
     }
 
     /// The cell set is derived from the body rather than asked for, since
@@ -3926,9 +3965,9 @@ mod tests {
     #[test]
     fn a_parameter_a_closure_captures_is_a_cell_without_being_told() {
         let (_, params, body) =
-            top_level(&[], "(defun ::f ((n int-any-width)) fn (lambda () int-any-width (var n)))").expect("compiled");
-        assert_eq!(params, "((n . 11))", "the parameter should be bound as a cell");
-        assert!(body.contains(r#"(cellvar "n" 1)"#), "{}", body);
+            top_level(&[], "(defun ::f ((n i32)) fn (lambda () i32 (var n)))").expect("compiled");
+        assert_eq!(params, "((n . 275))", "the parameter should be bound as a cell");
+        assert!(body.contains(r#"(cellvar "n" 265)"#), "{}", body);
     }
 
     /// Most of the top level is not compiled, and saying so is not a refusal:
@@ -3938,13 +3977,13 @@ mod tests {
     #[test]
     fn the_rest_of_the_top_level_is_not_compiled() {
         for src in [
-            "(defstruct ::point (int-any-width int-any-width))",
+            "(defstruct ::point (i32 i32))",
             "(defenum ::m::color (red green blue) (() () ()))",
             "(defmacro m::when (c body) true (1 () ()) (quote ()))",
             "(use ::m::helper other::helper)",
             r#"(load "lib.typl")"#,
-            "(expr (int-any-width 0 42))",
-            "(module ::m (expr (int-any-width 0 1)))",
+            "(expr (int-any-width 65 0 42))",
+            "(module ::m (expr (int-any-width 65 0 1)))",
         ] {
             assert!(top_level(&[], src).is_none(), "{} should not be compiled as a function", src);
         }
@@ -3962,7 +4001,7 @@ mod tests {
         let form = read_core(&mut h, "(defvar ::m::total sexpr true (quote ()))").expect("read failed")[0];
         h.push_root(form);
         let node = global_init(&mut h, form, cx).expect("translation failed").expect("a defvar has one");
-        assert_eq!(core::print(&h, node), "(global-init 6 (construct true false () 0))");
+        assert_eq!(core::print(&h, node), "(global-init 7 6 (construct true false () 0))");
         // Nothing else is one.
         let other = read_core(&mut h, "(defun ::f () unit (unit))").expect("read failed")[0];
         assert!(global_init(&mut h, other, cx).expect("translation failed").is_none());
@@ -3974,10 +4013,10 @@ mod tests {
     fn a_type_inside_a_module_is_recorded_too() {
         assert!(
             bridged_with(
-                &["(module ::m (defstruct ::m::point (int-any-width sexpr)))"],
-                "(construct ::m::point (type-named ::m::point) 0 true (int-any-width sexpr) (int-any-width 1) (quote ()))"
+                &["(module ::m (defstruct ::m::point (i32 sexpr)))"],
+                "(construct ::m::point (type-named ::m::point) 0 true (i32 sexpr) (int-any-width 1 i32) (quote ()))"
             )
-            .contains("(1 int-any-width 0 1)")
+            .contains("(265 int-any-width 65 0 1)")
         );
     }
 
@@ -3992,8 +4031,8 @@ mod tests {
     #[test]
     fn an_untranslated_tag_names_itself() {
         assert!(refused("(defun ::m::f () unit (unit))").contains("`defun`"));
-        assert!(refused("(defvar ::m::x int-any-width true (int-any-width 0))").contains("`defvar`"));
-        assert!(refused("(module ::m (expr (int-any-width 1)))").contains("`module`"));
+        assert!(refused("(defvar ::m::x i32 true (int-any-width 0 i32))").contains("`defvar`"));
+        assert!(refused("(module ::m (expr (int-any-width 1 i32)))").contains("`module`"));
     }
 
     /// A mismatched representation list is an internal error, not something
@@ -4001,7 +4040,7 @@ mod tests {
     /// argument.
     #[test]
     fn an_argument_list_that_disagrees_with_its_representations_is_refused() {
-        let e = refused("(call ::f (int-any-width) (int-any-width 1) (int-any-width 2))");
+        let e = refused("(call ::f i32 (i32) (int-any-width 1 i32) (int-any-width 2 i32))");
         assert!(e.contains("1 argument representations for 2 arguments"), "{}", e);
     }
 }

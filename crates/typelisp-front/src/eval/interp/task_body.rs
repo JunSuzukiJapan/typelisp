@@ -12,7 +12,7 @@
 //! to the interpreter's thread **for good** — it is never handed back out.
 
 use typelisp_mem::{Heap, Value};
-use typelisp_rt::sched::{self, CompiledTask, Progress, SchedError, TaskBody, TaskFailure};
+use typelisp_rt::sched::{CompiledTask, Progress, SchedError, TaskBody, TaskFailure};
 
 use super::core_cps::Task;
 use super::Interp;
@@ -57,6 +57,7 @@ unsafe impl Sync for TyplCx {}
 
 impl TyplCx {
     /// What a worker steps tasks with.
+    #[cfg(not(target_family = "wasm"))]
     const NONE: TyplCx = TyplCx(std::ptr::null());
 
     /// What the interpreter's own thread steps tasks with, for as long as
@@ -66,9 +67,6 @@ impl TyplCx {
     }
 }
 
-/// The worker's context, `'static` because a worker thread outlives any
-/// borrow of the drive that started it.
-static WORKER_CX: TyplCx = TyplCx::NONE;
 
 impl TyplBody {
     /// A task the interpreter runs.
@@ -173,7 +171,7 @@ fn failure_error(f: TaskFailure) -> EvalError {
 
 impl Interp {
     /// Gives this interpreter's scheduler its crew of worker threads
-    /// (`sched::install_crew`), the first time it is driven — there is no
+    /// (`typelisp_rt_posix::threads::install_crew`), the first time it is driven — there is no
     /// heap to attach them to before. `TYPELISP_THREADS` threads step tasks,
     /// this one included, as in an executable.
     ///
@@ -182,57 +180,84 @@ impl Interp {
     /// or an `eval`-carrying executable's own tables — and has none of the
     /// interpreter's hooks: what needs the interpreter from a worker's
     /// machine frame is refused as a panic in the task
-    /// ([`refuse_apply_off_main`]).
+    /// (`crew::refuse_apply_off_main`).
+    ///
+    /// WebAssembly has no other thread: there the scheduler is left with the
+    /// one it has.
     pub(super) fn install_crew(&self, heap: &mut Heap) -> Result<(), EvalError> {
         if self.crew_installed.get() {
             return Ok(());
         }
-        let threads = sched::thread_count().map_err(EvalError::Internal)?;
-        let rt = typelisp_rt::shared::rt_shared();
-        let print = typelisp_print::shared::print_shared();
-        let snapshot = std::sync::Arc::clone(&self.worker_print);
-        let executable_printer = self.executable_printer.get();
-        sched::install_crew(&self.scheduler, heap, threads - 1, &WORKER_CX, move || {
-            typelisp_rt::shared::set_rt_shared(std::sync::Arc::clone(&rt));
-            // Shared either way: besides the executable's tables it holds how
-            // type names are written (`PrintShared::name_view`), which the
-            // snapshot's hooks print with too.
-            typelisp_print::shared::set_print_shared(std::sync::Arc::clone(&print));
-            if executable_printer {
-                typelisp_print::aot::install();
-            } else {
-                super::worker_print::install(std::sync::Arc::clone(&snapshot));
-            }
-            typelisp_rt::set_apply_interpreted(Some(refuse_apply_off_main));
-            typelisp_rt::set_dyn_slot_closure(Some(refuse_dyn_off_main));
-        });
+        #[cfg(not(target_family = "wasm"))]
+        self.install_os_crew(heap)?;
+        #[cfg(target_family = "wasm")]
+        let _ = heap;
         self.crew_installed.set(true);
         Ok(())
     }
+
 }
 
-/// What a worker's machine frame does with an interpreted callee: a compiled
-/// body driven to completion on a Rust frame (a `print-object` reached
-/// through the printer's door) cannot stop and move to the interpreter's
-/// thread, so the call is refused as a panic the program can catch. A task's
-/// own chain never gets here — it stops and moves (`Progress::NeedsMain`).
-///
-/// # Safety
-///
-/// Only ever called as `typelisp_rt`'s apply hook.
-unsafe extern "C-unwind" fn refuse_apply_off_main(_closure: i64, _args: *const i64, _argc: u32) -> i64 {
-    typelisp_abi::raise(OFF_MAIN.to_string()).into_word()
-}
+/// The worker threads, which WebAssembly has none of.
+#[cfg(not(target_family = "wasm"))]
+mod crew {
+    use typelisp_mem::{Heap, Word};
 
-/// [`refuse_apply_off_main`] for a `:dyn` call whose method nobody compiled.
-///
-/// # Safety
-///
-/// Only ever called as `typelisp_rt`'s `:dyn` hook.
-unsafe extern "C-unwind" fn refuse_dyn_off_main(_vtable: u32, _slot: u32) -> i64 {
-    typelisp_abi::raise(OFF_MAIN.to_string()).into_word()
-}
+    use super::{Interp, TyplCx};
+    use crate::eval::value::EvalError;
 
-const OFF_MAIN: &str = "an interpreted function was called from compiled code running on a worker thread, \
-     inside a call that cannot move to the interpreter's thread (a print method, say); \
-     `compile` the function, or make the call from the main task";
+    /// The worker's context, `'static` because a worker thread outlives any
+    /// borrow of the drive that started it.
+    static WORKER_CX: TyplCx = TyplCx::NONE;
+
+    impl Interp {
+        pub(super) fn install_os_crew(&self, heap: &mut Heap) -> Result<(), EvalError> {
+            let threads = typelisp_rt_posix::threads::thread_count().map_err(EvalError::Internal)?;
+            let rt = typelisp_rt::shared::rt_shared();
+            let print = typelisp_print::shared::print_shared();
+            let snapshot = std::sync::Arc::clone(&self.worker_print);
+            let executable_printer = self.executable_printer.get();
+            typelisp_rt_posix::threads::install_crew(&self.scheduler, heap, threads - 1, &WORKER_CX, move || {
+                typelisp_rt::shared::set_rt_shared(std::sync::Arc::clone(&rt));
+                // Shared either way: besides the executable's tables it holds how
+                // type names are written (`PrintShared::name_view`), which the
+                // snapshot's hooks print with too.
+                typelisp_print::shared::set_print_shared(std::sync::Arc::clone(&print));
+                if executable_printer {
+                    typelisp_print::aot::install();
+                } else {
+                    super::super::worker_print::install(std::sync::Arc::clone(&snapshot));
+                }
+                typelisp_rt::set_apply_interpreted(Some(refuse_apply_off_main));
+                typelisp_rt::set_dyn_slot_closure(Some(refuse_dyn_off_main));
+            })
+            .map_err(EvalError::Internal)
+        }
+    }
+
+    /// What a worker's machine frame does with an interpreted callee: a compiled
+    /// body driven to completion on a Rust frame (a `print-object` reached
+    /// through the printer's door) cannot stop and move to the interpreter's
+    /// thread, so the call is refused as a panic the program can catch. A task's
+    /// own chain never gets here — it stops and moves (`Progress::NeedsMain`).
+    ///
+    /// # Safety
+    ///
+    /// Only ever called as `typelisp_rt`'s apply hook.
+    unsafe extern "C-unwind" fn refuse_apply_off_main(_closure: Word, _args: *const Word, _argc: u32) -> i64 {
+        typelisp_abi::raise(OFF_MAIN.to_string()).into_zero()
+    }
+
+    /// [`refuse_apply_off_main`] for a `:dyn` call whose method nobody compiled.
+    ///
+    /// # Safety
+    ///
+    /// Only ever called as `typelisp_rt`'s `:dyn` hook.
+    unsafe extern "C-unwind" fn refuse_dyn_off_main(_vtable: u32, _slot: u32) -> Word {
+        typelisp_abi::raise(OFF_MAIN.to_string()).into_word()
+    }
+
+    const OFF_MAIN: &str = "an interpreted function was called from compiled code running on a worker thread, \
+         inside a call that cannot move to the interpreter's thread (a print method, say); \
+         `compile` the function, or make the call from the main task";
+}

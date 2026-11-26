@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ ac5a6b3adada21a0a55e0e1c4b0e1fabf4854908 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 1b5dc6ac828d8e4a95800a91218b5e9dffe83f98 -->
 # typelisp 語法參考
 
 typelisp 是一種靜態型別的 Lisp，語法採用 S 運算式。內建函式與方法的一覽見[內建函式](functions/README.md)，型別一覽見 [types.md](types.md)，
@@ -47,7 +47,7 @@ typelisp 是一種靜態型別的 Lisp，語法採用 S 運算式。內建函式
 - **向量**：`#(1 2 3)`（與 CL 相同）。內容全部是字面值，不會求值——`#(a b)` 中的 `a` 是符號而不是變數。元素型別由上下文決定（`(the Vector<i32> #(1 2))`），沒有上下文時取第一個元素的型別（`#(1 2 3)` 是 `Vector<int>`）。元素型別必須一致，`#(1 "a")` 是型別錯誤。既沒有元素也沒有上下文的 `#()` 也是型別錯誤。每次求值都會建立新的向量。在預期 S 運算式資料的位置（`(the Option<Sexpr> #(1 x))`、`'#(..)`、`read` 讀到的資料），它是元素全部為資料的 `Vector<Option<Sexpr>>`——即 `Sexpr` 的 `Vector` 變體。
 - **陣列**：`#2A((1 2) (3 4))`（與 CL 相同）。`#` 與 `A` 之間的數是維數，內容中串列巢狀的前這麼多層就是各個維度。`#0A x` 是只有一個元素的零維陣列。同一層的串列長度不一致是讀取錯誤。型別的決定方式與向量相同，結果是 `Array<T>`（沒有元素時需要上下文，例如 `(the Array<f64> #2A(()))`）。作為 S 運算式資料，它是 `Array<Option<Sexpr>>`——即 `Sexpr` 的 `Array` 變體。
 - **元組**：`#{"foo" 123 45.6}`。內容全部是字面值，不求值（`#{a b}` 的 `a` 是符號）。各元素的型別依位置由上下文決定（`(the #{i32 f64} #{1 2.0})`），沒有上下文時就是各元素自身的型別（`#{"foo" 123}` 是 `#{string int}`）。元素為 1～12 個。每次求值都會產生新的元組。要用計算出的值建構元組，使用 `(tuple a b)`。在期望 S 運算式資料的位置，它是元素全部為資料的元組——即 `Sexpr` 的 `Tuple` 變體。
-- **屬性**：`#[test]` 是附加在下一個形式上的標記（與 Rust 的寫法相同）。目前唯一的屬性是 `test`，加在 `defun` 上（[3.16 `#[test]`](#316-test--測試函式)）。用 `read` 讀取時，它會成為串列 `(%internal::attribute (test) form)`。
+- **屬性**：`#[test]` 是附在下一個形式上的標記（寫法與 Rust 相同）。屬性有 `test`、`interrupt(N)`、`exception(NAME)` 三個，都附在 `defun` 上（[3.16 `#[test]`](#316-test--測試函式)、[3.17 中斷處理程式](#317-interruptn--exceptionname--中斷處理程式)）。帶引數的屬性在名稱後面緊接括號書寫。用 `read` 讀取，會成為 `(%internal::attribute (test) form)`、`(%internal::attribute ((interrupt 7)) form)` 這樣的串列。
 - **空串列 `()`**：依上下文，是 `Unit` 型別的值，或是 `Option<Sexpr>` 的 `None`。**`Sexpr` 沒有空串列的變體**——`Sexpr` 表示「非空的 S
   運算式」，S 運算式資料的型別是 `Option<Sexpr>`（見 [4.3 match](#43-match--模式比對) 的「`Option<Sexpr>` 的模式」）。
 - **quote/quasiquote/unquote**：
@@ -254,8 +254,7 @@ C 的符號名稱。
 
 #### ptr / c-long / c-ulong —— 原始機器字
 
-`ptr` 是不透明指標（`void *`、`FILE *`，或者宣告所指的任何東西）。`c-long` / `c-ulong` 是 C 的 `long` / `unsigned long`（`size_t`、
-`int64_t`、`intptr_t` 也一樣）。
+`ptr` 是不透明指標（`void *`、`FILE *`，或者宣告所指的任何東西）。`c-long` / `c-ulong` 是 C 的 `long` / `unsigned long`（`size_t`、`intptr_t` 也一樣）。
 
 ```lisp
 (defffi (c-malloc "malloc") (c-ulong) ptr)
@@ -266,14 +265,14 @@ C 的符號名稱。
 ```
 
 **不叫 `i64` / `u64` 是刻意的。** 這個語言沒有 64 位元整數型別——帶標籤的立即值只有 63 位元（[第 2 章](#2-型別的寫法)）。`c-long` 這個名稱在
-說「這是跨越與 C 邊界的字，不是這個語言的整數」。
+說「這是跨越與 C 邊界的字，不是這個語言的整數」。寬度與編譯目標的 C 的 `long` 相同（64 位元的 macOS 與 Linux 上為 64 位元，wasm32 與 Cortex-M 上為 32 位元）。
 
 **沒有算術。** 不能寫 `(+ x 1)`。能提供卻沒有提供，是為了不讓無處保存、寬度與其他所有數都不同的值參與計算——與去掉 64 位元整數型別的理由相同。
 有的**只是轉換**：
 
 ```lisp
 (as i32 (unsafe (c-strlen "hello")))         ; 讀取回傳的東西
-(as int (unsafe (c-strlen s)))               ; 要精確讀取用這個（int 不會失去 64 位元）
+(as int (unsafe (c-strlen s)))               ; 要精確讀取用這個（int 不會失去值）
 (try-as i32 (unsafe (c-strlen s)))           ; 詢問能否放下
 (as c-ulong n)                               ; 從其他整數建立
 ```
@@ -377,7 +376,7 @@ C 函式的呼叫只能寫在 `unsafe` 中，所以只有在 `unsafe` 中才能�
 宣告與 C 配置相同的結構。只能寫在頂層的 `unsafe` 中（那個 `unsafe` 中只能寫 `def-c-struct`）。可以在名稱之後放置文件字串。
 
 欄位可以寫的型別是 `i8` `i16` `i32` `u8` `u16` `u32` `c-long` `c-ulong` `f32` `f64` `bool` `ptr`、型別化指標 `(ptr T)`，以及其他
-`def-c-struct`（以值嵌入）。配置（各欄位的位移、結構的大小與對齊）依 C 的規則計算（以 LP64 為前提）。可以寫指向自己的欄位，但不能嵌入自己。
+`def-c-struct`（以值嵌入）。配置（各欄位的位移、結構的大小與對齊）依 C 的規則計算（`c-long` 與指標的寬度以及 `f64` 的對齊遵循編譯目標的 C）。可以寫指向自己的欄位，但不能嵌入自己。
 
 ```lisp
 (unsafe
@@ -398,6 +397,7 @@ C 函式的呼叫只能寫在 `unsafe` 中，所以只有在 `unsafe` 中才能�
 | `(c-alloc T)` / `(c-alloc T n)` | 配置 `n` 個（省略時 1 個）`T`。內容填入 0。回傳 `(ptr T)` |
 | `(c-ref p i)` | 從 `p` 起第 `i` 個元素的指標。超出配置範圍時是錯誤 |
 | `(c-deref p)` / `(setf (c-deref p) v)` | 讀取／寫入 `p` 所指的純量 |
+| `(volatile-read-u32 addr)` / `(volatile-write-u32 addr v)` | 讀取或寫入位址 `addr`（`int`，或 `u16` 等固定寬度的整數）處的暫存器，在該位置恰好一次。`-u8`、`-u16` 亦同 |
 | `p::field` / `(setf p::field v)` | 讀取／寫入結構的欄位。讀取嵌入的結構欄位會得到其位址（`(ptr 內部型別)`） |
 | `(as ptr p)` | 忘掉型別成為 `ptr`（為了傳給 `qsort` 的 `void *` 之類）。沒有反方向的轉換 |
 
@@ -1037,6 +1037,34 @@ test result: FAILED. 1 passed; 1 failed; 0 filtered out
 
 測試中 `print` 的內容會直接輸出到標準輸出（不擷取）。用於調查的輸出，使用寫到標準錯誤輸出的 `eprint`/`eprintln`（[列印](functions/printing.md)），就不會與程式的輸出混在一起。
 
+### 3.17 `#[interrupt(N)]` / `#[exception(NAME)]` — 中斷處理程式
+
+```lisp
+(use std::board::enable-interrupt)
+(defvar (*received* int) 0)
+
+#[interrupt(7)]
+(defun on-uart () ()
+  (unsafe (volatile-write-u32 #x4000400C 1))   ; 清除引發中斷的原因
+  (setf *received* (+ *received* 1))
+  ())
+
+(defun main () ()
+  (enable-interrupt 7)
+  ...)
+```
+
+在為微控制器編譯的程式中（[編譯](../guide/compile.md) 的 3.8 節），這裡寫的是中斷到來時被呼叫的函式。`#[interrupt(N)]` 使函式成為周邊中斷 `N`（0～239）的處理程式，`#[exception(NAME)]` 使其成為核心例外 `NAME` 的處理程式，`NAME` 是 `NonMaskableInt`, `MemoryManagement`, `BusFault`, `UsageFault`, `SVCall`, `DebugMonitor`, `PendSV`, `SysTick` 之一（`HardFault` 由執行時期負責，會結束程式）。
+
+- 面向 Arduino Uno 時，編號方式和啟用方法不同，且不能使用 `#[exception(NAME)]` 和 `enable-interrupt`（[編譯](../guide/compile.md) 3.9 節）。下面說明中涉及執行階段的內容是針對 Cortex-M 的。
+- 附在不接受引數並回傳 `()` 的頂層 `defun` 上（也不能有型別參數）。一個中斷只有一個處理程式，一個函式也只處理一個中斷。
+- 周邊中斷在用 `(enable-interrupt N)` 啟用之前不會到來（用 `(disable-interrupt N)` 停止。參見 [系統](functions/system.md)）。SysTick 等例外只要把暫存器設為引發它就會到來。
+- 處理程式在中斷到來的地方立即執行。但若在執行時期的處理（配置、GC、輸出、工作切換等）途中到來，則等該處理結束後再執行。處理程式之間不會互相打斷。
+- 處理程式中不會發生 GC（需要時會擴大堆積）。程式的狀態（全域變數等）可以照常讀寫。
+- 處理程式不能等待。使用 `sleep` 的處理程式會產生編譯錯誤。像從通道接收這樣是否等待在執行時期才決定的操作，只有在無需等待時才能使用，若需要等待則會 panic。
+- 離開處理程式的 `panic` 與 `throw` 會像未被捕捉時一樣結束程式。
+- 在直譯器中以及面向微控制器以外目標的編譯中，中斷不會到來。在直譯器中，處理程式可以像一般函式一樣呼叫（可用於測試）。面向微控制器以外目標的 `typl -c`，若有處理程式會產生編譯錯誤。
+
 ## 4. 繫結與條件分支
 
 ```lisp
@@ -1421,6 +1449,8 @@ CL 以裸符號書寫子句詞（`(loop for i from 1 to 3 collect i)`），但�
 (todo)                              ; 展開為 (panic "todo")。defmacro
 (as Type expr)                      ; 數值/字元的型別轉換。可能失敗的轉換失敗時 panic
 (try-as Type expr)                  ; 與 as 相同，但以 Option<Type> 回傳結果（失敗時為 None）
+(size-of Type)                      ; Type 的值的位元組數（int）
+(size-of-val expr)                  ; expr 的型別的值的位元組數（int）。不對 expr 求值
 (print control args...)             ; 展開格式寫到標準輸出（不換行）
 (println control args...)           ; 同上（最後換行）
 (format dest control args...)       ; CL 的 format。回傳展開結果的 string
@@ -1461,6 +1491,28 @@ CL 以裸符號書寫子句詞（`(loop for i from 1 to 3 collect i)`），但�
 
 從 `rational` 可以轉換為 `int`（`as` 截斷，`try-as` 僅在為整數時成功）、`ratio` 和 `f64`；從
 `int`/`ratio` 可以轉換為 `rational`。
+
+`size-of`/`size-of-val` 相當於 C 的 `sizeof`。答案是編譯時決定的常數，即程式碼執行的目標上的大小：
+
+| 型別 | 位元組數 |
+|---|---|
+| `i8` `u8` `bool` | 1 |
+| `i16` `u16` | 2 |
+| `i32` `u32` `f32` `char` | 4 |
+| `f64` | 8 |
+| `c-long` `c-ulong` | 與目標的 C `long` 相同 |
+| `ptr` `(ptr T)` | 與目標的指標相同 |
+| `def-c-struct` | 與 C 結構相同（含填補） |
+| `()` | 0 |
+| 其餘（`int`、`string`、`defstruct` 的型別等） | 一個字（與目標的指標相同）。是值本身，或表示值所在的位置 |
+
+```lisp
+(size-of u16)                       ; => 2
+(size-of-val (as i8 5))             ; => 1
+(let ((x 1.0)) (size-of-val x))     ; => 8
+```
+
+也可以寫泛型函式的型別參數，由每次呼叫的型別決定。`!` 沒有值，因此是錯誤。`def-c-struct` 的型別在 `unsafe` 之外也可以寫。
 
 `documentation` 與 `quote`/`compile` 一樣是不對 `name` 求值、以未求值的裸符號/`::` 路徑讀取的特殊形式。與 CL 的 `(documentation 'name 'function)`
 不同，不接受型別引數——依變數→函式→型別→trait→巨集的順序（與把裸識別字作為運算式求值時的優先順序相同）解析 `name`，回傳找到的定義的文件
@@ -1758,9 +1810,8 @@ typl --image session.typld             # REPL 也一樣
   留在那裡**（不會回去）。長時間的處理途中只要接觸過一次直譯執行的程式碼，剩下的部分就在直譯器的執行緒上執行。
 - **`typl` 的工作執行緒只存活一次頂層求值的時間。** 在 REPL 等待輸入期間以及頂層形式之間，其他執行緒不推進任務（剩下的任務在下次求值時接著
   執行）。求值結束時會等待各執行緒完成目前的一步，所以如果 `thread` 中有持續阻塞的 C 函式（`defffi`），在它返回之前求值不會結束。
-- **worker 上的印出**：解譯執行的 `print-object` 方法，以及 `~/name/` 所呼叫的解譯執行的函式與方法，
-  不能在其他執行緒上執行，所以在其他執行緒印出這樣的值會產生與 `(panic ...)` 同等對待的 panic
-  （`(compile T::print-object)`，或從主任務印出）。
+- **worker 上的印出**：解譯執行的 `print-object` 方法不能在其他執行緒上執行，所以在其他執行緒印出這樣的值
+  會產生與 `(panic ...)` 同等對待的 panic（`(compile T::print-object)`，或從主任務印出）。
 - **資料競爭是未定義的**（與 Go 立場相同）。不經過 `Mutex<T>`・`Chan<T>` 從多個任務修改同一個值的結果沒有保證。
 - **`task` 回傳值。** 與 Go 的 `go` 敘述不同，它回傳 `Task<T>`，以 `(wait t)` 可以取得結果。
 - **沒有 nil 通道。** Go 的 fan-in 慣用法（把關閉的通道設為 `nil` 以從 `select` 的分支中去掉）無法寫出，所以為每個輸入啟動一個任務，再以

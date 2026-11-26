@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/format.md @ 59f6f286d9081f10d4e2d72836362c3efc3e42af -->
+<!-- translated-from: docs/ja/reference/functions/format.md @ 9657f5a39527be80deea76fe60ecc58ab1752689 -->
 # Biçim Yönergeleri
 
 `print`/`println`/`format`'ın denetim string'lerinde yazılan yönergeler. CL'nin `format` yönergelerinin
@@ -110,13 +110,13 @@ söyleyen `bool` değerlerdir.
 - Ad çözümlemesi bir çağrınınkiyle aynıdır ([Sözdizimi Başvurusu 3.10](../syntax.md#310-module--use--ad-alanları)). Argümanın türünün `name`
   metodu varsa o çağrılır; yoksa görünür `name` fonksiyonu. Bir modüldeki fonksiyon yoluyla belirtilebilir
   (`~/m::shout/`).
-- Çağrılabilen, typelisp ile yazılmış, argümanı, `colon`'ı ve `at`'i olduğu gibi alıp bir `string`
-  döndüren bir fonksiyon ya da metottur. Yerleşik fonksiyonlar çağrılamaz.
+- Çağrılan, argümanı, `colon`'ı ve `at`'i alıp bir `string` döndüren bir fonksiyon ya da metottur.
+  Yerleşik olanlar da çağrılabilir.
 - **Neyin çağrılacağı denetim sırasında belirlenir.** Denetleyici, `~*` ve `~[` ile yapılan atlamaları da
   hesaba katarak o `~/name/`'e ulaşabilecek her argümanı bulur ve adı her birinin türüne göre çözer.
-  Bunlardan biri çözülemezse denetim zamanı hatasıdır; ulaşabilecek argümanlar iki farklı tanımı çağıracaksa
-  da öyledir. Çalışma zamanında hiçbir ad aranmaz, bu yüzden AOT çalıştırılabilir dosyalarında da aynı
-  şekilde çalışır.
+  Bunlardan biri çözülemezse denetim zamanı hatasıdır. Ulaşabilecek argümanlar türlerine göre farklı
+  tanımları çağırabilir; çalışma zamanında gerçekten ulaşan argümanın türüne ait tanım çağrılır. Çalışma
+  zamanında hiçbir ad aranmaz, bu yüzden AOT çalıştırılabilir dosyalarında da aynı şekilde çalışır.
 - **`~{`, `~:{`, `~:@{` ve `~<...~:>` içinde kullanılamaz** (denetim zamanı hatası). Bir liste argümanının
   öğelerinin türü `Sexpr`'dir ve neyin çağrılacağını belirleyemez. `~@{` çağrının kalan argümanlarını
   dolaşır; türleri bilindiği için orada kullanılabilir.

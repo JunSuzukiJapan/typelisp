@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/option-result.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
+<!-- translated-from: docs/ja/reference/functions/option-result.md @ dff3b51792f6d9c49bb8802bd3d3fb6e168edd92 -->
 # Option, Result और त्रुटि टाइप
 
 ## 1. `Option<T>` / `Result<T,E>`
@@ -56,7 +56,7 @@ Rust की तरह, **`Option<T>` सामान्यतः कोई ब�
 |---|---|---|
 | `Option<U>` (नेस्टेड) | बॉक्स | भीतर का `None` बाहर के `None` जैसा ही मान होता |
 | `()` | बॉक्स | `()` का मान स्वयं खाली-सूची मान है |
-| `ptr` / `c-long` / `c-ulong` | बॉक्स | सभी 64 बिट मान हैं, अलग पहचानने के लिए कोई जगह नहीं बचती |
+| `ptr` / `c-long` / `c-ulong` | बॉक्स | सभी बिट मान हैं, अलग पहचानने के लिए कोई जगह नहीं बचती |
 | बाकी कुछ भी | बॉक्स नहीं | — |
 
 प्रतिनिधित्व केवल टाइप से तय होता है और मान से पढ़ा नहीं जा सकता। प्रिंट करते समय, `(Some ...)`/`None` स्टैटिक टाइप से पुनर्निर्मित होता है, इसलिए `(format false "~a" opt)` `(Some 1)` प्रिंट करता है। दो प्रतिबंध हैं:

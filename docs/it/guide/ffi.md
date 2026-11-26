@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/ffi.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
+<!-- translated-from: docs/ja/guide/ffi.md @ dff3b51792f6d9c49bb8802bd3d3fb6e168edd92 -->
 # FFI C (defffi)
 
 Questa guida spiega come chiamare funzioni C da typelisp. L'elenco dei tipi che si possono dichiarare
@@ -46,7 +46,7 @@ L'uso previsto è confinare `unsafe` in un unico punto e presentare all'esterno 
 | `bool` | `bool` (`_Bool`) |
 | `()` | `void` |
 | `string` | `const char *` |
-| `c-long` / `c-ulong` | `long` / `unsigned long` (anche `size_t`, `int64_t` e così via) |
+| `c-long` / `c-ulong` | `long` / `unsigned long` (anche `size_t` e così via) |
 | `ptr` | Qualsiasi puntatore (`void *`, `FILE *` e così via) |
 | `(ptr T)` | Un puntatore a `T` ([sezione 7](#7-strutture-c)) |
 
@@ -63,10 +63,10 @@ L'uso previsto è confinare `unsafe` in un unico punto e presentare all'esterno 
 ### `c-long` / `c-ulong` / `ptr`
 
 Questi tipi esistono solo per passare valori attraverso il confine con C e **non supportano alcuna
-aritmetica**. Per usarne uno come intero typelisp, convertilo con `as`.
+aritmetica**. Per usarne uno come intero typelisp, convertilo con `as`. La loro larghezza è quella del C della macchina su cui gira il programma (64 bit sia per `c-long` sia per i puntatori su macOS e Linux a 64 bit, 32 bit quando `--target` indica wasm32 o un Cortex-M).
 
 ```lisp
-(as int (unsafe (c-strlen s)))      ; int does not lose any of the 64-bit value
+(as int (unsafe (c-strlen s)))      ; int loses none of the value
 (try-as i32 (unsafe (c-strlen s)))  ; None if it does not fit in an i32
 (unsafe (c-malloc 16))              ; integer literals can be passed as they are
 ```

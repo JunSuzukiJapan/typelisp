@@ -1,36 +1,25 @@
-//! The four things the operating system knows and `std` will not tell us.
+//! What the operating system knows and `std` will not tell us, as safe Rust
+//! signatures over one C call each, with the `unsafe` kept inside.
 //!
-//! **This is the only module in the workspace that calls the C library
-//! directly.** Everything else reaches libc the way all Rust does — through a
-//! `std` wrapper that owns the `unsafe`. Here that ownership is ours, so it
-//! is worth having one file to read rather than four scattered `unsafe`
-//! blocks: every function below is a *safe* Rust signature over one C call,
-//! and the `unsafe` never escapes.
+//! CPU time (`getrusage`), the host's name and OS release (`uname`), a file's
+//! owner (`getpwuid_r`), the dynamic linker ([`dl_open`]/[`dl_sym`], which is
+//! how a `(defffi ...)` finds the function it names), the one place a socket
+//! is waited on ([`poll_ready`], the scheduler's, not any stream's), a connect
+//! that returns before the handshake does ([`tcp_connect_begin`]), and how
+//! one thread interrupts another's `poll` ([`SelfPipe`]). The two answers the
+//! host layer needs from the C library (the local time zone and the CPU's
+//! name) are in `typelisp_mem::host` instead.
 //!
-//! What forced it: CPU time (`getrusage`), the host's name and OS release
-//! (`uname`), a file's owner (`getpwuid_r`) and the local time zone
-//! (`localtime_r`). `std` has no equivalent of any of them, deliberately in
-//! the last case — see [`timezone_at`].
+//! Every query returns `Option`, and the `None`s are real: CL says
+//! `machine-instance`, `software-version` and `file-author` may all answer
+//! `NIL`. That is what makes reporting a failure honest rather than a
+//! made-up constant.
 //!
-//! Since the C FFI, one more: the dynamic linker ([`dl_open`]/[`dl_sym`]),
-//! which is how a `(defffi ...)` finds the function it names. Same rule as
-//! the rest — a safe signature over one C call, `unsafe` kept inside.
-//!
-//! Since TCP, two more: [`poll_ready`], the one place a socket is waited on
-//! (the scheduler's, not any stream's), and [`tcp_connect_begin`], a connect
-//! that returns before the handshake does — `std` offers neither.
-//!
-//! Since tasks run on several OS threads, one more: [`SelfPipe`], which is
-//! how one thread interrupts another's `poll`.
-//!
-//! Every one of these returns `Option`, and the `None`s are real: CL says
-//! `machine-instance`, `machine-version`, `software-version` and
-//! `file-author` may all answer `NIL`. That is what makes reporting a failure
-//! honest rather than a made-up constant.
-//!
-//! **Not portable off Unix.** `getrusage`/`uname`/`getpwuid_r`/`tm_gmtoff`
-//! are POSIX, and this workspace's first `#[cfg]` split is here. The non-Unix
-//! arms are `unimplemented!()` rather than a plausible-looking answer.
+//! **Not portable off Unix.** `getrusage`/`uname`/`getpwuid_r` are POSIX. The
+//! non-Unix arms are `unimplemented!()` rather than a plausible-looking
+//! answer.
+
+use typelisp_mem::prelude::*;
 
 /// Whole microseconds of CPU time this process has used — user plus system,
 /// which is what CL's `get-internal-run-time` counts and what
@@ -46,7 +35,7 @@ pub fn run_time_micros() -> Option<i64> {
     // and `RUSAGE_SELF` is the constant libc defines for it. `getrusage`
     // writes only through the pointer we pass and touches no global state.
     let ru = unsafe {
-        let mut ru: libc::rusage = std::mem::zeroed();
+        let mut ru: libc::rusage = core::mem::zeroed();
         if libc::getrusage(libc::RUSAGE_SELF, &mut ru) != 0 {
             return None;
         }
@@ -99,82 +88,12 @@ fn uname_field(field: impl Fn(&libc::utsname) -> *const libc::c_char) -> Option<
     // it is valid for the `CStr` read below, and every `utsname` field is
     // NUL-terminated by contract.
     unsafe {
-        let mut u: libc::utsname = std::mem::zeroed();
+        let mut u: libc::utsname = core::mem::zeroed();
         if libc::uname(&mut u) != 0 {
             return None;
         }
-        let s = std::ffi::CStr::from_ptr(field(&u));
+        let s = core::ffi::CStr::from_ptr(field(&u));
         s.to_str().ok().filter(|s| !s.is_empty()).map(|s| s.to_string())
-    }
-}
-
-/// A human-readable name for the hardware — CL's `machine-version`.
-///
-/// No POSIX call answers this, so each platform is asked its own way and
-/// anything else says `None` (which CL explicitly allows). Note the contrast
-/// with the neighbours above: `machine-type` is `std::env::consts::ARCH`, the
-/// architecture this *binary* was built for; this is the chip it is running
-/// on.
-#[cfg(target_os = "macos")]
-pub fn machine_version() -> Option<String> {
-    sysctl_string("machdep.cpu.brand_string")
-}
-
-#[cfg(target_os = "linux")]
-pub fn machine_version() -> Option<String> {
-    // `/proc/cpuinfo` rather than a syscall: there is no sysctl for this on
-    // Linux, and the file is the source every tool reads. x86 spells the
-    // field `model name`; on ARM the closest is `Model` (the board), so both
-    // are accepted, in that order of preference.
-    let text = std::fs::read_to_string("/proc/cpuinfo").ok()?;
-    let field = |key: &str| {
-        text.lines()
-            .find_map(|l| l.split_once(':').filter(|(k, _)| k.trim() == key).map(|(_, v)| v.trim().to_string()))
-            .filter(|v| !v.is_empty())
-    };
-    field("model name").or_else(|| field("Model"))
-}
-
-#[cfg(not(any(target_os = "macos", target_os = "linux")))]
-pub fn machine_version() -> Option<String> {
-    // CL allows `NIL` here, and this is the honest answer on a platform
-    // nobody has taught this function about — not an `unimplemented!()`,
-    // because "cannot be computed" is a value the specification defines.
-    None
-}
-
-/// A `sysctl` string by name, sized by the two-call protocol `sysctlbyname`
-/// specifies (ask with a null buffer, then read).
-#[cfg(target_os = "macos")]
-fn sysctl_string(name: &str) -> Option<String> {
-    let cname = std::ffi::CString::new(name).ok()?;
-    // SAFETY: both calls pass a NUL-terminated name and a `len` that
-    // describes the buffer being written. The first passes a null buffer,
-    // which is how `sysctlbyname` is asked for the size; the second passes a
-    // `Vec` of exactly that size and cannot overrun it. `newp`/`newlen` are
-    // null/0, so nothing is written back into the kernel.
-    unsafe {
-        let mut len: libc::size_t = 0;
-        if libc::sysctlbyname(cname.as_ptr(), std::ptr::null_mut(), &mut len, std::ptr::null_mut(), 0) != 0 {
-            return None;
-        }
-        if len == 0 {
-            return None;
-        }
-        let mut buf = vec![0u8; len];
-        if libc::sysctlbyname(
-            cname.as_ptr(),
-            buf.as_mut_ptr() as *mut libc::c_void,
-            &mut len,
-            std::ptr::null_mut(),
-            0,
-        ) != 0
-        {
-            return None;
-        }
-        // The value is NUL-terminated and `len` counts the NUL.
-        buf.truncate(len.saturating_sub(1));
-        String::from_utf8(buf).ok().filter(|s| !s.is_empty())
     }
 }
 
@@ -195,12 +114,12 @@ pub fn user_name(uid: u32) -> Option<String> {
         // pointer into shared state. `pwd.pw_name` points into `buf` and so
         // is read before either is dropped.
         let (rc, found, name) = unsafe {
-            let mut pwd: libc::passwd = std::mem::zeroed();
-            let mut result: *mut libc::passwd = std::ptr::null_mut();
+            let mut pwd: libc::passwd = core::mem::zeroed();
+            let mut result: *mut libc::passwd = core::ptr::null_mut();
             let rc = libc::getpwuid_r(uid as libc::uid_t, &mut pwd, buf.as_mut_ptr(), buf.len(), &mut result);
             let found = !result.is_null();
             let name = if rc == 0 && found && !pwd.pw_name.is_null() {
-                std::ffi::CStr::from_ptr(pwd.pw_name).to_str().ok().map(|s| s.to_string())
+                core::ffi::CStr::from_ptr(pwd.pw_name).to_str().ok().map(|s| s.to_string())
             } else {
                 None
             };
@@ -241,77 +160,6 @@ pub fn file_owner(_path: &str) -> std::io::Result<Option<String>> {
     unimplemented!("file-author needs a uid and getpwuid_r, which are POSIX")
 }
 
-/// The local time zone in effect at `unix_secs`, as `(seconds west of
-/// Greenwich, daylight saving in effect)` — the pair SBCL's `get_timezone`
-/// returns from the same call, for the same reason.
-///
-/// **Why the offset takes a time**: it is not a property of the machine but
-/// of the instant. The same host is 5 hours west in January and 4 in July,
-/// and a program decoding a stored timestamp must use the rules that were in
-/// force *then*.
-///
-/// Sign: CL's zone is positive going **west**, `tm_gmtoff` is positive going
-/// **east**, so this negates. Seconds and not hours because the offset is not
-/// always a whole number of them — India is +5:30, Nepal +5:45, Chatham
-/// +12:45 — and rounding here would be a silent lie for a billion people.
-///
-/// **On thread safety.** `localtime_r` reads `TZ` through `getenv`, which
-/// races with any concurrent `setenv`: that is [RUSTSEC-2020-0071], and it is
-/// why Rust made `std::env::set_var` `unsafe` in edition 2024 rather than
-/// blame the C library.
-///
-/// Nothing in this workspace writes an environment variable — there is no
-/// `setenv` builtin and `std::env::set_var` appears nowhere — and that used to
-/// be the whole argument. **The C FFI ended it.** `(defffi (c-setenv "setenv")
-/// (string string i32) i32)` is a line any program may now write, and no
-/// promise this workspace makes about its own code can cover it.
-///
-/// So the obligation moved rather than disappeared: it belongs to whoever
-/// writes that declaration, which is exactly what `(unsafe ...)` is for — the
-/// mark that a premise nothing can check has been taken on. A program that
-/// writes the environment from one thread while another asks for the time zone
-/// has the race, and `docs/ja/reference/syntax.md` §4.1 lists process-global state among the
-/// things `unsafe` accepts responsibility for. Adding a `setenv` *builtin*
-/// — reachable with no `unsafe` at all — is still the thing not to do.
-///
-/// [RUSTSEC-2020-0071]: https://rustsec.org/advisories/RUSTSEC-2020-0071
-#[cfg(unix)]
-pub fn timezone_at(unix_secs: i64) -> Option<(i32, bool)> {
-    // SAFETY: `t` and `tm` are owned locals that outlive the call, and
-    // `localtime_r` writes only through the `tm` pointer (the `_r` form keeps
-    // no static state and returns either that same pointer or null). The
-    // environment race the doc comment describes is ruled out by this
-    // workspace never writing one.
-    unsafe {
-        let t = unix_secs as libc::time_t;
-        let mut tm: libc::tm = std::mem::zeroed();
-        if libc::localtime_r(&t, &mut tm).is_null() {
-            return None;
-        }
-        Some((-(tm.tm_gmtoff as i64) as i32, tm.tm_isdst > 0))
-    }
-}
-
-/// In a `wasm32-unknown-unknown` module the page or program that loaded it
-/// answers, from JavaScript's `Date`.
-#[cfg(all(target_family = "wasm", target_os = "unknown"))]
-pub fn timezone_at(unix_secs: i64) -> Option<(i32, bool)> {
-    typelisp_mem::host::timezone_at(unix_secs)
-}
-
-/// WASI preview 1 has no time zone to ask about, so the local one is unknown
-/// at every instant: the prelude's `local-zone-west` panics on that `None`,
-/// which is where a program that decodes into local time stops.
-#[cfg(target_os = "wasi")]
-pub fn timezone_at(_unix_secs: i64) -> Option<(i32, bool)> {
-    None
-}
-
-#[cfg(all(not(unix), not(target_family = "wasm")))]
-pub fn timezone_at(_unix_secs: i64) -> Option<(i32, bool)> {
-    unimplemented!("the local time zone needs localtime_r and tm_gmtoff, which are POSIX")
-}
-
 /// Open the shared library at `path`, or `None` if it cannot be opened.
 ///
 /// **Never closed.** JIT-compiled thunks and, in an AOT build, the program's
@@ -324,7 +172,7 @@ pub fn timezone_at(_unix_secs: i64) -> Option<(i32, bool)> {
 /// this one — the ordinary way a set of related libraries is loaded.
 #[cfg(unix)]
 pub fn dl_open(path: &str) -> Option<usize> {
-    let c = std::ffi::CString::new(path).ok()?;
+    let c = alloc::ffi::CString::new(path).ok()?;
     // SAFETY: `c` is a NUL-terminated string that outlives the call, and the
     // flags are the constants libc defines. `dlopen` reads the name and
     // returns either a handle or null; it writes nothing through our pointer.
@@ -346,7 +194,7 @@ pub fn dl_open(path: &str) -> Option<usize> {
 /// absence. No such symbol is callable, which is all this is used for.
 #[cfg(unix)]
 pub fn dl_sym(handle: usize, symbol: &str) -> Option<usize> {
-    let c = std::ffi::CString::new(symbol).ok()?;
+    let c = alloc::ffi::CString::new(symbol).ok()?;
     let h = if handle == 0 { libc::RTLD_DEFAULT } else { handle as *mut libc::c_void };
     // SAFETY: `c` outlives the call. `handle` is either `RTLD_DEFAULT` or a
     // value `dl_open` returned from `dlopen` and never closed, so it is still
@@ -369,28 +217,31 @@ pub fn dl_sym(_handle: usize, _symbol: &str) -> Option<usize> {
     unimplemented!("the FFI needs dlsym, which is POSIX")
 }
 
-/// What a socket wait is for: the readiness `poll_ready` reports and the
-/// scheduler parks a task on.
-///
-/// Defined here, in the crate that makes the `poll` call, so that the front
-/// end (which owns the scheduler) and the builtins (which own the sockets)
-/// name the same two things without either depending on the other for it.
-/// The wire form is `net-wait`'s second argument: 0 readable, 1 writable.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub enum Interest {
-    Readable,
-    Writable,
+use typelisp_rt::sched::Interest;
+
+/// The scheduler's way to watch the descriptors its tasks wait on
+/// ([`typelisp_rt::sched::Poller`]): [`poll_ready`].
+pub struct OsPoller;
+
+/// The one [`OsPoller`]: what every socket backend names as the poller its
+/// waits are watched with.
+pub static POLLER: OsPoller = OsPoller;
+
+impl typelisp_rt::sched::Poller for OsPoller {
+    fn poll_ready(&self, fds: &[(i32, Interest)], timeout: Option<core::time::Duration>) -> Result<Vec<(i32, bool)>, String> {
+        poll_ready(fds, timeout).map_err(|e| e.to_string())
+    }
 }
 
-impl Interest {
-    /// The integer `net-wait` takes — `0` readable, `1` writable — or `None`
-    /// for anything else, which is the caller's error to report.
-    pub fn from_code(code: i64) -> Option<Interest> {
-        match code {
-            0 => Some(Interest::Readable),
-            1 => Some(Interest::Writable),
-            _ => None,
-        }
+impl typelisp_rt::sched::Waker for SelfPipe {
+    fn read_fd(&self) -> i32 {
+        SelfPipe::read_fd(self)
+    }
+    fn kick(&self) {
+        SelfPipe::kick(self)
+    }
+    fn drain(&self) {
+        SelfPipe::drain(self)
     }
 }
 
@@ -414,7 +265,7 @@ impl Interest {
 ///
 /// `EINTR` is retried with the remaining timeout: a signal is not an answer.
 #[cfg(unix)]
-pub fn poll_ready(fds: &[(i32, Interest)], timeout: Option<std::time::Duration>) -> std::io::Result<Vec<(i32, bool)>> {
+pub fn poll_ready(fds: &[(i32, Interest)], timeout: Option<core::time::Duration>) -> std::io::Result<Vec<(i32, bool)>> {
     let mut polls: Vec<libc::pollfd> = fds
         .iter()
         .map(|(fd, interest)| libc::pollfd {
@@ -426,14 +277,14 @@ pub fn poll_ready(fds: &[(i32, Interest)], timeout: Option<std::time::Duration>)
             revents: 0,
         })
         .collect();
-    let deadline = timeout.map(|t| std::time::Instant::now() + t);
+    let deadline = timeout.map(|t| typelisp_mem::host::Instant::now() + t);
     loop {
         // Milliseconds, rounded *up*: rounding down would turn a 0.5ms wait
         // into a busy loop. `-1` is "no timeout".
         let ms: libc::c_int = match deadline {
             None => -1,
             Some(d) => {
-                let left = d.saturating_duration_since(std::time::Instant::now());
+                let left = d.saturating_duration_since(typelisp_mem::host::Instant::now());
                 let ms = left.as_millis() + u128::from(left.subsec_nanos() % 1_000_000 != 0);
                 libc::c_int::try_from(ms).unwrap_or(libc::c_int::MAX)
             }
@@ -459,7 +310,7 @@ pub fn poll_ready(fds: &[(i32, Interest)], timeout: Option<std::time::Duration>)
 }
 
 #[cfg(not(unix))]
-pub fn poll_ready(_fds: &[(i32, Interest)], _timeout: Option<std::time::Duration>) -> std::io::Result<Vec<(i32, bool)>> {
+pub fn poll_ready(_fds: &[(i32, Interest)], _timeout: Option<core::time::Duration>) -> std::io::Result<Vec<(i32, bool)>> {
     unimplemented!("socket waits need poll, which is POSIX")
 }
 
@@ -532,7 +383,7 @@ impl SelfPipe {
 
 /// One thread runs every task on WebAssembly, so there is no other thread to
 /// wake and no socket to poll: the scheduler makes one of these and never
-/// polls ([`crate::sched::SchedShared`]).
+/// polls ([`typelisp_rt::sched::SchedShared`]).
 #[cfg(target_family = "wasm")]
 impl SelfPipe {
     pub fn new() -> std::io::Result<SelfPipe> {
@@ -614,7 +465,7 @@ pub fn tcp_connect_begin(addr: std::net::SocketAddr) -> std::io::Result<std::net
     stream.set_nonblocking(true)?;
     // The address as the kernel wants it. `sockaddr_storage` is large enough
     // for either family; only the family's own prefix is written.
-    let mut storage: libc::sockaddr_storage = unsafe { std::mem::zeroed() };
+    let mut storage: libc::sockaddr_storage = unsafe { core::mem::zeroed() };
     let len: libc::socklen_t = match addr {
         std::net::SocketAddr::V4(a) => {
             let sin = libc::sockaddr_in {
@@ -623,12 +474,12 @@ pub fn tcp_connect_begin(addr: std::net::SocketAddr) -> std::io::Result<std::net
                 sin_addr: libc::in_addr { s_addr: u32::from_ne_bytes(a.ip().octets()) },
                 sin_zero: [0; 8],
                 #[cfg(any(target_os = "macos", target_os = "ios", target_os = "freebsd", target_os = "netbsd", target_os = "openbsd"))]
-                sin_len: std::mem::size_of::<libc::sockaddr_in>() as u8,
+                sin_len: core::mem::size_of::<libc::sockaddr_in>() as u8,
             };
             // SAFETY: `storage` is at least as large as `sockaddr_in`, and both
             // are plain-old-data.
-            unsafe { std::ptr::write(&mut storage as *mut _ as *mut libc::sockaddr_in, sin) };
-            std::mem::size_of::<libc::sockaddr_in>() as libc::socklen_t
+            unsafe { core::ptr::write(&mut storage as *mut _ as *mut libc::sockaddr_in, sin) };
+            core::mem::size_of::<libc::sockaddr_in>() as libc::socklen_t
         }
         std::net::SocketAddr::V6(a) => {
             let sin6 = libc::sockaddr_in6 {
@@ -638,11 +489,11 @@ pub fn tcp_connect_begin(addr: std::net::SocketAddr) -> std::io::Result<std::net
                 sin6_addr: libc::in6_addr { s6_addr: a.ip().octets() },
                 sin6_scope_id: a.scope_id(),
                 #[cfg(any(target_os = "macos", target_os = "ios", target_os = "freebsd", target_os = "netbsd", target_os = "openbsd"))]
-                sin6_len: std::mem::size_of::<libc::sockaddr_in6>() as u8,
+                sin6_len: core::mem::size_of::<libc::sockaddr_in6>() as u8,
             };
             // SAFETY: as above, for `sockaddr_in6`.
-            unsafe { std::ptr::write(&mut storage as *mut _ as *mut libc::sockaddr_in6, sin6) };
-            std::mem::size_of::<libc::sockaddr_in6>() as libc::socklen_t
+            unsafe { core::ptr::write(&mut storage as *mut _ as *mut libc::sockaddr_in6, sin6) };
+            core::mem::size_of::<libc::sockaddr_in6>() as libc::socklen_t
         }
     };
     // SAFETY: `fd` is the live descriptor `stream` owns, `storage` holds a
@@ -701,7 +552,7 @@ fn setsockopt_int(fd: i32, level: i32, name: i32, value: i32) -> std::io::Result
             level,
             name,
             &value as *const i32 as *const libc::c_void,
-            std::mem::size_of::<i32>() as libc::socklen_t,
+            core::mem::size_of::<i32>() as libc::socklen_t,
         )
     };
     if rc == 0 {
@@ -763,37 +614,6 @@ mod tests {
         let uid = unsafe { libc::getuid() };
         let who = super::user_name(uid).expect("the running user has a passwd entry");
         assert!(!who.is_empty() && !who.contains('\0'), "{:?}", who);
-    }
-
-    #[test]
-    fn the_local_zone_is_a_plausible_offset() {
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .expect("the clock is after 1970")
-            .as_secs() as i64;
-        let (west, _dst) = super::timezone_at(now).expect("the host has a local zone");
-        // Real offsets run from +14:00 (Kiritimati, -50400 west) to -12:00
-        // (Baker Island, 43200 west).
-        assert!((-50_400..=43_200).contains(&west), "implausible offset: {}s west", west);
-        // Every zone in use is a whole number of minutes; the seconds-level
-        // offsets are pre-1900 local mean time.
-        assert_eq!(west % 60, 0, "offset is not a whole number of minutes: {}s", west);
-    }
-
-    /// The offset is a property of the instant, not of the machine — which is
-    /// why [`super::timezone_at`] takes one. A zone that observes daylight
-    /// saving reports different offsets in January and July; one that does
-    /// not reports the same. Both are correct, so the assertion is only that
-    /// asking twice does not fail.
-    #[test]
-    fn the_zone_can_be_asked_about_any_instant() {
-        let jan = super::timezone_at(1_704_067_200).expect("2024-01-01");
-        let jul = super::timezone_at(1_720_000_000).expect("2024-07-03");
-        assert!(jan.0 % 60 == 0 && jul.0 % 60 == 0);
-        // A pre-Unix-epoch instant is an ordinary negative `time_t`, and
-        // `decode-universal-time` reaches one for any date before 1970.
-        let pre = super::timezone_at(-2_208_988_800).expect("1900-01-01");
-        assert!((-50_400..=43_200).contains(&pre.0), "1900: {}s west", pre.0);
     }
 
     #[test]

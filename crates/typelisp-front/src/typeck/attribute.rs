@@ -1,7 +1,13 @@
 //! `#[ATTR...] FORM`, which the reader hands over as
-//! `(%internal::attribute (ATTR...) FORM)`. The one attribute is `test`, on
-//! a `defun` that takes nothing and returns `()` or `Result<(), E>`; what
-//! becomes of it depends on what is checked for (`TestForms`).
+//! `(%internal::attribute (ATTR...) FORM)`, an attribute with arguments
+//! (`interrupt(7)`) as the list `(interrupt 7)`. Each goes on a `defun` that
+//! takes nothing:
+//!
+//! - `test`, returning `()` or `Result<(), E>`; what becomes of it depends on
+//!   what is checked for (`TestForms`).
+//! - `interrupt(N)` and `exception(NAME)`, returning `()`: the function is the
+//!   handler of a board's interrupt `N` or of the core exception `NAME`
+//!   ([`Attributed::handlers`]). Anywhere else it is an ordinary function.
 
 use std::collections::BTreeMap;
 
@@ -15,11 +21,93 @@ use super::defun::{check_defun, parse_header};
 use super::generic::Requests;
 use super::registry::Registry;
 
-/// What a `#[test]` definition is checked into, and the tests found.
+/// What the definitions with an attribute are checked into.
 #[derive(Debug, Default)]
-pub(crate) struct Tests {
+pub(crate) struct Attributed {
     pub(crate) forms: TestForms,
+    /// The `#[test]` functions found.
     pub(crate) found: Vec<TestCase>,
+    /// The interrupt handlers, by the number of the vector-table entry each
+    /// is at: an exception's number, or 16 + an interrupt's.
+    pub(crate) handlers: BTreeMap<u16, Path>,
+}
+
+/// How many interrupts a Cortex-M core's vector table has entries for.
+pub const INTERRUPTS: i64 = 240;
+
+/// The core exceptions a program may handle, with their vector-table
+/// entries. `HardFault` is the runtime's, which ends the program; `Reset` is
+/// where the program starts.
+pub const EXCEPTIONS: [(&str, u16); 8] = [
+    ("NonMaskableInt", 2),
+    ("MemoryManagement", 4),
+    ("BusFault", 5),
+    ("UsageFault", 6),
+    ("SVCall", 11),
+    ("DebugMonitor", 12),
+    ("PendSV", 14),
+    ("SysTick", 15),
+];
+
+/// An attribute, as [`attribute`] reads it.
+enum Attribute {
+    Test,
+    /// A handler at this vector-table entry; the attribute as written, for
+    /// the messages.
+    Handler(u16, String),
+}
+
+/// The attributes there are, for a message about one that is not.
+const ATTRIBUTES: &str = "the attributes are `test`, `interrupt(N)` and `exception(NAME)`";
+
+/// The attribute `a` names.
+///
+/// `interrupt` and `exception` are told by their spelling: an attribute's
+/// name is read in the program's module and defines nothing, and putting the
+/// words in the vocabulary would make them reserved, so that no program could
+/// name a function `interrupt`. `test` is a vocabulary word already.
+fn attribute(heap: &Heap, a: Value) -> Result<Attribute, Error> {
+    let name_of = |v: Value| match v {
+        Value::Symbol(id) => Some(id),
+        _ => None,
+    };
+    let (name, args) = match a {
+        Value::Symbol(id) => (id, None),
+        Value::Cons(_) => match name_of(heap.car(a)?) {
+            Some(id) => (id, Some(heap.list_to_vec(heap.cdr(a)?)?)),
+            None => return Err(Error::TypeError(format!("an attribute is a name, or a name with its arguments: {}", ATTRIBUTES))),
+        },
+        _ => return Err(Error::TypeError(format!("an attribute is a name, or a name with its arguments: {}", ATTRIBUTES))),
+    };
+    let spelling = heap.symbol_spelling(name);
+    match (&*spelling, args.as_deref()) {
+        _ if name.is(wk::TEST) => match args {
+            None => Ok(Attribute::Test),
+            Some(_) => Err(Error::TypeError("`#[test]` takes no arguments".into())),
+        },
+        ("interrupt", Some([Value::Int(n)])) if (0..INTERRUPTS).contains(n) => {
+            Ok(Attribute::Handler(16 + *n as u16, format!("#[interrupt({})]", n)))
+        }
+        ("interrupt", Some([Value::Int(n)])) => Err(Error::TypeError(format!(
+            "`#[interrupt({})]`: an interrupt is numbered from 0 to {}",
+            n,
+            INTERRUPTS - 1
+        ))),
+        ("interrupt", _) => Err(Error::TypeError("an interrupt handler is written `#[interrupt(N)]`, N its number".into())),
+        ("exception", Some([Value::Symbol(e)])) => {
+            let e = heap.symbol_spelling(*e);
+            match EXCEPTIONS.iter().find(|(n, _)| *n == e) {
+                Some((_, vector)) => Ok(Attribute::Handler(*vector, format!("#[exception({})]", e))),
+                None => Err(Error::TypeError(format!(
+                    "`#[exception({})]`: the exceptions a program handles are {}",
+                    e,
+                    EXCEPTIONS.iter().map(|(n, _)| format!("`{}`", n)).collect::<Vec<_>>().join(", ")
+                ))),
+            }
+        }
+        ("exception", _) => Err(Error::TypeError("an exception handler is written `#[exception(NAME)]`, NAME the exception's".into())),
+        _ => Err(Error::TypeError(format!("unknown attribute `{}`: {}", spelling, ATTRIBUTES))),
+    }
 }
 
 /// Whether `head`, a form's head, is the reader's `%internal::attribute`.
@@ -37,38 +125,44 @@ pub(crate) fn check_attribute(
     d: &mut Definer,
     heap: &mut Heap,
     requests: &mut Requests,
-    tests: &mut Tests,
+    attributed: &mut Attributed,
     parts: &[(Value, Option<Loc>)],
 ) -> Result<Value, Error> {
     let [(attrs, _), (form, form_loc)] = parts else {
         return Err(Error::TypeError("an attribute is written `#[ATTR...] FORM`".into()));
     };
     let mut test = false;
+    let mut handler: Option<(u16, String)> = None;
     for a in heap.list_to_vec(*attrs)? {
-        match a {
-            Value::Symbol(id) if id.is(wk::TEST) => {
-                if test {
-                    return Err(Error::TypeError("`#[test]` is given twice".into()));
+        match attribute(heap, a)? {
+            Attribute::Test if test => return Err(Error::TypeError("`#[test]` is given twice".into())),
+            Attribute::Test => test = true,
+            Attribute::Handler(vector, written) => match &handler {
+                Some((_, first)) => {
+                    return Err(Error::TypeError(format!("`{}` and `{}`: a function handles one interrupt", first, written)))
                 }
-                test = true;
-            }
-            Value::Symbol(id) => {
-                return Err(Error::TypeError(format!(
-                    "unknown attribute `{}`: the one attribute is `test`",
-                    heap.symbol_spelling(id)
-                )))
-            }
-            _ => return Err(Error::TypeError("an attribute is a name: the one attribute is `test`".into())),
+                None => handler = Some((vector, written)),
+            },
         }
+    }
+    let what = match &handler {
+        Some((_, written)) => written.clone(),
+        None => "#[test]".to_string(),
+    };
+    if test && handler.is_some() {
+        return Err(Error::TypeError(format!("`#[test]` and `{}`: a test is not an interrupt handler", what)));
     }
     let elems = match form {
         Value::Cons(_) => heap.list_to_vec_locs(*form)?,
         _ => Vec::new(),
     };
     if !matches!(elems.first(), Some((Value::Symbol(id), _)) if id.is(wk::DEFUN)) {
-        return Err(Error::TypeError("`#[test]` goes on a `defun`".into()));
+        return Err(Error::TypeError(format!("`{}` goes on a `defun`", what)));
     }
-    if tests.forms == TestForms::Skip {
+    if let Some((vector, written)) = handler {
+        return check_handler(reg, d, heap, requests, attributed, &elems[1..], vector, &written);
+    }
+    if attributed.forms == TestForms::Skip {
         return crate::check::forms::module_form(heap, &Path::in_ns(d.site.ns, "nothing"), &[]);
     }
     let Some(&(header, _)) = elems.get(1) else {
@@ -85,9 +179,51 @@ pub(crate) fn check_attribute(
     let path = Path::of_symbol(d.site.ns, d.ownable(heap, name, "defun")?);
     let ret = &reg.fn_def(&path).expect("check_defun defined the function").ret;
     let returns = test_return(reg, name.name(), ret)?;
-    if tests.forms == TestForms::Collect {
+    if attributed.forms == TestForms::Collect {
         let loc = heap.cons_loc(*form).or(form_loc.clone());
-        tests.found.push(TestCase { path, ns: d.site.ns, name: header, returns, loc });
+        attributed.found.push(TestCase { path, ns: d.site.ns, name: header, returns, loc });
+    }
+    Ok(checked)
+}
+
+/// The `defun` (`parts` without its head) of the handler `written` at the
+/// vector-table entry `vector`: a function that takes nothing and returns
+/// `()`, defined like any other, and recorded in `attributed`.
+#[allow(clippy::too_many_arguments)]
+fn check_handler(
+    reg: &mut Registry,
+    d: &mut Definer,
+    heap: &mut Heap,
+    requests: &mut Requests,
+    attributed: &mut Attributed,
+    parts: &[(Value, Option<Loc>)],
+    vector: u16,
+    written: &str,
+) -> Result<Value, Error> {
+    let Some(&(header, _)) = parts.first() else {
+        return Err(Error::TypeError("defun: (defun name (params...) ret body...)".into()));
+    };
+    let (name, type_names) = parse_header(heap, header)?;
+    if !type_names.is_empty() {
+        return Err(Error::TypeError(format!("`{}` function `{}` cannot take type parameters", written, name.name())));
+    }
+    if parts.get(1).map(|(v, _)| *v) != Some(Value::Empty) {
+        return Err(Error::TypeError(format!("`{}` function `{}` cannot take parameters: nothing calls it with any", written, name.name())));
+    }
+    let checked = check_defun(reg, d, heap, requests, parts)?;
+    let path = Path::of_symbol(d.site.ns, d.ownable(heap, name, "defun")?);
+    let ret = &reg.fn_def(&path).expect("check_defun defined the function").ret;
+    if *ret != Type::Unit {
+        return Err(Error::TypeError(format!("`{}` function `{}` must return `()`, not `{}`: nothing reads its answer", written, name.name(), ret)));
+    }
+    match attributed.handlers.get(&vector) {
+        Some(other) if *other != path => {
+            return Err(Error::TypeError(format!("`{}` is handled by `{}` already, so `{}` cannot handle it too", written, other, path)))
+        }
+        _ => {
+            attributed.handlers.retain(|_, p| *p != path);
+            attributed.handlers.insert(vector, path);
+        }
     }
     Ok(checked)
 }

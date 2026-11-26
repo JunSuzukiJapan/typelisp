@@ -31,6 +31,7 @@
 //! drops a frame's values) and the `set_state` that re-roots what the next
 //! state carries. Nothing in between touches the heap.
 
+use typelisp_mem::Word;
 use typelisp_mem::{wk, Heap, SymRef, TypeId, Value};
 use typelisp_rt::sched::{self, chan_id_of, io_deadline, io_wait, task_id_of, ChanOp, Progress, SchedError, SelectOp, Waiting, Wake};
 
@@ -269,10 +270,10 @@ impl ArgsKind {
     /// How many leading fields are not arguments.
     fn skip(self) -> usize {
         match self {
-            ArgsKind::Call => 2,
+            ArgsKind::Call => 3,
             ArgsKind::Construct => 5,
             ArgsKind::Assoc => 6,
-            ArgsKind::DynCall => 5,
+            ArgsKind::DynCall => 6,
             ArgsKind::Apply => 3,
         }
     }
@@ -709,7 +710,7 @@ pub(super) fn escaped_task_failure(e: EvalError) -> EvalError {
 
 /// Places `e` at `loc`, if there is one. `EvalError::at` keeps the innermost
 /// location in the program's own source, so calling this more than once on
-/// the way out is harmless.
+/// The way out is harmless.
 fn place(e: EvalError, loc: Option<crate::Loc>) -> EvalError {
     match loc {
         Some(l) => e.at(l),
@@ -1295,10 +1296,7 @@ impl Interp {
     /// encodes to a word the collector never follows.
     fn deliver_wake(&self, heap: &mut Heap, task: &mut Task, v: Value, repr: &Repr) -> Result<(), EvalError> {
         let (words, roots) = self.encode_crossing_args(heap, &[v], std::slice::from_ref(repr), false)?;
-        let word = *words.first().ok_or_else(|| {
-            EvalError::Internal("delivering a wake value produced no word".to_string())
-        })?;
-        task.compiled.set_top_value(heap, word);
+        task.compiled.set_top_value(heap, typelisp_mem::raw_value(&words));
         for _ in 0..roots {
             heap.pop_root();
         }
@@ -1326,8 +1324,8 @@ impl Interp {
         heap: &mut Heap,
         task: &mut Task,
         drive: DriveCtx,
-        closure: i64,
-        argv: &[i64],
+        closure: Word,
+        argv: &[Word],
     ) -> Result<State, EvalError> {
         let f = typelisp_rt::decode(closure);
         let id = match f {
@@ -1350,13 +1348,7 @@ impl Interp {
         let ret = Repr::read(heap, heap.closure_ret(id)).ok_or_else(|| {
             EvalError::Internal("the applied closure has no declared return representation".to_string())
         })?;
-        if argv.len() != reprs.len() {
-            return Err(EvalError::Internal(format!(
-                "arity mismatch: the applied closure takes {} argument(s), given {}",
-                reprs.len(),
-                argv.len()
-            )));
-        }
+        let raws = super::crossing_values(argv, &reprs)?;
 
         task.stack.push(heap, Frame::DriveCompiled { drive, wake: ret }, None);
         // The box is reachable only from the caller's compiled frame, which
@@ -1365,8 +1357,8 @@ impl Interp {
         // them.
         let base = heap.root_count();
         heap.push_root(f);
-        let mut args = Vec::with_capacity(argv.len());
-        for (raw, r) in argv.iter().zip(&reprs) {
+        let mut args = Vec::with_capacity(raws.len());
+        for (raw, r) in raws.iter().zip(&reprs) {
             let v = self.decode_compiled_return(heap, *raw, r)?;
             heap.push_root(v);
             args.push(v);
@@ -1558,6 +1550,9 @@ impl Interp {
             }
             // The identity: an `int` value is what it is on this side; the
             // tag is compiled code's concern.
+            Op::LlvmSizeOfValue => Err(EvalError::Panic(
+                "std::dbg::llvm-size-of: interpreted code holds no value in an LLVM type; compile the function that asks".to_string(),
+            )),
             Op::TagInt => {
                 let inner = core::field(heap, form, 0)
                     .ok_or_else(|| EvalError::Internal("eval: (tag-int ..) has no operand".to_string()))?;
@@ -2049,11 +2044,10 @@ impl Interp {
                 args.len()
             )));
         }
-        let words = args
-            .iter()
-            .zip(&params)
-            .map(|(v, r)| super::encode_crossing_value(heap, v, r))
-            .collect::<Result<Vec<i64>, EvalError>>()?;
+        let mut words: Vec<Word> = Vec::with_capacity(args.len());
+        for (v, r) in args.iter().zip(&params) {
+            words.extend(typelisp_mem::value_words(super::encode_crossing_value(heap, v, r)?, super::crossing_bits(r)));
+        }
         let held = core::list(heap, &args).map_err(heap_err)?;
         heap.push_root(held);
         let answer: sched::AnswerDecoder = Box::new(move |heap: &mut Heap, word: i64| {
@@ -2088,7 +2082,7 @@ impl Interp {
                 Value::Cons(_) => Ok(typelisp_rt::encode(*f)),
                 other => Err(EvalError::Internal(format!("thread: a closure body form is not a core form: {:?}", other))),
             })
-            .collect::<Result<Vec<i64>, EvalError>>()?;
+            .collect::<Result<Vec<Word>, EvalError>>()?;
         let known = self.thread_entries.borrow().get(&key).cloned();
         let path = match known {
             Some(path) => path,
@@ -3235,7 +3229,7 @@ mod tests {
         let mut h = stress_heap();
         let v = eval_ok(
             &mut h,
-            "(call ::std::sexpr::sexpr-cons (sexpr sexpr) (int-any-width 1) (int-any-width 2))",
+            "(call ::std::sexpr::sexpr-cons sexpr (sexpr sexpr) (int-any-width 1) (int-any-width 2))",
         );
         assert_eq!(h.car(v).unwrap(), Value::Int(1));
         assert_eq!(h.cdr(v).unwrap(), Value::Int(2));
@@ -3248,7 +3242,7 @@ mod tests {
         let mut h = stress_heap();
         let v = eval_ok(
             &mut h,
-            "(call ::std::%internal::make-random-state-fresh ())",
+            "(call ::std::%internal::make-random-state-fresh sexpr ())",
         );
         assert!(matches!(v, Value::Boxed(_)), "expected a random-state box, got {:?}", v);
     }
@@ -3258,9 +3252,9 @@ mod tests {
     #[test]
     fn an_argument_that_is_itself_a_call_suspends_the_outer_one() {
         let mut h = stress_heap();
-        let src = "(call ::std::sexpr::sexpr-cons (sexpr sexpr) \
+        let src = "(call ::std::sexpr::sexpr-cons sexpr (sexpr sexpr) \
                      (str \"first\") \
-                     (call ::std::sexpr::sexpr-cons (sexpr sexpr) (int-any-width 1) (int-any-width 2)))";
+                     (call ::std::sexpr::sexpr-cons sexpr (sexpr sexpr) (int-any-width 1) (int-any-width 2)))";
         let v = eval_ok(&mut h, src);
         match h.car(v).unwrap() {
             Value::Str(id) => assert_eq!(&*h.string(id), "first"),
@@ -3277,7 +3271,7 @@ mod tests {
         let mut src = String::from("(unit)");
         for i in (0..30).rev() {
             src = format!(
-                "(call ::std::sexpr::sexpr-cons (sexpr sexpr) (str \"a{}\") {})",
+                "(call ::std::sexpr::sexpr-cons sexpr (sexpr sexpr) (str \"a{}\") {})",
                 i, src
             );
         }
@@ -3296,14 +3290,14 @@ mod tests {
     #[test]
     fn construct_builds_a_struct_and_field_get_reads_it() {
         let mut h = stress_heap();
-        let point = "(construct ::point (type-named ::point) 0 true (int-any-width int-any-width) \
+        let point = "(construct ::point (type-named ::point) 0 true (i32 i32) \
                        (int-any-width 1) (int-any-width 2))";
         assert_eq!(
-            eval_ok(&mut h, &format!("(field-get {} 1 int-any-width)", point)),
+            eval_ok(&mut h, &format!("(field-get {} 1 i32)", point)),
             Value::Int(2)
         );
         assert_eq!(
-            eval_ok(&mut h, &format!("(field-get {} 0 int-any-width)", point)),
+            eval_ok(&mut h, &format!("(field-get {} 0 i32)", point)),
             Value::Int(1)
         );
     }
@@ -3313,13 +3307,13 @@ mod tests {
     #[test]
     fn a_nested_construction_does_not_lose_the_outer_fields() {
         let mut h = stress_heap();
-        let inner = "(construct ::point (type-named ::point) 0 true (int-any-width int-any-width) \
+        let inner = "(construct ::point (type-named ::point) 0 true (i32 i32) \
                        (int-any-width 3) (int-any-width 4))";
         let outer = format!(
             "(construct ::pair (type-named ::pair) 0 true (str point) (str \"tag\") {})",
             inner
         );
-        let src = format!("(field-get (field-get {} 1 point) 0 int-any-width)", outer);
+        let src = format!("(field-get (field-get {} 1 point) 0 i32)", outer);
         assert_eq!(eval_ok(&mut h, &src), Value::Int(3));
     }
 
@@ -3328,9 +3322,9 @@ mod tests {
     #[test]
     fn a_struct_survives_being_bound_and_read_back() {
         let mut h = stress_heap();
-        let src = "(let ((p sexpr (construct ::point (type-named ::point) 0 true (int-any-width int-any-width) \
+        let src = "(let ((p sexpr (construct ::point (type-named ::point) 0 true (i32 i32) \
                                     (int-any-width 5) (int-any-width 6))))
-                     (field-get (var p) 1 int-any-width))";
+                     (field-get (var p) 1 i32))";
         assert_eq!(eval_ok(&mut h, src), Value::Int(6));
     }
 
@@ -3339,11 +3333,11 @@ mod tests {
     #[test]
     fn a_lambda_is_applied_to_its_arguments() {
         let mut h = stress_heap();
-        let src = "(apply (lambda ((x int-any-width)) int-any-width (var x)) int-any-width \
-                     (int-any-width) (int-any-width 5))";
+        let src = "(apply (lambda ((x i32)) i32 (var x)) i32 \
+                     (i32) (int-any-width 5))";
         assert_eq!(eval_ok(&mut h, src), Value::Int(5));
         assert_eq!(
-            eval_ok(&mut h, "(apply (lambda () int-any-width (int-any-width 7)) int-any-width ())"),
+            eval_ok(&mut h, "(apply (lambda () i32 (int-any-width 7)) i32 ())"),
             Value::Int(7)
         );
     }
@@ -3352,8 +3346,8 @@ mod tests {
     #[test]
     fn a_closure_captures_its_defining_environment() {
         let mut h = stress_heap();
-        let src = "(let ((n int-any-width (int-any-width 3)))
-                     (apply (lambda () int-any-width (var n)) int-any-width ()))";
+        let src = "(let ((n i32 (int-any-width 3)))
+                     (apply (lambda () i32 (var n)) i32 ()))";
         assert_eq!(eval_ok(&mut h, src), Value::Int(3));
     }
 
@@ -3362,10 +3356,10 @@ mod tests {
     #[test]
     fn labels_siblings_can_call_each_other() {
         let mut h = stress_heap();
-        let src = "(labels ((f ((x int-any-width)) int-any-width \
-                              (apply (var g) int-any-width (int-any-width) (var x))) \
-                            (g ((y int-any-width)) int-any-width (var y))) \
-                     (apply (var f) int-any-width (int-any-width) (int-any-width 3)))";
+        let src = "(labels ((f ((x i32)) i32 \
+                              (apply (var g) i32 (i32) (var x))) \
+                            (g ((y i32)) i32 (var y))) \
+                     (apply (var f) i32 (i32) (int-any-width 3)))";
         assert_eq!(eval_ok(&mut h, src), Value::Int(3));
     }
 
@@ -3401,13 +3395,13 @@ mod tests {
         const DEPTH: i64 = 20_000;
         let mut h = Heap::with_capacity(1 << 20);
 
-        let src = "(labels ((build ((n int-any-width)) sexpr
-                        (if (call ::std::sexpr::sexpr-null (sexpr) (var n))
+        let src = "(labels ((build ((n i32)) sexpr
+                        (if (call ::std::sexpr::sexpr-null sexpr (sexpr) (var n))
                             (unit)
-                            (call ::std::sexpr::sexpr-cons (sexpr sexpr)
+                            (call ::std::sexpr::sexpr-cons sexpr (sexpr sexpr)
                               (int-any-width 1)
                               (apply (var build) sexpr (sexpr)
-                                (call ::std::sexpr::sexpr-cdr (sexpr) (var n)))))))
+                                (call ::std::sexpr::sexpr-cdr sexpr (sexpr) (var n)))))))
                (apply (var build) sexpr (sexpr) (var xs)))".to_string();
 
         // `xs` is a list of DEPTH elements, built on the Rust side so the
@@ -3449,7 +3443,7 @@ mod tests {
     #[test]
     fn match_takes_the_first_arm_that_matches() {
         let mut h = stress_heap();
-        let src = "(match (int-any-width 2) int-any-width \
+        let src = "(match (int-any-width 2) i32 \
                      ((pat-lit (int-any-width 1)) (int-any-width 10)) \
                      ((pat-lit (int-any-width 2)) (int-any-width 20)) \
                      ((pat-wild) (int-any-width 99)))";
@@ -3459,7 +3453,7 @@ mod tests {
     #[test]
     fn a_wildcard_arm_catches_what_the_others_do_not() {
         let mut h = stress_heap();
-        let src = "(match (int-any-width 7) int-any-width \
+        let src = "(match (int-any-width 7) i32 \
                      ((pat-lit (int-any-width 1)) (int-any-width 10)) \
                      ((pat-wild) (int-any-width 99)))";
         assert_eq!(eval_ok(&mut h, src), Value::Int(99));
@@ -3470,7 +3464,7 @@ mod tests {
     fn a_binding_pattern_is_visible_in_the_arm() {
         let mut h = stress_heap();
         assert_eq!(
-            eval_ok(&mut h, "(match (int-any-width 5) int-any-width ((pat-bind x) (var x)))"),
+            eval_ok(&mut h, "(match (int-any-width 5) i32 ((pat-bind x) (var x)))"),
             Value::Int(5)
         );
     }
@@ -3492,10 +3486,10 @@ mod tests {
     #[test]
     fn field_set_writes_through_the_struct() {
         let mut h = stress_heap();
-        let src = "(let ((p sexpr (construct ::point (type-named ::point) 0 true (int-any-width int-any-width) \
+        let src = "(let ((p sexpr (construct ::point (type-named ::point) 0 true (i32 i32) \
                                     (int-any-width 1) (int-any-width 2))))
-                     (field-set (var p) 1 int-any-width (int-any-width 42))
-                     (field-get (var p) 1 int-any-width))";
+                     (field-set (var p) 1 i32 (int-any-width 42))
+                     (field-get (var p) 1 i32))";
         assert_eq!(eval_ok(&mut h, src), Value::Int(42));
     }
 
@@ -3504,7 +3498,7 @@ mod tests {
     #[test]
     fn the_object_survives_an_allocating_value_expression() {
         let mut h = stress_heap();
-        let src = r#"(let ((p sexpr (construct ::point (type-named ::point) 0 true (int-any-width str)
+        let src = r#"(let ((p sexpr (construct ::point (type-named ::point) 0 true (i32 str)
                                       (int-any-width 1) (str "old"))))
                        (field-set (var p) 1 str (str "new"))
                        (field-get (var p) 1 str))"#;
@@ -3547,7 +3541,7 @@ mod tests {
         let mut src = String::from("(unit)");
         for i in (0..n).rev() {
             src = format!(
-                "(call ::std::sexpr::sexpr-cons (sexpr sexpr) (int-any-width {}) {})",
+                "(call ::std::sexpr::sexpr-cons sexpr (sexpr sexpr) (int-any-width {}) {})",
                 i, src
             );
         }
@@ -3560,9 +3554,9 @@ mod tests {
         let src = format!(
             "(let ((lst r {}) (seen r (int-any-width 0)))
                (loop unit
-                     (if (call ::std::sexpr::sexpr-null (sexpr) (var lst)) (break) (unit))
-                     (set seen (call ::std::sexpr::sexpr-car (sexpr) (var lst)))
-                     (set lst (call ::std::sexpr::sexpr-cdr (sexpr) (var lst))))
+                     (if (call ::std::sexpr::sexpr-null sexpr (sexpr) (var lst)) (break) (unit))
+                     (set seen (call ::std::sexpr::sexpr-car sexpr (sexpr) (var lst)))
+                     (set lst (call ::std::sexpr::sexpr-cdr sexpr (sexpr) (var lst))))
                (var seen))",
             countdown_list(5)
         );
@@ -3576,7 +3570,7 @@ mod tests {
         let mut h = stress_heap();
         // `loop`'s leading field is its own `Repr` -- positional, so unlike
         // `catch`'s trailing one it cannot be left out of a hand-written form.
-        assert_eq!(eval_ok(&mut h, "(loop int-any-width (return (int-any-width 7)))"), Value::Int(7));
+        assert_eq!(eval_ok(&mut h, "(loop i32 (return (int-any-width 7)))"), Value::Int(7));
         assert_eq!(eval_ok(&mut h, "(loop unit (break))"), Value::Empty);
         assert_eq!(eval_ok(&mut h, "(loop unit (return))"), Value::Empty);
     }
@@ -3592,9 +3586,9 @@ mod tests {
             "(let ((lst r {}) (seen r (int-any-width 0)))
                (loop unit
                      (loop unit (break))
-                     (if (call ::std::sexpr::sexpr-null (sexpr) (var lst)) (break) (unit))
-                     (set seen (call ::std::sexpr::sexpr-car (sexpr) (var lst)))
-                     (set lst (call ::std::sexpr::sexpr-cdr (sexpr) (var lst))))
+                     (if (call ::std::sexpr::sexpr-null sexpr (sexpr) (var lst)) (break) (unit))
+                     (set seen (call ::std::sexpr::sexpr-car sexpr (sexpr) (var lst)))
+                     (set lst (call ::std::sexpr::sexpr-cdr sexpr (sexpr) (var lst))))
                (var seen))",
             countdown_list(3)
         );
@@ -3609,9 +3603,9 @@ mod tests {
         let src = format!(
             "(let ((lst r {}) (seen r (int-any-width 0)))
                (loop unit
-                     (if (call ::std::sexpr::sexpr-null (sexpr) (var lst)) (break) (unit))
-                     (set seen (call ::std::sexpr::sexpr-car (sexpr) (var lst)))
-                     (set lst (call ::std::sexpr::sexpr-cdr (sexpr) (var lst))))
+                     (if (call ::std::sexpr::sexpr-null sexpr (sexpr) (var lst)) (break) (unit))
+                     (set seen (call ::std::sexpr::sexpr-car sexpr (sexpr) (var lst)))
+                     (set lst (call ::std::sexpr::sexpr-cdr sexpr (sexpr) (var lst))))
                (var seen))",
             countdown_list(300)
         );
@@ -3737,8 +3731,8 @@ mod tests {
                          (unwind-protect
                            (unwind-protect
                              (throw (quote done) (int-any-width 0))
-                             (set trail (call ::std::sexpr::sexpr-cons (sexpr sexpr) (str "i") (var trail))))
-                           (set trail (call ::std::sexpr::sexpr-cons (sexpr sexpr) (str "o") (var trail)))))
+                             (set trail (call ::std::sexpr::sexpr-cons sexpr (sexpr sexpr) (str "i") (var trail))))
+                           (set trail (call ::std::sexpr::sexpr-cons sexpr (sexpr sexpr) (str "o") (var trail)))))
                        (var trail))"#;
         let v = eval_ok(&mut h, src);
         let head = h.car(v).unwrap();
@@ -3855,8 +3849,8 @@ mod tests {
         let mut h = stress_heap();
         let build = |tag: i64| {
             format!(
-                "(call ::std::sexpr::sexpr-cons (sexpr sexpr) (int-any-width {}) \
-                   (call ::std::sexpr::sexpr-cons (sexpr sexpr) (int-any-width {}) (unit)))",
+                "(call ::std::sexpr::sexpr-cons sexpr (sexpr sexpr) (int-any-width {}) \
+                   (call ::std::sexpr::sexpr-cons sexpr (sexpr sexpr) (int-any-width {}) (unit)))",
                 tag,
                 tag + 1
             )
@@ -3896,8 +3890,8 @@ mod tests {
             &mut h,
             &[
                 "(throw (quote escaped) \
-                   (call ::std::sexpr::sexpr-cons (sexpr sexpr) (int-any-width 5) (unit)))",
-                "(call ::std::sexpr::sexpr-cons (sexpr sexpr) (int-any-width 6) (unit))",
+                   (call ::std::sexpr::sexpr-cons sexpr (sexpr sexpr) (int-any-width 5) (unit)))",
+                "(call ::std::sexpr::sexpr-cons sexpr (sexpr sexpr) (int-any-width 6) (unit))",
             ],
         );
         // Allocating now would collect an unrooted carried value.
@@ -3931,7 +3925,7 @@ mod tests {
         assert_eq!(eval_ok(&mut h, "(int-any-width 1)"), Value::Int(1));
         assert_eq!(eval_ok(&mut h, "(if (bool true) (int-any-width 1) (int-any-width 2))"), Value::Int(1));
         assert_eq!(eval_ok(&mut h, "(let ((x r (int-any-width 3))) (var x))"), Value::Int(3));
-        assert_eq!(eval_ok(&mut h, "(loop int-any-width (return (int-any-width 4)))"), Value::Int(4));
+        assert_eq!(eval_ok(&mut h, "(loop i32 (return (int-any-width 4)))"), Value::Int(4));
         assert_eq!(eval_ok(&mut h, "(catch (quote t) (throw (quote t) (int-any-width 5)))"), Value::Int(5));
     }
 }

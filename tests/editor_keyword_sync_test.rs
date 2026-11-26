@@ -128,21 +128,39 @@ fn is_excluded(name: &str) -> bool {
     // `compiler.rs`'s SOURCE can call one: they read and write state keyed on
     // the builder of the function being built.
     const ISLAND_PREFIXES: [&str; 8] =
-        ["build-", "llvm-", "const-", "load-", "store-", "position-", "frame-", "coroutine-"];
-    const ISLAND_EXACT: [&str; 17] = [
+        ["build-", "llvm-", "const-", "load-", "slot-", "position-", "frame-", "coroutine-"];
+    const ISLAND_EXACT: [&str; 32] = [
         "add-function",
         "add-function-with-env",
         // The coroutine ABI's declarer and its raw parameter reader (Phase C2)
         // — siblings of `add-function`/`load-arg`, in the island only.
         "add-coroutine-function",
         "function-param",
-        "alloca-args",
+        "add-frame-slot",
+        "add-frame-slot-rooted",
+        "arg-list",
+        "coerce",
+        "convert",
+        "no-value",
+        "tag-field",
+        "temp-slot",
+        "untag-field",
         "scratch-slot",
         "append-block",
         "block-terminated?",
         "clone-frames",
         "create",
         "get-function",
+        "global-get",
+        "global-new",
+        "global-put",
+        // The width of a `c-long` on the machine the module is for.
+        "c-long-bits",
+        // A function's argument as it was entered with, and a loop's back
+        // edge — under either shape of function.
+        "entry-safepoint",
+        "entry-value",
+        "loop-safepoint",
         "pop-frame",
         "push-frame",
         "scope",

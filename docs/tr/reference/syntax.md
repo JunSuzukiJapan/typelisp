@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ ac5a6b3adada21a0a55e0e1c4b0e1fabf4854908 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 1b5dc6ac828d8e4a95800a91218b5e9dffe83f98 -->
 # typelisp Sözdizimi Başvurusu
 
 typelisp, S-ifadelerle yazılan, statik tür denetimli bir Lisp'tir. Yerleşik fonksiyonların ve metotların
@@ -82,7 +82,7 @@ hata mesajlarının okunması için [errors.md](errors.md) belgelerine bakın.
   olur). Bir demetin 1 ile 12 arasında öğesi vardır. Her değerlendirme yeni bir demet oluşturur.
   Hesaplanmış değerlerden bir demet kurmak için `(tuple a b)` kullanılır. S-ifadesi verisi beklenen
   yerlerde, tüm öğeleri veri olan bir demettir: `Sexpr`'in `Tuple` varyantı.
-- **Öznitelikler**: `#[test]`, sonraki forma bağlanan bir işarettir (Rust'taki gibi yazılır). Şimdilik tek öznitelik `test`'tir ve bir `defun` üzerine konur ([3.16 `#[test]`](#316-test--test-fonksiyonları)). `read` ile okunduğunda `(%internal::attribute (test) form)` listesi olur.
+- **Öznitelikler**: `#[test]`, sonraki forma takılan bir işarettir (Rust'taki gibi yazılır). Üç öznitelik vardır: `test`, `interrupt(N)` ve `exception(NAME)`; her biri bir `defun` üzerine konur ([3.16 `#[test]`](#316-test--test-fonksiyonları), [3.17 kesme işleyicileri](#317-interruptn--exceptionname--kesme-işleyicileri)). Argümanlı bir öznitelik, adının hemen ardından parantezle yazılır. `read` ile okununca `(%internal::attribute (test) form)` ve `(%internal::attribute ((interrupt 7)) form)` listeleri olur.
 - **Boş liste `()`**: bağlama göre `Unit` türünün değeri ya da `Option<Sexpr>`'in `None`'ı.
   **`Sexpr`'in boş liste varyantı yoktur**: `Sexpr`, "boş olmayan bir S-ifade" demektir ve S-ifade
   verisinin türü `Option<Sexpr>`'dir ([4.3 match](#43-match--örüntü-eşleme) içindeki "`Option<Sexpr>`
@@ -367,7 +367,7 @@ kütüphaneler asla kapatılmaz: fonksiyonlarına işaret eden kod çalışmaya 
 #### ptr / c-long / c-ulong — ham makine sözcükleri
 
 `ptr` opak bir işaretçidir (`void *`, `FILE *`, bildirimin ne kastettiyse). `c-long` / `c-ulong`, C'nin
-`long` / `unsigned long`'udur (ayrıca `size_t`, `int64_t` ve `intptr_t`).
+`long` / `unsigned long`'udur (ayrıca `size_t` ve `intptr_t`).
 
 ```lisp
 (defffi (c-malloc "malloc") (c-ulong) ptr)
@@ -379,7 +379,7 @@ kütüphaneler asla kapatılmaz: fonksiyonlarına işaret eden kod çalışmaya 
 
 **Onlara `i64` / `u64` dememek bilinçlidir.** Bu dilde 64 bitlik bir tamsayı türü yoktur; çünkü etiketli
 bir anlık değerin yalnızca 63 biti vardır ([2. bölüm](#2-türlerin-yazımı)). `c-long` adı "bu, bu dilin
-bir tamsayısı değil, C ile sınırı geçen bir sözcüktür" der.
+bir tamsayısı değil, C ile sınırı geçen bir sözcüktür" der. Genişliği hedefteki C'nin `long`'u ile aynıdır (64 bitlik macOS ve Linux'ta 64 bit, wasm32 ve Cortex-M'de 32 bit).
 
 **Aritmetikleri yoktur.** `(+ x 1)` yazılamaz. Sağlanabilirdi, ancak sağlanmamıştır; böylece hiçbir yerde
 saklanamayan ve diğer her sayıdan farklı bir genişliğe sahip bir değer üzerinde hesaplama çalışmaz; 64
@@ -387,7 +387,7 @@ bitlik tamsayı türünün dışarıda bırakılmasıyla aynı nedenle. **Yalnı
 
 ```lisp
 (as i32 (unsafe (c-strlen "hello")))         ; read what came back
-(as int (unsafe (c-strlen s)))               ; this one to read it exactly (int does not lose 64 bits)
+(as int (unsafe (c-strlen s)))               ; this one to read it exactly (int loses none of the value)
 (try-as i32 (unsafe (c-strlen s)))           ; ask whether it fits
 (as c-ulong n)                               ; make one from another integer
 ```
@@ -523,7 +523,7 @@ içinde `def-c-struct`'lardan başka bir şey olamaz). Adın hemen ardından bir
 
 Alanlar için yazılabilen türler `i8` `i16` `i32` `u8` `u16` `u32` `c-long` `c-ulong` `f32` `f64` `bool`
 `ptr`, türlü işaretçiler `(ptr T)` ve diğer `def-c-struct`'lardır (değerle gömülü). Düzen (her alanın
-ofseti ile struct'ın boyutu ve hizalaması) C'nin kurallarıyla hesaplanır (LP64 varsayılarak). Struct'ın
+ofseti ile struct'ın boyutu ve hizalaması) C'nin kurallarıyla hesaplanır (`c-long` ve işaretçilerin genişlikleri ile `f64`'ün hizalaması hedefin C'sine uyar). Struct'ın
 kendisine işaret eden bir alan yazılabilir, ancak struct kendini gömemez.
 
 ```lisp
@@ -548,6 +548,7 @@ Ayırma, okuma ve yazma aşağıdaki biçimlerle yazılır. Hepsi yalnızca `uns
 | `(c-alloc T)` / `(c-alloc T n)` | `T`'den `n` değer ayırır (atlanırsa 1). İçerik 0 ile doldurulur. Bir `(ptr T)` döndürür |
 | `(c-ref p i)` | `p`'den `i`'inci elemana bir işaretçi. Ayrılan aralığın dışındaysa hata |
 | `(c-deref p)` / `(setf (c-deref p) v)` | `p`'nin işaret ettiği skaleri okur / yazar |
+| `(volatile-read-u32 addr)` / `(volatile-write-u32 addr v)` | `addr` adresindeki (`int` ya da `u16` gibi sabit genişlikli bir tam sayı) yazmacı okur veya yazar, yazıldığı yerde tam bir kez. `-u8` ve `-u16` de aynı |
 | `p::field` / `(setf p::field v)` | Bir struct'ın bir alanını okur / yazar. Gömülü bir struct olan alanı okumak adresini verir (`(ptr inner-type)`) |
 | `(as ptr p)` | Türü unutur ve bir `ptr` yapar (`qsort`'un `void *`'ı gibi bir şeye geçirmek için). Geri dönüşüm yoktur |
 
@@ -1311,6 +1312,34 @@ test result: FAILED. 1 passed; 1 failed; 0 filtered out
 
 Bir testin `print` ile yazdıkları doğrudan standart çıktıya gider (yakalanmaz). İnceleme amaçlı çıktı için `eprint`/`eprintln` ([Yazdırma](functions/printing.md)) standart hata çıktısına yazar ve programın çıktısıyla karışmaz.
 
+### 3.17 `#[interrupt(N)]` / `#[exception(NAME)]` — kesme işleyicileri
+
+```lisp
+(use std::board::enable-interrupt)
+(defvar (*received* int) 0)
+
+#[interrupt(7)]
+(defun on-uart () ()
+  (unsafe (volatile-write-u32 #x4000400C 1))   ; kesmeye yol açanı temizle
+  (setf *received* (+ *received* 1))
+  ())
+
+(defun main () ()
+  (enable-interrupt 7)
+  ...)
+```
+
+Bir mikrodenetleyici için derlenen programda ([Derleme](../guide/compile.md) bölüm 3.8), bunlar bir kesme geldiğinde çağrılan fonksiyonlardır. `#[interrupt(N)]` bir fonksiyonu çevre birimi kesmesi `N`'nin (0 ile 239 arası), `#[exception(NAME)]` ise `NonMaskableInt`, `MemoryManagement`, `BusFault`, `UsageFault`, `SVCall`, `DebugMonitor`, `PendSV`, `SysTick` arasından çekirdek istisnası `NAME`'in işleyicisi yapar (`HardFault` çalışma zamanınındır ve programı bitirir).
+
+- Arduino Uno'da numaralama ve etkinleştirme farklıdır; `#[exception(NAME)]` ve `enable-interrupt` kullanılamaz ([Derleme](../guide/compile.md), bölüm 3.9). Aşağıda çalışma zamanı hakkında söylenenler Cortex-M içindir.
+- Hiçbir şey almayan ve `()` döndüren üst düzey bir `defun` üzerine konur (tür parametresi de olmaz). Bir kesmenin bir işleyicisi vardır ve bir fonksiyon bir kesmeyi işler.
+- Bir çevre birimi kesmesi, `(enable-interrupt N)` onu etkinleştirene kadar gelmez (`(disable-interrupt N)` onu durdurur; bkz. [Sistem](functions/system.md)). SysTick gibi bir istisna, yazmaçlar onu tetikleyecek biçimde ayarlanınca gelir.
+- Bir işleyici hemen, kesmenin geldiği yerde çalışır. Kesme çalışma zamanının işinin ortasında gelirse (bellek ayırma, çöp toplama, çıktı, görev değiştirme vb.), işleyici o iş biter bitmez çalışır. İşleyiciler birbirini kesmez.
+- Bir işleyicide çöp toplama olmaz (gerekirse yığın büyür). Global değişkenler gibi programın durumu her zamanki gibi okunup yazılabilir.
+- Bir işleyici bekleyemez. `sleep` kullanan bir işleyici derleme hatasıdır. Kanaldan almak gibi yalnızca bazen bekleyen bir işlem, beklemesi gerekmedikçe kullanılabilir; gerekirse bu bir panic'tir.
+- Bir işleyiciden çıkan `panic` veya `throw`, yakalanmamış olanın yaptığı gibi programı bitirir.
+- Yorumlayıcıda ve mikrodenetleyiciden başka bir şey için derlenmiş programda hiçbir kesme gelmez. Yorumlayıcıda bir işleyici sıradan bir fonksiyon gibi çağrılabilir (testler için). Mikrodenetleyiciden başka bir şey için `typl -c`, işleyicisi olan bir programı reddeder.
+
 ## 4. Bağlama ve koşullar
 
 ```lisp
@@ -1767,6 +1796,8 @@ bağımsız değişken olarak vb.).
 (todo)                              ; expands to (panic "todo"). defmacro
 (as Type expr)                      ; numeric/character type conversion. conversions that can fail panic on failure
 (try-as Type expr)                  ; like as, but returns the result as Option<Type> (None on failure)
+(size-of Type)                      ; Type türünden bir değerin bayt sayısı (int)
+(size-of-val expr)                  ; expr'nin türünden bir değerin bayt sayısı (int); expr değerlendirilmez
 (print control args...)             ; expands the format and writes to standard output (no newline)
 (println control args...)           ; the same (with a newline at the end)
 (format dest control args...)       ; CL's format. returns the expanded string
@@ -1816,6 +1847,30 @@ dönüşüm metotlarına açılan bir şekerdir ([Sayılar](functions/numbers.md
 
 `rational`'dan `as`/`try-as`, `int`'e (`as` kırpar, `try-as` yalnızca tam sayıda başarılı olur), `ratio`'ya
 ve `f64`'e dönüştürür; `int`/`ratio`'dan `rational`'a dönüştürür.
+
+`size-of`/`size-of-val`, C'deki `sizeof`'un karşılığıdır. Yanıt, derleme sırasında belirlenen bir sabittir: kodun
+çalıştığı hedefteki boyuttur:
+
+| Tür | Bayt |
+|---|---|
+| `i8` `u8` `bool` | 1 |
+| `i16` `u16` | 2 |
+| `i32` `u32` `f32` `char` | 4 |
+| `f64` | 8 |
+| `c-long` `c-ulong` | hedefteki C `long` ile aynı |
+| `ptr` `(ptr T)` | hedefin işaretçisiyle aynı |
+| `def-c-struct` | C yapısıyla aynı (dolgu dahil) |
+| `()` | 0 |
+| Diğer her şey (`int`, `string`, bir `defstruct` türü vb.) | bir sözcük (hedefin işaretçisiyle aynı): değerin kendisi ya da değerin bulunduğu yer |
+
+```lisp
+(size-of u16)                       ; => 2
+(size-of-val (as i8 5))             ; => 1
+(let ((x 1.0)) (size-of-val x))     ; => 8
+```
+
+Jenerik bir fonksiyonun tür parametresi de yazılabilir; her çağrıdaki türle belirlenir. `!` türünün değeri yoktur, bu
+yüzden hatadır. Bir `def-c-struct` türü `unsafe` dışında da yazılabilir.
 
 `documentation`, `quote`/`compile` gibi, `name`'i değerlendirmeden, değerlendirilmemiş çıplak bir sembol /
 `::` yolu olarak okuyan bir özel formdur. CL'nin `(documentation 'name 'function)`'ından farklı olarak bir
@@ -2204,10 +2259,9 @@ gibi bir panic, bir `(panic ...)` ile aynı şekilde ele alınır).
   kaldıkları yerden sürer). Bir değerlendirmenin sonunda her thread'in geçerli adımını bitirmesini bekler;
   bu yüzden bir `thread` içinde bir C fonksiyonu (`defffi`) bloke olmaya devam ederse değerlendirme o
   dönene kadar bitmez.
-- **Worker'larda yazdırma**: yorumlanan `print-object` metotları ve `~/name/`'in çağırdığı yorumlanan
-  fonksiyon ve metotlar başka iş parçacıklarında çalışamaz, bu yüzden böyle değerleri başka bir iş
-  parçacığında yazdırmak `(panic ...)` gibi ele alınan bir panic'tir (`(compile T::print-object)` ya da ana
-  görevden yazdırın).
+- **Worker'larda yazdırma**: yorumlanan `print-object` metotları başka iş parçacıklarında çalışamaz, bu
+  yüzden böyle değerleri başka bir iş parçacığında yazdırmak `(panic ...)` gibi ele alınan bir panic'tir
+  (`(compile T::print-object)` ya da ana görevden yazdırın).
 - **Veri yarışları tanımsızdır** (Go ile aynı konum). Birkaç task'in aynı değeri `Mutex<T>` / `Chan<T>`
   üzerinden geçmeden değiştirmesinin sonucu garanti edilmez.
 - **`task` bir değer döndürür.** Go'nun `go` deyiminden farklı olarak bir `Task<T>` döndürür ve

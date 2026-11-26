@@ -66,6 +66,17 @@ jobs:
         run: cargo check -p typelisp-front --target wasm32-unknown-unknown --locked
         env:
           RUSTFLAGS: -D warnings
+      # The runtime for a board without an operating system, without std:
+      # with the host functions over semihosting (what the tests run under
+      # QEMU with), and without them (a board that gives its own).
+      - name: Check the boards' runtimes (warnings are errors)
+        run: |
+          for target in thumbv7em-none-eabihf thumbv8m.main-none-eabihf; do
+            cargo check -p typelisp-rt-embedded --target "$target" --locked
+            cargo check -p typelisp-rt-semihosting --target "$target" --locked
+          done
+        env:
+          RUSTFLAGS: -D warnings
       - name: Build
         run: cargo build --workspace --locked
 
@@ -119,6 +130,17 @@ jobs:
           RUSTFLAGS: -D warnings
       - name: Check the wasm32-unknown-unknown runtime (warnings are errors)
         run: cargo check -p typelisp-front --target wasm32-unknown-unknown --locked
+        env:
+          RUSTFLAGS: -D warnings
+      # The runtime for a board without an operating system, without std:
+      # with the host functions over semihosting (what the tests run under
+      # QEMU with), and without them (a board that gives its own).
+      - name: Check the boards' runtimes (warnings are errors)
+        run: |
+          for target in thumbv7em-none-eabihf thumbv8m.main-none-eabihf; do
+            cargo check -p typelisp-rt-embedded --target "$target" --locked
+            cargo check -p typelisp-rt-semihosting --target "$target" --locked
+          done
         env:
           RUSTFLAGS: -D warnings
       - name: Build

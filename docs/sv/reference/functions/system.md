@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/system.md @ 7622044725db7d28dabb691d82e592367d9284e8 -->
+<!-- translated-from: docs/ja/reference/functions/system.md @ b01477a6134617bbcef066ff2065d17245132754 -->
 # Tid, miljö och implementation
 
 Funktioner för tid, frågor om körmiljön, implementationsverktyg, tolkning och utvärdering av text,
@@ -363,3 +363,32 @@ det som kompileras är den expanderade formen av kroppen.
 | `with-standard-io-syntax` | `(with-standard-io-syntax body...)` | — | Kör `body` med varje utskriftskontrollvariabel på sitt standardvärde och `*read-eval*` satt till `true` ([Utskrift](printing.md#6-styra-hur-mycket-som-skrivs-ut)) |
 | `exit` | `(exit code)` | `int→!` | Avslutar processen |
 | `dump` | `(dump path)` | `string→bool` | Skriver den aktuella miljön (typinformation plus kompilerade kroppar) till en fil. `typl --image <path>` startar om från den. Bara för tolken ([Syntaxreferens 10.1](../syntax.md#101-dumpar)) |
+
+## 11. En mikrokontrollers avbrott (`std::board`)
+
+Hämta in dem med en `use`, som `(use std::board::enable-interrupt)`. Hur man skriver en avbrottshanterare står i [syntaxreferensen 3.17](../syntax.md#317-interruptn--exceptionname--avbrottshanterare).
+
+| Namn | Form | Typ | Beskrivning |
+|---|---|---|---|
+| `enable-interrupt` | `(enable-interrupt n)` | `int→()` | Låter kringutrustningsavbrottet `n` (0 till 239) komma. Utanför en mikrokontroller ett körtidsfel (ett kompileringsfel under `typl -c`) |
+| `disable-interrupt` | `(disable-interrupt n)` | `int→()` | Låter avbrottet `n` sluta komma. Utanför en mikrokontroller som `enable-interrupt` |
+
+## 12. Felsökning (`std::dbg`)
+
+Hämtas in med ett `use`, som i `(use std::dbg::llvm-size-of)`.
+
+| Namn | Form | Typ | Beskrivning |
+|---|---|---|---|
+| `llvm-size-of` | `(llvm-size-of expr)` | `A→u32` | I hur många byte kompilerad kod håller värdet av `expr`. LLVM räknar storleken på den LLVM-typ kompilatorn gav värdet, för målet där koden körs. `expr` evalueras. Kört av tolken ett körtidsfel |
+
+`size-of-val` svarar med storleken som typen bestämmer, och `llvm-size-of` med storleken som kompilerad kod faktiskt använder. Skiljer de sig åt har kompilatorn fel bredd på värdet.
+
+```lisp
+(use std::dbg::llvm-size-of)
+(defun widths ((x i8)) ()
+  (println "~a ~a ~a" (llvm-size-of x) (llvm-size-of (as u32 x)) (llvm-size-of (< x 0))))
+(compile widths)
+(widths 1)                          ; skriver ut 1 4 1
+```
+
+Ett värde på heapen (en `string`, en `defstruct`-typ och så vidare) och en `int` tar ett ord, som står för var värdet finns eller för värdet självt.

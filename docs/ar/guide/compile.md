@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ 7622044725db7d28dabb691d82e592367d9284e8 -->
+<!-- translated-from: docs/ja/guide/compile.md @ 1b5dc6ac828d8e4a95800a91218b5e9dffe83f98 -->
 # الترجمة
 
 إذا لم تفعل شيئًا آخر فإن برامج typelisp تعمل في المفسِّر (interpreter). وإضافة إلى ذلك توجد طريقتان
@@ -219,7 +219,148 @@ const code = await run({ write: (fd, text) => { /* اعرضه في الصفحة 
 - في المتصفح، قدّم `hello.wasm` عبر HTTP من المكان نفسه الذي فيه `hello.mjs` (لا يمكن تحميله من `file://`).
 - ينتظر `sleep` بواسطة `Atomics.wait`. ولا يسمح المتصفح بذلك إلا داخل Worker في صفحة معزولة عبر الأصول، لذا شغّل البرنامج الذي يستخدم `sleep` في Worker.
 - يُحسب التوقيت المحلي (`decode-universal-time` بدون `zone` ونحوها) بالمنطقة الزمنية التي يُبلغ عنها `Date` في JavaScript.
-- إضافة إلى ما لا يمكن استخدامه في القسم 3.6، تكون عمليات الملفات والمجلدات **خطأ ترجمة**. ويُقرأ الإدخال القياسي فارغًا، و`(command-line-args)` متجه فارغ.
+- بالإضافة إلى ما لا يمكن استخدامه في القسم 3.6، تكون عمليات الملفات والمجلدات ومتغيرات البيئة و`(command-line-args)` والمجلد الرئيسي و`dribble` **خطأ ترجمة**. يُقرأ الإدخال القياسي فارغًا.
+
+### 3.8 الترجمة لمتحكم دقيق (Cortex-M)
+
+مع `--target thumbv7em-none-eabihf` ينشئ `typl -c` ملفًا تنفيذيًا (ELF) للوحة Cortex-M4F أو M7 بلا نظام تشغيل. بدون `-o` يُسمّى باسم المصدر مع استبدال `.typl` بـ`.elf`. ومع `--target thumbv8m.main-none-eabihf` يكون للوحة Cortex-M33.
+
+```sh
+$ typl -c hello.typl --target thumbv7em-none-eabihf          # ينشئ hello.elf
+$ qemu-system-arm -M mps2-an386 -nographic \
+    -semihosting-config enable=on,target=native -kernel hello.elf   # شغّله على Cortex-M4 في QEMU
+$ typl -c hello.typl --target thumbv8m.main-none-eabihf
+$ qemu-system-arm -M mps2-an505 -nographic \
+    -semihosting-config enable=on,target=native -kernel hello.elf   # شغّله على Cortex-M33 في QEMU
+```
+
+- يمكن استخدام `typl` المثبّت بـ`install.sh` كما هو. للتثبيت بـ`cargo install` شغّل `rustup target add thumbv7em-none-eabihf thumbv8m.main-none-eabihf` ثم ثبّت مع `--features embedded` (و`--features wasm,embedded` للاثنين). مع نسخة التصحيح من `typl` في المستودع شغّل `scripts/build-embedded-runtime.sh`. يستخدم الربط رابط سلسلة أدوات rustup.
+- مرّر ذاكرة اللوحة بـ`--linker-script FILE`. يُكتب الملف مثل `memory.x` في `cortex-m-rt`: عناوين FLASH وRAM وأحجامها. سطر مثل `_typelisp_stack_size = 32K;` يحدد ما يأخذه المكدس من RAM (64KiB إن لم يُذكر)؛ وبقية RAM هي الكومة. بدون الخيار يُستخدم تخطيط `mps2-an386` (و`mps2-an505` لـ Cortex-M33) في QEMU.
+
+  ```
+  MEMORY
+  {
+    FLASH : ORIGIN = 0x08000000, LENGTH = 512K
+    RAM : ORIGIN = 0x20000000, LENGTH = 128K
+  }
+  _typelisp_stack_size = 16K;
+  ```
+
+- يختار `--board-functions` من يوفّر الإخراج والإدخال والإنهاء والساعة (دوال اللوحة).
+  - `semihosting` (الافتراضي): عبر semihosting، للتشغيل تحت QEMU (`-semihosting-config enable=on`) أو مصحّح.
+  - `c`: توفّرها اللوحة كدوال C. مرّر بـ`--link FILE` ملف كائن أو مكتبة ثابتة تعرّف الدوال أدناه (يمكن تكرار `--link`؛ وتُمرَّر مكتبة المصنّع التي يستدعيها `defffi` بالطريقة نفسها).
+
+  ```c
+  void     typelisp_host_write(int32_t fd, const uint8_t *p, size_t len); // fd 1 الإخراج القياسي، 2 الخطأ القياسي
+  size_t   typelisp_host_read(int32_t fd, uint8_t *p, size_t len);        // fd 0؛ عدد البايتات المقروءة، 0 عند النهاية
+  void     typelisp_host_exit(int32_t code);                              // لا تعود
+  uint64_t typelisp_host_now_us(void);                                    // ميكروثوانٍ على ساعة لا ترجع أبدًا
+  int64_t  typelisp_host_unix_us(void);                                   // ميكروثوانٍ منذ 1970-01-01
+  void     typelisp_host_sleep_us(uint64_t us);                           // تنتظر us ميكروثانية
+  ```
+
+- تُقرأ سجلات اللوحة (الأجهزة الطرفية المعيَّنة في الذاكرة) بـ `volatile-read-u8` و`volatile-read-u16` و`volatile-read-u32`، وتُكتب بـ `volatile-write-u8` و`volatile-write-u16` و`volatile-write-u32`. يُمرَّر العنوان بوصفه `int` أو عددًا صحيحًا ثابت العرض مثل `u16`، وتكون القيمة المقروءة من نوع عرضها (`u8` وما إلى ذلك). كلٌّ منها يقرأ أو يكتب مرة واحدة بالضبط في الموضع الذي كُتب فيه، ولا يحذفه المترجم ولا ينقله. لا تُستخدم جميعها إلا داخل `unsafe`. العنوان السالب، أو الذي ليس من مضاعفات العرض، خطأ وقت التشغيل قبل قراءة أي شيء أو كتابته.
+
+  ```lisp
+  ;; UART 0 في لوحة mps2-an386 في QEMU: البيانات 0x40004000، الحالة 0x40004004، التحكم 0x40004008
+  (defun put-byte ((c u32)) ()
+    (unsafe
+      (loop (when (= (logand (volatile-read-u32 #x40004004) 1) 0) (break)))   ; انتظر أثناء الإرسال
+      (volatile-write-u32 #x40004000 c)))
+
+  (defun main () ()
+    (unsafe (volatile-write-u32 #x40004008 1))                               ; فعِّل الإرسال
+    (put-byte 104) (put-byte 105) (put-byte 10))                             ; "hi" وسطر جديد
+  ```
+
+- اكتب الدالة التي تُستدعى عند وصول مقاطعة على هيئة `defun` بالسمة `#[interrupt(N)]` (مقاطعة الطرفية `N`) أو سمة مثل `#[exception(SysTick)]`. فعّل المقاطعة بـ `(enable-interrupt N)`. يعمل المعالج فورًا، ولا يعمل بعد انتهاء العمل إلا إذا وصل في منتصف عمل بيئة التشغيل. لا يستطيع المعالج الانتظار (`sleep` خطأ ترجمة). التفاصيل في القسم 3.17 من [مرجع الصياغة](../reference/syntax.md).
+
+  ```lisp
+  (use std::board::enable-interrupt)
+
+  #[interrupt(5)]
+  (defun on-five () ()
+    (println "interrupt 5"))
+
+  (defun main () ()
+    (enable-interrupt 5)
+    (unsafe (volatile-write-u32 #xE000E200 (as u32 32))))   ; أحدث المقاطعة 5 بنفسك (سجل المقاطعات المعلقة في NVIC)
+  ```
+
+- تبدأ بيئة التشغيل البرنامج (جدول المتجهات وتهيئة RAM) وتخصّص الذاكرة. HardFault أو مقاطعة بلا معالج ينهي البرنامج برمز خروج panic (1).
+- يعمل `throw`/`catch`/`panic` والأعداد الكبيرة والكسور والأعداد العشرية والمهام والقنوات و`sleep` كما في الملف التنفيذي. تعمل المهام بالتناوب على النواة الوحيدة. يمكن استخدام دوال C (`defffi`).
+- البرنامج الذي يستخدم ما ليس في اللوحة **خطأ ترجمة**: بالإضافة إلى ما لا يمكن استخدامه في القسم 3.7، `eval` و`macroexpand`. الوقت المحلي غير معروف (كما في القسم 3.6).
+- تبدأ ساحة cons بـ1024 خلية وتكبر عند الحاجة. تعمل `--heap-cells` و`--max-memory` و`--no-cons` و`-O<N>` و`--release` كما هي.
+
+### 3.9 الترجمة لـ Arduino Uno ‏(AVR)
+
+مع `--target avr-atmega328p` يُنشأ ملف تنفيذي (ELF) للمتحكم الدقيق في Arduino Uno ‏(ATmega328P). البرنامج التالي يجعل مصباح LED على اللوحة يومض.
+
+```lisp
+(defconstant (PINB int) #x23)
+(defconstant (DDRB int) #x24)
+(defconstant (LED u8) 32)                         ; PB5
+
+(defun wait-a-bit () ()
+  (let ((i (the u32 0)))
+    (while (< i (the u32 400000))
+      (unsafe (volatile-read-u8 PINB))
+      (setf i (+ i 1)))
+    ()))
+
+(defun main () ()
+  (unsafe (volatile-write-u8 DDRB LED))           ; اجعله خرجًا
+  (while true
+    (unsafe (volatile-write-u8 PINB LED))         ; اعكسه
+    (wait-a-bit)))
+```
+
+```sh
+$ typl -c blink.typl --target avr-atmega328p -O2   # ينشئ blink.elf
+$ qemu-system-avr -M uno -display none -serial stdio -bios blink.elf   # شغّله في QEMU
+```
+
+- لا توجد بيئة تشغيل، لذا فإن البرنامج الذي يستخدمها **خطأ ترجمة**. يذكر الخطأ ما المطلوب وعبر أي دوال يُوصل إليه. ما يمكن استخدامه: حسابات الأعداد الصحيحة ثابتة العرض (من `i8` إلى `u32`) و`f32` و`f64` و`bool` و`char`، واستدعاء الدوال (ومنه الاستدعاء الذاتي)، والشروط، والحلقات، و`defvar` و`defconstant` الحاملان لهذه القيم، و`volatile-read-u8` وما شابهها، واستدعاء دوال C.
+- ما لا يمكن استخدامه: القيم الموجودة في الكومة مثل السلاسل والقوائم والبنى؛ `catch` واستدعاء قيم الدوال؛ استدعاء دوال C التي تأخذ سلسلة أو دالة؛ الدوال الرياضية للأعداد العشرية مثل `sin` و`expt` (ويمكن استخدام `sqrt` والتقريب مثل `floor`).
+- يُكتب معالج المقاطعة بالصيغة `#[interrupt(N)]` ([الصياغة](../reference/syntax.md)، القسم 3.17). و`N` هو رقم المقاطعة في ATmega328P، من 1 إلى 25 باعتبار إعادة الضبط 0 (فيضان المؤقت 1 هو 13). انظر المثال أدناه.
+- القسمة على 0 توقف المتحكم في مكانها (ولا تأتي مقاطعات بعدها). وكذلك `/` لأصغر قيمة ذات إشارة على `-1`.
+- لا يمكن استخدام `int` (خطأ ترجمة) لأنه بلا عرض ثابت. استخدم نوعًا ثابت العرض مثل `i16` أو `u16`. ويمكن حساب العناوين أيضًا بأعداد صحيحة ثابتة العرض. وما تتحدد قيمته وقت الترجمة يمكن استخدامه، مثل العنوان المكتوب كرقم و`int` في `defconstant`.
+- إذا نفد المكدس في استدعاء ذاتي توقف المتحكم.
+- صرّح عن دالة C بـ `defffi`، ومرّر ملف كائن مترجمًا لـ AVR بـ `--link FILE`.
+- الحلقة التي لا تفعل شيئًا تُحذف ابتداءً من `-O1`. في حلقة الانتظار اقرأ سجلًا مثلًا.
+- عند انتهاء `main` يتوقف المتحكم الدقيق.
+- يُغيَّر توزيع الذاكرة باستخدام `--linker-script FILE`. عند حذفه تكون الذاكرة 32 KiB من الفلاش ناقصًا آخر 512 بايت الخاصة بمحمّل الإقلاع، و2 KiB من RAM. تُكتب عناوين RAM مع إضافة `0x800000`، مثل `0x800100`.
+- حسابات `f32` و`f64` تجريها دوال مساعدة. ويدخل المستخدَم منها فقط في الفلاش (ودوال `f64` أكبر).
+- يستخدم الربط رابط سلسلة أدوات rustup كما في القسم 3.8.
+
+مثال يجعل مصباح LED يومض بمقاطعة مؤقت. تُفعَّل المقاطعة في سجل الجهاز نفسه.
+
+```lisp
+(defconstant (PINB int) #x23)
+(defconstant (DDRB int) #x24)
+(defconstant (LED u8) 32)
+(defconstant (TIMSK1 int) #x6F)
+(defconstant (TCCR1B int) #x81)
+(defvar (ticks u16) 0)
+
+#[interrupt(13)]                                  ; فيضان المؤقت 1
+(defun on-overflow () ()
+  (unsafe (volatile-write-u8 PINB LED))           ; اعكسه
+  (setf ticks (+ ticks 1))
+  ())
+
+(defun main () ()
+  (unsafe (volatile-write-u8 DDRB LED)
+          (volatile-write-u8 TIMSK1 1)            ; فعّل مقاطعة الفيضان
+          (volatile-write-u8 TCCR1B 3))           ; عُدّ بمعدل 1/64 من الساعة
+  (while true))
+```
+
+- البرنامج الذي فيه معالج يقبل المقاطعات فور تهيئة متغيراته العامة. اضبط الأجهزة في بداية `main`.
+- لا يمكن استخدام `enable-interrupt` و`#[exception(NAME)]` (خطأ تصريف).
+- أثناء تنفيذ معالج تنتظر المقاطعات الأخرى. ولا يستطيع المعالج استخدام بيئة التشغيل، كأي دالة أخرى.
+- القراءة الواحدة أو الكتابة الواحدة لمتغير عام لا يقطعها معالج، حتى لقيمة من بايتين أو أكثر. وتُعطَّل المقاطعات لذلك عند قراءة متغير يكتبه معالج وعند كتابة متغير يقرؤه معالج أو يكتبه، ويُذكر هذا المتغير في تحذير وقت التصريف. ويمكن أن تأتي مقاطعة بين القراءة والكتابة في التحديث (`(setf n (+ n 1))`). لتحديث متغير يكتبه معالج أيضًا، اقرأ سجل الحالة (العنوان `#x5F`) واحتفظ به، واكتب فيه 0 لإيقاف المقاطعات، ثم أعد كتابة القيمة المحفوظة.
+- المقاطعة التي لا معالج لها توقف المتحكم.
 
 ## 4. ملفات الـ dump
 

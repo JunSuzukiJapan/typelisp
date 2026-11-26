@@ -22,7 +22,10 @@
 //! executable, which is why `build_main_wrapper` emits them only when the
 //! module actually calls a printing shim.
 
-use std::cell::RefCell;
+use typelisp_mem::Word;
+use typelisp_mem::prelude::*;
+use core::cell::RefCell;
+use core::sync::atomic::{AtomicPtr, Ordering};
 
 use typelisp_abi::{decode, encode, fatal};
 use typelisp_mem::{Heap, TypeId, Value};
@@ -39,7 +42,7 @@ use crate::stored_type;
 // `shared::PrintShared`'s too, for the same reason: a worker thread
 // dispatches through the tables main's startup sequence filled.
 
-thread_local! {
+typelisp_mem::thread_local! {
     /// The values whose own `print-object` is running right now, innermost
     /// last — the re-entry guard, so `(impl print-object point (… (format
     /// false "~a" self)))` degrades to the built-in `#<point 1 2>` rather
@@ -63,7 +66,6 @@ const AOT_HOOKS: PrintHooks = PrintHooks {
         field_name_in(&names, &templates, ty, index)
     },
     print_object: aot_print_object,
-    format_call: aot_format_call,
     opts: |heap| crate::runtime::read_opts(heap, &|name| aot_global(heap, name)),
     print_vars: |heap| crate::runtime::read_print_vars(heap, &|name| aot_global(heap, name)),
 };
@@ -73,13 +75,13 @@ const AOT_HOOKS: PrintHooks = PrintHooks {
 /// ([`typelisp_mem::TypeShape::named_definition`]).
 pub type Definition = (typelisp_mem::NsId, typelisp_mem::SymRef);
 /// `(definition, variant) -> name`: what [`rt_print_enum_variant`] fills.
-pub type VariantNames = std::collections::HashMap<(Definition, usize), String>;
+pub type VariantNames = typelisp_mem::collections::HashMap<(Definition, usize), String>;
 /// `(definition, variant or NO_VARIANT, index or EVERY_FIELD) -> the field's
 /// declared type, its definition's parameters as `TypeShape::Param`s`: what
 /// [`rt_print_field_template`] fills.
-pub type FieldTemplates = std::collections::HashMap<(Definition, i64, i64), TypeId>;
+pub type FieldTemplates = typelisp_mem::collections::HashMap<(Definition, i64, i64), TypeId>;
 /// `(definition, index) -> field name`: what [`rt_print_field_name`] fills.
-pub type FieldNames = std::collections::HashMap<(Definition, i64), String>;
+pub type FieldNames = typelisp_mem::collections::HashMap<(Definition, i64), String>;
 
 /// The definition `ty` instantiates. Every box's type is a named one.
 fn definition_of(ty: TypeId) -> Result<Definition, String> {
@@ -177,12 +179,19 @@ fn aot_print_object(heap: &mut Heap, v: Value, escape: bool) -> Result<Option<St
     let Some(addr) = crate::shared::print_shared().print_object.read().get(&ty).copied() else {
         return Ok(None);
     };
+    if addr == 0 {
+        return Err(format!(
+            "internal error: a `{}` was printed, and the executable was built without its `print-object` because it \
+             found no code that makes one",
+            &*typelisp_mem::type_name(ty)
+        ));
+    }
     // SAFETY: `addr` came from `rt_print_object_method`, whose only caller is
     // the startup sequence `build_main_wrapper` generates, and the address it
     // passes is a `ptrtoint` of a function the same file compiled under the
     // shared compiled-function ABI.
-    let f: unsafe extern "C-unwind" fn(*const i64, u32) -> i64 = unsafe { std::mem::transmute(addr) };
-    let args = [encode(v), i64::from(escape)];
+    let f: unsafe extern "C-unwind" fn(*const Word, u32) -> Word = unsafe { core::mem::transmute(addr) };
+    let args = [encode(v), Word::from(escape)];
     PRINTING.with(|p| p.borrow_mut().push(v));
     let result = unsafe { f(args.as_ptr(), 2) };
     PRINTING.with(|p| {
@@ -200,91 +209,52 @@ fn aot_print_object(heap: &mut Heap, v: Value, escape: bool) -> Result<Option<St
     }
 }
 
-/// `~/name/` in an AOT executable, called through `PrintShared::format_call`.
-///
-/// `name` is what the checker resolved the directive to, and the table holds
-/// every definition some directive in this program resolved to, registered
-/// at startup — so a name that reaches here has an entry.
-fn aot_format_call(heap: &mut Heap, name: &str, v: Value, colon: bool, at: bool) -> Result<String, String> {
-    let Some(entry) = crate::shared::print_shared().format_call.read().get(name).copied() else {
-        return Err(format!("format: ~/{}/ is not registered in this executable", name));
-    };
-    // SAFETY: the same contract `aot_print_object` relies on — `addr` came
-    // from `rt_format_call_method`, whose only caller is the startup sequence
-    // `build_main_wrapper` generates, and the address is a `ptrtoint` of a
-    // function this file compiled under the shared compiled-function ABI. The
-    // checker verified the signature (`(T, bool, bool) -> string`) before
-    // naming it.
-    let (addr, arg) = entry;
-    let f: unsafe extern "C-unwind" fn(*const i64, u32) -> i64 = unsafe { std::mem::transmute(addr) };
-    let args = [arg.word(heap, v).map_err(|m| format!("format: ~/{}/: {}", name, m))?, i64::from(colon), i64::from(at)];
-    let result = unsafe { f(args.as_ptr(), 3) };
-    if typelisp_abi::is_raised() {
-        return Err(format!("format: ~/{}/ raised", name));
-    }
-    match decode(result) {
-        Value::Str(id) => Ok(heap.string(id).to_string()),
-        other => Err(format!("format: ~/{}/ returned {:?}, not a string", name, other)),
-    }
-}
 
-/// Reads a `(pointer, length)` pair of `args` as a `&'static str`.
+/// Reads a `(pointer, length)` pair as a `&'static str`.
 ///
 /// # Safety
 ///
 /// The two words must be a pointer to `len` valid UTF-8 bytes that outlive
 /// the process — which every caller satisfies, since the only ones are
 /// startup calls whose arguments are LLVM global string constants.
-unsafe fn static_str(args: *const i64, i: usize, who: &str) -> &'static str {
-    let ptr = *args.add(i) as usize as *const u8;
-    let len = *args.add(i + 1) as usize;
-    match std::str::from_utf8(std::slice::from_raw_parts(ptr, len)) {
+unsafe fn static_str(ptr: Word, len: Word, who: &str) -> &'static str {
+    let (ptr, len) = (ptr as usize as *const u8, len as usize);
+    match core::str::from_utf8(core::slice::from_raw_parts(ptr, len)) {
         Ok(s) => s,
-        Err(_) => fatal(&format!("{}: argument {} is not valid UTF-8", who, i)),
+        Err(_) => fatal(&format!("{}: a name is not valid UTF-8", who)),
     }
 }
 
-/// The definition the type in word `i` of `args` instantiates — a word an
-/// executable's startup read out of its type table.
-///
-/// # Safety
-///
-/// `args` must point to more than `i` valid `i64`s.
-unsafe fn definition_arg(args: *const i64, i: usize, who: &str) -> Definition {
-    let ty = type_arg(args, i, who);
+/// The definition the type `word` instantiates — a word an executable's
+/// startup read out of its type table.
+fn definition_arg(word: Word, who: &str) -> Definition {
+    let ty = type_arg(word, who);
     match definition_of(ty) {
         Ok(def) => def,
         Err(e) => fatal(&format!("{}: {}", who, e)),
     }
 }
 
-/// The type in word `i` of `args`.
-///
-/// # Safety
-///
-/// `args` must point to more than `i` valid `i64`s.
-unsafe fn type_arg(args: *const i64, i: usize, who: &str) -> TypeId {
-    let w = *args.add(i);
-    TypeId::from_word(w).unwrap_or_else(|| fatal(&format!("{}: argument {} ({}) is no type", who, i, w)))
+/// The type `w` names.
+fn type_arg(w: Word, who: &str) -> TypeId {
+    TypeId::from_word(w).unwrap_or_else(|| fatal(&format!("{}: {} is no type", who, w)))
 }
 
-/// Registers one enum variant's name: `args` is `[type, variant, name_ptr,
-/// name_len]`, `type` being an instantiation of the enum's definition.
+/// Registers one enum variant's name, `ty` being an instantiation of the
+/// enum's definition.
 ///
 /// Installs [`AOT_HOOKS`] on first use, so the generated startup sequence is
 /// just the registration calls with nothing to remember to do first.
 ///
 /// # Safety
 ///
-/// `args` must point to 4 valid `i64`s in those representations.
+/// `name_ptr` must point to `name_len` bytes of UTF-8 that live as long as
+/// the process.
 #[no_mangle]
-pub unsafe extern "C" fn rt_print_enum_variant(args: *const i64, argc: u32) -> i64 {
-    if argc < 4 {
-        fatal("rt_print_enum_variant: expected 4 arguments");
-    }
-    let def = definition_arg(args, 0, "rt_print_enum_variant");
-    let variant = *args.add(1) as usize;
-    let name = static_str(args, 2, "rt_print_enum_variant");
+pub unsafe extern "C" fn rt_print_enum_variant(ty: Word, variant: Word, name_ptr: Word, name_len: Word) -> Word {
+    let def = definition_arg(ty, "rt_print_enum_variant");
+    let variant = variant as usize;
+    let name = static_str(name_ptr, name_len, "rt_print_enum_variant");
     install();
     crate::shared::print_shared().enum_names.write().insert((def, variant), name.to_string());
     0
@@ -297,8 +267,8 @@ pub const NO_VARIANT: i64 = -1;
 /// applies to every field of the type — a `Vector<T>`'s elements.
 pub const EVERY_FIELD: i64 = -1;
 
-/// Registers one field's declared type: `args` is `[type, variant, index,
-/// template]`, `type` being an instantiation of the definition and
+/// Registers one field's declared type, `ty` being an instantiation of the
+/// definition and
 /// `template` the field's type with the definition's parameters as
 /// `TypeShape::Param`s; `variant` is [`NO_VARIANT`] for a struct and `index`
 /// [`EVERY_FIELD`] for a uniform template. See
@@ -306,198 +276,112 @@ pub const EVERY_FIELD: i64 = -1;
 ///
 /// # Safety
 ///
-/// `args` must point to 4 valid `i64`s in those representations.
+/// None: every word is checked.
 #[no_mangle]
-pub unsafe extern "C" fn rt_print_field_template(args: *const i64, argc: u32) -> i64 {
-    if argc < 4 {
-        fatal("rt_print_field_template: expected 4 arguments");
-    }
-    let def = definition_arg(args, 0, "rt_print_field_template");
-    let variant = *args.add(1);
-    let index = *args.add(2);
-    let template = type_arg(args, 3, "rt_print_field_template");
+pub unsafe extern "C" fn rt_print_field_template(ty: Word, variant: Word, index: Word, template: Word) -> Word {
+    let def = definition_arg(ty, "rt_print_field_template");
+    let template = type_arg(template, "rt_print_field_template");
     install();
-    crate::shared::print_shared().field_templates.write().insert((def, variant, index), template);
+    crate::shared::print_shared().field_templates.write().insert((def, variant as i64, index as i64), template);
     0
 }
 
-/// Registers one struct field's name: `args` is `[type, index, name_ptr,
-/// name_len]`. See `Interp::field_name_descriptors`.
+/// Registers one struct field's name. See `Interp::field_name_descriptors`.
 ///
 /// # Safety
 ///
-/// `args` must point to 4 valid `i64`s in those representations.
+/// As [`rt_print_enum_variant`].
 #[no_mangle]
-pub unsafe extern "C" fn rt_print_field_name(args: *const i64, argc: u32) -> i64 {
-    if argc < 4 {
-        fatal("rt_print_field_name: expected 4 arguments");
-    }
-    let def = definition_arg(args, 0, "rt_print_field_name");
-    let index = *args.add(1);
-    let name = static_str(args, 2, "rt_print_field_name");
+pub unsafe extern "C" fn rt_print_field_name(ty: Word, index: Word, name_ptr: Word, name_len: Word) -> Word {
+    let def = definition_arg(ty, "rt_print_field_name");
+    let name = static_str(name_ptr, name_len, "rt_print_field_name");
     install();
-    crate::shared::print_shared().field_names.write().insert((def, index), name.to_string());
+    crate::shared::print_shared().field_names.write().insert((def, index as i64), name.to_string());
     0
 }
 
-/// Registers one type's compiled `print-object`: `args` is `[type,
-/// fn_addr]`.
+/// Registers one type's compiled `print-object`. An address of 0 says the executable has none for the type
+/// because it can make no value of it, so printing one is an internal error.
 ///
 /// # Safety
 ///
-/// `args` must point to 2 valid `i64`s, the second being the address of a
-/// function compiled under the shared compiled-function ABI.
+/// `addr` must be 0 or the address of a function compiled under the shared
+/// compiled-function ABI.
 #[no_mangle]
-pub unsafe extern "C" fn rt_print_object_method(args: *const i64, argc: u32) -> i64 {
-    if argc < 2 {
-        fatal("rt_print_object_method: expected 2 arguments");
-    }
-    let ty = type_arg(args, 0, "rt_print_object_method");
-    let addr = *args.add(1) as usize;
+pub unsafe extern "C" fn rt_print_object_method(ty: Word, addr: Word) -> Word {
+    let ty = type_arg(ty, "rt_print_object_method");
+    let addr = addr as usize;
     install();
     crate::shared::print_shared().print_object.write().insert(ty, addr);
     0
 }
 
-/// Registers one definition a `~/name/` directive resolved to: `args` is
-/// `[name_ptr, name_len, fn_addr]`, the name being what the checker resolved
-/// the directive to.
-///
-/// One call per definition the checker resolved some directive in this
-/// program to — see [`aot_format_call`].
+/// Registers one printer control variable's compiled global.
 ///
 /// # Safety
 ///
-/// `args` must point to 4 valid `i64`s: the name's pointer and length, the
-/// address of a function compiled under the shared compiled-function ABI
-/// whose signature is `((x T) (colon bool) (at bool)) -> string`, and the
-/// [`ArgWord`] its `x` crosses as.
+/// As [`rt_print_enum_variant`].
 #[no_mangle]
-pub unsafe extern "C" fn rt_format_call_method(args: *const i64, argc: u32) -> i64 {
-    if argc < 4 {
-        fatal("rt_format_call_method: expected 4 arguments");
-    }
-    let name = static_str(args, 0, "rt_format_call_method");
-    let addr = *args.add(2) as usize;
-    let Some(arg) = ArgWord::of_code(*args.add(3)) else {
-        fatal(&format!("rt_format_call_method: {} is not an argument encoding", *args.add(3)))
-    };
-    install();
-    crate::shared::print_shared().format_call.write().insert(name.to_string(), (addr, arg));
-    0
-}
-
-/// How the argument a `~/name/` directive hands its definition crosses into
-/// compiled code: the representation of the definition's first parameter,
-/// which the value alone does not say (an `f64` and a `Sexpr` holding one
-/// are the same value, and cross differently).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum ArgWord {
-    /// The tagged word the value is.
-    Tagged,
-    /// A fixed-width integer, as a raw word.
-    Narrow,
-    /// `0` or `1`.
-    Bool,
-    /// The code point.
-    Char,
-    /// `()`, which carries nothing: `0`.
-    Unit,
-    /// The `f64`'s bits.
-    F64,
-    /// The `f32` widened to an `f64`, its bits.
-    F32,
-}
-
-impl ArgWord {
-    /// The number a startup registration passes it as.
-    pub const fn code(self) -> i64 {
-        self as i64
-    }
-
-    fn of_code(n: i64) -> Option<ArgWord> {
-        [ArgWord::Tagged, ArgWord::Narrow, ArgWord::Bool, ArgWord::Char, ArgWord::Unit, ArgWord::F64, ArgWord::F32].into_iter().find(|a| a.code() == n)
-    }
-
-    /// `v`, crossing as this.
-    fn word(self, heap: &Heap, v: Value) -> Result<i64, String> {
-        match (self, v) {
-            (ArgWord::Tagged, v) => Ok(encode(v)),
-            // Held as a `Sexpr`, a fixed-width integer is boxed with its
-            // width; the checker made the width the parameter's.
-            (ArgWord::Narrow, Value::Int(n)) => Ok(n),
-            (ArgWord::Narrow, Value::Boxed(id)) if heap.narrow_box(id).is_some() => Ok(heap.narrow_box(id).expect("checked").value),
-            (ArgWord::Bool, Value::Bool(b)) => Ok(i64::from(b)),
-            (ArgWord::Char, Value::Char(c)) => Ok(c as i64),
-            (ArgWord::Unit, _) => Ok(0),
-            (ArgWord::F64, Value::Boxed(id)) if heap.is_f64(id) => Ok(heap.f64_value(id).to_bits() as i64),
-            (ArgWord::F32, Value::Boxed(id)) if heap.is_f32(id) => Ok(f64::from(heap.f32_value(id)).to_bits() as i64),
-            (want, v) => Err(format!("expected an argument crossing as {:?}, got {:?}", want, v)),
-        }
-    }
-}
-
-/// Registers one printer control variable's compiled global: `args` is
-/// `[name_ptr, name_len, id]`.
-///
-/// # Safety
-///
-/// `args` must point to 3 valid `i64`s in those representations.
-#[no_mangle]
-pub unsafe extern "C" fn rt_print_global(args: *const i64, argc: u32) -> i64 {
-    if argc < 3 {
-        fatal("rt_print_global: expected 3 arguments");
-    }
-    let name = static_str(args, 0, "rt_print_global");
-    let id = *args.add(2) as usize;
+pub unsafe extern "C" fn rt_print_global(name_ptr: Word, name_len: Word, id: Word) -> Word {
+    let name = static_str(name_ptr, name_len, "rt_print_global");
+    let id = id as usize;
     install();
     crate::shared::print_shared().globals.write().insert(name.to_string(), id);
     0
 }
 
-/// Registers the module the executable's type names are written for:
-/// `args` is `[words_ptr, words_len]`, the module as the words
-/// `typelisp_mem::type_words::ns_words` writes, a constant in the executable.
-/// See [`crate::shared::PrintShared::name_view`].
+/// The executable's type names, as [`rt_print_names`] registered them and
+/// until the first name is written: decoding them interns symbols, which a
+/// program that never writes a name does not need, so the decoding is done
+/// by what writes one ([`crate::shared::name_view`]) and linked in with it.
+static NAMES: AtomicPtr<Word> = AtomicPtr::new(core::ptr::null_mut());
+
+/// Registers how the executable writes type names: `x` is the
+/// address of a constant table, `[module_ptr, module_len, n]` and then `n`
+/// times `[words_ptr, words_len, name_ptr, name_len]` — the module the
+/// names are written for as the words `typelisp_mem::type_words::ns_words`
+/// writes, and each type it has brought in, as the words
+/// `typelisp_mem::type_words::definition_words` writes, with the name it is
+/// brought in under. See [`crate::shared::PrintShared::name_view`].
 ///
 /// # Safety
 ///
-/// `args` must point to 2 valid `i64`s describing those words, whose strings
-/// are constants.
+/// The words must be valid, the address of such a table, whose
+/// words and strings are constants.
 #[no_mangle]
-pub unsafe extern "C" fn rt_print_name_module(args: *const i64, argc: u32) -> i64 {
-    if argc < 2 {
-        fatal("rt_print_name_module: expected 2 arguments");
-    }
-    let words = std::slice::from_raw_parts(*args as usize as *const i64, *args.add(1) as usize);
-    let module = typelisp_mem::type_words::read_ns(words);
-    let view = crate::shared::name_view();
-    crate::shared::set_name_view(typelisp_mem::NameView::new(module, view.imports().clone()));
+pub unsafe extern "C" fn rt_print_names(x: Word) -> Word {
+    NAMES.store(x as usize as *mut Word, Ordering::SeqCst);
     0
 }
 
-/// Registers one type the module of [`rt_print_name_module`] has brought
-/// in: `args` is `[words_ptr, words_len, name_ptr, name_len]`, the
-/// definition as the words `typelisp_mem::type_words::definition_words`
-/// writes and the name it is brought in under.
-///
-/// # Safety
-///
-/// `args` must point to 4 valid `i64`s in those representations, whose
-/// strings are constants.
-#[no_mangle]
-pub unsafe extern "C" fn rt_print_name_import(args: *const i64, argc: u32) -> i64 {
-    if argc < 4 {
-        fatal("rt_print_name_import: expected 4 arguments");
+/// Drops the names [`rt_print_names`] registered without decoding them: a
+/// view set since replaces them.
+pub(crate) fn forget_registered_names() {
+    NAMES.store(core::ptr::null_mut(), Ordering::SeqCst);
+}
+
+/// The names [`rt_print_names`] registered, decoded, the first time this is
+/// asked; `None` after that, and when none were.
+pub(crate) fn registered_names() -> Option<typelisp_mem::NameView> {
+    let table = NAMES.swap(core::ptr::null_mut(), Ordering::SeqCst);
+    if table.is_null() {
+        return None;
     }
-    let words = std::slice::from_raw_parts(*args as usize as *const i64, *args.add(1) as usize);
-    let definition = typelisp_mem::type_words::read_definition(words);
-    let name = static_str(args, 2, "rt_print_name_import");
-    let view = crate::shared::name_view();
-    let mut imports = view.imports().clone();
-    imports.insert(definition, name);
-    crate::shared::set_name_view(typelisp_mem::NameView::new(view.module(), imports));
-    0
+    // SAFETY: the table `rt_print_names` was given, a constant of the
+    // executable laid out as it says.
+    unsafe {
+        let words = |at: *const Word| core::slice::from_raw_parts(*at as usize as *const Word, *at.add(1) as usize);
+        let module = typelisp_mem::type_words::read_ns(words(table));
+        let n = *table.add(2) as usize;
+        let mut imports = typelisp_mem::collections::HashMap::new();
+        for i in 0..n {
+            let entry = table.add(3 + 4 * i);
+            let definition = typelisp_mem::type_words::read_definition(words(entry));
+            let name = static_str(*entry.add(2), *entry.add(3), "rt_print_names");
+            imports.insert(definition, name);
+        }
+        Some(typelisp_mem::NameView::new(module, imports))
+    }
 }
 
 /// Installs [`AOT_HOOKS`] once. Idempotent, so each registration shim can

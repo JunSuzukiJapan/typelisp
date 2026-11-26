@@ -19,8 +19,8 @@
 # `-j N` (`TEST_JOBS`, default 6) caps how many test binaries run at once.
 # It does not cap the threads *within* a binary — that is libtest's own
 # `--test-threads`, passed after a `--` like in `test-serial.sh`. Flags
-# after `--` are forwarded to every `cargo test` invocation; they must not
-# contain spaces.
+# after `--` are forwarded to every test binary; they must not contain
+# spaces.
 #
 # A shard is every target whose position in the list (lib first, then
 # tests/*.rs in name order) is congruent to it modulo the count, so the shards
@@ -68,14 +68,28 @@ if [ "${1:-}" = "--worker" ]; then
         exit 0
     fi
     : "${TEST_TIMEOUT:=3600}"
-    if [ "$target" = "--lib" ]; then
-        # See test-serial.sh for why `--lib` needs `--no-fail-fast`. The
-        # trailing `--` separates cargo's own flags from libtest's.
-        "$timeout_bin" -k 10 "$TEST_TIMEOUT" cargo test --lib --no-fail-fast -- "$@" > "$logdir/$key.log" 2>&1
-    else
-        "$timeout_bin" -k 10 "$TEST_TIMEOUT" cargo test --test "$target" -- "$@" > "$logdir/$key.log" 2>&1
+    if [ "$target" = "--lib" ]; then source="src/lib.rs"; else source="tests/$target.rs"; fi
+    # Run by itself, not through `cargo test`: cargo puts
+    # `target/debug/typl` in place anew every time it runs, changed or not, and
+    # a test of another worker that runs `typl` just then finds no file there.
+    # `--lib` is the unit tests of every default member of the workspace, each
+    # run in its package's directory, as cargo does.
+    exes="$(sed -n "s|^ *Executable \(unittests \)\{0,1\}$source (\(.*\))\$|\2|p" "$logdir/executables")"
+    if [ -z "$exes" ]; then
+        echo "no test executable for $source in $logdir/executables" > "$logdir/$key.log"
+        echo "RESULT 125 $target (not built)"
+        echo "125" > "$logdir/$key.rc"
+        exit 0
     fi
-    rc=$?
+    : > "$logdir/$key.log"
+    rc=0
+    while IFS= read -r exe; do
+        package="$(basename "${exe%-*}" | tr _ -)"
+        if [ "$target" = "--lib" ] && [ -d "crates/$package" ]; then dir="crates/$package"; else dir="."; fi
+        case "$exe" in /*) ;; *) exe="$repo_root/$exe" ;; esac
+        echo "     Running $exe" >> "$logdir/$key.log"
+        (cd "$dir" && "$timeout_bin" -k 10 "$TEST_TIMEOUT" "$exe" "$@") >> "$logdir/$key.log" 2>&1 || rc=$?
+    done <<< "$exes"
     echo "$rc" > "$logdir/$key.rc"
     echo "RESULT $rc $target"
     exit 0
@@ -190,8 +204,20 @@ cargo build -p typelisp-front || { echo "FAILED: building typelisp-front's stati
 # invocation here, for the same reason as the staticlib above.
 echo "=== scripts/build-wasm-runtime.sh (the runtimes for the WebAssembly tests) ==="
 "$repo_root/scripts/build-wasm-runtime.sh" || { echo "FAILED: building the WebAssembly runtimes"; exit 1; }
-
+# The runtime for a board without an operating system: nothing links it
+# yet, so this is what keeps it building without std.
+echo "=== scripts/build-embedded-runtime.sh (the runtime for a board) ==="
+"$repo_root/scripts/build-embedded-runtime.sh" || { echo "FAILED: building the embedded runtime"; exit 1; }
+# Every test target, built once before the workers start; where each one's
+# executable is, which is what a worker runs, is in what cargo says.
+echo "=== cargo test --no-run (every test target, before the workers) ==="
 mkdir -p "$logdir"
+cargo test --no-run --lib --tests --color never 2>&1 | tee "$logdir/executables" | grep -v '^ *Executable '
+if [ "${PIPESTATUS[0]}" -ne 0 ]; then
+    echo "FAILED: building the test targets"
+    exit 1
+fi
+
 # Fresh verdicts: without this, a target whose worker never ran would be
 # judged by the `.rc` file a previous run left behind.
 for t in "${targets[@]}"; do

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/option-result.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
+<!-- translated-from: docs/ja/reference/functions/option-result.md @ dff3b51792f6d9c49bb8802bd3d3fb6e168edd92 -->
 # Option、Result 與錯誤型別
 
 ## 1. `Option<T>` / `Result<T,E>`
@@ -58,7 +58,7 @@
 |---|---|---|
 | `Option<U>`（巢狀） | 盒子 | 內層的 `None` 會與外層的 `None` 成為同一個值 |
 | `()` | 盒子 | `()` 的值就是空串列的值本身 |
-| `ptr` / `c-long` / `c-ulong` | 盒子 | 64 位元全部都是值，沒有用於區分的餘地 |
+| `ptr` / `c-long` / `c-ulong` | 盒子 | 所有位元都是值，沒有用於區分的餘地 |
 | 其他 | 無盒子 | — |
 
 表示只由型別決定，無法從值讀出。列印時依靜態型別還原 `(Some ...)`/`None`，所以 `(format false "~a" opt)` 輸出 `(Some 1)`。有兩個限制：

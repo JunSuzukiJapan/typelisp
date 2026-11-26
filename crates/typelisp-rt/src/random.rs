@@ -1,5 +1,7 @@
 //! `random-state`.
 
+use typelisp_mem::Word;
+use typelisp_mem::prelude::*;
 use typelisp_abi::{active_heap, decode, encode, fatal, raise};
 use typelisp_mem::{BoxId, Value};
 
@@ -76,10 +78,9 @@ pub fn seeded_random_state(seed: i64) -> u64 {
 ///
 /// # Safety
 ///
-/// A `Heap` must already be registered on this thread. Takes no arguments,
-/// so `args`/`argc` are unread.
+/// A `Heap` must already be registered on this thread.
 #[no_mangle]
-pub unsafe extern "C" fn rt_make_random_state_fresh(_args: *const i64, _argc: u32) -> i64 {
+pub unsafe extern "C" fn rt_make_random_state_fresh() -> Word {
     encode(active_heap().alloc_random_state(fresh_random_seed()))
 }
 
@@ -90,73 +91,60 @@ pub unsafe extern "C" fn rt_make_random_state_fresh(_args: *const i64, _argc: u3
 ///
 /// # Safety
 ///
-/// `argc` must be `>= 1` and `args[0]` must decode to an integer; a `Heap`
+/// `seed` must decode to an integer; a `Heap`
 /// must already be registered on this thread.
 #[no_mangle]
-pub unsafe extern "C" fn rt_seed_random_state(args: *const i64, argc: u32) -> i64 {
-    if argc < 1 {
-        fatal("rt_seed_random_state: expected 1 argument");
-    }
-    let seed = *args;
-    encode(active_heap().alloc_random_state(seeded_random_state(seed)))
+pub unsafe extern "C" fn rt_seed_random_state(seed: Word) -> Word {
+    encode(active_heap().alloc_random_state(seeded_random_state(seed as i64)))
 }
 
-/// Decodes `args[idx]` as a boxed random-state.
+/// Decodes `word` as a boxed random-state.
 ///
 /// # Safety
 ///
-/// `args` must point to at least `idx + 1` valid `i64`s, `args[idx]`
-/// decoding to a `Value::Boxed` random-state; a `Heap` must already be
-/// registered on this thread.
-unsafe fn random_state_arg(args: *const i64, idx: isize, who: &str) -> BoxId {
-    match decode(*args.offset(idx)) {
+/// A `Heap` must already be registered on this thread.
+unsafe fn random_state_arg(word: Word, who: &str) -> BoxId {
+    match decode(word) {
         Value::Boxed(id) if active_heap().is_random_state(id) => id,
         _ => fatal(&format!("{who}: argument is not a random-state")),
     }
 }
 
-/// `random-state-next` for compiled code — advances `args[0]`'s seed one
-/// xorshift step and returns the draw reduced into `[0, args[1])`, matching
-/// the interpreter's own `eval_random_state_next` (`args[1]` is a bare
-/// `i64` bound, and the result is a bare `i64` too). A non-positive bound
+/// `random-state-next` for compiled code — advances `state`'s seed one
+/// xorshift step and returns the draw reduced into `[0, bound)`, matching
+/// the interpreter's own `eval_random_state_next` (`bound` is a bare `i64`,
+/// and the result is a bare `i64` too). A non-positive bound
 /// [`raise`]s that same function's message, so `(random 0)` fails
 /// identically whichever tier the prelude's `random` is running on.
 ///
 /// # Safety
 ///
-/// `argc` must be `>= 2` and `args[0]` must decode to a boxed random-state;
-/// a `Heap` must already be registered on this thread.
+/// `state` must decode to a boxed random-state; a `Heap` must already be
+/// registered on this thread.
 #[no_mangle]
-pub unsafe extern "C-unwind" fn rt_random_state_next(args: *const i64, argc: u32) -> i64 {
-    if argc < 2 {
-        fatal("rt_random_state_next: expected 2 arguments");
-    }
-    let id = random_state_arg(args, 0, "rt_random_state_next");
-    let bound = *args.add(1);
+pub unsafe extern "C-unwind" fn rt_random_state_next(state: Word, bound: Word) -> Word {
+    let id = random_state_arg(state, "rt_random_state_next");
     if bound <= 0 {
         return raise(format!("random: bound must be positive, got {}", bound)).into_word();
     }
     let heap = active_heap();
     let next = xorshift64_step(heap.random_state_seed(id));
     heap.set_random_state_seed(id, next);
-    (next % bound as u64) as i64
+    (next % bound as u64) as Word
 }
 
 /// `random-state-copy` for compiled code — a new state starting where
-/// `args[0]` is now, so later draws against either never affect the other
+/// `state` is now, so later draws against either never affect the other
 /// (`eval_random_state_copy`). The result is a fresh allocation, tagged and
 /// as unrooted as [`rt_str_new`]'s until a caller protects it.
 ///
 /// # Safety
 ///
-/// `argc` must be `>= 1` and `args[0]` must decode to a boxed random-state;
-/// a `Heap` must already be registered on this thread.
+/// `state` must decode to a boxed random-state; a `Heap` must already be
+/// registered on this thread.
 #[no_mangle]
-pub unsafe extern "C" fn rt_random_state_copy(args: *const i64, argc: u32) -> i64 {
-    if argc < 1 {
-        fatal("rt_random_state_copy: expected 1 argument");
-    }
-    let id = random_state_arg(args, 0, "rt_random_state_copy");
+pub unsafe extern "C" fn rt_random_state_copy(state: Word) -> Word {
+    let id = random_state_arg(state, "rt_random_state_copy");
     let heap = active_heap();
     let seed = heap.random_state_seed(id);
     encode(heap.alloc_random_state(seed))

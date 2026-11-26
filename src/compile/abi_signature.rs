@@ -180,11 +180,11 @@ fn constants(out: &mut String) {
         FIXNUM_SHIFT, FIXNUM_MIN, FIXNUM_MAX, FIXNUM_MASK, FIXNUM_TAG,
         LOW_MASK, TAG_CONS, TAG_SYMBOL, TAG_BOXED, TAG_SMALL,
         SMALL_MASK, SMALL_SHIFT, TAG_IMMEDIATE, TAG_CHAR, TAG_STR, TAG_PATH,
-        BOXED_SHIFT, IMMEDIATE_NIL, IMMEDIATE_FALSE, IMMEDIATE_TRUE, NIL_WORD,
+        BOXED_SHIFT, IMMEDIATE_NIL, IMMEDIATE_FALSE, IMMEDIATE_TRUE, NIL_WORD, VALUE_WORDS,
     ]);
     const_table!(out, "C メモリ (typelisp_rt::c_mem)", typelisp_rt::c_mem, [
-        KIND_I8, KIND_I16, KIND_I32, KIND_U8, KIND_U16, KIND_U32, KIND_C_LONG, KIND_C_ULONG,
-        KIND_F32, KIND_F64, KIND_BOOL, KIND_PTR,
+        KIND_I8, KIND_I16, KIND_I32, KIND_U8, KIND_U16, KIND_U32, KIND_RAW_I32, KIND_RAW_U32,
+        KIND_F32, KIND_F64, KIND_BOOL, KIND_RAW_64,
     ]);
     const_table!(out, "終了コード (typelisp_rt)", typelisp_rt, [EXIT_CODE_PANIC, EXIT_CODE_SUCCESS]);
     const_table!(out, "既定の cons アリーナ (typelisp_rt)", typelisp_rt, [DEFAULT_AOT_HEAP_CAPACITY]);
@@ -205,17 +205,10 @@ fn vocabulary(out: &mut String) {
         let id = typelisp_mem::intern_type(typelisp_mem::TypeShape::named(ns.ns(), n, args));
         writeln!(out, "| {} | `{}` |", i, &*typelisp_mem::type_name(id)).unwrap();
     }
-    out.push_str("\n## 実行時が組み立てる値の型 (typelisp_rt)\n\n| 表 | 関数 | 型 |\n|---|---|---|\n");
-    let tables: [(&str, &[(u32, typelisp_mem::TypeSpec)]); 5] = [
-        ("sys_builtin::RESULT_TYPES", typelisp_rt::sys_builtin::RESULT_TYPES),
-        ("stream_builtin::RESULT_TYPES", typelisp_rt::stream_builtin::RESULT_TYPES),
-        ("stream_builtin::INNER_TYPES", typelisp_rt::stream_builtin::INNER_TYPES),
-        ("net_builtin::RESULT_TYPES", typelisp_rt::net_builtin::RESULT_TYPES),
-        ("net_builtin::INNER_TYPES", typelisp_rt::net_builtin::INNER_TYPES),
-    ];
-    for (table, rows) in tables {
-        for (f, spec) in rows {
-            writeln!(out, "| {} | `{}` | `{}` |", table, typelisp_mem::BUILTIN_SYMBOLS[*f as usize], name(spec)).unwrap();
+    out.push_str("\n## 実行時が組み立てる値の型\n\n| 表 | 関数 | 型 |\n|---|---|---|\n");
+    for table in &crate::compile::externs::BUILTIN_TYPE_TABLES {
+        for (f, spec) in table.rows {
+            writeln!(out, "| {} | `{}` | `{}` |", table.name, typelisp_mem::BUILTIN_SYMBOLS[*f as usize], name(spec)).unwrap();
         }
     }
     writeln!(out, "| readtable::READER_MACRO_OPTION_TYPE | | `{}` |", name(&typelisp_rt::readtable::READER_MACRO_OPTION_TYPE)).unwrap();
@@ -290,12 +283,10 @@ fn sig_types(sig: &FnDef, note: &mut impl FnMut(&Type)) {
 /// Every symbol compiled code calls in the archive, with the LLVM type it
 /// declares it at.
 fn shims(out: &mut String) {
-    const CLASSIC: &str = "i64 (ptr, i32)";
-    let mut rows: BTreeMap<&str, &str> = super::externs::rt_extern_functions().iter().map(|(n, _)| (*n, CLASSIC)).collect();
-    // Declared by the AOT entry sequence rather than the shim table
-    // (`aot::build_main_wrapper`, `aot::coroutine_door`).
-    for (name, ty) in [("rt_heap_init", CLASSIC), ("rt_run_entry", "i64 (i64)"), ("rt_drive_body", CLASSIC)] {
-        rows.insert(name, ty);
+    let mut rows: BTreeMap<&str, String> = BTreeMap::new();
+    for name in super::externs::runtime_function_names_with_entries() {
+        let sig = super::externs::runtime_sig(name).expect("a listed runtime function has a signature");
+        rows.insert(name, sig.to_string());
     }
     out.push_str("## ランタイム関数\n\n| シンボル | LLVM の型 |\n|---|---|\n");
     for (name, ty) in rows {

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ ac5a6b3adada21a0a55e0e1c4b0e1fabf4854908 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 1b5dc6ac828d8e4a95800a91218b5e9dffe83f98 -->
 # typelisp-syntaxisreferentie
 
 typelisp is een statisch getypeerde Lisp, geschreven in S-expressies. Voor de lijst met ingebouwde
@@ -84,7 +84,7 @@ functies en methoden zie [Ingebouwde functies](functions/README.md); voor de lij
   nieuwe tuple. Om er een te bouwen uit berekende waarden gebruik je `(tuple a b)`. Waar
   S-expressiedata worden verwacht, is het een tuple waarvan alle elementen data zijn: de variant
   `Tuple` van `Sexpr`.
-- **Attributen**: `#[test]` is een markering die aan de volgende vorm vastzit (geschreven zoals in Rust). Het enige attribuut tot nu toe is `test`, en dat hoort bij een `defun` ([3.16 `#[test]`](#316-test--testfuncties)). Gelezen met `read` wordt het de lijst `(%internal::attribute (test) form)`.
+- **Attributen**: `#[test]` is een markering op de volgende vorm (geschreven zoals in Rust). Er zijn drie attributen, `test`, `interrupt(N)` en `exception(NAME)`, die elk op een `defun` staan ([3.16 `#[test]`](#316-test--testfuncties), [3.17 interrupthandlers](#317-interruptn--exceptionname--interrupthandlers)). Een attribuut met argumenten schrijf je met het haakje direct na de naam. Gelezen met `read` worden ze de lijsten `(%internal::attribute (test) form)` en `(%internal::attribute ((interrupt 7)) form)`.
 - **De lege lijst `()`**: afhankelijk van de context de waarde van het type `Unit` of de `None` van
   `Option<Sexpr>`. **`Sexpr` heeft geen variant voor de lege lijst**: `Sexpr` betekent "een niet-lege
   S-expressie", en het type van S-expressiedata is `Option<Sexpr>` (zie "Patronen voor
@@ -383,7 +383,7 @@ wijst blijft draaien, dus de enige juiste levensduur is die van het proces.
 #### ptr / c-long / c-ulong — ruwe machinewoorden
 
 `ptr` is een ondoorzichtige pointer (`void *`, `FILE *`, wat de declaratie ook bedoelde). `c-long` /
-`c-ulong` zijn `long` / `unsigned long` van C (ook `size_t`, `int64_t` en `intptr_t`).
+`c-ulong` zijn `long` / `unsigned long` van C (ook `size_t` en `intptr_t`).
 
 ```lisp
 (defffi (c-malloc "malloc") (c-ulong) ptr)
@@ -395,7 +395,7 @@ wijst blijft draaien, dus de enige juiste levensduur is die van het proces.
 
 **Ze niet `i64` / `u64` noemen is bewust.** Deze taal heeft geen geheel type van 64 bits, omdat een
 getagde directe waarde maar 63 bits heeft ([hoofdstuk 2](#2-types-schrijven)). De naam `c-long` zegt
-"dit is een woord dat de grens met C overschrijdt, geen geheel getal van deze taal".
+"dit is een woord dat de grens met C overschrijdt, geen geheel getal van deze taal". De breedte is die van C's `long` op het doel (64 bits op 64-bits macOS en Linux, 32 bits op wasm32 en Cortex-M).
 
 **Ze hebben geen rekenkunde.** `(+ x 1)` kan niet worden geschreven. Het zou kunnen worden geboden maar
 is dat niet, zodat er geen berekening draait op een waarde die nergens kan worden opgeslagen en een andere
@@ -404,7 +404,7 @@ zijn **alleen conversies**:
 
 ```lisp
 (as i32 (unsafe (c-strlen "hello")))         ; read what came back
-(as int (unsafe (c-strlen s)))               ; this one to read it exactly (int does not lose 64 bits)
+(as int (unsafe (c-strlen s)))               ; this one to read it exactly (int loses none of the value)
 (try-as i32 (unsafe (c-strlen s)))           ; ask whether it fits
 (as c-ulong n)                               ; make one from another integer
 ```
@@ -547,7 +547,7 @@ docstring worden gezet.
 De types die voor velden kunnen worden geschreven zijn `i8` `i16` `i32` `u8` `u16` `u32` `c-long`
 `c-ulong` `f32` `f64` `bool` `ptr`, getypeerde pointers `(ptr T)`, en andere `def-c-struct`s (op waarde
 ingebed). De indeling (de offset van elk veld, en de grootte en uitlijning van de struct) wordt volgens de
-regels van C berekend (uitgaande van LP64). Een veld dat naar de struct zelf wijst kan worden geschreven,
+regels van C berekend (de breedtes van `c-long` en pointers en de uitlijning van `f64` volgen de C van het doel). Een veld dat naar de struct zelf wijst kan worden geschreven,
 maar de struct kan zichzelf niet insluiten.
 
 ```lisp
@@ -574,6 +574,7 @@ Alloceren, lezen en schrijven worden in de volgende vormen geschreven. Ze kunnen
 | `(c-alloc T)` / `(c-alloc T n)` | Alloceert `n` waarden van `T` (1 als weggelaten). De inhoud wordt met 0 gevuld. Geeft een `(ptr T)` terug |
 | `(c-ref p i)` | Een pointer naar element `i` vanaf `p`. Een fout als buiten het gealloceerde bereik |
 | `(c-deref p)` / `(setf (c-deref p) v)` | Leest / schrijft de scalar waar `p` naar wijst |
+| `(volatile-read-u32 addr)` / `(volatile-write-u32 addr v)` | Leest of schrijft het register op adres `addr` (een `int`, of een geheel getal van vaste breedte zoals `u16`), precies één keer, op die plek. Hetzelfde voor `-u8` en `-u16` |
 | `p::field` / `(setf p::field v)` | Leest / schrijft een veld van een struct. Een veld lezen dat een ingebedde struct is geeft zijn adres (`(ptr inner-type)`) |
 | `(as ptr p)` | Vergeet het type en maakt een `ptr` (om door te geven aan iets als de `void *` van `qsort`). Er is geen conversie terug |
 
@@ -1369,6 +1370,34 @@ test result: FAILED. 1 passed; 1 failed; 0 filtered out
 
 Wat een test met `print` afdrukt, gaat direct naar standaarduitvoer (het wordt niet opgevangen). Voor uitvoer om iets te onderzoeken schrijven `eprint`/`eprintln` ([Afdrukken](functions/printing.md)) naar standaardfout en mengen ze zich niet met de uitvoer van het programma.
 
+### 3.17 `#[interrupt(N)]` / `#[exception(NAME)]` — interrupthandlers
+
+```lisp
+(use std::board::enable-interrupt)
+(defvar (*received* int) 0)
+
+#[interrupt(7)]
+(defun on-uart () ()
+  (unsafe (volatile-write-u32 #x4000400C 1))   ; wis wat de interrupt veroorzaakte
+  (setf *received* (+ *received* 1))
+  ())
+
+(defun main () ()
+  (enable-interrupt 7)
+  ...)
+```
+
+In een programma dat voor een microcontroller is gecompileerd (paragraaf 3.8 van [Compileren](../guide/compile.md)) zijn dit de functies die worden aangeroepen als er een interrupt komt. `#[interrupt(N)]` maakt een functie de handler van periferie-interrupt `N` (0 tot en met 239), en `#[exception(NAME)]` van de core-exception `NAME`, een van `NonMaskableInt`, `MemoryManagement`, `BusFault`, `UsageFault`, `SVCall`, `DebugMonitor`, `PendSV`, `SysTick` (`HardFault` is van de runtime en beëindigt het programma).
+
+- Voor de Arduino Uno zijn de nummering en het inschakelen anders, en zijn `#[exception(NAME)]` en `enable-interrupt` niet bruikbaar ([Compileren](../guide/compile.md), paragraaf 3.9). Wat hieronder over de runtime staat, geldt voor de Cortex-M.
+- Ze staan op een `defun` op het hoogste niveau die niets neemt en `()` teruggeeft (ook geen typeparameters). Een interrupt heeft één handler, en een functie behandelt één interrupt.
+- Een periferie-interrupt komt pas als `(enable-interrupt N)` hem inschakelt (`(disable-interrupt N)` stopt hem; zie [Systeem](functions/system.md)). Een exception zoals SysTick komt zodra de registers zo zijn ingesteld dat hij optreedt.
+- Een handler draait meteen, waar de interrupt kwam. Komt die midden in werk van de runtime (toewijzen, garbage collection, uitvoer, van taak wisselen enzovoort), dan draait de handler zodra dat werk klaar is. Handlers onderbreken elkaar niet.
+- In een handler vindt geen garbage collection plaats (de heap groeit als dat nodig is). De toestand van het programma, zoals globale variabelen, is gewoon te lezen en te schrijven.
+- Een handler kan niet wachten. Een handler die `sleep` gebruikt, is een compileerfout. Een bewerking die maar soms wacht, zoals ontvangen uit een kanaal, is te gebruiken zolang die niet hoeft te wachten; zou dat wel moeten, dan is het een panic.
+- Een `panic` of `throw` die een handler verlaat, beëindigt het programma, zoals een niet-opgevangen doet.
+- In de interpreter en in een programma dat voor iets anders dan een microcontroller is gecompileerd, komt geen interrupt. In de interpreter is een handler als gewone functie aan te roepen (voor tests). `typl -c` voor iets anders dan een microcontroller weigert een programma met een handler.
+
 ## 4. Binding en voorwaarden
 
 ```lisp
@@ -1836,6 +1865,8 @@ hogere orde enzovoort).
 (todo)                              ; expands to (panic "todo"). defmacro
 (as Type expr)                      ; numeric/character type conversion. conversions that can fail panic on failure
 (try-as Type expr)                  ; like as, but returns the result as Option<Type> (None on failure)
+(size-of Type)                      ; aantal bytes van een waarde van Type (int)
+(size-of-val expr)                  ; aantal bytes van een waarde van het type van expr (int); expr wordt niet geëvalueerd
 (print control args...)             ; expands the format and writes to standard output (no newline)
 (println control args...)           ; the same (with a newline at the end)
 (format dest control args...)       ; CL's format. returns the expanded string
@@ -1887,6 +1918,30 @@ overeenkomstige conversiemethoden expandeert (`int->char`/`int->int`/`int->W` en
 
 Vanuit `rational` converteren `as`/`try-as` naar `int` (`as` kapt af, `try-as` slaagt alleen voor een
 geheel getal), `ratio` en `f64`; vanuit `int`/`ratio` naar `rational`.
+
+`size-of`/`size-of-val` zijn wat `sizeof` in C is. Het antwoord is een constante die bij het compileren vaststaat: de
+grootte op het doel waarop de code draait:
+
+| Type | Bytes |
+|---|---|
+| `i8` `u8` `bool` | 1 |
+| `i16` `u16` | 2 |
+| `i32` `u32` `f32` `char` | 4 |
+| `f64` | 8 |
+| `c-long` `c-ulong` | gelijk aan `long` in C op het doel |
+| `ptr` `(ptr T)` | gelijk aan een pointer van het doel |
+| `def-c-struct` | gelijk aan de C-structuur (opvulling inbegrepen) |
+| `()` | 0 |
+| Al het andere (`int`, `string`, een `defstruct`-type enz.) | één woord (gelijk aan een pointer van het doel): de waarde zelf, of de plaats van de waarde |
+
+```lisp
+(size-of u16)                       ; => 2
+(size-of-val (as i8 5))             ; => 1
+(let ((x 1.0)) (size-of-val x))     ; => 8
+```
+
+Een typeparameter van een generieke functie mag ook; het type bij elke aanroep beslist. `!` heeft geen waarde en is
+daarom een fout. Een `def-c-struct`-type mag ook buiten `unsafe` worden geschreven.
 
 `documentation` is, net als `quote`/`compile`, een speciale vorm die `name` zonder evaluatie leest, als een
 ongeëvalueerd kaal symbool / `::`-pad. Anders dan `(documentation 'name 'function)` van CL neemt het geen
@@ -2300,10 +2355,9 @@ hetzelfde wordt behandeld als een `(panic ...)`).
   taken gaan bij de volgende evaluatie verder waar ze waren gebleven). Aan het eind van een evaluatie wacht
   het tot elke thread zijn huidige stap heeft voltooid, dus als een C-functie (`defffi`) binnen een
   `thread` blijft blokkeren, eindigt de evaluatie niet totdat ze terugkeert.
-- **Afdrukken op workers**: geïnterpreteerde `print-object`-methoden, en geïnterpreteerde functies en
-  methoden die `~/name/` aanroept, kunnen niet op andere threads draaien; zulke waarden op een andere thread
-  afdrukken is dus een panic die als een `(panic ...)` wordt behandeld (`(compile T::print-object)`, of druk
-  af vanuit de hoofdtaak).
+- **Afdrukken op workers**: geïnterpreteerde `print-object`-methoden kunnen niet op andere threads
+  draaien; zulke waarden op een andere thread afdrukken is dus een panic die als een `(panic ...)` wordt
+  behandeld (`(compile T::print-object)`, of druk af vanuit de hoofdtaak).
 - **Data races zijn ongedefinieerd** (dezelfde positie als Go). Het resultaat van meerdere taken die
   dezelfde waarde wijzigen zonder via `Mutex<T>` / `Chan<T>` te gaan is niet gegarandeerd.
 - **`task` geeft een waarde terug.** Anders dan het `go`-statement van Go geeft het een `Task<T>` terug, en

@@ -38,7 +38,7 @@ pub(super) fn expect_char(v: &Value) -> Result<char, EvalError> {
 
 /// `char->int` (`registry::char_assoc`): a `char`'s Unicode scalar value as
 /// `i32` (uniformly `Value::Int(i64)` at runtime — see
-/// `eval_int_builtin`'s doc comment). Always succeeds — every `char` is
+/// `eval_fixed_builtin`'s doc comment). Always succeeds — every `char` is
 /// already a valid scalar value, unlike `int->char`'s reverse direction.
 pub(super) fn char_to_int(args: &[Value]) -> Result<Value, EvalError> {
     expect_char(&args[0]).map(|c| Value::Int(c as i64))
@@ -112,7 +112,7 @@ pub(super) fn string_lt(heap: &Heap, args: &[Value]) -> Result<Value, EvalError>
 }
 
 /// The `<`/`<=`/`>`/`>=` comparison operators on `string`, lexicographic (byte
-/// order) — the counterpart of `eval_int_builtin`'s numeric comparisons, kept
+/// order) — the counterpart of `eval_fixed_builtin`'s numeric comparisons, kept
 /// in one function for the same reason (one match over the operator symbol).
 pub(super) fn string_compare(heap: &Heap, method: SymRef, args: &[Value]) -> Result<Value, EvalError> {
     let a = expect_str(heap, &args[0])?;

@@ -1,5 +1,7 @@
 //! A task that is a compiled chain and nothing else.
 
+use typelisp_mem::Word;
+use typelisp_mem::prelude::*;
 use typelisp_mem::{Heap, Value};
 use super::{pending_wait, wake_word, ChanOp, Progress, SchedError, TaskBody, Waiting, Wake};
 
@@ -28,10 +30,10 @@ impl From<SchedError> for TaskFailure {
     }
 }
 
-impl std::fmt::Display for TaskFailure {
+impl core::fmt::Display for TaskFailure {
     /// The line an executable prints on the way out — the same wording
     /// `EvalError`'s `Display` uses for the same failures.
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
             TaskFailure::Panic(m) => write!(f, "panic: {}", m),
             TaskFailure::Throw(tag) => write!(f, "throw: no enclosing (catch '{}) for this throw", tag.spelling()),
@@ -140,7 +142,7 @@ enum CompiledState {
     /// Enter this with these argument words — an interpreted `thread`'s
     /// task. What the words point at is rooted in the state slots until the
     /// entry's prologue has copied them into its frame.
-    EnterWith(Entry, Vec<i64>),
+    EnterWith(Entry, Vec<Word>),
     /// Re-enter the standing chain with this word in its value slot.
     Resume(i64),
     /// Hand the standing chain the unwind parked for it (`deliver` of an
@@ -162,7 +164,7 @@ impl CompiledTask {
         heap.push_root(Value::Empty);
         heap.push_root(Value::Empty);
         CompiledTask {
-            chain: crate::coroutine::FrameStack::new(),
+            chain: crate::coroutine::FrameStack::for_task(),
             state: CompiledState::Entry(f),
             sbase,
             wake: Wake::Unit,
@@ -183,7 +185,7 @@ impl CompiledTask {
     /// arguments as values — rooted in the second state slot until the first
     /// step (a closure entry is rooted in the first). Built on the task's own
     /// root stack.
-    pub fn enter_with(heap: &mut Heap, entry: Entry, args: Vec<i64>, held: Value, answer: AnswerDecoder) -> CompiledTask {
+    pub fn enter_with(heap: &mut Heap, entry: Entry, args: Vec<Word>, held: Value, answer: AnswerDecoder) -> CompiledTask {
         let sbase = heap.root_count();
         heap.push_root(match &entry {
             Entry::Closure(c) => *c,
@@ -191,7 +193,7 @@ impl CompiledTask {
         });
         heap.push_root(held);
         CompiledTask {
-            chain: crate::coroutine::FrameStack::new(),
+            chain: crate::coroutine::FrameStack::for_task(),
             state: CompiledState::EnterWith(entry, args),
             sbase,
             wake: Wake::Unit,
@@ -256,7 +258,7 @@ impl CompiledTask {
             Ok(_) if self.discard_answer => Progress::Done(Ok(Value::Empty)),
             Ok(word) => match &self.answer {
                 Some(answer) => Progress::Done(answer(heap, word).map_err(TaskFailure::Internal)),
-                None => Progress::Done(Ok(typelisp_abi::decode(word))),
+                None => Progress::Done(Ok(typelisp_abi::decode(word as Word))),
             },
             // The chain stays exactly as it is, rooted by the prologues that
             // built it; only the answer's shape has to be remembered.
@@ -330,7 +332,7 @@ impl CompiledTask {
 /// # Safety
 ///
 /// A `Heap` must be registered on this thread (a throw's value lives there).
-unsafe fn unwind_failure(payload: Box<dyn std::any::Any + Send>) -> TaskFailure {
+unsafe fn unwind_failure(payload: Box<dyn core::any::Any + Send>) -> TaskFailure {
     let payload = match payload.downcast::<typelisp_abi::CompiledPanic>() {
         Ok(p) => return TaskFailure::Panic(p.message),
         Err(other) => other,
@@ -354,7 +356,7 @@ impl TaskBody for CompiledTask {
         heap.push_root(closure);
         heap.push_root(Value::Empty);
         CompiledTask {
-            chain: crate::coroutine::FrameStack::new(),
+            chain: crate::coroutine::FrameStack::for_task(),
             state: CompiledState::Start(closure),
             sbase,
             wake: Wake::Unit,
@@ -377,10 +379,10 @@ impl TaskBody for CompiledTask {
         // own throw through these same thread-locals since then, so nothing
         // here may be assumed left over from last time except what this call
         // installs.
-        crate::restore_parked_unwind(std::mem::take(&mut self.parked_unwind));
+        crate::restore_parked_unwind(core::mem::take(&mut self.parked_unwind));
         // Taken out to be consumed; every path below either puts the next
         // state back or reports `Done`, after which nothing reads it.
-        let state = std::mem::replace(&mut self.state, CompiledState::Resume(0));
+        let state = core::mem::replace(&mut self.state, CompiledState::Resume(0));
         let outcome = match state {
             CompiledState::Entry(f) => self.chain.run(heap, f, &[]),
             CompiledState::Start(closure) => self.chain.run_closure(heap, typelisp_abi::encode(closure), &[]),

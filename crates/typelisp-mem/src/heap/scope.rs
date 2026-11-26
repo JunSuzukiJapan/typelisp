@@ -1,6 +1,7 @@
 //! `Scope` payloads.
 
-use std::collections::HashMap;
+use crate::prelude::*;
+use crate::collections::HashMap;
 use crate::value::{BoxId, BoxedObj, StructPayload, TypeId, Value};
 use super::Heap;
 

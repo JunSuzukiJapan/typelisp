@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/numbers.md @ 676864f7e6cf8e950e51aadacecd49695c8545a8 -->
+<!-- translated-from: docs/ja/reference/functions/numbers.md @ 1b5dc6ac828d8e4a95800a91218b5e9dffe83f98 -->
 # Zahlen
 
 Operationen auf Ganzzahlen, Gleitkommazahlen, rationalen Zahlen, komplexen Zahlen und Wahrheitswerten sowie
@@ -72,11 +72,10 @@ einem Typ mit Breite. `c-long` / `c-ulong` haben nur Umwandlungen:
 | `int->i8` … `int->u32` | `(int->W x)` | `T→W` | Dieselben Breitenumwandlungen wie in Kapitel 1. Werte, die nicht passen, werden abgeschnitten |
 | `try-int->i8` … `try-int->u32` | `(try-int->W x)` | `T→Option<W>` | Dieselbe Umwandlung als Frage |
 | `int->c-long` `int->c-ulong` | `(int->W x)` | `T→W` | Der Weg hinein, vom anderen rohen Wort und von den Ganzzahltypen aus Kapitel 1 |
-| `try-int->c-long` `try-int->c-ulong` | `(try-int->W x)` | `T→Option<W>` | Wie oben |
 | `int->int` | `(int->int x)` | `T→int` | **Immer exakt**. Der ehrliche Weg, ein `size_t` zu lesen, das nicht in ein `i32` passt |
 
 `(as i32 x)` / `(try-as i32 x)` / `(as int x)` / `(as c-ulong n)` tun genau das, und die Umwandlungen gibt es
-für jedes Paar mit den Ganzzahltypen aus Kapitel 1. `ptr` hat nicht einmal diese Tabelle: Es gibt keine
+für jedes Paar mit den Ganzzahltypen aus Kapitel 1. Eine `try-`-Form zu einem rohen Wort gibt es nicht: `Option<c-long>` würde ein rohes Wort in einen anderen Typ legen, und das lässt sich nicht schreiben. `ptr` hat nicht einmal diese Tabelle: Es gibt keine
 Möglichkeit, einen Zeiger als Zahl zu lesen. Es ist ein Wert, der nur übergeben, erhalten und an eine andere
 C-Funktion weitergereicht wird.
 
@@ -144,6 +143,7 @@ passt, ist ein Laufzeitfehler („an integer argument does not fit a fixnum“).
 | `log` (zwei Argumente) | `(log x base)` | `(f64,f64)→f64` | Logarithmus zu einer gegebenen Basis. Expandiert zu `(/ (log x) (log base))` (Kapitel 8) |
 | `floor-div` `ceiling-div` `round-div` `truncate-div` | `(op a b)` | `(f64,f64)→cons-cell<f64,f64>` | Entsprechen CLs zweistelligen Fassungen (`(floor 7.0 2.0)`→Quotient 3, Rest 1). Derselbe Entwurf wie die gleichnamigen Funktionen in Kapitel 1 (`car`=Quotient, `cdr`=Rest) |
 | `float->int` | `(float->int x)` | `f64→int` | Wandelt durch Abschneiden gegen null in `int` um (CLs `truncate`; exakt für endliche Werte jeder Größe). Panic bei Unendlich und NaN. Für eine feste Breite verwendet man `(as i32 x)` |
+| `float->i8` `float->i16` `float->i32` `float->u8` `float->u16` `float->u32` | `(op x)` | `f64→i8` | Die unteren Bits dessen, was `float->int` liefert, als dieser Typ (ohne Umweg über `int`). Unendlich und NaN führen zu panic. Das, was `(as i16 x)` ist |
 | `float->ratio` | `(float->ratio x)` | `f64→ratio` | Wandelt als exakte binäre rationale Zahl in ein `ratio` um (CLs `rational`) |
 | `float->f32` `float->f64` | `(op x)` | `f64→f32` / `f64→f64` | Wandelt zwischen Gleitkommabreiten um. `float->f32` rundet zum nächsten Wert, `float->f64` ist immer exakt. Das, was `(as f32 x)` tut |
 | `try-float->f32` `try-float->f64` | `(op x)` | `f64→Option<f32>` / `→Option<f64>` | Dieselbe Umwandlung als Frage. `None`, wenn das Runden den Wert ändert (das Erweitern auf `f64` ist immer `Some`). Das, was `(try-as f32 x)` tut |
@@ -334,7 +334,7 @@ Konstanten für numerische Grenzen (CLHS 12.1.4.2 / 12.1.3):
 
 | Name | Typ | Beschreibung |
 |---|---|---|
-| `most-positive-fixnum` / `most-negative-fixnum` | `int` | Die obere / untere Grenze eines direkten 63-Bit-Wertes (2^62-1 / -2^62). Ein `int` darüber hinaus wird zur Bignum |
+| `most-positive-fixnum` / `most-negative-fixnum` | `int` | Die obere / untere Grenze eines direkten 63-Bit-Wertes (2^62-1 / -2^62; auf wasm32 und Cortex-M 31 Bit, 2^30-1 / -2^30). Ein `int` darüber hinaus wird zur Bignum |
 | `most-positive-double-float` / `most-negative-double-float` | `f64` | Der größte / kleinste endliche Wert |
 | `least-positive-double-float` / `least-negative-double-float` | `f64` | Der kleinste von null verschiedene Betrag, einschließlich subnormaler Zahlen |
 | `least-positive-normalized-double-float` / `least-negative-normalized-double-float` | `f64` | Dasselbe, beschränkt auf normalisierte Zahlen |

@@ -22,6 +22,7 @@
 //!   disagreements made a `HashTable<K,V>` field of a `defstruct` fail to
 //!   compile while claiming the type had no representation at all.
 
+use typelisp_mem::fixed::FixedType;
 use typelisp_mem::{wk, Error, Heap, Value};
 
 use crate::typeck::registry::AdtKind;
@@ -80,18 +81,19 @@ pub(crate) fn is_enum_ty_by(ty: &Type, kind_of: &dyn Fn(&Path) -> Option<AdtKind
 /// representation has to be written down here or it is gone.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Repr {
-    /// Every fixed integer width — a raw machine word.
+    /// A fixed-width integer (`i8` ... `u32`) — a raw machine word in a word
+    /// carrier, sign- or zero-extended from its width
+    /// (`typelisp_mem::fixed::Fixed::to_word`).
     ///
-    /// Named `int-any-width` in the core IR: one representation really does
-    /// serve all six, because the word already holds the number the type
-    /// names (sign- or zero-extended, `types::normalize_int`). What a width
-    /// still decides is how the value is *boxed*, and that is
-    /// [`Repr::field_kind`]'s business, not this tag's.
+    /// Spelled with the type's own name in the core IR (`i8`, `u32`). The
+    /// width is the type's because a value is carried at its type's width
+    /// wherever it is not in a word: a direct function takes and answers a
+    /// `u8` as an `i8`.
     ///
     /// `Narrow` and not `Int`, since `int` became a type of its own: the
     /// six widths are the ones narrower than a word, and [`Repr::Int`] is
     /// the one that is not a raw word at all.
-    Narrow,
+    Narrow(FixedType),
     /// `int` — the arbitrary-precision integer, as the tagged word it
     /// already is: a fixnum (bit 0 clear, 63-bit payload) or a
     /// `BoxedObj::Bignum` reference, whichever the value's size demands
@@ -107,12 +109,10 @@ pub enum Repr {
     Int,
     /// `f64` — raw `f64::to_bits` in an `i64`.
     F64,
-    /// `f32` — also a raw `f64::to_bits` pattern, of the binary32 value
-    /// widened into binary64.
+    /// `f32` — raw `f32::to_bits` in the low 32 bits of a word.
     ///
-    /// A separate representation from [`Repr::F64`] even though the carrier
-    /// word is identical, because the carrier is not the only thing a `Repr`
-    /// decides: a compiled value coming *back* has to be put in a box, and
+    /// Apart from [`Repr::F64`] because how the value crosses is not the only
+    /// thing a `Repr` decides: a compiled value coming *back* has to be put in a box, and
     /// the box has to say which width it is. One `Float` variant meant the
     /// return path had to guess, and it guessed `f64`.
     F32,
@@ -201,6 +201,11 @@ pub enum Repr {
     None,
 }
 
+fn c_long_fits_the_word() -> bool {
+    let model = typelisp_mem::target::DataModel::current();
+    model.c_long_bits() <= model.pointer_bits()
+}
+
 impl Repr {
     /// Classify `ty`, resolving a nominal type's kind through `kind_of`.
     ///
@@ -213,9 +218,18 @@ impl Repr {
             // no arithmetic), and ahead of everything else for the same reason
             // the `Handle` arm is early: falling through to the tagged
             // catch-all would shift a pointer left by three.
+            // A C `long` wider than the word (AVR's) is an integer of its width.
+            Type::CLong | Type::CULong if !c_long_fits_the_word() => {
+                let bits = typelisp_mem::target::DataModel::current().c_long_bits();
+                Repr::Narrow(FixedType::of(bits, *ty == Type::CLong).unwrap_or_else(|| unreachable!("a {}-bit `long`", bits)))
+            }
             Type::Ptr | Type::CLong | Type::CULong | Type::PtrTo(_) => Repr::RawWord,
             Type::Int => Repr::Int,
-            _ if ty.is_integer() => Repr::Narrow,
+            _ if ty.is_integer() => Repr::Narrow(
+                crate::types::int_width_signed(ty)
+                    .and_then(|(width, signed)| FixedType::of(width, signed))
+                    .unwrap_or_else(|| unreachable!("{:?} is an integer type of no fixed width", ty)),
+            ),
             _ if is_llvm_handle_ty(ty) => Repr::Handle,
             Type::F32 => Repr::F32,
             _ if ty.is_float() => Repr::F64,
@@ -271,6 +285,9 @@ impl Repr {
             Type::Named(p, args) if path_is_builtin(p, typelisp_mem::wk::HASHTABLE) && args.len() == 2 => {
                 Repr::HashTable(Box::new(Repr::of_by(&args[0], kind_of)), Box::new(Repr::of_by(&args[1], kind_of)))
             }
+            // An expanded `format`'s buffer: a box like a struct's, which
+            // nothing but the printer's pieces opens.
+            Type::Named(p, _) if path_is_builtin(p, typelisp_mem::wk::FORMAT_OUT) => Repr::Struct,
             Type::Named(p, _) if kind_of(p) == Some(AdtKind::Struct) => Repr::Struct,
             // Not the lookup alone: `Option`/`Result` and the concrete error
             // types are recognized structurally, so they classify correctly
@@ -286,7 +303,7 @@ impl Repr {
     /// the head of the list for a parametric one.
     pub fn tag(&self) -> &'static str {
         match self {
-            Repr::Narrow => "int-any-width",
+            Repr::Narrow(t) => Repr::fixed_tag(*t).0,
             Repr::Int => "int",
             Repr::F64 => "f64",
             Repr::F32 => "f32",
@@ -313,11 +330,26 @@ impl Repr {
         }
     }
 
+    /// A fixed-width integer's spelling: its type's name, as text and as the
+    /// vocabulary member. `c-long`/`c-ulong` are not here: they are
+    /// [`Repr::RawWord`].
+    fn fixed_tag(t: FixedType) -> (&'static str, u32) {
+        match t {
+            FixedType::I8 => ("i8", wk::I8),
+            FixedType::I16 => ("i16", wk::I16),
+            FixedType::I32 => ("i32", wk::I32),
+            FixedType::U8 => ("u8", wk::U8),
+            FixedType::U16 => ("u16", wk::U16),
+            FixedType::U32 => ("u32", wk::U32),
+            FixedType::I64 | FixedType::U64 => unreachable!("a 64-bit integer is a raw word, not a fixed-width representation"),
+        }
+    }
+
     /// The vocabulary member [`Repr::write`] spells this representation's
     /// head with — [`Repr::tag`]'s symbol.
     pub(crate) fn tag_wk(&self) -> u32 {
         match self {
-            Repr::Narrow => wk::INT_ANY_WIDTH,
+            Repr::Narrow(t) => Repr::fixed_tag(*t).1,
             Repr::Int => wk::INT,
             Repr::F64 => wk::F64,
             Repr::F32 => wk::F32,
@@ -346,8 +378,13 @@ impl Repr {
 
     /// Every simple representation, for [`Repr::read`] and for a test that
     /// wants to enumerate the vocabulary.
-    pub(crate) const SIMPLE: [Repr; 20] = [
-        Repr::Narrow,
+    pub(crate) const SIMPLE: [Repr; 25] = [
+        Repr::Narrow(FixedType::I8),
+        Repr::Narrow(FixedType::I16),
+        Repr::Narrow(FixedType::I32),
+        Repr::Narrow(FixedType::U8),
+        Repr::Narrow(FixedType::U16),
+        Repr::Narrow(FixedType::U32),
         Repr::Int,
         Repr::RawWord,
         Repr::F64,
@@ -466,7 +503,7 @@ impl Repr {
             // A handle joins the integer class: its representation *is* a plain
             // untraced `i64`, so the int tag/detag bit ops are exactly right
             // and no GC root is ever wanted.
-            Repr::Narrow | Repr::Handle => Class::Int,
+            Repr::Narrow(_) | Repr::Handle => Class::Int,
             // *Not* `Class::Int`, which a handle is: an integer field is
             // stored tagged, and this word has no room for a tag.
             Repr::RawWord => Class::RawWord,
@@ -535,15 +572,9 @@ impl Repr {
     /// committed bitcode: island trio, `compile_test`, and
     /// `compiled_binding_gc_test` all stayed green.
     ///
-    /// `Struct`/`Vector`/`Dyn` reaching this as `KIND_PLAIN` was not an
-    /// oversight: `compile-construct-boxed-struct`'s doc comment
-    /// (`src/compiler.rs`) argues the classifier "deliberately doesn't classify
-    /// a `mutable` struct type as `KIND_SEXPR`", because
-    /// `push-permanent-sexpr-root` already keeps every box compiled code builds
-    /// alive from birth, making a per-binding push/pop redundant. That is true
-    /// — and it is correctness resting on a leak, since a permanent root is
-    /// never popped by design (`rt_push_permanent_sexpr_root`'s own doc). The
-    /// derivation here pays that redundancy back to be independent of it.
+    /// The slot a binding has in its frame is the only thing that keeps a box
+    /// alive, so a representation that can be reclaimed and is not a `2` is
+    /// a value swept while it is in use.
     pub fn binding_kind(&self) -> i64 {
         /// No bookkeeping at a binding boundary.
         const KIND_PLAIN: i64 = 0;
@@ -576,12 +607,12 @@ impl Repr {
     ///
     /// The narrow integers are the clearest case of the two producers meaning
     /// different things by the same *kind of* value. A `u8` **field of a
-    /// struct** is `1`, a raw word, because the `defstruct` already wrote the
-    /// width down and nothing has to be carried alongside the value. A `u8`
+    /// struct** is a fixnum, because the `defstruct` already wrote the width
+    /// down and nothing has to be carried alongside the value. A `u8`
     /// **inside a `Sexpr`** is the `u8` variant, a `BoxedObj::Narrow`, because
-    /// there the width is written down nowhere else. Same type, same machine
-    /// word, two encodings — decided by where the value is going, which is
-    /// what this number says.
+    /// there the width is written down nowhere else. Same type, two encodings
+    /// — decided by where the value is going, which is what this number
+    /// says.
     ///
     /// Read off the `Repr`, not off [`Repr::class`]: the two float widths
     /// share a class (they compute alike) but not a kind (they box
@@ -590,6 +621,11 @@ impl Repr {
         use crate::sexpr_variant::field_kind as k;
         if matches!(self, Repr::F32) {
             return k::F32 as i64;
+        }
+        // A fixed-width integer is a fixnum in the slot whatever its width;
+        // the width is what it is read back at.
+        if let Repr::Narrow(t) = self {
+            return (k::FIXED as i64) + i64::from(t.bits()) * 2 + i64::from(t.signed());
         }
         // A niche is a tagged word both ways, like `TAGGED` — but the island has
         // to tell the two apart where it *builds* an `Option` around a
@@ -625,24 +661,6 @@ impl Repr {
             // code yet", which is now true of everything that produces it.
             Class::NotRepresentable => k::NOT_REPRESENTABLE,
         }) as i64
-    }
-
-    /// How a value of this representation crosses into a compiled
-    /// definition a `~/name/` directive calls in an executable.
-    pub fn arg_word(&self) -> typelisp_print::aot::ArgWord {
-        use typelisp_print::aot::ArgWord;
-        if matches!(self, Repr::F32) {
-            return ArgWord::F32;
-        }
-        match self.class() {
-            Class::Int => ArgWord::Narrow,
-            Class::Float => ArgWord::F64,
-            Class::Char => ArgWord::Char,
-            Class::Bool => ArgWord::Bool,
-            Class::Tagged { .. } => ArgWord::Tagged,
-            Class::Unit => ArgWord::Unit,
-            Class::RawWord | Class::NotRepresentable => unreachable!("a `~/name/` directive calls a definition of a type a value has, never {:?}", self),
-        }
     }
 }
 
@@ -701,11 +719,11 @@ mod tests {
         h.set_gc_stress(true);
         let mut all: Vec<Repr> = Repr::SIMPLE.to_vec();
         all.push(Repr::Scope(Box::new(Repr::Handle)));
-        all.push(Repr::Vector(Box::new(Repr::Narrow)));
+        all.push(Repr::Vector(Box::new(Repr::Narrow(FixedType::U8))));
         all.push(Repr::HashTable(Box::new(Repr::Str), Box::new(Repr::Sexpr)));
         // Nested, so `read` is not merely accepting a one-level list.
         all.push(Repr::Vector(Box::new(Repr::Vector(Box::new(Repr::Enum)))));
-        all.push(Repr::Niche(Box::new(Repr::Narrow)));
+        all.push(Repr::Niche(Box::new(Repr::Narrow(FixedType::I16))));
         all.push(Repr::Vector(Box::new(Repr::Niche(Box::new(Repr::F64)))));
         for r in all {
             let v = r.write(&mut h).expect("write failed");
@@ -721,9 +739,10 @@ mod tests {
             let v = r.write(h).expect("write failed");
             crate::check::core::print(h, v)
         };
-        assert_eq!(printed(&mut h, Repr::Narrow), "int-any-width");
+        assert_eq!(printed(&mut h, Repr::Narrow(FixedType::I8)), "i8");
+        assert_eq!(printed(&mut h, Repr::Narrow(FixedType::U32)), "u32");
         assert_eq!(printed(&mut h, Repr::Scope(Box::new(Repr::Handle))), "(scope handle)");
-        assert_eq!(printed(&mut h, Repr::Vector(Box::new(Repr::Narrow))), "(vector int-any-width)");
+        assert_eq!(printed(&mut h, Repr::Vector(Box::new(Repr::Narrow(FixedType::U16)))), "(vector u16)");
         assert_eq!(printed(&mut h, Repr::Niche(Box::new(Repr::Handle))), "(niche handle)");
         assert_eq!(
             printed(&mut h, Repr::HashTable(Box::new(Repr::Str), Box::new(Repr::Sexpr))),
@@ -742,7 +761,7 @@ mod tests {
             "(vector)",
             // Arity, not spelling: both elements *are* representations, so
             // this is refused only for having two of them.
-            "(vector int-any-width int-any-width)",
+            "(vector i32 i32)",
             "(scope not-a-repr)",
             "(42)",
             "()",
@@ -755,8 +774,8 @@ mod tests {
     #[test]
     fn scalars_and_adts_classify_by_their_declared_type() {
         let of = |t: Type| Repr::of_by(&t, &kind_of);
-        assert_eq!(of(Type::I32), Repr::Narrow);
-        assert_eq!(of(Type::U32), Repr::Narrow);
+        assert_eq!(of(Type::I32), Repr::Narrow(FixedType::I32));
+        assert_eq!(of(Type::U32), Repr::Narrow(FixedType::U32));
         assert_eq!(of(Type::F64), Repr::F64);
         assert_eq!(of(Type::F32), Repr::F32);
         assert_eq!(of(Type::Char), Repr::Char);
@@ -772,7 +791,7 @@ mod tests {
         // reason they have variants of their own.
         assert_eq!(
             of(Type::Named(Path::builtin(typelisp_mem::wk::VECTOR), vec![Type::U32])),
-            Repr::Vector(Box::new(Repr::Narrow))
+            Repr::Vector(Box::new(Repr::Narrow(FixedType::U32)))
         );
         assert_eq!(
             of(Type::Named(Path::builtin(typelisp_mem::wk::HASHTABLE), vec![Type::Str, Type::Bool])),
@@ -782,7 +801,7 @@ mod tests {
         // no type must not turn `Option`/`Result` into `Repr::None`.
         assert_eq!(
             Repr::of_by(&Type::Named(Path::builtin(typelisp_mem::wk::OPTION), vec![Type::I32]), &|_| None),
-            Repr::Niche(Box::new(Repr::Narrow))
+            Repr::Niche(Box::new(Repr::Narrow(FixedType::I32)))
         );
         // The niche stops where the payload could be the empty word.
         let option = |t: Type| Type::Named(Path::builtin(typelisp_mem::wk::OPTION), vec![t]);
@@ -820,7 +839,7 @@ mod tests {
             Repr::Rational,
             Repr::Sexpr,
             Repr::Struct,
-            Repr::Vector(Box::new(Repr::Narrow)),
+            Repr::Vector(Box::new(Repr::Narrow(FixedType::U8))),
             Repr::HashTable(Box::new(Repr::Str), Box::new(Repr::Sexpr)),
             Repr::Enum,
             Repr::Dyn,
@@ -852,7 +871,7 @@ mod tests {
     #[test]
     fn a_niche_is_tagged_and_rooted_by_its_payload() {
         let niche = |r: Repr| Repr::Niche(Box::new(r));
-        for r in [Repr::Narrow, Repr::Handle, Repr::Char, Repr::Bool, Repr::Sym] {
+        for r in [Repr::Narrow(FixedType::U8), Repr::Handle, Repr::Char, Repr::Bool, Repr::Sym] {
             assert_eq!(niche(r.clone()).field_kind(), k::NICHE as i64, "{:?}", r);
             assert_eq!(niche(r.clone()).binding_kind(), 0, "{:?} points at nothing reclaimable", r);
         }
@@ -861,7 +880,7 @@ mod tests {
             assert_eq!(niche(r.clone()).binding_kind(), 2, "{:?} is reclaimable through the niche", r);
         }
         // A niche never niches: `Option<Option<T>>` boxes.
-        assert!(!niche(Repr::Narrow).niches());
+        assert!(!niche(Repr::Narrow(FixedType::I8)).niches());
         for r in [Repr::Unit, Repr::RawWord, Repr::None] {
             assert!(!r.niches(), "{:?}", r);
         }
@@ -876,7 +895,7 @@ mod tests {
     /// `compile_reads_a_hashtable_field_out_of_a_struct`).
     #[test]
     fn only_a_generic_type_variable_is_not_representable() {
-        for r in [Repr::Narrow, Repr::Handle, Repr::F64, Repr::F32, Repr::Char, Repr::Bool, Repr::Unit] {
+        for r in [Repr::Narrow(FixedType::I32), Repr::Handle, Repr::F64, Repr::F32, Repr::Char, Repr::Bool, Repr::Unit] {
             assert_eq!(r.binding_kind(), 0, "{:?} is a scalar and needs no root", r);
             assert_ne!(r.field_kind(), k::NOT_REPRESENTABLE as i64, "{:?} is representable in a field", r);
         }

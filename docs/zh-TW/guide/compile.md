@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ 7622044725db7d28dabb691d82e592367d9284e8 -->
+<!-- translated-from: docs/ja/guide/compile.md @ 1b5dc6ac828d8e4a95800a91218b5e9dffe83f98 -->
 # 編譯
 
 不做任何處理的話，typelisp 程式由直譯器執行。此外還有兩種編譯為原生碼的方法，以及一種保存環境的方法。規格的詳情見
@@ -206,7 +206,148 @@ const code = await run({ write: (fd, text) => { /* 例如顯示在頁面上 */ }
 - 在瀏覽器中，請透過 HTTP 從與 `hello.mjs` 相同的位置提供 `hello.wasm`（無法從 `file://` 載入）。
 - `sleep` 用 `Atomics.wait` 等待。瀏覽器只允許在跨來源隔離頁面的 Worker 中使用它，因此使用 `sleep` 的程式請在 Worker 中執行。
 - 本地時間（省略 `zone` 的 `decode-universal-time` 等）依 JavaScript 的 `Date` 回報的時區求得。
-- 除 3.6 節中不能使用的之外，檔案和目錄操作也是**編譯錯誤**。標準輸入讀作空，`(command-line-args)` 是空向量。
+- 除了 3.6 節中不能使用的東西，檔案和目錄操作、環境變數、`(command-line-args)`、家目錄和 `dribble` 也是**編譯錯誤**。標準輸入讀作空。
+
+### 3.8 為微控制器（Cortex-M）編譯
+
+加上 `--target thumbv7em-none-eabihf`，`typl -c` 會為沒有作業系統的 Cortex-M4F、M7 開發板產生可執行檔（ELF）。省略 `-o` 時，名稱是把原始檔的 `.typl` 換成 `.elf`。加上 `--target thumbv8m.main-none-eabihf` 則是針對 Cortex-M33 開發板的。
+
+```sh
+$ typl -c hello.typl --target thumbv7em-none-eabihf          # 產生 hello.elf
+$ qemu-system-arm -M mps2-an386 -nographic \
+    -semihosting-config enable=on,target=native -kernel hello.elf   # 在 QEMU 的 Cortex-M4 上執行
+$ typl -c hello.typl --target thumbv8m.main-none-eabihf
+$ qemu-system-arm -M mps2-an505 -nographic \
+    -semihosting-config enable=on,target=native -kernel hello.elf   # 在 QEMU 的 Cortex-M33 上執行
+```
+
+- 用 `install.sh` 安裝的 `typl` 可以直接使用。用 `cargo install` 安裝時，先執行 `rustup target add thumbv7em-none-eabihf thumbv8m.main-none-eabihf`，再加上 `--features embedded` 安裝（與 wasm 兩者都要則用 `--features wasm,embedded`）。使用儲存庫的除錯建置 `typl` 時，執行 `scripts/build-embedded-runtime.sh`。連結使用 rustup 工具鏈的連結器。
+- 用 `--linker-script FILE` 給出開發板的記憶體配置。寫法與 `cortex-m-rt` 的 `memory.x` 相同，寫 FLASH 和 RAM 的位址與大小。寫 `_typelisp_stack_size = 32K;` 這樣的一行，就是 RAM 中堆疊佔用的大小（不寫則為 64KiB）。RAM 的其餘部分是堆積。省略時使用 QEMU 的 `mps2-an386`（Cortex-M33 為 `mps2-an505`） 的配置。
+
+  ```
+  MEMORY
+  {
+    FLASH : ORIGIN = 0x08000000, LENGTH = 512K
+    RAM : ORIGIN = 0x20000000, LENGTH = 128K
+  }
+  _typelisp_stack_size = 16K;
+  ```
+
+- 由誰提供輸出、輸入、結束和時鐘（開發板的函式），用 `--board-functions` 選擇。
+  - `semihosting`（預設）：透過 semihosting 提供。在 QEMU（`-semihosting-config enable=on`）或除錯器下執行時使用。
+  - `c`：由開發板以 C 函式提供。用 `--link FILE` 傳入定義了下列函式的目的檔或靜態函式庫（`--link` 可以寫多次；`defffi` 呼叫的廠商函式庫也同樣傳入）。
+
+  ```c
+  void     typelisp_host_write(int32_t fd, const uint8_t *p, size_t len); // fd 1 是標準輸出，2 是標準錯誤
+  size_t   typelisp_host_read(int32_t fd, uint8_t *p, size_t len);        // fd 0；讀到的位元組數，結束時為 0
+  void     typelisp_host_exit(int32_t code);                              // 不返回
+  uint64_t typelisp_host_now_us(void);                                    // 不會倒退的時鐘的微秒數
+  int64_t  typelisp_host_unix_us(void);                                   // 自 1970-01-01 起的微秒數
+  void     typelisp_host_sleep_us(uint64_t us);                           // 等待 us 微秒
+  ```
+
+- 板子的暫存器（對映到記憶體的周邊裝置）用 `volatile-read-u8`、`volatile-read-u16`、`volatile-read-u32` 讀取，用 `volatile-write-u8`、`volatile-write-u16`、`volatile-write-u32` 寫入。位址以 `int` 或 `u16` 等固定寬度的整數傳入，讀到的值是該寬度的型別（`u8` 等）。每個都在寫下它的位置恰好讀寫一次，編譯器既不省略也不移動它。它們都只能在 `unsafe` 中使用。位址為負數或不是寬度的倍數時，在讀寫之前就是執行期錯誤。
+
+  ```lisp
+  ;; QEMU 的 mps2-an386 的 UART 0：資料 0x40004000，狀態 0x40004004，控制 0x40004008
+  (defun put-byte ((c u32)) ()
+    (unsafe
+      (loop (when (= (logand (volatile-read-u32 #x40004004) 1) 0) (break)))   ; 傳送中則等待
+      (volatile-write-u32 #x40004000 c)))
+
+  (defun main () ()
+    (unsafe (volatile-write-u32 #x40004008 1))                               ; 啟用傳送
+    (put-byte 104) (put-byte 105) (put-byte 10))                             ; "hi" 與換行
+  ```
+
+- 中斷到來時被呼叫的函式，寫成帶有 `#[interrupt(N)]`（周邊中斷 `N`）或 `#[exception(SysTick)]` 這類屬性的 `defun`。中斷用 `(enable-interrupt N)` 啟用。處理程式當場執行，只有在執行時期處理途中到來時，才會在該處理結束後執行。處理程式中不能等待（`sleep` 是編譯錯誤）。詳見 [語法參考](../reference/syntax.md) 的 3.17 節。
+
+  ```lisp
+  (use std::board::enable-interrupt)
+
+  #[interrupt(5)]
+  (defun on-five () ()
+    (println "interrupt 5"))
+
+  (defun main () ()
+    (enable-interrupt 5)
+    (unsafe (volatile-write-u32 #xE000E200 (as u32 32))))   ; 自己引發中斷 5（NVIC 的擱置暫存器）
+  ```
+
+- 啟動（向量表和 RAM 的準備）和記憶體配置由執行環境完成。發生 HardFault 或未處理的中斷時，以與 panic 相同的結束碼（1）結束。
+- `throw`/`catch`/`panic`、bignum、ratio、浮點數，以及任務、通道和 `sleep` 的行為與可執行檔相同。任務在唯一的核心上依序執行。也可以使用 C 函式（`defffi`）。
+- 使用開發板沒有的東西的程式是**編譯錯誤**。除了 3.7 節中不能使用的東西，還不能使用 `eval` 和 `macroexpand`。本地時間未知（與 3.6 節相同）。
+- cons 區域從 1024 個單元開始，不夠時會成長。`--heap-cells`、`--max-memory`、`--no-cons`、`-O<N>`、`--release` 可以照常使用。
+
+### 3.9 為 Arduino Uno（AVR）編譯
+
+加上 `--target avr-atmega328p`，會產生供 Arduino Uno 的微控制器（ATmega328P）使用的執行檔（ELF）。下面的程式讓開發板上的 LED 閃爍。
+
+```lisp
+(defconstant (PINB int) #x23)
+(defconstant (DDRB int) #x24)
+(defconstant (LED u8) 32)                         ; PB5
+
+(defun wait-a-bit () ()
+  (let ((i (the u32 0)))
+    (while (< i (the u32 400000))
+      (unsafe (volatile-read-u8 PINB))
+      (setf i (+ i 1)))
+    ()))
+
+(defun main () ()
+  (unsafe (volatile-write-u8 DDRB LED))           ; 設為輸出
+  (while true
+    (unsafe (volatile-write-u8 PINB LED))         ; 反轉
+    (wait-a-bit)))
+```
+
+```sh
+$ typl -c blink.typl --target avr-atmega328p -O2   # 產生 blink.elf
+$ qemu-system-avr -M uno -display none -serial stdio -bios blink.elf   # 在 QEMU 中執行
+```
+
+- 由於沒有執行階段，使用執行階段的程式會成為**編譯錯誤**。錯誤會指出需要什麼，以及經由哪些函式到達。可以使用的有：固定寬度整數（`i8` 到 `u32`）、`f32`、`f64`、`bool`、`char` 的計算，函式呼叫（包括遞迴），條件分支，迴圈，保存這些值的 `defvar` 和 `defconstant`，`volatile-read-u8` 等，以及 C 函式的呼叫。
+- 不能使用的有：字串、串列、結構等放在堆積上的值；`catch`、函式值的呼叫；傳遞字串或函式的 C 函式的呼叫；`sin`、`expt` 等浮點數的數學函式（`sqrt` 和 `floor` 等取整可以使用）。
+- 中斷處理函式用 `#[interrupt(N)]` 撰寫（[語法](../reference/syntax.md) 3.17 節）。`N` 是 ATmega328P 的中斷編號，以重設為 0 計，從 1 到 25（計時器 1 溢位是 13）。請看下面的例子。
+- 除以 0 時，微控制器會當場停止（中斷也不再到來）。用 `/` 將有號的最小值除以 `-1` 也一樣。
+- `int` 沒有固定寬度，因此不能使用（編譯錯誤）。請使用 `i16`、`u16` 等固定寬度的型別。位址也可以用固定寬度的整數計算。寫成數字的位址和 `defconstant` 的 `int` 這類在編譯時就確定值的東西可以使用。
+- 遞迴使堆疊不足時，微控制器會停止。
+- C 函式用 `defffi` 宣告，並用 `--link FILE` 傳入為 AVR 編譯的目的檔。
+- 什麼都不做的迴圈在 `-O1` 以上會被移除。在等待的迴圈中，請讀取暫存器等。
+- `main` 結束後，微控制器停止。
+- 記憶體配置可以用 `--linker-script FILE` 更改。省略時為 32KiB 快閃記憶體去掉末尾 512 位元組的開機載入程式後的部分，以及 2KiB RAM。RAM 的位址要加上 `0x800000` 來寫，例如 `0x800100`。
+- `f32` 和 `f64` 的計算由輔助函式完成。只有用到的輔助函式會放進快閃記憶體（`f64` 的更大）。
+- 連結與 3.8 節一樣，使用 rustup 工具鏈的連結器。
+
+用計時器中斷讓 LED 閃爍的例子。中斷在周邊裝置自己的暫存器中啟用。
+
+```lisp
+(defconstant (PINB int) #x23)
+(defconstant (DDRB int) #x24)
+(defconstant (LED u8) 32)
+(defconstant (TIMSK1 int) #x6F)
+(defconstant (TCCR1B int) #x81)
+(defvar (ticks u16) 0)
+
+#[interrupt(13)]                                  ; 計時器 1 溢位
+(defun on-overflow () ()
+  (unsafe (volatile-write-u8 PINB LED))           ; 反轉
+  (setf ticks (+ ticks 1))
+  ())
+
+(defun main () ()
+  (unsafe (volatile-write-u8 DDRB LED)
+          (volatile-write-u8 TIMSK1 1)            ; 啟用溢位中斷
+          (volatile-write-u8 TCCR1B 3))           ; 以時脈的 1/64 計數
+  (while true))
+```
+
+- 有處理函式的程式在全域變數初始化完成後接受中斷。請在 `main` 的開頭設定周邊裝置。
+- 不能使用 `enable-interrupt` 和 `#[exception(NAME)]`（編譯錯誤）。
+- 處理函式執行期間，其他中斷等待。處理函式與其他函式一樣，不能使用執行階段。
+- 全域變數的一次讀取或寫入，即使是兩個位元組以上的值，也不會被處理函式打斷。為此，在讀取處理函式寫入的變數時，以及寫入處理函式讀取或寫入的變數時，會禁止中斷，並在編譯時以警告指出該變數。先讀後寫的更新（`(setf n (+ n 1))`）之間會有中斷到來。要更新處理函式也寫入的變數時，請讀取並保存狀態暫存器（位址 `#x5F`），寫入 0 以停止中斷，完成後寫回保存的值。
+- 沒有處理函式的中斷到來時，微控制器會停止。
 
 ## 4. 傾印
 

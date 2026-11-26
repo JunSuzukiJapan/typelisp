@@ -4,10 +4,10 @@
 //! `prin1`/`princ`/`write` and the three `-to-string` forms are macros over
 //! `format`, so what is worth testing is the *choice* each makes (`~s` vs
 //! `~a`), that they return their object the way CL's do, and that the stream
-//! argument is optional. `~/name/` is the one new piece of machinery: it
-//! resolves a name against the argument's own type at run time, which is a
-//! deliberate departure from CL's global-function lookup (see
-//! `PrintEnv::format_call` for why the CL reading is not reachable here).
+//! argument is optional. `~/name/` is the one new piece of machinery: it is
+//! the call `(name arg colon at)`, resolved at check time against the
+//! argument's own type, which is a deliberate departure from CL's
+//! global-function lookup.
 
 extern crate typelisp;
 
@@ -301,18 +301,19 @@ fn a_call_directive_over_the_remaining_arguments_is_resolved() {
     );
 }
 
-/// One directive calls one definition: one that can be handed arguments of
-/// two types calling different definitions is refused.
+/// A directive that can be handed arguments of two types calls, for each,
+/// the definition that type's argument would be handed to.
 #[test]
-fn a_directive_that_would_call_two_definitions_is_refused() {
-    let e = check_err(&format!(
-        r#"{} (defun brief ((s string) (colon bool) (at bool)) string s)
-              (format false "~:[~;~*~]~/brief/" true "s" (make-instance 'point :x 1 :y 2))"#,
-        POINT
-    ));
-    assert!(e.contains("which call different definitions"), "{}", e);
-    // In the source's spelling: `''` is the method's internal name.
-    assert!(e.contains("point::brief`)") && !e.contains("''"), "{}", e);
+fn a_directive_handed_arguments_of_two_types_calls_each_ones_definition() {
+    let call = |pick: bool, expected: &str| {
+        format!(
+            r#"{} (defun brief ((s string) (colon bool) (at bool)) string (append s "!"))
+                  (equal (format false "~:[~;~*~]~/brief/" {} "s" (make-instance 'point :x 1 :y 2)) "{}")"#,
+            POINT, pick, expected
+        )
+    };
+    is_true(&call(true, "1/2"));
+    is_true(&call(false, "s!"));
 }
 
 #[test]

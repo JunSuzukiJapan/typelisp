@@ -22,6 +22,7 @@
 /// The subject of the DER-encoded certificate `der`, in RFC 4514 form. An
 /// error names what in the encoding was not X.509 — a certificate that has
 /// been through the verifier never gets one.
+use typelisp_mem::prelude::*;
 pub fn subject(der: &[u8]) -> Result<String, String> {
     let (certificate, _) = Tlv::read(der, 0).map_err(|e| format!("certificate: {}", e))?;
     certificate.expect(0x30, "certificate")?;

@@ -44,7 +44,8 @@
 //! - `:miser` — `:linear`, but only when miser style is in effect (the block
 //!   started within `*print-miser-width*` columns of the right margin).
 
-use std::collections::HashMap;
+use typelisp_mem::prelude::*;
+use typelisp_mem::collections::HashMap;
 
 use typelisp_mem::{wk, Heap, Value};
 

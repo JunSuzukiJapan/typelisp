@@ -60,12 +60,10 @@ pub(crate) struct Request {
 }
 
 /// What a form's code asks to be reached from outside it: the C callback
-/// entries, and the definitions `~/name/` directives call, which an
-/// executable registers at startup.
+/// entries.
 #[derive(Debug, Default)]
 pub(crate) struct Reached {
     pub(crate) callbacks: Vec<crate::ffi_callback::CallbackSig>,
-    pub(crate) format_calls: Vec<(crate::CompileTarget, typelisp_print::aot::ArgWord)>,
 }
 
 /// What one top-level form asks to be made besides itself: the
@@ -79,9 +77,6 @@ pub(crate) struct Requests {
     /// The lifted functions' definitions, rooted.
     lifted: Vec<Value>,
     callbacks: Vec<crate::ffi_callback::CallbackSig>,
-    /// What the form's `~/name/` directives call, each with how its
-    /// argument crosses into it.
-    format_calls: Vec<(crate::CompileTarget, typelisp_print::aot::ArgWord)>,
     /// In the instantiation of a generic body being lowered, the name each
     /// `labels` function it passes C is lifted under: the checked body names
     /// one path for every instantiation, and each lifts its own function.
@@ -112,14 +107,6 @@ impl Requests {
         }
     }
 
-    /// The definition `target`, which a `~/name/` directive calls, its
-    /// argument crossing as `arg`.
-    pub(crate) fn format_call(&mut self, target: crate::CompileTarget, arg: typelisp_print::aot::ArgWord) {
-        if !self.format_calls.iter().any(|(t, _)| *t == target) {
-            self.format_calls.push((target, arg));
-        }
-    }
-
     /// The lifted definitions not taken yet.
     pub(crate) fn take_lifted(&mut self) -> Vec<Value> {
         std::mem::take(&mut self.lifted)
@@ -127,7 +114,7 @@ impl Requests {
 
     /// What the form's code asks to be reached from outside it.
     pub(crate) fn take_reached(&mut self) -> Reached {
-        Reached { callbacks: std::mem::take(&mut self.callbacks), format_calls: std::mem::take(&mut self.format_calls) }
+        Reached { callbacks: std::mem::take(&mut self.callbacks) }
     }
 
     /// The name the function `base` has specialized at `args`; asked for

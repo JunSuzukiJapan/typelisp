@@ -14,7 +14,8 @@
 //! The decision is made on the modules' tree; the string is only assembled at
 //! the end.
 
-use std::collections::HashMap;
+use crate::prelude::*;
+use crate::collections::HashMap;
 
 use crate::symbols::{ns_parent, ns_path, NsId, SymRef};
 use crate::TypeId;

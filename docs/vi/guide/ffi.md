@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/ffi.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
+<!-- translated-from: docs/ja/guide/ffi.md @ dff3b51792f6d9c49bb8802bd3d3fb6e168edd92 -->
 # C FFI (defffi)
 
 Tài liệu này giải thích cách gọi hàm C từ typelisp. Danh sách các kiểu có thể khai báo và các hạn chế
@@ -46,7 +46,7 @@ Cách dùng dự kiến là giới hạn `unsafe` ở một chỗ và đưa ra b
 | `bool` | `bool` (`_Bool`) |
 | `()` | `void` |
 | `string` | `const char *` |
-| `c-long` / `c-ulong` | `long` / `unsigned long` (cũng là `size_t`, `int64_t`, v.v.) |
+| `c-long` / `c-ulong` | `long` / `unsigned long` (cũng là `size_t`, v.v.) |
 | `ptr` | Con trỏ bất kỳ (`void *`, `FILE *`, v.v.) |
 | `(ptr T)` | Con trỏ tới `T` ([mục 7](#7-struct-c)) |
 
@@ -63,10 +63,10 @@ Cách dùng dự kiến là giới hạn `unsafe` ở một chỗ và đưa ra b
 ### `c-long` / `c-ulong` / `ptr`
 
 Các kiểu này chỉ tồn tại để truyền giá trị qua ranh giới với C, và **không hỗ trợ phép toán số học
-nào**. Để dùng chúng như số nguyên của typelisp, hãy chuyển đổi bằng `as`.
+nào**. Để dùng chúng như số nguyên của typelisp, hãy chuyển đổi bằng `as`. Độ rộng của chúng bằng độ rộng của C trên máy chạy chương trình (64 bit cho cả `c-long` lẫn con trỏ trên macOS và Linux 64 bit, 32 bit khi `--target` chỉ định wasm32 hoặc Cortex-M).
 
 ```lisp
-(as int (unsafe (c-strlen s)))      ; int không làm mất bit nào của giá trị 64 bit
+(as int (unsafe (c-strlen s)))      ; int không làm mất bit nào của giá trị
 (try-as i32 (unsafe (c-strlen s)))  ; None nếu không vừa với i32
 (unsafe (c-malloc 16))              ; có thể truyền nguyên hằng số nguyên
 ```

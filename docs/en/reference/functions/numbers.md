@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/numbers.md @ 676864f7e6cf8e950e51aadacecd49695c8545a8 -->
+<!-- translated-from: docs/ja/reference/functions/numbers.md @ 1b5dc6ac828d8e4a95800a91218b5e9dffe83f98 -->
 # Numbers
 
 Operations on integers, floating-point numbers, rationals, complex numbers and booleans, and other
@@ -71,11 +71,10 @@ type with a width. `c-long` / `c-ulong` have only conversions:
 | `int->i8` … `int->u32` | `(int->W x)` | `T→W` | The same width conversions as chapter 1. Values that do not fit are truncated |
 | `try-int->i8` … `try-int->u32` | `(try-int->W x)` | `T→Option<W>` | The same conversion as a question |
 | `int->c-long` `int->c-ulong` | `(int->W x)` | `T→W` | The way in, from the other raw word and from the integer types of chapter 1 |
-| `try-int->c-long` `try-int->c-ulong` | `(try-int->W x)` | `T→Option<W>` | Same as above |
 | `int->int` | `(int->int x)` | `T→int` | **Always exact**. The honest way to read a `size_t` that does not fit in an `i32` |
 
 `(as i32 x)` / `(try-as i32 x)` / `(as int x)` / `(as c-ulong n)` are what these do, and the
-conversions exist for every pair with the integer types of chapter 1. `ptr` does not even have this
+conversions exist for every pair with the integer types of chapter 1. There is no `try-` form into a raw word: `Option<c-long>` would put a raw word inside another type, which cannot be written. `ptr` does not even have this
 table: no way is provided to read a pointer as a number. It is a value that is only passed, received
 and handed on to another C function.
 
@@ -143,6 +142,7 @@ argument does not fit a fixnum").
 | `log` (two arguments) | `(log x base)` | `(f64,f64)→f64` | Logarithm to a given base. Expanded to `(/ (log x) (log base))` (chapter 8) |
 | `floor-div` `ceiling-div` `round-div` `truncate-div` | `(op a b)` | `(f64,f64)→cons-cell<f64,f64>` | Correspond to CL's two-argument versions (`(floor 7.0 2.0)`→quotient 3, remainder 1). The same design as the functions of the same name in chapter 1 (`car`=quotient, `cdr`=remainder) |
 | `float->int` | `(float->int x)` | `f64→int` | Converts to `int` by truncating toward zero (CL's `truncate`; exact for finite values of any size). Panics on infinity and NaN. For a fixed width, use `(as i32 x)` |
+| `float->i8` `float->i16` `float->i32` `float->u8` `float->u16` `float->u32` | `(op x)` | `f64→i8` | Converts to the type the low bits of what `float->int` answers (with no `int` on the way). Infinity and NaN panic. What `(as i16 x)` is |
 | `float->ratio` | `(float->ratio x)` | `f64→ratio` | Converts to a `ratio` as the exact binary rational (CL's `rational`) |
 | `float->f32` `float->f64` | `(op x)` | `f64→f32` / `f64→f64` | Converts between floating-point widths. `float->f32` rounds to nearest, `float->f64` is always exact. What `(as f32 x)` does |
 | `try-float->f32` `try-float->f64` | `(op x)` | `f64→Option<f32>` / `→Option<f64>` | The same conversion as a question. `None` if rounding changes the value (widening to `f64` is always `Some`). What `(try-as f32 x)` does |
@@ -334,7 +334,7 @@ Numeric limit constants (CLHS 12.1.4.2 / 12.1.3):
 
 | Name | Type | Description |
 |---|---|---|
-| `most-positive-fixnum` / `most-negative-fixnum` | `int` | The upper / lower limit of a 63-bit immediate value (2^62-1 / -2^62). An `int` beyond them becomes a bignum |
+| `most-positive-fixnum` / `most-negative-fixnum` | `int` | The upper / lower limit of a 63-bit immediate value (2^62-1 / -2^62; 31 bits, 2^30-1 / -2^30, on wasm32 and Cortex-M). An `int` beyond them becomes a bignum |
 | `most-positive-double-float` / `most-negative-double-float` | `f64` | The largest / smallest finite values |
 | `least-positive-double-float` / `least-negative-double-float` | `f64` | The smallest nonzero magnitude, including subnormals |
 | `least-positive-normalized-double-float` / `least-negative-normalized-double-float` | `f64` | The same, limited to normalized numbers |

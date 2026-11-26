@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/system.md @ 7622044725db7d28dabb691d82e592367d9284e8 -->
+<!-- translated-from: docs/ja/reference/functions/system.md @ b01477a6134617bbcef066ff2065d17245132754 -->
 # Tempo, ambiente e implementazione
 
 Funzioni per il tempo, interrogazioni sull'ambiente di esecuzione, strumenti di implementazione,
@@ -378,3 +378,32 @@ resta nulla: ciò che viene compilato è la forma espansa del corpo.
 | `with-standard-io-syntax` | `(with-standard-io-syntax body...)` | — | Esegue `body` con ogni variabile di controllo del printer al suo valore standard e `*read-eval*` impostato a `true` ([Stampa](printing.md#6-controllo-della-quantità-stampata)) |
 | `exit` | `(exit code)` | `int→!` | Termina il processo |
 | `dump` | `(dump path)` | `string→bool` | Scrive l'ambiente corrente (informazioni di tipo più corpi compilati) in un unico file. `typl --image <path>` riparte da esso. Solo dell'interprete ([Riferimento della sintassi 10.1](../syntax.md#101-dump)) |
+
+## 11. Interrupt di un microcontrollore (`std::board`)
+
+Si importano con un `use`, come `(use std::board::enable-interrupt)`. Come scrivere un gestore di interrupt è nel [riferimento della sintassi 3.17](../syntax.md#317-interruptn--exceptionname--gestori-di-interrupt).
+
+| Nome | Forma | Tipo | Descrizione |
+|---|---|---|---|
+| `enable-interrupt` | `(enable-interrupt n)` | `int→()` | Fa arrivare l'interrupt di periferica `n` (da 0 a 239). Fuori da un microcontrollore, un errore a runtime (un errore di compilazione con `typl -c`) |
+| `disable-interrupt` | `(disable-interrupt n)` | `int→()` | Fa smettere di arrivare l'interrupt `n`. Fuori da un microcontrollore, come `enable-interrupt` |
+
+## 12. Debug (`std::dbg`)
+
+Si importa con un `use`, come in `(use std::dbg::llvm-size-of)`.
+
+| Nome | Forma | Tipo | Descrizione |
+|---|---|---|---|
+| `llvm-size-of` | `(llvm-size-of expr)` | `A→u32` | In quanti byte il codice compilato tiene il valore di `expr`. LLVM conta la dimensione del tipo LLVM che il compilatore ha dato al valore, per il target su cui gira il codice. `expr` viene valutato. Eseguito dall'interprete, un errore a runtime |
+
+`size-of-val` risponde con la dimensione decisa dal tipo, `llvm-size-of` con la dimensione che il codice compilato usa davvero. Se le due differiscono, il compilatore sbaglia la larghezza del valore.
+
+```lisp
+(use std::dbg::llvm-size-of)
+(defun widths ((x i8)) ()
+  (println "~a ~a ~a" (llvm-size-of x) (llvm-size-of (as u32 x)) (llvm-size-of (< x 0))))
+(compile widths)
+(widths 1)                          ; stampa 1 4 1
+```
+
+Un valore nello heap (una `string`, un tipo `defstruct` e così via) e un `int` occupano una parola, che rappresenta dove si trova il valore o il valore stesso.

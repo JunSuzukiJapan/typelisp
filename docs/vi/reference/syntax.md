@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ ac5a6b3adada21a0a55e0e1c4b0e1fabf4854908 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 1b5dc6ac828d8e4a95800a91218b5e9dffe83f98 -->
 # Tham chiếu cú pháp typelisp
 
 typelisp là một ngôn ngữ Lisp có kiểu tĩnh, được viết bằng S-expression. Về danh sách các hàm và phương thức
@@ -76,7 +76,7 @@ dựng sẵn, xem [Hàm dựng sẵn](functions/README.md); về danh sách các
   (`#{"foo" 123}` là `#{string int}`). Một tuple có từ 1 đến 12 phần tử. Mỗi lần đánh giá tạo ra một
   tuple mới. Để dựng từ các giá trị đã tính, dùng `(tuple a b)`. Ở nơi mong đợi dữ liệu
   S-expression, nó là tuple mà mọi phần tử đều là dữ liệu: variant `Tuple` của `Sexpr`.
-- **Thuộc tính**: `#[test]` là một dấu gắn vào dạng tiếp theo (viết như trong Rust). Hiện chỉ có một thuộc tính là `test`, và nó đặt lên một `defun` ([3.16 `#[test]`](#316-test--hàm-kiểm-thử)). Khi đọc bằng `read`, nó trở thành danh sách `(%internal::attribute (test) form)`.
+- **Thuộc tính**: `#[test]` là dấu gắn vào dạng tiếp theo (viết như trong Rust). Có ba thuộc tính là `test`, `interrupt(N)` và `exception(NAME)`, mỗi cái gắn vào một `defun` ([3.16 `#[test]`](#316-test--hàm-kiểm-thử), [3.17 trình xử lý ngắt](#317-interruptn--exceptionname--trình-xử-lý-ngắt)). Thuộc tính có đối số được viết với dấu ngoặc ngay sau tên. Khi đọc bằng `read`, chúng thành các danh sách `(%internal::attribute (test) form)` và `(%internal::attribute ((interrupt 7)) form)`.
 - **Danh sách rỗng `()`**: tùy ngữ cảnh, là giá trị của kiểu `Unit` hoặc là `None` của `Option<Sexpr>`.
   **`Sexpr` không có variant danh sách rỗng**: `Sexpr` nghĩa là "một S-expression không rỗng", và kiểu của dữ
   liệu S-expression là `Option<Sexpr>` (xem "Mẫu cho `Option<Sexpr>`" ở
@@ -350,7 +350,7 @@ trong **chính tiến trình** (mọi thứ đã được liên kết, gồm c�
 #### ptr / c-long / c-ulong — các từ máy thô
 
 `ptr` là một con trỏ mờ (`void *`, `FILE *`, bất cứ thứ gì khai báo muốn nói). `c-long` / `c-ulong` là `long` /
-`unsigned long` của C (cũng là `size_t`, `int64_t` và `intptr_t`).
+`unsigned long` của C (cũng là `size_t` và `intptr_t`).
 
 ```lisp
 (defffi (c-malloc "malloc") (c-ulong) ptr)
@@ -362,7 +362,7 @@ trong **chính tiến trình** (mọi thứ đã được liên kết, gồm c�
 
 **Không gọi chúng là `i64` / `u64` là có chủ ý.** Ngôn ngữ này không có kiểu số nguyên 64 bit, vì một giá trị
 tức thời có tag chỉ có 63 bit ([chương 2](#2-cách-viết-kiểu)). Cái tên `c-long` nói rằng "đây là một từ đi qua
-ranh giới với C, không phải một số nguyên của ngôn ngữ này".
+ranh giới với C, không phải một số nguyên của ngôn ngữ này". Độ rộng của nó bằng `long` của C trên đích (64 bit trên macOS và Linux 64 bit, 32 bit trên wasm32 và Cortex-M).
 
 **Chúng không có số học.** `(+ x 1)` không thể viết. Nó có thể được cung cấp nhưng không được cung cấp, để
 không có phép tính nào chạy trên một giá trị không thể được lưu ở đâu cả và có độ rộng khác mọi số khác, vì
@@ -370,7 +370,7 @@ cùng lý do kiểu số nguyên 64 bit bị bỏ. Chỉ có **các phép chuy�
 
 ```lisp
 (as i32 (unsafe (c-strlen "hello")))         ; đọc thứ trả về
-(as int (unsafe (c-strlen s)))               ; cái này để đọc chính xác (int không mất 64 bit)
+(as int (unsafe (c-strlen s)))               ; cái này để đọc chính xác (int không làm mất giá trị)
 (try-as i32 (unsafe (c-strlen s)))           ; hỏi xem nó có vừa không
 (as c-ulong n)                               ; tạo một giá trị từ một số nguyên khác
 ```
@@ -500,7 +500,7 @@ Khai báo một struct có cùng bố cục như trong C. Nó chỉ có thể đ
 
 Các kiểu có thể viết cho trường là `i8` `i16` `i32` `u8` `u16` `u32` `c-long` `c-ulong` `f32` `f64` `bool`
 `ptr`, con trỏ có kiểu `(ptr T)`, và các `def-c-struct` khác (nhúng theo giá trị). Bố cục (offset của từng
-trường, và kích thước cùng căn chỉnh của struct) được tính theo quy tắc của C (giả định LP64). Một trường
+trường, và kích thước cùng căn chỉnh của struct) được tính theo quy tắc của C (độ rộng của `c-long` và con trỏ cùng căn chỉnh của `f64` theo C của đích). Một trường
 trỏ tới chính struct đó có thể được viết, nhưng struct không thể nhúng chính nó.
 
 ```lisp
@@ -524,6 +524,7 @@ Việc cấp phát, đọc và ghi được viết theo các dạng sau. Tất c
 | `(c-alloc T)` / `(c-alloc T n)` | Cấp phát `n` giá trị kiểu `T` (1 nếu bỏ qua). Nội dung được điền bằng 0. Trả về một `(ptr T)` |
 | `(c-ref p i)` | Một con trỏ tới phần tử `i` kể từ `p`. Lỗi nếu ngoài phạm vi đã cấp phát |
 | `(c-deref p)` / `(setf (c-deref p) v)` | Đọc / ghi giá trị vô hướng mà `p` trỏ tới |
+| `(volatile-read-u32 addr)` / `(volatile-write-u32 addr v)` | Đọc hoặc ghi thanh ghi tại địa chỉ `addr` (một `int`, hoặc số nguyên có độ rộng cố định như `u16`), đúng một lần, tại nơi viết. `-u8` và `-u16` cũng vậy |
 | `p::field` / `(setf p::field v)` | Đọc / ghi một trường của struct. Đọc một trường là struct nhúng cho địa chỉ của nó (`(ptr kiểu-bên-trong)`) |
 | `(as ptr p)` | Quên kiểu, tạo một `ptr` (để truyền cho thứ như `void *` của `qsort`). Không có chuyển đổi ngược lại |
 
@@ -1284,6 +1285,34 @@ test result: FAILED. 1 passed; 1 failed; 0 filtered out
 
 Những gì kiểm thử in ra bằng `print` đi thẳng ra đầu ra chuẩn (không bị thu giữ). Với đầu ra dùng để điều tra, `eprint`/`eprintln` ([In](functions/printing.md)) ghi ra đầu ra lỗi chuẩn và không lẫn với đầu ra của chương trình.
 
+### 3.17 `#[interrupt(N)]` / `#[exception(NAME)]` — trình xử lý ngắt
+
+```lisp
+(use std::board::enable-interrupt)
+(defvar (*received* int) 0)
+
+#[interrupt(7)]
+(defun on-uart () ()
+  (unsafe (volatile-write-u32 #x4000400C 1))   ; xóa nguyên nhân gây ra ngắt
+  (setf *received* (+ *received* 1))
+  ())
+
+(defun main () ()
+  (enable-interrupt 7)
+  ...)
+```
+
+Trong chương trình biên dịch cho vi điều khiển (mục 3.8 của [Biên dịch](../guide/compile.md)), đây là các hàm được gọi khi có ngắt đến. `#[interrupt(N)]` biến một hàm thành trình xử lý ngắt ngoại vi `N` (từ 0 đến 239), và `#[exception(NAME)]` thành trình xử lý ngoại lệ lõi `NAME`, một trong `NonMaskableInt`, `MemoryManagement`, `BusFault`, `UsageFault`, `SVCall`, `DebugMonitor`, `PendSV`, `SysTick` (`HardFault` thuộc về runtime, và kết thúc chương trình).
+
+- Với Arduino Uno, cách đánh số và cách bật khác đi, và không dùng được `#[exception(NAME)]` cùng `enable-interrupt` ([Biên dịch](../guide/compile.md), mục 3.9). Những gì nói về runtime bên dưới là của Cortex-M.
+- Chúng gắn vào một `defun` cấp cao nhất không nhận gì và trả về `()` (cũng không có tham số kiểu). Một ngắt có một trình xử lý, và một hàm xử lý một ngắt.
+- Ngắt ngoại vi không đến cho tới khi `(enable-interrupt N)` bật nó (`(disable-interrupt N)` dừng nó; xem [Hệ thống](functions/system.md)). Ngoại lệ như SysTick đến ngay khi các thanh ghi được đặt để gây ra nó.
+- Trình xử lý chạy ngay, tại nơi ngắt đến. Nếu ngắt đến giữa lúc runtime đang làm việc (cấp phát, thu gom rác, xuất, chuyển tác vụ, v.v.), trình xử lý chạy ngay khi công việc đó xong. Các trình xử lý không ngắt lẫn nhau.
+- Trong trình xử lý không có thu gom rác (heap lớn lên nếu cần). Trạng thái của chương trình, như biến toàn cục, đọc và ghi như thường.
+- Trình xử lý không thể chờ. Trình xử lý dùng `sleep` là lỗi biên dịch. Thao tác chỉ đôi khi phải chờ, như nhận từ kênh, dùng được khi không phải chờ; nếu phải chờ, đó là panic.
+- `panic` hoặc `throw` thoát khỏi trình xử lý sẽ kết thúc chương trình, như khi không được bắt.
+- Trong trình thông dịch và trong chương trình biên dịch cho thứ khác vi điều khiển, không có ngắt nào đến. Trong trình thông dịch, trình xử lý gọi được như hàm thường (để kiểm thử). `typl -c` cho thứ khác vi điều khiển từ chối chương trình có trình xử lý.
+
 ## 4. Ràng buộc và rẽ nhánh
 
 ```lisp
@@ -1725,6 +1754,8 @@ Các hàm có tên cũng có thể được truyền như giá trị nguyên tr�
 (todo)                              ; khai triển thành (panic "todo"). defmacro
 (as Type expr)                      ; chuyển đổi kiểu số/ký tự. các chuyển đổi có thể thất bại thì panic khi thất bại
 (try-as Type expr)                  ; như as, nhưng trả về kết quả dưới dạng Option<Type> (None khi thất bại)
+(size-of Type)                      ; số byte của một giá trị kiểu Type (int)
+(size-of-val expr)                  ; số byte của một giá trị thuộc kiểu của expr (int); expr không được tính
 (print control args...)             ; khai triển định dạng và ghi ra đầu ra chuẩn (không có dòng mới)
 (println control args...)           ; giống vậy (với một dòng mới ở cuối)
 (format dest control args...)       ; format của CL. trả về chuỗi đã khai triển
@@ -1773,6 +1804,30 @@ trong [Số](functions/numbers.md)).
 
 Từ `rational`, `as`/`try-as` chuyển sang `int` (`as` cắt bớt, `try-as` chỉ thành công với số nguyên),
 `ratio` và `f64`; từ `int`/`ratio` sang `rational`.
+
+`size-of`/`size-of-val` tương ứng với `sizeof` của C. Câu trả lời là một hằng số được quyết định khi biên dịch: kích thước
+trên đích mà mã chạy:
+
+| Kiểu | Số byte |
+|---|---|
+| `i8` `u8` `bool` | 1 |
+| `i16` `u16` | 2 |
+| `i32` `u32` `f32` `char` | 4 |
+| `f64` | 8 |
+| `c-long` `c-ulong` | bằng `long` của C trên đích |
+| `ptr` `(ptr T)` | bằng con trỏ của đích |
+| `def-c-struct` | bằng cấu trúc C (kể cả phần đệm) |
+| `()` | 0 |
+| Mọi kiểu khác (`int`, `string`, kiểu `defstruct`, v.v.) | một từ (bằng con trỏ của đích): chính giá trị, hoặc nơi chứa giá trị |
+
+```lisp
+(size-of u16)                       ; => 2
+(size-of-val (as i8 5))             ; => 1
+(let ((x 1.0)) (size-of-val x))     ; => 8
+```
+
+Cũng có thể viết tham số kiểu của một hàm tổng quát; nó được quyết định theo kiểu ở mỗi lời gọi. `!` không có giá trị nên
+là lỗi. Kiểu `def-c-struct` cũng có thể viết bên ngoài `unsafe`.
 
 `documentation`, như `quote`/`compile`, là một dạng đặc biệt đọc `name` mà không đánh giá, như một symbol trần /
 đường dẫn `::` không được đánh giá. Khác `(documentation 'name 'function)` của CL, nó không nhận đối số kiểu: nó
@@ -2150,9 +2205,9 @@ thực sự phải chờ là lỗi** (không dừng tiến trình ngay tại ch�
   các dạng cấp cao nhất, các thread khác không đẩy các task tiến lên (các task còn lại tiếp tục từ chỗ chúng dừng
   ở lần đánh giá kế tiếp). Cuối một lần đánh giá, nó chờ từng thread xong bước hiện tại của nó, nên nếu một hàm C
   (`defffi`) cứ chặn bên trong một `thread`, lần đánh giá không kết thúc cho đến khi nó trả về.
-- **In trên worker**: các phương thức `print-object` được thông dịch, và các hàm và phương thức được thông
-  dịch mà `~/name/` gọi, không thể chạy trên luồng khác, nên in những giá trị như vậy trên luồng khác là
-  một panic được xử lý như `(panic ...)` (`(compile T::print-object)`, hoặc in từ tác vụ chính).
+- **In trên worker**: các phương thức `print-object` được thông dịch không thể chạy trên luồng khác, nên in
+  những giá trị như vậy trên luồng khác là một panic được xử lý như `(panic ...)`
+  (`(compile T::print-object)`, hoặc in từ tác vụ chính).
 - **Tranh chấp dữ liệu là không xác định** (cùng vị thế như Go). Kết quả của việc nhiều task thay đổi cùng một
   giá trị mà không qua `Mutex<T>` / `Chan<T>` không được đảm bảo.
 - **`task` trả về một giá trị.** Khác câu lệnh `go` của Go, nó trả về một `Task<T>`, và `(wait t)` lấy kết quả.

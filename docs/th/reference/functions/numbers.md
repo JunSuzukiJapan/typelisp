@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/numbers.md @ 676864f7e6cf8e950e51aadacecd49695c8545a8 -->
+<!-- translated-from: docs/ja/reference/functions/numbers.md @ 1b5dc6ac828d8e4a95800a91218b5e9dffe83f98 -->
 # ตัวเลข
 
 การดำเนินการกับจำนวนเต็ม จำนวนทศนิยม จำนวนตรรกยะ จำนวนเชิงซ้อน และบูลีน รวมถึงฟังก์ชันอื่นที่เกี่ยวกับ
@@ -70,11 +70,10 @@ literal จำนวนเต็มที่ไม่มีคำอธิบา
 | `int->i8` … `int->u32` | `(int->W x)` | `T→W` | การแปลงความกว้างเดียวกับบทที่ 1 ค่าที่ไม่พอดีถูกตัดทอน |
 | `try-int->i8` … `try-int->u32` | `(try-int->W x)` | `T→Option<W>` | การแปลงเดียวกันในรูปของคำถาม |
 | `int->c-long` `int->c-ulong` | `(int->W x)` | `T→W` | ทางเข้า จาก word ดิบอีกชนิดและจากชนิดจำนวนเต็มของบทที่ 1 |
-| `try-int->c-long` `try-int->c-ulong` | `(try-int->W x)` | `T→Option<W>` | เหมือนข้างบน |
 | `int->int` | `(int->int x)` | `T→int` | **ถูกต้องแม่นยำเสมอ** วิธีที่ซื่อตรงในการอ่าน `size_t` ที่ไม่พอดีใน `i32` |
 
 `(as i32 x)` / `(try-as i32 x)` / `(as int x)` / `(as c-ulong n)` คือสิ่งที่สิ่งเหล่านี้ทำ และ
-มีการแปลงสำหรับทุกคู่กับชนิดจำนวนเต็มของบทที่ 1 `ptr` ไม่มีแม้แต่ตารางนี้:
+มีการแปลงสำหรับทุกคู่กับชนิดจำนวนเต็มของบทที่ 1 ไม่มีรูปแบบ `try-` ไปยังเวิร์ดดิบ เพราะ `Option<c-long>` จะใส่เวิร์ดดิบไว้ในชนิดอื่น ซึ่งเขียนไม่ได้ `ptr` ไม่มีแม้แต่ตารางนี้:
 ไม่มีวิธีอ่านตัวชี้เป็นตัวเลข มันเป็นค่าที่ส่ง รับ และส่งต่อให้ฟังก์ชัน C อื่นเท่านั้น
 
 **พิมพ์ก็ไม่ได้เช่นกัน** `(println "~a" x)` ไม่รับ word ดิบ (ไม่มีการแสดงผลเป็น `Sexpr`)
@@ -139,6 +138,7 @@ argument does not fit a fixnum")
 | `log` (สองอาร์กิวเมนต์) | `(log x base)` | `(f64,f64)→f64` | ลอการิทึมที่ฐานที่กำหนด ขยายเป็น `(/ (log x) (log base))` (บทที่ 8) |
 | `floor-div` `ceiling-div` `round-div` `truncate-div` | `(op a b)` | `(f64,f64)→cons-cell<f64,f64>` | สอดคล้องกับเวอร์ชันสองอาร์กิวเมนต์ของ CL (`(floor 7.0 2.0)`→ผลหาร 3 เศษ 1) การออกแบบเดียวกับฟังก์ชันชื่อเดียวกันในบทที่ 1 (`car`=ผลหาร, `cdr`=เศษ) |
 | `float->int` | `(float->int x)` | `f64→int` | แปลงเป็น `int` โดยตัดไปทางศูนย์ (`truncate` ของ CL; ถูกต้องแม่นยำสำหรับค่าจำกัดทุกขนาด) panic เมื่อเป็นอนันต์และ NaN สำหรับความกว้างคงที่ ใช้ `(as i32 x)` |
+| `float->i8` `float->i16` `float->i32` `float->u8` `float->u16` `float->u32` | `(op x)` | `f64→i8` | บิตล่างของคำตอบของ `float->int` ในชนิดนั้น (ไม่ผ่าน `int`) อนันต์และ NaN ทำให้ panic เป็นตัวจริงของ `(as i16 x)` |
 | `float->ratio` | `(float->ratio x)` | `f64→ratio` | แปลงเป็น `ratio` ในรูปจำนวนตรรกยะฐานสองที่ถูกต้องแม่นยำ (`rational` ของ CL) |
 | `float->f32` `float->f64` | `(op x)` | `f64→f32` / `f64→f64` | แปลงระหว่างความกว้างของจำนวนทศนิยม `float->f32` ปัดไปค่าที่ใกล้ที่สุด `float->f64` ถูกต้องแม่นยำเสมอ สิ่งที่ `(as f32 x)` ทำ |
 | `try-float->f32` `try-float->f64` | `(op x)` | `f64→Option<f32>` / `→Option<f64>` | การแปลงเดียวกันในรูปของคำถาม `None` หากการปัดเปลี่ยนค่า (การขยายเป็น `f64` เป็น `Some` เสมอ) สิ่งที่ `(try-as f32 x)` ทำ |
@@ -325,7 +325,7 @@ struct (`defstruct`) ในไลบรารีมาตรฐาน
 
 | ชื่อ | ชนิด | คำอธิบาย |
 |---|---|---|
-| `most-positive-fixnum` / `most-negative-fixnum` | `int` | ขีดจำกัดบน / ล่างของค่า immediate 63 บิต (2^62-1 / -2^62) `int` ที่เกินนี้กลายเป็น bignum |
+| `most-positive-fixnum` / `most-negative-fixnum` | `int` | ขีดจำกัดบน / ล่างของค่า immediate 63 บิต (2^62-1 / -2^62 บน wasm32 และ Cortex-M เป็น 31 บิต คือ 2^30-1 / -2^30) `int` ที่เกินนี้กลายเป็น bignum |
 | `most-positive-double-float` / `most-negative-double-float` | `f64` | ค่าจำกัดที่ใหญ่ที่สุด / เล็กที่สุด |
 | `least-positive-double-float` / `least-negative-double-float` | `f64` | ขนาดที่ไม่เป็นศูนย์ที่เล็กที่สุด รวม subnormal |
 | `least-positive-normalized-double-float` / `least-negative-normalized-double-float` | `f64` | เหมือนกัน แต่จำกัดเฉพาะจำนวนที่ normalized |

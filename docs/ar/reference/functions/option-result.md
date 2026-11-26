@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/option-result.md @ 9c760ef2ad2dc2b89b96101219bf3f9a64774c6e -->
+<!-- translated-from: docs/ja/reference/functions/option-result.md @ dff3b51792f6d9c49bb8802bd3d3fb6e168edd92 -->
 # Option وResult وأنواع الأخطاء
 
 ## 1. `Option<T>` / `Result<T,E>`
@@ -64,7 +64,7 @@
 |---|---|---|
 | `Option<U>` (متداخل) | صندوق | ستكون `None` الداخلية القيمة نفسها كـ `None` الخارجية |
 | `()` | صندوق | قيمة `()` هي قيمة القائمة الفارغة نفسها |
-| `ptr` / `c-long` / `c-ulong` | صندوق | كل البتات الـ 64 قيمة، فلا يبقى مجال للتمييز |
+| `ptr` / `c-long` / `c-ulong` | صندوق | كل البتات قيمة، فلا يبقى مجال للتمييز |
 | أي شيء آخر | بلا صندوق | — |
 
 يتحدد التمثيل بالنوع وحده ولا يمكن قراءته من قيمة. وعند الطباعة تُعاد بناء `(Some ...)`/`None` من النوع

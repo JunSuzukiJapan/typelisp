@@ -151,9 +151,19 @@ fn as_widens_an_int_to_f64() {
 fn as_narrows_f64_to_int_truncating_toward_zero() {
     assert_eq!(eval_ok("(as i32 3.9)"), Value::Int(3));
     assert_eq!(eval_ok("(as i32 (- 0.0 3.9))"), Value::Int(-3));
-    // A narrower target: the same `float->int` call, with the width cast
-    // chained onto its `i32` result.
     assert_eq!(eval_ok("(as u8 3.9)"), Value::Int(3));
+    // The low bits of the integer, as from one of a fixed width.
+    assert_eq!(eval_ok("(as u16 100000.5)"), Value::Int(34464));
+    assert_eq!(eval_ok("(as i8 (- 0.0 130.5))"), Value::Int(126));
+    assert_eq!(eval_ok("(as u32 (- 0.0 1.5))"), Value::Int(4294967295));
+    assert_eq!(eval_ok("(as i32 1e12)"), Value::Int(-727379968));
+}
+
+#[test]
+fn try_as_a_float_to_a_fixed_width_answers_whether_it_fits() {
+    assert_eq!(eval_ok("(is-none (try-as i8 150.0))"), Value::Bool(true));
+    assert_eq!(eval_ok("(unwrap (try-as i8 15.5))"), Value::Int(15));
+    assert_eq!(eval_ok("(is-none (try-as u16 (- 0.0 1.0)))"), Value::Bool(true));
 }
 
 #[test]

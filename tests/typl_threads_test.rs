@@ -251,10 +251,11 @@ fn a_worker_calls_what_a_call_directive_resolved_to() {
     }
 }
 
-/// (n) And a function a `~/name/` calls that nobody compiled cannot run off
-/// the interpreter's thread, which printing there says.
+/// (n) A function a `~/name/` calls is called as any other call is, so
+/// compiling the caller compiles it too, and it runs off the interpreter's
+/// thread.
 #[test]
-fn an_interpreted_call_directive_callee_off_the_interpreter_s_thread_is_a_panic() {
+fn a_call_directive_callee_compiles_with_its_caller() {
     let source = r#"(defun yen ((n int) (colon bool) (at bool)) string (format false "~d yen" n))
                     (defun show () string (format false "~/yen/" 300))
                     (defun elsewhere () string (join (thread (show))))
@@ -262,13 +263,8 @@ fn an_interpreted_call_directive_callee_off_the_interpreter_s_thread_is_a_panic(
                     (println "~a" (elsewhere))"#;
     for threads in ["1", "4"] {
         let (code, out, err) = run_on("typl_worker_format_call_interpreted", source, threads);
-        assert_ne!(code, Some(0), "TYPELISP_THREADS={}: stdout was: {}", threads, out);
-        assert!(
-            err.contains("yen`, which a ~/name/ directive calls, is not compiled"),
-            "TYPELISP_THREADS={}: stderr was: {}",
-            threads,
-            err
-        );
+        assert_eq!(code, Some(0), "TYPELISP_THREADS={}: stderr was: {}", threads, err);
+        assert_eq!(out.trim(), "300 yen", "TYPELISP_THREADS={}", threads);
     }
 }
 

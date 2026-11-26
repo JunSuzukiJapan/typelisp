@@ -2,8 +2,8 @@
 //! it into machine code — the one step every path to machine code takes (the
 //! JIT, `compile-file`, and `disassemble`'s assembly).
 //!
-//! The island asks for a fresh stack array (`alloca-args`) for every scratch
-//! word and every argument array it needs, and never hands one back. Emitted as
+//! A temporary and an argument array are each given storage of their own, and nothing
+//! hands one back. Emitted as
 //! is, each of those is a slot of its own in the machine frame, so a function's
 //! frame grew with the size of its body: `(+ 1 (+ 1 ... a))` a hundred
 //! thousand deep needed 8.3MB, and overflowed the stack it was called on. What
@@ -225,13 +225,13 @@ fn instruction_value_as_pointer(i: InstructionValue<'static>) -> inkwell::values
 /// block, by one call that takes its address. Its contents matter from the
 /// first store to the end of that call and never after: the coroutine ABI
 /// already rules out a later read, since the machine frame does not survive a
-/// call that suspends (see `llvm_builder_alloca_args`). Spans in different
+/// call that suspends (see `llvm_builtins::slots`). Spans in different
 /// blocks never overlap — each lies within one run of its block — so only
 /// the spans of one block are compared, and the same few shared arrays serve
 /// the whole function. An `alloca` used any other way keeps its own slot.
 fn pool_argument_arrays(module: &Module<'static>) {
     let ctx = crate::compile::llvm_context();
-    let i64t = ctx.i64_type();
+    let word_ty = crate::compile::carriers::word();
     for function in module.get_functions() {
         let Some(entry) = function.get_first_basic_block() else { continue };
         let allocas: Vec<InstructionValue<'static>> =
@@ -241,7 +241,7 @@ fn pool_argument_arrays(module: &Module<'static>) {
         let mut spans: HashMap<BasicBlock<'static>, Vec<(usize, usize, u32, InstructionValue<'static>)>> = HashMap::new();
         for alloca in allocas {
             let Some(words) = alloca.get_allocated_type().ok().and_then(|t| match t {
-                inkwell::types::BasicTypeEnum::ArrayType(a) if a.get_element_type() == i64t.into() => Some(a.len()),
+                inkwell::types::BasicTypeEnum::ArrayType(a) if a.get_element_type() == word_ty.into() => Some(a.len()),
                 _ => None,
             }) else {
                 continue;
@@ -284,7 +284,7 @@ fn pool_argument_arrays(module: &Module<'static>) {
                 Some(first) => builder.position_before(&first),
                 None => builder.position_at_end(entry),
             }
-            let array = builder.build_alloca(i64t.array_type(words.max(1)), "shared_args").expect("an alloca in the entry block");
+            let array = builder.build_alloca(word_ty.array_type(words.max(1)), "shared_args").expect("an alloca in the entry block");
             for member in members {
                 // SAFETY: both are live values of this module, and of the same
                 // (pointer) type.
@@ -522,7 +522,7 @@ mod tests {
         let f = module.add_function(name, ctx.void_type().fn_type(&[], false), None);
         let b = ctx.create_builder();
         b.position_at_end(ctx.append_basic_block(f, "entry"));
-        let array = b.build_alloca(ctx.i64_type().array_type(words), "array").unwrap();
+        let array = b.build_alloca(crate::compile::carriers::word().array_type(words), "array").unwrap();
         b.build_call(take, &[array.into()], "").unwrap();
         b.build_return(None).unwrap();
     }
@@ -552,16 +552,16 @@ mod tests {
         let _guard = COMPILE_LOCK.lock().unwrap();
         let ctx = llvm_context();
         let module = ctx.create_module("argument_pool_test");
-        let i64t = ctx.i64_type();
+        let word_ty = crate::compile::carriers::word();
         let ptr = ctx.ptr_type(AddressSpace::default());
         let take = module.add_function("take", ctx.void_type().fn_type(&[ptr.into()], false), None);
-        let f = module.add_function("f", ctx.void_type().fn_type(&[i64t.into()], false), None);
+        let f = module.add_function("f", ctx.void_type().fn_type(&[word_ty.into()], false), None);
         let b = ctx.create_builder();
         b.position_at_end(ctx.append_basic_block(f, "entry"));
         let x = f.get_nth_param(0).unwrap().into_int_value();
-        let arrays: Vec<_> = (0..4).map(|n| b.build_alloca(i64t.array_type(2), &format!("args{}", n)).unwrap()).collect();
+        let arrays: Vec<_> = (0..4).map(|n| b.build_alloca(word_ty.array_type(2), &format!("args{}", n)).unwrap()).collect();
         let fill = |a| {
-            let e = unsafe { b.build_gep(i64t, a, &[i64t.const_int(1, false)], "e").unwrap() };
+            let e = unsafe { b.build_gep(word_ty, a, &[word_ty.const_int(1, false)], "e").unwrap() };
             b.build_store(e, x).unwrap();
         };
         let call = |a: inkwell::values::PointerValue<'static>| {
@@ -591,15 +591,15 @@ mod tests {
         let _guard = COMPILE_LOCK.lock().unwrap();
         let ctx = llvm_context();
         let module = ctx.create_module("block_local_word_test");
-        let i64t = ctx.i64_type();
-        let f = module.add_function("f", i64t.fn_type(&[i64t.into()], false), None);
+        let word_ty = crate::compile::carriers::word();
+        let f = module.add_function("f", word_ty.fn_type(&[word_ty.into()], false), None);
         let b = ctx.create_builder();
         b.position_at_end(ctx.append_basic_block(f, "entry"));
-        let slot = b.build_alloca(i64t.array_type(1), "flag").unwrap();
+        let slot = b.build_alloca(word_ty.array_type(1), "flag").unwrap();
         let x = f.get_nth_param(0).unwrap().into_int_value();
-        let element = unsafe { b.build_gep(i64t, slot, &[i64t.const_zero()], "flag0").unwrap() };
+        let element = unsafe { b.build_gep(word_ty, slot, &[word_ty.const_zero()], "flag0").unwrap() };
         b.build_store(element, x).unwrap();
-        let v = b.build_load(i64t, element, "v").unwrap();
+        let v = b.build_load(word_ty, element, "v").unwrap();
         b.build_return(Some(&v)).unwrap();
         prepare(&module).unwrap();
         let text = module.print_to_string().to_string();
