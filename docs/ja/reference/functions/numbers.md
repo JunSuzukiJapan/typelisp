@@ -132,6 +132,7 @@ fixnum に入らない値を渡すと実行時エラー（「an integer argument
 | `log`（2引数） | `(log x base)` | `(f64,f64)→f64` | 底を指定した対数。`(/ (log x) (log base))` へ展開される（8 章） |
 | `floor-div` `ceiling-div` `round-div` `truncate-div` | `(op a b)` | `(f64,f64)→cons-cell<f64,f64>` | CL の2引数版（`(floor 7.0 2.0)`→商3・剰余1）に相当。1 章の同名関数と同じ設計（`car`=商、`cdr`=剰余） |
 | `float->int` | `(float->int x)` | `f64→int` | ゼロ方向への切り捨てで `int` へ変換（CL の `truncate`。どんな大きさの有限値でも正確）。無限大・NaN は panic。固定幅が要るなら `(as i32 x)` |
+| `float->i8` `float->i16` `float->i32` `float->u8` `float->u16` `float->u32` | `(op x)` | `f64→i8` など | `float->int` の答えの下位ビットをその型にしたもの（`int` を経由しない）。無限大・NaN は panic。`(as i16 x)` の実体 |
 | `float->ratio` | `(float->ratio x)` | `f64→ratio` | 正確な二進有理数として `ratio` へ変換（CL の `rational`） |
 | `float->f32` `float->f64` | `(op x)` | `f64→f32` / `f64→f64` | 浮動小数点の幅の変換。`float->f32` は最近接へ丸め、`float->f64` は常に正確。`(as f32 x)` の実体 |
 | `try-float->f32` `try-float->f64` | `(op x)` | `f64→Option<f32>` / `→Option<f64>` | 同じ変換を問いとして。丸めで値が変わるなら `None`（`f64` への拡大は常に `Some`）。`(try-as f32 x)` の実体 |
