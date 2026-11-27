@@ -263,8 +263,10 @@ const code = await run({ write: (fd, text) => { /* 画面に出すなど */ } })
 
 `--target thumbv7em-none-eabihf` を付けると、OS の無い Cortex-M4F・M7 のボード向けの実行ファイル
 （ELF）を作ります。`--target thumbv8m.main-none-eabihf` なら Cortex-M33 のボード向け、
-`--target riscv32imac-unknown-none-elf` なら 32 ビットの RISC-V（M・A・C 拡張）のボード向けです。`-o` を
+`--target thumbv6m-none-eabi` なら Cortex-M0+（M0）のボード向け、`--target riscv32imac-unknown-none-elf` なら 32 ビットの RISC-V（M・A・C 拡張）のボード向けです。`-o` を
 省くと、ソースの `.typl` を `.elf` に変えた名前になります。
+QEMU には Cortex-M0+ のボードが無いので、M0+ 向けの実行ファイルは、同じ命令がそのまま動く Cortex-M3 の
+`mps2-an385` で動かします（`--linker-script` を省いたときの配置もこのボードのものです）。
 
 ```sh
 $ typl -c hello.typl --target thumbv7em-none-eabihf          # hello.elf ができる
@@ -273,13 +275,16 @@ $ qemu-system-arm -M mps2-an386 -nographic \
 $ typl -c hello.typl --target thumbv8m.main-none-eabihf
 $ qemu-system-arm -M mps2-an505 -nographic \
     -semihosting-config enable=on,target=native -kernel hello.elf   # QEMU の Cortex-M33 で実行する
+$ typl -c hello.typl --target thumbv6m-none-eabi
+$ qemu-system-arm -M mps2-an385 -nographic \
+    -semihosting-config enable=on,target=native -kernel hello.elf   # QEMU の Cortex-M3 で実行する
 $ typl -c hello.typl --target riscv32imac-unknown-none-elf
 $ qemu-system-riscv32 -M virt -bios none -nographic \
     -semihosting-config enable=on,target=native -kernel hello.elf   # QEMU の RISC-V で実行する
 ```
 
 - `install.sh` で入れた `typl` はそのまま使えます。`cargo install` で入れるときは、
-  `rustup target add thumbv7em-none-eabihf thumbv8m.main-none-eabihf riscv32imac-unknown-none-elf` を実行してから `--features embedded` を付けてインストールします
+  `rustup target add thumbv7em-none-eabihf thumbv8m.main-none-eabihf thumbv6m-none-eabi riscv32imac-unknown-none-elf` を実行してから `--features embedded` を付けてインストールします
   （wasm と両方なら `--features wasm,embedded`）。リポジトリのデバッグビルドの `typl` では
   `scripts/build-embedded-runtime.sh` を実行します。リンクには rustup の toolchain のリンカを使います。
 - ボードのメモリの配置は `--linker-script FILE` で渡します。書き方は `cortex-m-rt` の `memory.x` と同じで、
@@ -350,6 +355,7 @@ $ qemu-system-riscv32 -M virt -bios none -nographic \
   ハンドラはその場で実行され、ランタイムの処理の途中に来たときだけ、その処理が終わってから実行されます。
   ハンドラの中では待てません（`sleep` はコンパイルエラーです）。詳しくは
   [構文リファレンス](../reference/syntax.md) の 3.17 節にあります。
+  Cortex-M0+ では `N` は 0〜31 で、`#[exception(NAME)]` に書けるのは `NonMaskableInt`・`SVCall`・`PendSV`・`SysTick` だけです。
   RISC-V では `N` は `mcause` の割り込みの番号（0〜31。3 がソフトウェア割り込み、7 がタイマー、11 が外部割り込み）で、
   `#[exception(NAME)]` は使えません。
 
