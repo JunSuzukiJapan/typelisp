@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ 794bc1c3cb98e547458f7b07a6a476cc10cae3ad -->
+<!-- translated-from: docs/ja/guide/compile.md @ 9d79920895a73472f673dcf2ab2711b73f666967 -->
 # Compilação
 
 Se você não fizer nada além disso, os programas typelisp são executados no interpretador. Além disso há duas
@@ -272,6 +272,8 @@ $ qemu-system-riscv32 -M virt -bios none -nographic \
   ```
 
 - Numa placa com pouca RAM, no lugar de `--linker-script`, `--ram SIZE` (`16K` etc.) informa só quanta RAM têm os dados, o heap e a pilha. A RAM do layout padrão passa a ter esse tamanho, e a pilha ocupa no máximo um quarto dela. Numa placa que também guarda o código na RAM, como o `virt` do RISC-V, o código vai no resto da RAM da placa. O que o runtime aloca no início fica pequeno para caber no heap. Não pode ser usado junto com `--linker-script`.
+
+- Uma placa não tem sistema operacional, então nada detém uma pilha que transborda. Por isso o executável verifica, ao entrar em cada função do programa, quanta pilha resta; se resta pouca demais, escreve `stack overflow: the program needs more than the ... bytes of the stack` e termina com o código de saída 1. Para dar mais espaço à pilha, aumente `_typelisp_stack_size` no arquivo de `--linker-script`, ou `--ram`. `--no-stack-check` omite a verificação (o executável fica um pouco menor e mais rápido, mas uma pilha que transborda pode corromper o heap silenciosamente). Em ambos os casos, quando a pilha transborda dentro do runtime e passa do seu fundo, o relatório do panic ou do HardFault seguinte é precedido de `stack overflow: the stack has run past its bottom into the heap`.
 
 - `--board-functions` escolhe quem fornece saída, entrada, término e relógio (as funções da placa).
   - `semihosting` (padrão): via semihosting, para rodar no QEMU (`-semihosting-config enable=on`) ou com um depurador.

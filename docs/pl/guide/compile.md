@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ 794bc1c3cb98e547458f7b07a6a476cc10cae3ad -->
+<!-- translated-from: docs/ja/guide/compile.md @ 9d79920895a73472f673dcf2ab2711b73f666967 -->
 # Kompilacja
 
 O ile nie zrobisz nic więcej, programy typelisp działają w interpreterze. Ponadto istnieją dwa
@@ -271,6 +271,8 @@ $ qemu-system-riscv32 -M virt -bios none -nographic \
   ```
 
 - Na płytce z małą ilością RAM zamiast `--linker-script` można podać `--ram SIZE` (`16K` itp.), czyli tylko ilość RAM dla danych, sterty i stosu. RAM domyślnego układu ma wtedy ten rozmiar, a stos zajmuje co najwyżej jego ćwierć. Na płytce, która trzyma w RAM także kod, jak `virt` dla RISC-V, kod trafia do reszty RAM płytki. To, co środowisko uruchomieniowe przydziela na początku, jest zmniejszane tak, by zmieściło się w stercie. Nie można go używać razem z `--linker-script`.
+
+- Płytka nie ma systemu operacyjnego, więc nic nie zatrzyma przepełnionego stosu. Dlatego plik wykonywalny przy wejściu do każdej funkcji programu sprawdza, ile stosu zostało; gdy za mało, wypisuje `stack overflow: the program needs more than the ... bytes of the stack` i kończy się kodem wyjścia 1. Aby powiększyć stos, zwiększ `_typelisp_stack_size` w pliku `--linker-script` albo `--ram`. `--no-stack-check` pomija to sprawdzanie (plik jest nieco mniejszy i szybszy, ale przepełniony stos może po cichu uszkodzić stertę). W obu przypadkach, gdy stos przepełni się wewnątrz środowiska uruchomieniowego i przekroczy swój spód, raport następującego potem panic lub HardFault poprzedza `stack overflow: the stack has run past its bottom into the heap`.
 
 - `--board-functions` wybiera, kto dostarcza wyjście, wejście, zakończenie i zegar (funkcje płytki).
   - `semihosting` (domyślnie): przez semihosting, do uruchamiania w QEMU (`-semihosting-config enable=on`) lub z debugerem.

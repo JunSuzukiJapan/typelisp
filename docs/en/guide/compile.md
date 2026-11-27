@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ 794bc1c3cb98e547458f7b07a6a476cc10cae3ad -->
+<!-- translated-from: docs/ja/guide/compile.md @ 9d79920895a73472f673dcf2ab2711b73f666967 -->
 # Compiling
 
 Unless you do anything else, typelisp programs run in the interpreter. In addition there are two
@@ -280,6 +280,8 @@ $ qemu-system-riscv32 -M virt -bios none -nographic \
   ```
 
 - On a board with little RAM, instead of `--linker-script`, `--ram SIZE` (`16K` and so on) gives only how much RAM the data, the heap and the stack have. The default layout's RAM becomes that size, and the stack takes at most a quarter of it. On a board that keeps code in RAM too, such as RISC-V's `virt`, the rest of the board's RAM is where the code goes. What the runtime allocates at first is made small to fit the heap. It cannot be used with `--linker-script`.
+
+- A board has no operating system, so nothing stops a stack that overflows. The executable therefore checks, on entering each of the program's functions, how much stack is left; when too little is, it writes `stack overflow: the program needs more than the ... bytes of the stack` and ends with exit code 1. To give the stack more room, make `_typelisp_stack_size` in the `--linker-script` file, or `--ram`, larger. `--no-stack-check` leaves the check out (the executable is a little smaller and faster, but an overflowing stack may silently corrupt the heap). Either way, when the stack overflows inside the runtime and runs past its bottom, the report of the panic or HardFault that follows is preceded by `stack overflow: the stack has run past its bottom into the heap`.
 
 - `--board-functions` chooses who gives output, input, exiting and the clock (the board's functions).
   - `semihosting` (the default): given over semihosting, for running under QEMU (`-semihosting-config enable=on`) or a debugger.

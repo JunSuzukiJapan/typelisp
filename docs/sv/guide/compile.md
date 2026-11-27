@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ 794bc1c3cb98e547458f7b07a6a476cc10cae3ad -->
+<!-- translated-from: docs/ja/guide/compile.md @ 9d79920895a73472f673dcf2ab2711b73f666967 -->
 # Kompilering
 
 Om du inte gör något annat körs typelisp-program i tolken. Dessutom finns två sätt att kompilera till
@@ -274,6 +274,8 @@ $ qemu-system-riscv32 -M virt -bios none -nographic \
   ```
 
 - På ett kort med lite RAM anger `--ram SIZE` (`16K` och så vidare) i stället för `--linker-script` bara hur mycket RAM data, heapen och stacken har. Standardlayoutens RAM får den storleken, och stacken tar högst en fjärdedel av det. På ett kort som också har koden i RAM, som `virt` för RISC-V, hamnar koden i resten av kortets RAM. Det som körmiljön allokerar först görs litet så att det ryms i heapen. Det kan inte användas tillsammans med `--linker-script`.
+
+- Ett kort har inget operativsystem, så inget stoppar en stack som flödar över. Programmet kontrollerar därför, vid inträdet i var och en av sina funktioner, hur mycket stack som är kvar; är det för lite skriver det `stack overflow: the program needs more than the ... bytes of the stack` och avslutas med slutkoden 1. För en större stack ökar man `_typelisp_stack_size` i filen till `--linker-script`, eller `--ram`. `--no-stack-check` utelämnar kontrollen (programmet blir lite mindre och snabbare, men en stack som flödar över kan i tysthet förstöra heapen). I båda fallen föregås, när stacken flödar över inne i körtidsmiljön och passerar sin botten, rapporten om den panic eller HardFault som följer av `stack overflow: the stack has run past its bottom into the heap`.
 
 - `--board-functions` väljer vem som ger utdata, indata, avslut och klockan (kortets funktioner).
   - `semihosting` (standard): via semihosting, för körning under QEMU (`-semihosting-config enable=on`) eller en debugger.

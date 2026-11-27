@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ 794bc1c3cb98e547458f7b07a6a476cc10cae3ad -->
+<!-- translated-from: docs/ja/guide/compile.md @ 9d79920895a73472f673dcf2ab2711b73f666967 -->
 # Derleme
 
 Başka bir şey yapmazsanız typelisp programları yorumlayıcıda çalışır. Buna ek olarak yerel koda
@@ -273,6 +273,8 @@ $ qemu-system-riscv32 -M virt -bios none -nographic \
   ```
 
 - RAM'i az olan bir kartta `--linker-script` yerine `--ram SIZE` (`16K` vb.) ile yalnızca verilerin, yığın belleğin (heap) ve yığının (stack) kullanacağı RAM miktarı verilebilir. Varsayılan düzenin RAM'i bu boyutu alır ve yığın en fazla dörtte birini kullanır. RISC-V'nin `virt`'i gibi kodu da RAM'de tutan bir kartta kod, kartın RAM'inin geri kalanına konur. Çalışma zamanının başta ayırdığı miktar, yığın belleğe sığacak kadar küçültülür. `--linker-script` ile birlikte kullanılamaz.
+
+- Bir kartta işletim sistemi yoktur, bu yüzden taşan bir yığını hiçbir şey durdurmaz. Çalıştırılabilir dosya bu nedenle programın her fonksiyonuna girerken ne kadar yığın kaldığını denetler; çok az kaldıysa `stack overflow: the program needs more than the ... bytes of the stack` yazar ve 1 çıkış koduyla biter. Yığını büyütmek için `--linker-script` dosyasındaki `_typelisp_stack_size` değerini ya da `--ram` değerini büyütün. `--no-stack-check` bu denetimi koymaz (dosya biraz daha küçük ve hızlı olur, ama taşan yığın heap'i sessizce bozabilir). Her iki durumda da yığın çalışma zamanının içinde taşıp tabanını geçtiğinde, ardından gelen panic veya HardFault raporundan önce `stack overflow: the stack has run past its bottom into the heap` yazılır.
 
 - `--board-functions`, çıktıyı, girdiyi, bitirmeyi ve saati (kartın işlevlerini) kimin sağlayacağını seçer.
   - `semihosting` (varsayılan): semihosting ile; QEMU (`-semihosting-config enable=on`) veya bir hata ayıklayıcı altında çalıştırmak için.

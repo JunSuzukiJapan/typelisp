@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ 794bc1c3cb98e547458f7b07a6a476cc10cae3ad -->
+<!-- translated-from: docs/ja/guide/compile.md @ 9d79920895a73472f673dcf2ab2711b73f666967 -->
 # 编译
 
 如果不做任何处理，typelisp 程序由解释器执行。除此之外，还有两种编译为本机代码的方法，以及一种保存环境的方法。
@@ -260,6 +260,8 @@ $ qemu-system-riscv32 -M virt -bios none -nographic \
   ```
 
 - 在 RAM 较小的开发板上，可以用 `--ram SIZE`（如 `16K`）代替 `--linker-script`，只指定数据、堆和栈所用 RAM 的大小。默认布局的 RAM 变为这个大小，栈最多占其四分之一。在像 RISC-V 的 `virt` 这样代码也放在 RAM 中的开发板上，开发板 RAM 的其余部分成为代码的区域。运行时最初分配的量会配合堆的大小而变小。不能与 `--linker-script` 一起使用。
+
+- 开发板没有操作系统，栈溢出时没有任何东西能阻止它。因此可执行文件在进入程序的每个函数时检查栈还剩多少；不够时写出 `stack overflow: the program needs more than the ... bytes of the stack` 并以退出码 1 结束。要让栈更大，请增大 `--linker-script` 文件中的 `_typelisp_stack_size`，或增大 `--ram`。加上 `--no-stack-check` 则不插入此检查（可执行文件会稍小、稍快，但溢出的栈可能悄无声息地破坏堆）。无论哪种情况，当栈在运行时内部溢出并越过栈底时，随后的 panic 或 HardFault 报告之前都会写出 `stack overflow: the stack has run past its bottom into the heap`。
 
 - 由谁提供输出、输入、结束和时钟（开发板的函数），用 `--board-functions` 选择。
   - `semihosting`（默认）：通过 semihosting 提供。在 QEMU（`-semihosting-config enable=on`）或调试器下运行时使用。

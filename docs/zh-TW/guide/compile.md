@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ 794bc1c3cb98e547458f7b07a6a476cc10cae3ad -->
+<!-- translated-from: docs/ja/guide/compile.md @ 9d79920895a73472f673dcf2ab2711b73f666967 -->
 # 編譯
 
 不做任何處理的話，typelisp 程式由直譯器執行。此外還有兩種編譯為原生碼的方法，以及一種保存環境的方法。規格的詳情見
@@ -257,6 +257,8 @@ $ qemu-system-riscv32 -M virt -bios none -nographic \
   ```
 
 - 在 RAM 較小的開發板上，可以用 `--ram SIZE`（如 `16K`）代替 `--linker-script`，只指定資料、堆積和堆疊所用 RAM 的大小。預設配置的 RAM 變為這個大小，堆疊最多佔其四分之一。在像 RISC-V 的 `virt` 這樣程式碼也放在 RAM 中的開發板上，開發板 RAM 的其餘部分成為程式碼的區域。執行環境最初配置的量會配合堆積的大小而變小。不能與 `--linker-script` 一起使用。
+
+- 開發板沒有作業系統，堆疊溢位時沒有任何東西能阻止它。因此可執行檔在進入程式的每個函式時檢查堆疊還剩多少；不夠時寫出 `stack overflow: the program needs more than the ... bytes of the stack` 並以結束碼 1 結束。要讓堆疊更大，請增大 `--linker-script` 檔案中的 `_typelisp_stack_size`，或增大 `--ram`。加上 `--no-stack-check` 則不插入此檢查（可執行檔會稍小、稍快，但溢位的堆疊可能無聲無息地破壞堆積）。無論哪種情況，當堆疊在執行環境內部溢位並越過堆疊底部時，隨後的 panic 或 HardFault 報告之前都會寫出 `stack overflow: the stack has run past its bottom into the heap`。
 
 - 由誰提供輸出、輸入、結束和時鐘（開發板的函式），用 `--board-functions` 選擇。
   - `semihosting`（預設）：透過 semihosting 提供。在 QEMU（`-semihosting-config enable=on`）或除錯器下執行時使用。
