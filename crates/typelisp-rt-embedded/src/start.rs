@@ -17,7 +17,7 @@
 //! used up or the guard words are not as written. The runtime's own
 //! functions are not checked on entry: one that runs the stack past its
 //! bottom is found by the guard words at the next check, or when the program
-//! panics or faults, which then says so.
+//! panics, faults or ends, which then says so.
 
 use core::alloc::{GlobalAlloc, Layout};
 use typelisp_mem::sync::atomic::{AtomicPtr, Ordering};
@@ -45,6 +45,9 @@ extern "C" {
 /// The words at the bottom of the stack, written before the program starts:
 /// a stack that has grown past its bottom has overwritten them.
 const GUARD: [u32; 4] = [0x5354_4143, 0x4b20_454e, 0x4420_4845, 0x5245_2121];
+
+/// What the program says when the stack has run past its bottom.
+const OVERFLOWED: &[u8] = b"stack overflow: the stack has run past its bottom into the heap";
 
 /// The least room on the stack a function may start with: what is below is
 /// for the runtime functions it calls and for ending the program.
@@ -93,13 +96,18 @@ extern "C" fn typelisp_stack_check() {
     }
 }
 
-/// Runs the program and ends with what it answers. What the core's entry
-/// calls.
+/// Runs the program and ends with what it answers, or, when the stack has
+/// run past its bottom on the way, with the code a panic ends it with: what
+/// it answers was worked out with a heap the stack wrote over. What the
+/// core's entry calls.
 pub(crate) fn run() -> ! {
     // SAFETY: the bottom of the stack, far below the frames there are yet.
     unsafe { core::ptr::write_volatile(guard(), GUARD) };
     // SAFETY: the program typl compiled, which takes nothing.
     let code = unsafe { typelisp_main() };
+    if overflowed() {
+        end(&[OVERFLOWED])
+    }
     typelisp_mem::host::exit(code)
 }
 
@@ -161,7 +169,8 @@ pub(crate) fn die(parts: &[&[u8]]) -> ! {
 /// has.
 pub(crate) fn say_if_overflowed() {
     if overflowed() {
-        let _ = typelisp_mem::host::write_stderr(b"stack overflow: the stack has run past its bottom into the heap\n");
+        let _ = typelisp_mem::host::write_stderr(OVERFLOWED);
+        let _ = typelisp_mem::host::write_stderr(b"\n");
     }
 }
 

@@ -264,31 +264,34 @@ fn ram_is_for_the_default_layout_of_a_board() {
     assert!(text(&out.stderr).contains("--no-stack-check: only for a board"), "{}", text(&out.stderr));
 }
 
-/// A recursion deeper than the stack. The check each function starts with
-/// ends the program before the stack reaches the heap; without it
-/// (`--no-stack-check`, which leaves the check out of the executable) the
-/// stack runs on into the heap and then out of RAM, and the guard words at
-/// its bottom say what the fault was.
+/// A stack smaller than the program needs: 1 KiB, in a layout of the
+/// user's. A recursion would not do: its frames are on the heap, and what
+/// takes the stack deep is the runtime's own work. The check each function
+/// starts with ends the program saying so. Without it (`--no-stack-check`,
+/// which leaves the check out of the executable) the stack runs on into the
+/// heap; the program ends as it would, and then the guard words at the
+/// stack's bottom say what happened, and the exit code is a panic's.
 #[test]
-fn a_stack_that_runs_out_ends_the_program() {
-    let source = r#"
-(defun depth ((n int)) int (if (= n 0) 0 (+ 1 (depth (- n 1)))))
-(defun main () int (println "~a" (depth 100000)) 0)
-"#;
-    let elf = built("m0_stack_checked", source, "prog.elf", &target_flags(TARGET, &["--ram", "16K"]));
+fn a_stack_too_small_for_the_program_is_found() {
+    let dir = scratch("m0_small_stack");
+    let memory_x = dir.join("memory.x");
+    std::fs::write(&memory_x, "MEMORY\n{\n  FLASH : ORIGIN = 0, LENGTH = 4M\n  RAM : ORIGIN = 0x20000000, LENGTH = 32K\n}\n_typelisp_stack_size = 1K;\n").unwrap();
+    let source = "(defun main () int (println \"hello\") 0)";
+    let script = memory_x.to_str().unwrap();
+    let elf = built("m0_stack_checked", source, "prog.elf", &target_flags(TARGET, &["--linker-script", script]));
     let out = run_on(TARGET, &elf);
     assert_eq!(text(&out.stdout), "");
-    assert!(text(&out.stderr).contains("stack overflow: the program needs more than the 0x00001000 bytes of the stack (_typelisp_stack_size)"), "{}", text(&out.stderr));
+    assert!(text(&out.stderr).contains("stack overflow: the program needs more than the 0x00000400 bytes of the stack (_typelisp_stack_size)"), "{}", text(&out.stderr));
     assert_eq!(out.status.code(), Some(1));
 
-    let elf = built("m0_stack_unchecked", source, "prog.elf", &target_flags(TARGET, &["--ram", "16K", "--no-stack-check"]));
+    let elf = built("m0_stack_unchecked", source, "prog.elf", &target_flags(TARGET, &["--linker-script", script, "--no-stack-check"]));
     let symbols = Command::new(std::path::Path::new(&std::env::var("LLVM_SYS_221_PREFIX").unwrap()).join("bin").join("llvm-nm"))
         .arg(&elf)
         .output()
         .expect("failed to start llvm-nm");
     assert!(!text(&symbols.stdout).contains("typelisp_stack_check"), "the stack is checked");
     let out = run_on(TARGET, &elf);
-    let err = text(&out.stderr);
-    assert!(err.contains("stack overflow: the stack has run past its bottom into the heap\nhard fault at pc "), "{}", err);
+    assert_eq!(text(&out.stdout), "hello\n");
+    assert!(text(&out.stderr).contains("stack overflow: the stack has run past its bottom into the heap"), "{}", text(&out.stderr));
     assert_eq!(out.status.code(), Some(1));
 }
