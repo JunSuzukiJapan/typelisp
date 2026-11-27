@@ -1951,7 +1951,7 @@ fn a_frame_slot_roots_what_it_holds() {
     let mut h = Heap::with_capacity(64);
     let s = alloc_named_struct(&mut h, "point", vec![Value::Int(1), Value::Int(2)]);
     let mask = mask_table(4, &[1]);
-    let f = unsafe { h.open_frame(4, mask.as_ptr()) };
+    let f = unsafe { h.open_frame(4, mask.as_ptr()).unwrap() };
     unsafe { f.set_word(1, typelisp::encode(s)) };
 
     let _ = alloc_named_struct(&mut h, "garbage", vec![Value::Int(0)]);
@@ -1974,7 +1974,7 @@ fn a_frame_slot_roots_what_it_holds() {
 #[test]
 fn an_unmasked_frame_slot_is_never_read_as_a_reference() {
     let mut h = Heap::with_capacity(64);
-    let f = unsafe { h.open_frame(2, std::ptr::null()) };
+    let f = unsafe { h.open_frame(2, std::ptr::null()).unwrap() };
     unsafe {
         f.set_word(0, ((9_999_isize) << 3) | 0b101);
         f.set_word(1, isize::MIN);
@@ -1993,7 +1993,7 @@ fn an_unmasked_frame_slot_is_never_read_as_a_reference() {
 fn a_masked_frame_slot_holding_a_fixnum_traces_nothing() {
     let mut h = Heap::with_capacity(64);
     let mask = mask_table(1, &[0]);
-    let f = unsafe { h.open_frame(1, mask.as_ptr()) };
+    let f = unsafe { h.open_frame(1, mask.as_ptr()).unwrap() };
     unsafe { f.set_word(0, typelisp::encode(Value::Int(42))) };
     h.gc();
     assert_eq!(typelisp::decode(unsafe { f.word(0) }), Value::Int(42));
@@ -2010,7 +2010,7 @@ fn truncating_to_a_frames_depth_closes_it_and_what_it_held_goes() {
     let s = alloc_named_struct(&mut h, "point", vec![Value::Int(1)]);
     let depth = h.root_count();
     let mask = mask_table(1, &[0]);
-    let f = unsafe { h.open_frame(1, mask.as_ptr()) };
+    let f = unsafe { h.open_frame(1, mask.as_ptr()).unwrap() };
     unsafe { f.set_word(0, typelisp::encode(s)) };
     assert_eq!(h.root_count(), depth + 1, "opening pushed the frame's placeholder root");
     h.gc();
@@ -2030,10 +2030,10 @@ fn truncating_to_a_frames_depth_closes_it_and_what_it_held_goes() {
 fn truncating_above_a_frame_leaves_it_open() {
     let mut h = Heap::with_capacity(64);
     let depth = h.root_count();
-    let outer = unsafe { h.open_frame(1, std::ptr::null()) };
+    let outer = unsafe { h.open_frame(1, std::ptr::null()).unwrap() };
     let inside = h.root_count();
     h.push_root(Value::Int(1));
-    let inner = unsafe { h.open_frame(1, std::ptr::null()) };
+    let inner = unsafe { h.open_frame(1, std::ptr::null()).unwrap() };
     h.truncate_roots(inside);
     assert_eq!(h.open_frame_count(), 1, "the inner frame went, the outer stayed");
     unsafe { outer.set_word(0, 5) };
@@ -2049,10 +2049,10 @@ fn truncating_above_a_frame_leaves_it_open() {
 fn every_open_frame_of_a_chain_is_traced() {
     let mut h = Heap::with_capacity(64);
     let mask = mask_table(1, &[0]);
-    let outer = unsafe { h.open_frame(1, mask.as_ptr()) };
+    let outer = unsafe { h.open_frame(1, mask.as_ptr()).unwrap() };
     let a = alloc_named_struct(&mut h, "outer", vec![Value::Int(1)]);
     unsafe { outer.set_word(0, typelisp::encode(a)) };
-    let inner = unsafe { h.open_frame(1, mask.as_ptr()) };
+    let inner = unsafe { h.open_frame(1, mask.as_ptr()).unwrap() };
     let b = alloc_named_struct(&mut h, "inner", vec![Value::Int(2)]);
     unsafe { inner.set_word(0, typelisp::encode(b)) };
 
@@ -2071,7 +2071,7 @@ fn a_waiting_tasks_frames_are_traced() {
     let t = h.new_root_stack();
     h.switch_to_root_stack(t);
     let mask = mask_table(1, &[0]);
-    let f = unsafe { h.open_frame(1, mask.as_ptr()) };
+    let f = unsafe { h.open_frame(1, mask.as_ptr()).unwrap() };
     let s = alloc_named_struct(&mut h, "waiting", vec![Value::Int(3)]);
     unsafe { f.set_word(0, typelisp::encode(s)) };
     h.switch_to_root_stack(main);
@@ -2092,13 +2092,13 @@ fn a_waiting_tasks_frames_are_traced() {
 fn a_frames_data_pointer_survives_growth_and_collection() {
     let mut h = Heap::with_capacity(64);
     let mask = mask_table(3, &[2]);
-    let f = unsafe { h.open_frame(3, mask.as_ptr()) };
+    let f = unsafe { h.open_frame(3, mask.as_ptr()).unwrap() };
     let before = f.data();
     unsafe { *before.add(2) = typelisp::encode(Value::Int(11)) };
 
     // Enough frames to need more chunks than the first, then a collection.
     for _ in 0..2000 {
-        let _ = unsafe { h.open_frame(10, std::ptr::null()) };
+        let _ = unsafe { h.open_frame(10, std::ptr::null()).unwrap() };
     }
     h.gc();
 
@@ -2121,7 +2121,7 @@ fn a_frames_data_pointer_survives_growth_and_collection() {
 fn a_frame_can_hold_more_than_sixty_four_slots() {
     let mut h = Heap::with_capacity(256);
     let mask = mask_table(120, &[64, 100]);
-    let f = unsafe { h.open_frame(120, mask.as_ptr()) };
+    let f = unsafe { h.open_frame(120, mask.as_ptr()).unwrap() };
     assert_eq!(f.len(), 120);
 
     // Two collectable slots, both past the first mask word.
@@ -2162,7 +2162,7 @@ fn frames_hold_their_slots_under_gc_stress() {
     let mut h = Heap::with_capacity(256);
     h.set_gc_stress(true);
     let mask = mask_table(8, &[0, 1, 2, 3, 4, 5, 6, 7]);
-    let f = unsafe { h.open_frame(8, mask.as_ptr()) };
+    let f = unsafe { h.open_frame(8, mask.as_ptr()).unwrap() };
     for i in 0..8 {
         let s = alloc_named_struct(&mut h, "slot", vec![Value::Int(i)]);
         unsafe { f.set_word(i as usize, typelisp::encode(s)) };

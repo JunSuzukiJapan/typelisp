@@ -453,3 +453,23 @@ fn a_stack_too_small_for_the_program_is_found() {
     assert!(text(&out.stderr).contains("stack overflow: the stack has run past its bottom into the heap"), "{}", text(&out.stderr));
     assert_eq!(out.status.code(), Some(1));
 }
+
+/// A board's calls in progress bounded by `--frame-memory`: a recursion
+/// past it ends the program, saying so, instead of taking the board's heap
+/// until an allocation fails.
+#[test]
+fn the_frame_memory_bounds_a_recursion() {
+    let elf = built(
+        "riscv_frame_memory",
+        r#"
+(defun depth ((n int)) int (if (= n 0) 0 (+ 1 (depth (- n 1)))))
+(defun main () int (println "~a" (depth 200)) (println "~a" (depth 100000)) 0)
+"#,
+        "prog.elf",
+        &target_flags(TARGET, &["--ram", "256K", "--frame-memory", "32K"]),
+    );
+    let out = run_on(TARGET, &elf);
+    assert_eq!(text(&out.stdout), "200\n");
+    assert!(text(&out.stderr).contains("the calls in progress take more than the 32768 bytes --frame-memory allows a task ("), "{}", text(&out.stderr));
+    assert_eq!(out.status.code(), Some(1));
+}

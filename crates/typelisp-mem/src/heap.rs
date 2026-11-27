@@ -24,7 +24,7 @@
 //!   use the same growable-slot-store shape. Both stores are a [`Slab`], not
 //!   a plain `Vec<Option<_>>`: growth appends a chunk rather than
 //!   reallocating everything, so an already-issued slot's address never
-//!   moves — see `Slab`'s doc comment.
+//!   moves — see [`ChunkStack`](crate::chunked::ChunkStack)'s doc comment.
 //! * **Mark-sweep.** `gc()` marks everything reachable from the root set
 //!   (iteratively — no native recursion), then rebuilds the cons free list and
 //!   sweeps strings. Cycles are reclaimed (unlike reference counting).
@@ -68,7 +68,6 @@ use super::symbols::{self, SymRef};
 use super::value::{BoxId, BoxedObj, Cell, ConsRef, LocId, Value};
 
 mod frames;
-mod slab;
 mod gc;
 mod roots;
 mod objects;
@@ -78,8 +77,11 @@ mod native;
 mod cons;
 
 pub use frames::*;
-use slab::*;
 use gc::*;
+
+/// A slot store, indexed like `Vec<Option<T>>` (`str_slots`, `box_slots`,
+/// `permanent_roots`), whose slots never move.
+type Slab<T> = crate::chunked::ChunkStack<Option<T>>;
 
 /// How far past its initial capacity a heap may grow by default — see
 /// [`Heap::with_capacity`]. Large enough that program text plus a working set
@@ -116,7 +118,7 @@ pub struct RootStackId(usize);
 /// `docs/dev/os-threads-design.md` §3.
 #[derive(Default)]
 struct RootStack {
-    roots: Vec<Value>,
+    roots: crate::chunked::ChunkStack<Value>,
     /// The value a `throw` currently travelling through *this task's* frames
     /// is carrying — see [`Heap::set_in_flight_throw`]. Per stack rather than
     /// a single field on `Heap`, so that a different task running on the same
@@ -307,7 +309,7 @@ pub struct HeapShared {
     // per-view below instead of read through this lock on every push/pop.
     root_stacks: Mutex<Vec<Option<Box<RootStack>>>>,
     // Always `Some` once written — `Slab` rather than a plain `Vec<Value>`
-    // for the address stability described on `Slab`'s doc comment, not
+    // for the address stability described on `ChunkStack`'s doc comment, not
     // because any entry is ever removed (`push_permanent_root` never
     // provides a way to). Shared because a `defvar` global (what this
     // backs — see `push_permanent_root`) must read the same way from every

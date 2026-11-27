@@ -27,20 +27,26 @@ pub const DEFAULT_AOT_HEAP_CAPACITY: usize = 1 << 16;
 /// [`crate::mem_limit`]); it is set before the arena is allocated, so the
 /// arena counts toward it. `fixed`, if not 0, fixes the arena at its
 /// capacity (`typl -c --heap-cells`); otherwise it grows as
-/// [`Heap::with_capacity`] lets it. The allocated `Heap` is deliberately
+/// [`Heap::with_capacity`] lets it. `frame_memory`, if not 0, is the bound
+/// on the bytes each task's calls in progress take (`typl -c
+/// --frame-memory`, `typelisp_mem::heap::set_frame_memory`). The allocated `Heap` is deliberately
 /// never freed — it must outlive every other compiled function in the
 /// process, i.e. live until the OS reclaims everything at process exit.
 ///
 /// # Safety
 ///
 /// None: it only allocates. `cells` is the cons arena's size,
-/// `max_memory` the memory limit (0 for none), and `fixed` nonzero when the
-/// arena must not grow.
+/// `max_memory` the memory limit (0 for none), `fixed` nonzero when the
+/// arena must not grow, and `frame_memory` the bound on a task's calls in
+/// progress (0 for none).
 #[no_mangle]
-pub unsafe extern "C" fn rt_heap_init(cells: Word, max_memory: Word, fixed: Word) -> Word {
+pub unsafe extern "C" fn rt_heap_init(cells: Word, max_memory: Word, fixed: Word, frame_memory: Word) -> Word {
     typelisp_mem::host::install_panic_report();
     if max_memory != 0 {
         crate::mem_limit::set_memory_limit(max_memory as usize);
+    }
+    if frame_memory != 0 {
+        typelisp_mem::heap::set_frame_memory(frame_memory as usize, crate::coroutine::ENTRY_BYTES);
     }
     let mut heap = Box::new(Heap::with_capacity(arena_start(cells as usize, fixed != 0)));
     if fixed != 0 {

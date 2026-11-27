@@ -300,6 +300,10 @@ pub struct BuildOptions {
     /// The bound on the bytes the running executable allocates
     /// (`--max-memory`, `typelisp_rt::mem_limit`). `None` is no bound.
     pub max_memory: Option<usize>,
+    /// The bound on the bytes each task's calls in progress take
+    /// (`--frame-memory`, `typelisp_mem::heap::set_frame_memory`): a call
+    /// past it ends the program. `None` is no bound.
+    pub frame_memory: Option<usize>,
     /// No cons arena at all (`--no-cons`): a program that would take a cell
     /// from it is refused at compile time (`reach`), and the executable's
     /// arena has no cells. Not with [`Self::heap_cells`].
@@ -1155,6 +1159,7 @@ pub fn compile_file_with(source_path: &str, output_path: &str, options: &BuildOp
                 },
                 fixed: options.heap_cells.is_some() || options.no_cons,
                 max_memory: options.max_memory,
+                frame_memory: options.frame_memory,
             },
         )
             .and_then(|()| m.verify().map_err(|e| format!("module failed verification: {}", e)))
@@ -1425,7 +1430,8 @@ fn build_main_wrapper(
     // before `tl_main` (or anything it calls) touches the heap at all.
     //
     // The bound on memory is set by the same call, before the arena is
-    // allocated, so the arena counts toward it (0 is no bound).
+    // allocated, so the arena counts toward it, and the bound on each task's
+    // calls in progress (0 is no bound, for both).
     call_shim(
         module,
         &builder,
@@ -1434,6 +1440,7 @@ fn build_main_wrapper(
             crate::compile::carriers::word().const_int(heap.cells as u64, false),
             crate::compile::carriers::word().const_int(heap.max_memory.unwrap_or(0) as u64, false),
             crate::compile::carriers::word().const_int(heap.fixed as u64, false),
+            crate::compile::carriers::word().const_int(heap.frame_memory.unwrap_or(0) as u64, false),
         ],
     )?;
     // Between the heap and the vtables and global inits, and that position
@@ -2146,12 +2153,13 @@ fn emit_print_registration(
 }
 
 /// What the generated `main` asks `rt_heap_init` for: the cons arena's
-/// capacity, whether it stays at that capacity, and the bound on the
-/// process's allocations.
+/// capacity, whether it stays at that capacity, the bound on the process's
+/// allocations, and the bound on each task's calls in progress.
 struct HeapInit {
     cells: usize,
     fixed: bool,
     max_memory: Option<usize>,
+    frame_memory: Option<usize>,
 }
 
 /// The cons-cell arena a board's executable starts with, which grows as the
@@ -2419,7 +2427,7 @@ mod tests {
         builder.build_call(exit, &[code.into()], "").unwrap();
         builder.build_unreachable().unwrap();
 
-        build_main_wrapper(ctx, &module, "tl_main", None, &[], &super::Globals::default(), &[], &[], &[], &[], &[], &[], &[], &[], &[], None, false, super::Target::Host, super::HeapInit { cells: typelisp_rt::DEFAULT_AOT_HEAP_CAPACITY, fixed: false, max_memory: None }).expect("build_main_wrapper failed");
+        build_main_wrapper(ctx, &module, "tl_main", None, &[], &super::Globals::default(), &[], &[], &[], &[], &[], &[], &[], &[], &[], None, false, super::Target::Host, super::HeapInit { cells: typelisp_rt::DEFAULT_AOT_HEAP_CAPACITY, fixed: false, max_memory: None, frame_memory: None }).expect("build_main_wrapper failed");
         module.verify().expect("module failed verification");
 
         let out_path = tmp_path("rt_ping_test");
@@ -2453,7 +2461,7 @@ mod tests {
         let (_, result) = crate::compile::runtime_abi::call_declared(&builder, rt_heap_live_count, &sig, &[]).unwrap();
         builder.build_return(Some(&result)).unwrap();
 
-        build_main_wrapper(ctx, &module, "tl_main", None, &[], &super::Globals::default(), &[], &[], &[], &[], &[], &[], &[], &[], &[], None, false, super::Target::Host, super::HeapInit { cells: typelisp_rt::DEFAULT_AOT_HEAP_CAPACITY, fixed: false, max_memory: None }).expect("build_main_wrapper failed");
+        build_main_wrapper(ctx, &module, "tl_main", None, &[], &super::Globals::default(), &[], &[], &[], &[], &[], &[], &[], &[], &[], None, false, super::Target::Host, super::HeapInit { cells: typelisp_rt::DEFAULT_AOT_HEAP_CAPACITY, fixed: false, max_memory: None, frame_memory: None }).expect("build_main_wrapper failed");
         module.verify().expect("module failed verification");
 
         let out_path = tmp_path("rt_heap_init_test");

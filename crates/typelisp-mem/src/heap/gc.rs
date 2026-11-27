@@ -3,6 +3,7 @@
 use core::ptr;
 use core::cell::UnsafeCell;
 use crate::sync::Arc;
+use crate::chunked::ChunkStack;
 use crate::prelude::*;
 use crate::sync::{Condvar, Mutex, ThreadKey};
 use crate::sync::atomic::{AtomicBool, AtomicU8, Ordering};
@@ -100,6 +101,34 @@ impl ThreadRegistry {
     }
 }
 
+/// The mark phase's worklist: the values it has still to trace.
+///
+/// Only a value the phase traces goes on it — a cons, a string or a boxed
+/// object, the arms of the mark loop in [`Heap::collect`]; the rest (a
+/// fixnum, such as the placeholder root each frame pushes) is dropped as it
+/// is pushed, so that the list is as long as what there is to trace and no
+/// longer. A [`ChunkStack`], so that it grows without copying: it is made
+/// when a collection runs, which is when memory is short.
+pub(super) struct MarkStack(ChunkStack<Value>);
+
+impl MarkStack {
+    pub(super) fn push(&mut self, v: Value) {
+        if matches!(v, Value::Cons(_) | Value::Str(_) | Value::Boxed(_)) {
+            self.0.push(v);
+        }
+    }
+
+    fn extend_from_slice(&mut self, values: &[Value]) {
+        for &v in values {
+            self.push(v);
+        }
+    }
+
+    fn pop(&mut self) -> Option<Value> {
+        self.0.pop()
+    }
+}
+
 impl Heap {
     // ---- collection -------------------------------------------------------
 
@@ -115,7 +144,7 @@ impl Heap {
     /// on its own rather than lean on any interning. Later `BoxedObj` kinds (a closure's
     /// captured environment, ...) will extend this `match` with their own
     /// fan-out.
-    fn push_boxed_nested(obj: &BoxedObj, stack: &mut Vec<Value>) {
+    fn push_boxed_nested(obj: &BoxedObj, stack: &mut MarkStack) {
         match obj {
             // `Bignum`/`Ratio` payloads live in ordinary Rust memory (like a
             // `Str`'s buffer) and hold no nested `Value` — nothing to trace.
@@ -329,7 +358,7 @@ impl Heap {
     /// reference out of arithmetic. The tag test then says whether that tagged
     /// word points at anything: a `Sexpr`-repr local legitimately holds
     /// fixnums and immediates.
-    fn trace_frames(frames: &FrameArena, stack: &mut Vec<Value>) {
+    fn trace_frames(frames: &FrameArena, stack: &mut MarkStack) {
         for &data in &frames.open {
             // SAFETY: an open frame is live, and every thread is stopped.
             unsafe {
@@ -486,7 +515,7 @@ impl Heap {
         // The worklist holds `Value`s directly (not just `*mut Cell`) so a
         // `Value::Boxed` payload's own nested `Value`s can be pushed onto
         // the very same stack once traced — see `push_boxed_nested`.
-        let mut stack: Vec<Value> = Vec::new();
+        let mut stack = MarkStack(ChunkStack::new());
         // Every task's roots, not just the running one: a suspended task will
         // resume into the frames these belong to. Each stack's own
         // `in_flight_throw` rides along here too — see `RootStack`'s doc
@@ -545,7 +574,7 @@ impl Heap {
                         Self::push_boxed_nested(obj, &mut stack);
                     }
                 }
-                _ => {}
+                _ => unreachable!("the mark stack holds only what is traced"),
             }
         }
 

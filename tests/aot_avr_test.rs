@@ -619,7 +619,7 @@ fn a_program_that_needs_the_runtime_is_refused() {
 
 #[test]
 fn the_runtime_s_flags_are_refused() {
-    let flags: [&[&str]; 4] = [&["--board-functions", "c"], &["--heap-cells", "16"], &["--max-memory", "1K"], &["--no-stack-check"]];
+    let flags: [&[&str]; 5] = [&["--board-functions", "c"], &["--heap-cells", "16"], &["--max-memory", "1K"], &["--frame-memory", "1K"], &["--no-stack-check"]];
     for flags in flags {
         let (out, _) = build("avr_runtime_flags", BLINK, flags);
         assert_eq!(out.status.code(), Some(1));

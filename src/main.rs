@@ -32,8 +32,9 @@ Usage:
   typl [OPTIONS]                                 start the REPL
   typl [OPTIONS] FILE [ARGS...]                  run FILE; ARGS are its (command-line-args)
   typl [--lib-dir DIR] [-O<N>] -c SOURCE [-o OUTPUT] [--heap-cells N]
-       [--max-memory SIZE] [--no-cons] [--target TARGET] [--linker-script FILE]
-       [--ram SIZE] [--no-stack-check] [--board-functions WHO] [--link FILE]
+       [--max-memory SIZE] [--frame-memory SIZE] [--no-cons] [--target TARGET]
+       [--linker-script FILE] [--ram SIZE] [--no-stack-check]
+       [--board-functions WHO] [--link FILE]
                                                  compile SOURCE to an executable
   typl [OPTIONS] test [FILE.typl] [FILTER]       run the #[test] functions of the
                                                  project here (or of FILE) whose
@@ -56,6 +57,10 @@ Options:
                          the capacity of the executable's arena (default 65536)
   --max-memory SIZE      after -c: the most the executable may allocate, in
                          bytes (K, M or G may follow); more is a runtime error
+  --frame-memory SIZE    after -c: the most the calls in progress of each task
+                         may take, in bytes (K, M or G may follow): the
+                         records a call keeps while it runs, which a deep
+                         recursion piles up; a call past it ends the program
   --no-cons              after -c: the executable has no cons cells; a program
                          that needs them is a compile error
   --target TARGET        after -c: build for TARGET instead of this machine:
@@ -399,6 +404,18 @@ fn compile_command(flag: &str, args: &[String], heap_cells: Option<usize>) -> i3
                 }
             }
             board_only = Some("--ram");
+        } else if let Some(v) = flag_value(a, "--frame-memory", &mut it) {
+            let Some(v) = v else {
+                eprintln!("--frame-memory: needs a size in bytes (K, M or G may follow)");
+                return 1;
+            };
+            match parse_memory_size(v) {
+                Ok(bytes) => options.frame_memory = Some(bytes),
+                Err(e) => {
+                    eprintln!("--frame-memory: {}", e);
+                    return 1;
+                }
+            }
         } else if let Some(v) = flag_value(a, "--max-memory", &mut it) {
             let Some(v) = v else {
                 eprintln!("--max-memory: needs a size in bytes (K, M or G may follow)");
@@ -432,7 +449,7 @@ fn compile_command(flag: &str, args: &[String], heap_cells: Option<usize>) -> i3
         } else if source.is_none() && !a.starts_with('-') {
             source = Some(PathBuf::from(a));
         } else {
-            eprintln!("{}: unexpected argument `{}` (usage: typl {} SOURCE [-o OUTPUT] [--release] [-O<N>] [--max-memory SIZE] [--no-cons] [--target TARGET] [--linker-script FILE | --ram SIZE] [--no-stack-check] [--board-functions WHO] [--link FILE])", flag, a, flag);
+            eprintln!("{}: unexpected argument `{}` (usage: typl {} SOURCE [-o OUTPUT] [--release] [-O<N>] [--max-memory SIZE] [--frame-memory SIZE] [--no-cons] [--target TARGET] [--linker-script FILE | --ram SIZE] [--no-stack-check] [--board-functions WHO] [--link FILE])", flag, a, flag);
             return 1;
         }
     }
@@ -446,14 +463,14 @@ fn compile_command(flag: &str, args: &[String], heap_cells: Option<usize>) -> i3
     }
     if !options.target.has_runtime() {
         // What these are for is the runtime's.
-        let runtime_only = [("--board-functions", board_functions), ("--heap-cells", heap_cells.is_some()), ("--max-memory", options.max_memory.is_some()), ("--no-stack-check", options.no_stack_check)];
+        let runtime_only = [("--board-functions", board_functions), ("--heap-cells", heap_cells.is_some()), ("--max-memory", options.max_memory.is_some()), ("--frame-memory", options.frame_memory.is_some()), ("--no-stack-check", options.no_stack_check)];
         if let Some((flag, _)) = runtime_only.iter().find(|(_, given)| *given) {
             eprintln!("{}: the target {} has no runtime", flag, options.target.name());
             return 1;
         }
     }
     let Some(source) = source else {
-        eprintln!("{}: needs a source file (usage: typl {} SOURCE [-o OUTPUT] [--release] [-O<N>] [--max-memory SIZE] [--no-cons] [--target TARGET] [--linker-script FILE | --ram SIZE] [--no-stack-check] [--board-functions WHO] [--link FILE])", flag, flag);
+        eprintln!("{}: needs a source file (usage: typl {} SOURCE [-o OUTPUT] [--release] [-O<N>] [--max-memory SIZE] [--frame-memory SIZE] [--no-cons] [--target TARGET] [--linker-script FILE | --ram SIZE] [--no-stack-check] [--board-functions WHO] [--link FILE])", flag, flag);
         return 1;
     };
     let output = match output {

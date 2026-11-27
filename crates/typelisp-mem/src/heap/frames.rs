@@ -1,8 +1,10 @@
 //! Compiled frames: the per-task arena their words live in, and the heap's
 //! operations on them.
 
+use crate::chunked::ChunkStack;
 use crate::prelude::*;
 use crate::symbols::SymRef;
+use crate::sync::atomic::{AtomicUsize, Ordering};
 use crate::tagged::{raw_value, value_words, Word, VALUE_WORDS};
 use crate::value::{BoxId, BoxedObj, TypeId, Value};
 use super::Heap;
@@ -118,9 +120,61 @@ const FRAME_HEADER_LEN: usize = 1;
 const FRAME_HEADER_MASK: usize = 2;
 
 /// How many words a root stack's first frame chunk holds; each later one
-/// doubles, up to [`FRAME_CHUNK_MAX`].
+/// doubles, up to [`frame_chunk_max`].
 const FRAME_CHUNK_MIN: usize = 256;
 const FRAME_CHUNK_MAX: usize = 1 << 16;
+
+/// The most words a frame chunk is made with (a frame larger than that gets
+/// a chunk of its own size): [`FRAME_CHUNK_MAX`], or, where the memory there
+/// is is known (a board's heap), as many as fit an eighth of it, as the
+/// heap's first allocations are sized (`Heap::fitting_cells`).
+fn frame_chunk_max() -> usize {
+    let room = crate::memory::capacity();
+    if room == usize::MAX {
+        return FRAME_CHUNK_MAX;
+    }
+    (room / 8 / size_of::<Word>()).clamp(FRAME_CHUNK_MIN, FRAME_CHUNK_MAX)
+}
+
+/// The most bytes the calls in progress of one task may take (`typl -c
+/// --frame-memory`): its frames' words and the tables that keep them
+/// ([`frame_cost`]). Unbounded until [`set_frame_memory`] gives a bound.
+static FRAME_MEMORY: AtomicUsize = AtomicUsize::new(usize::MAX);
+
+/// What the driver keeps of each frame, in bytes, beside what the heap does
+/// ([`set_frame_memory`]).
+static DRIVER_ENTRY: AtomicUsize = AtomicUsize::new(0);
+
+/// Bounds the calls in progress of each task at `bytes` from now on; the
+/// driver keeps `driver_entry` bytes of each frame of its own. Before any
+/// frame is opened.
+pub fn set_frame_memory(bytes: usize, driver_entry: usize) {
+    FRAME_MEMORY.store(bytes, Ordering::Relaxed);
+    DRIVER_ENTRY.store(driver_entry, Ordering::Relaxed);
+}
+
+/// The bound [`set_frame_memory`] gave.
+pub fn frame_memory() -> usize {
+    FRAME_MEMORY.load(Ordering::Relaxed)
+}
+
+/// What a frame of `nslots` words takes: its words and header in a chunk,
+/// the placeholder root its prologue pushes, its address in the open
+/// frames, and the driver's entry for it. A direct function's frame, which
+/// no driver keeps, is counted the same.
+fn frame_cost(nslots: usize) -> usize {
+    (FRAME_HEADER + nslots) * size_of::<Word>() + size_of::<Value>() + size_of::<*mut Word>() + DRIVER_ENTRY.load(Ordering::Relaxed)
+}
+
+/// A frame that would take a task's calls in progress past
+/// [`frame_memory`].
+#[derive(Debug)]
+pub struct FrameMemoryExceeded {
+    /// What the calls in progress take without it.
+    pub in_use: usize,
+    /// What the frame would add.
+    pub cost: usize,
+}
 
 /// The compiled frames of one root stack — one task's — in the order they were
 /// opened.
@@ -154,7 +208,9 @@ pub(super) struct FrameArena {
     /// The chunk the next frame goes in, or the last one when it is full.
     cur: usize,
     /// The open frames' word addresses, innermost last.
-    pub(super) open: Vec<*mut Word>,
+    pub(super) open: ChunkStack<*mut Word>,
+    /// What the open frames take ([`frame_cost`]).
+    bytes: usize,
 }
 
 // SAFETY: `open` points into `chunks`, which the arena owns; the root stack it
@@ -165,6 +221,7 @@ impl FrameArena {
     /// A new frame of `nslots` zeroed words with mask table `mask`, opened at
     /// root stack depth `depth`.
     fn open(&mut self, nslots: usize, mask: *const u64, depth: usize) -> FrameRaw {
+        self.bytes += frame_cost(nslots);
         let need = FRAME_HEADER + nslots;
         if self.chunks.is_empty() || self.used[self.cur] + need > self.chunks[self.cur].len() {
             if !self.chunks.is_empty() && self.used[self.cur] > 0 {
@@ -175,7 +232,7 @@ impl FrameArena {
                 self.used.truncate(self.cur);
             }
             if self.cur == self.chunks.len() {
-                let size = self.chunks.last().map_or(FRAME_CHUNK_MIN, |c| (c.len() * 2).min(FRAME_CHUNK_MAX));
+                let size = self.chunks.last().map_or(FRAME_CHUNK_MIN, |c| (c.len() * 2).min(frame_chunk_max()));
                 self.chunks.push(vec![0; size.max(need)].into_boxed_slice());
                 self.used.push(0);
             }
@@ -203,6 +260,7 @@ impl FrameArena {
             self.open.pop();
             let len = unsafe { *data.sub(FRAME_HEADER - FRAME_HEADER_LEN) } as usize;
             self.used[self.cur] -= FRAME_HEADER + len;
+            self.bytes -= frame_cost(len);
             if self.used[self.cur] == 0 && self.cur > 0 {
                 self.cur -= 1;
             }
@@ -225,6 +283,9 @@ impl Heap {
     /// closes it, and nothing the activation does to its own roots above can.
     /// The placeholder is a fixnum, which the collector follows nowhere.
     ///
+    /// Refuses a frame that would take the task's calls in progress past
+    /// [`frame_memory`], opening nothing.
+    ///
     /// Zero, not `Value::Empty`'s encoding: an unmasked slot is a raw word and
     /// zero is a fine raw word, while a masked slot reads as a fixnum 0 until
     /// the prologue writes it — so a collection between opening and the first
@@ -234,11 +295,15 @@ impl Heap {
     ///
     /// A non-null `mask` must hold `nslots.div_ceil(64)` words and outlive the
     /// frame.
-    pub unsafe fn open_frame(&mut self, nslots: usize, mask: *const u64) -> FrameRaw {
+    pub unsafe fn open_frame(&mut self, nslots: usize, mask: *const u64) -> Result<FrameRaw, FrameMemoryExceeded> {
         self.debug_assert_not_native("open_frame");
+        let (in_use, cost) = ((*self.current).frames.bytes, frame_cost(nslots));
+        if in_use + cost > frame_memory() {
+            return Err(FrameMemoryExceeded { in_use, cost });
+        }
         let depth = self.root_count();
         self.roots_mut().push(Value::Int(0));
-        (*self.current).frames.open(nslots, mask, depth)
+        Ok((*self.current).frames.open(nslots, mask, depth))
     }
 
     /// Closes the frame whose words start at `data`, and every frame and root

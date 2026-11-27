@@ -13,6 +13,7 @@
 
 extern crate alloc;
 
+pub mod chunked;
 pub mod collections;
 pub mod errors;
 pub mod fixed;

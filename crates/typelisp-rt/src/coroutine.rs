@@ -92,7 +92,7 @@ pub enum Paused {
 /// put down mid-call: everything the chain needs is a `Vec` of heap objects,
 /// and the collector already traces each of them.
 pub struct FrameStack {
-    frames: Vec<Entry>,
+    frames: typelisp_mem::chunked::ChunkStack<Entry>,
     /// Whether this chain is counted in [`LIVE_CHAINS`] — kept in step with
     /// "has frames" at the end of every drive ([`FrameStack::drive`]) and on
     /// drop.
@@ -130,6 +130,10 @@ impl Drop for FrameStack {
     }
 }
 
+/// What the driver keeps of each frame, which `--frame-memory` counts
+/// (`typelisp_mem::heap::set_frame_memory`).
+pub(crate) const ENTRY_BYTES: usize = size_of::<Entry>();
+
 /// One frame of the chain, and what the driver has to know about it that the
 /// frame itself does not say.
 struct Entry {
@@ -156,13 +160,13 @@ impl Default for FrameStack {
 
 impl FrameStack {
     pub fn new() -> Self {
-        FrameStack { frames: Vec::new(), counted: false, interruptible: false }
+        FrameStack { frames: typelisp_mem::chunked::ChunkStack::new(), counted: false, interruptible: false }
     }
 
     /// A task's chain, whose compiled code an interrupt handler may break
     /// into — see [`FrameStack::interruptible`].
     pub fn for_task() -> Self {
-        FrameStack { frames: Vec::new(), counted: false, interruptible: true }
+        FrameStack { frames: typelisp_mem::chunked::ChunkStack::new(), counted: false, interruptible: true }
     }
 
     /// How deep the chain is. Zero means finished or not yet started.
@@ -190,7 +194,9 @@ impl FrameStack {
         let status = unsafe { activation(f, 0, self.interruptible) };
         match call_state::with(|s| s.entered(published)) {
             // SAFETY: the word is the address a prologue just published.
-            Some(data) => self.frames.push(Entry { body: f, raw: unsafe { FrameRaw::from_data(data as *mut Word) }, roots }),
+            Some(data) => {
+                self.frames.push(Entry { body: f, raw: unsafe { FrameRaw::from_data(data as *mut Word) }, roots });
+            }
             None if status & 0b11 != STATUS_UNWIND => panic!("a coroutine function did not publish its frame on entry"),
             None => {}
         }
