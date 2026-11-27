@@ -215,7 +215,7 @@ impl PrintEnv for RtPrintEnv {
 /// block is recognised — closing it is what lays the buffer out and writes it.
 struct PrettySession {
     out: Out,
-    lists: Vec<alloc::sync::Arc<BoxId>>,
+    lists: Vec<typelisp_mem::sync::Arc<BoxId>>,
     opts: Opts,
 }
 
@@ -364,7 +364,7 @@ pub fn record_op(op: Op) {
 }
 
 /// The innermost open block's `pprint-pop` cursor cell, if any.
-fn innermost_list() -> Option<alloc::sync::Arc<BoxId>> {
+fn innermost_list() -> Option<typelisp_mem::sync::Arc<BoxId>> {
     SESSION.with(|cell| cell.borrow().as_ref().and_then(|s| s.lists.last().cloned()))
 }
 

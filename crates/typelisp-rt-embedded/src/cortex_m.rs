@@ -11,8 +11,12 @@ use crate::start::{arrived, die, hex};
 // section (`critical-section-single-core`), which the allocator takes.
 use cortex_m as _;
 
-/// How many interrupts the NVIC numbers.
+/// How many interrupts the NVIC numbers: 32 on an ARMv6-M core (`armv6m`,
+/// which build.rs sets), up to 240 on the others.
+#[cfg(not(armv6m))]
 const INTERRUPTS: u16 = 240;
+#[cfg(armv6m)]
+const INTERRUPTS: u16 = 32;
 
 /// Runs the program and ends with what it answers.
 #[cortex_m_rt::entry]

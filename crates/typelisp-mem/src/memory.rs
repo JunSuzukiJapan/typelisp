@@ -6,7 +6,7 @@
 //! process whose allocator does not, nothing is ever counted and no
 //! collection is made for memory.
 
-use core::sync::atomic::{AtomicUsize, Ordering};
+use crate::sync::atomic::{AtomicUsize, Ordering};
 
 /// Bytes currently allocated.
 static IN_USE: AtomicUsize = AtomicUsize::new(0);

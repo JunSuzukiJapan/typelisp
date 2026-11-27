@@ -2,10 +2,10 @@
 
 use core::ptr;
 use core::cell::UnsafeCell;
-use alloc::sync::Arc;
+use crate::sync::Arc;
 use crate::prelude::*;
 use crate::sync::{Condvar, Mutex, ThreadKey};
-use core::sync::atomic::{AtomicBool, AtomicU8, Ordering};
+use crate::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use crate::value::{BoxedObj, Cell, StructPayload, Value};
 use super::{FrameArena, FrameRaw, Heap};
 

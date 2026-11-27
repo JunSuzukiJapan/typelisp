@@ -63,13 +63,14 @@ Options:
                          a module and the JavaScript that runs it (default
                          OUTPUT: SOURCE with .wasm), thumbv7em-none-eabihf an
                          ELF executable for a Cortex-M4F/M7 board,
-                         thumbv8m.main-none-eabihf one for a Cortex-M33 board
-                         and riscv32imac-unknown-none-elf one for a 32-bit
+                         thumbv8m.main-none-eabihf one for a Cortex-M33 board,
+                         thumbv6m-none-eabi one for a Cortex-M0+ board and
+                         riscv32imac-unknown-none-elf one for a 32-bit
                          RISC-V board (default OUTPUT: SOURCE with .elf)
   --linker-script FILE   after --target for a board: the board's flash and
                          RAM, as a memory.x (default: those of QEMU's
                          mps2-an386 for a Cortex-M4, mps2-an505 for an M33,
-                         virt for RISC-V)
+                         mps2-an385 for an M0+, virt for RISC-V)
   --board-functions WHO  after --target for a board: who gives the board's
                          output, input, exit and clock: semihosting (QEMU or
                          a debugger; the default) or c (the board's

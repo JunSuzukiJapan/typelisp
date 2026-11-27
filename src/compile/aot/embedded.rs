@@ -84,9 +84,9 @@ pub struct Board {
     pub features: &'static str,
     /// The interrupts `#[interrupt(N)]` may name, the lowest and the highest.
     pub interrupts: (u16, u16),
-    /// Whether the core has the exceptions `#[exception(NAME)]` names (a
-    /// Cortex-M's).
-    pub exceptions: bool,
+    /// The core exceptions `#[exception(NAME)]` may name on it, of the ones
+    /// a Cortex-M has (`typelisp_front::EXCEPTIONS`).
+    pub exceptions: &'static [&'static str],
     /// The QEMU that emulates the core, and the arguments that pick the
     /// board (`-M ...`) before `-kernel`.
     pub qemu: (&'static str, &'static [&'static str]),
@@ -124,8 +124,20 @@ impl Board {
     pub(super) fn handled(&self, target: super::Target, vector: u16, path: &crate::types::Path) -> Result<u16, String> {
         let (lowest, highest) = self.interrupts;
         match vector.checked_sub(FIRST_INTERRUPT) {
-            None if self.exceptions => Ok(vector),
-            None => Err(format!("`{}` handles a core exception, and --target {} has none", path, target.name())),
+            None => {
+                let name = typelisp_front::EXCEPTIONS.iter().find(|(_, v)| *v == vector).map_or("?", |(name, _)| *name);
+                match self.exceptions {
+                    [] => Err(format!("`{}` handles a core exception, and --target {} has none", path, target.name())),
+                    has if has.contains(&name) => Ok(vector),
+                    has => Err(format!(
+                        "`{}` handles the exception {}, which --target {} has not got (its exceptions are {})",
+                        path,
+                        name,
+                        target.name(),
+                        has.join(", ")
+                    )),
+                }
+            }
             Some(n) if (lowest..=highest).contains(&n) => Ok(n),
             Some(n) => Err(format!(
                 "`{}` handles interrupt {}: the interrupts of --target {} are {} to {}",
@@ -143,6 +155,39 @@ impl Board {
 /// (`typeck::attribute`): a Cortex-M's exceptions come before it.
 const FIRST_INTERRUPT: u16 = 16;
 
+/// The exceptions of an ARMv7-M or ARMv8-M Mainline core (Cortex-M3, M4, M7,
+/// M33): all a program may handle.
+const ARMV7M_EXCEPTIONS: [&str; 8] =
+    ["NonMaskableInt", "MemoryManagement", "BusFault", "UsageFault", "SVCall", "DebugMonitor", "PendSV", "SysTick"];
+
+/// The exceptions of an ARMv6-M core (Cortex-M0, M0+), which has no fault
+/// but HardFault and no debug monitor.
+const ARMV6M_EXCEPTIONS: [&str; 4] = ["NonMaskableInt", "SVCall", "PendSV", "SysTick"];
+
+/// `thumbv6m-none-eabi`, a Cortex-M0+: no floating-point unit, no
+/// compare-and-swap (`typelisp_mem::sync`), and 32 interrupts. QEMU has no
+/// Cortex-M0+ board, and its Cortex-M0 one (`microbit`) has 16 KiB of RAM,
+/// less than the runtime takes, so the core stands on `mps2-an385` (Arm's
+/// AN385, a Cortex-M3, which runs every ARMv6-M instruction as an M0+
+/// does): 4 MiB of code memory at 0 and 4 MiB of RAM at `0x20000000`.
+pub const CORTEX_M0PLUS: Board = Board {
+    core: Core::CortexM,
+    llvm_triple: "thumbv6m-none-eabi",
+    cpu: "cortex-m0plus",
+    features: "",
+    interrupts: (0, 31),
+    exceptions: &ARMV6M_EXCEPTIONS,
+    qemu: ("qemu-system-arm", &["-M", "mps2-an385"]),
+    qemu_memory: "\
+MEMORY
+{
+  FLASH : ORIGIN = 0x00000000, LENGTH = 4M
+  RAM : ORIGIN = 0x20000000, LENGTH = 4M
+}
+_typelisp_stack_size = 1M;
+",
+};
+
 /// `thumbv7em-none-eabihf`, on QEMU's `mps2-an386` (Arm's AN386, a
 /// Cortex-M4 on an MPS2 FPGA board): 4 MiB of code memory at 0 and 4 MiB of
 /// RAM at `0x20000000`.
@@ -152,7 +197,7 @@ pub const CORTEX_M4: Board = Board {
     cpu: "cortex-m4",
     features: "",
     interrupts: (0, 239),
-    exceptions: true,
+    exceptions: &ARMV7M_EXCEPTIONS,
     qemu: ("qemu-system-arm", &["-M", "mps2-an386"]),
     qemu_memory: "\
 MEMORY
@@ -174,7 +219,7 @@ pub const CORTEX_M33: Board = Board {
     cpu: "cortex-m33",
     features: "",
     interrupts: (0, 239),
-    exceptions: true,
+    exceptions: &ARMV7M_EXCEPTIONS,
     qemu: ("qemu-system-arm", &["-M", "mps2-an505"]),
     qemu_memory: "\
 MEMORY
@@ -197,7 +242,7 @@ pub const RISCV32_VIRT: Board = Board {
     cpu: "generic-rv32",
     features: "+m,+a,+c",
     interrupts: (0, 31),
-    exceptions: false,
+    exceptions: &[],
     qemu: ("qemu-system-riscv32", &["-M", "virt", "-bios", "none"]),
     qemu_memory: "\
 MEMORY
@@ -399,4 +444,17 @@ pub(super) fn write_executable(
                 .arg(output_path)
         })
     })
+}
+
+#[cfg(test)]
+mod tests {
+    /// Every exception a board lists is one an attribute can name.
+    #[test]
+    fn a_board_s_exceptions_are_named_by_the_attribute() {
+        for target in super::super::Target::BOARDS {
+            for name in target.board().expect("a board").exceptions {
+                assert!(typelisp_front::EXCEPTIONS.iter().any(|(n, _)| n == name), "{}: {}", target.name(), name);
+            }
+        }
+    }
 }

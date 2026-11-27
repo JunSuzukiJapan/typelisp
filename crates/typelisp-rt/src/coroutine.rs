@@ -115,17 +115,17 @@ pub struct FrameStack {
 /// freed memory. The compiler asks this ([`live_chains`]) and keeps what it
 /// retired while it is not zero. Counted per chain rather than per frame so
 /// that a call costs nothing: the count moves only when a drive ends.
-static LIVE_CHAINS: core::sync::atomic::AtomicUsize = core::sync::atomic::AtomicUsize::new(0);
+static LIVE_CHAINS: typelisp_mem::sync::atomic::AtomicUsize = typelisp_mem::sync::atomic::AtomicUsize::new(0);
 
 /// See [`LIVE_CHAINS`].
 pub fn live_chains() -> usize {
-    LIVE_CHAINS.load(core::sync::atomic::Ordering::SeqCst)
+    LIVE_CHAINS.load(typelisp_mem::sync::atomic::Ordering::SeqCst)
 }
 
 impl Drop for FrameStack {
     fn drop(&mut self) {
         if self.counted {
-            LIVE_CHAINS.fetch_sub(1, core::sync::atomic::Ordering::SeqCst);
+            LIVE_CHAINS.fetch_sub(1, typelisp_mem::sync::atomic::Ordering::SeqCst);
         }
     }
 }
@@ -487,9 +487,9 @@ impl FrameStack {
         if standing != self.counted {
             self.counted = standing;
             if standing {
-                LIVE_CHAINS.fetch_add(1, core::sync::atomic::Ordering::SeqCst);
+                LIVE_CHAINS.fetch_add(1, typelisp_mem::sync::atomic::Ordering::SeqCst);
             } else {
-                LIVE_CHAINS.fetch_sub(1, core::sync::atomic::Ordering::SeqCst);
+                LIVE_CHAINS.fetch_sub(1, typelisp_mem::sync::atomic::Ordering::SeqCst);
             }
         }
     }

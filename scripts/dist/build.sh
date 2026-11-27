@@ -42,10 +42,11 @@
 #
 # - Built with `--features wasm,embedded`: typl holds the runtimes `typl -c
 #   --target wasm32-wasip1`, `--target wasm32-unknown-unknown`, `--target
-#   thumbv7em-none-eabihf`, `--target thumbv8m.main-none-eabihf` and `--target
-#   riscv32imac-unknown-none-elf` link, so the toolchain this runs with is a
-#   rustup one with the five targets added (`rustup target add wasm32-wasip1
-#   wasm32-unknown-unknown thumbv7em-none-eabihf thumbv8m.main-none-eabihf
+#   thumbv7em-none-eabihf`, `--target thumbv8m.main-none-eabihf`, `--target
+#   thumbv6m-none-eabi` and `--target riscv32imac-unknown-none-elf` link, so
+#   the toolchain this runs with is a rustup one with the six targets added
+#   (`rustup target add wasm32-wasip1 wasm32-unknown-unknown
+#   thumbv7em-none-eabihf thumbv8m.main-none-eabihf thumbv6m-none-eabi
 #   riscv32imac-unknown-none-elf`). The checks at the end run the modules
 #   under Node and the boards' executables under QEMU (`qemu-system-arm`,
 #   `qemu-system-riscv32`).
@@ -225,6 +226,10 @@ printf '(defun main () i32 (println "ok") 0)\n' > "$work/aot.typl"
 "$typl" -c "$work/aot.typl" -o "$work/aot33.elf" --target thumbv8m.main-none-eabihf
 [ "$(qemu-system-arm -M mps2-an505 -nographic -semihosting-config enable=on,target=native -kernel "$work/aot33.elf" < /dev/null)" = ok ] ||
     { echo "error: the thumbv8m.main-none-eabihf check failed" >&2; exit 1; }
+# And for a Cortex-M0+, on the Cortex-M3 board.
+"$typl" -c "$work/aot.typl" -o "$work/aot-m0.elf" --target thumbv6m-none-eabi
+[ "$(qemu-system-arm -M mps2-an385 -nographic -semihosting-config enable=on,target=native -kernel "$work/aot-m0.elf" < /dev/null)" = ok ] ||
+    { echo "error: the thumbv6m-none-eabi check failed" >&2; exit 1; }
 # And on its RISC-V board.
 "$typl" -c "$work/aot.typl" -o "$work/aot-rv32.elf" --target riscv32imac-unknown-none-elf
 [ "$(qemu-system-riscv32 -M virt -bios none -nographic -semihosting-config enable=on,target=native -kernel "$work/aot-rv32.elf" < /dev/null)" = ok ] ||

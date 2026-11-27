@@ -174,9 +174,16 @@ Cortex-M と共通にしたもの:
 
 テスト: `tests/aot_riscv32_test.rs`（ネイティブとの比較、語の幅、panic、CLINT のソフトウェア割り込みとタイマー割り込み（cons を作り続ける間）、範囲外の割り込み番号と例外の拒否、ファイル操作の拒否、16550 UART の volatile、C のボードの関数、ILP32 の `c-long` と構造体、ランタイムを使わないプログラム）。幅の検査（`size_of_test`、`llvm_size_of_test`）と GC（`collect_without_cons_test`）にも RISC-V を足した。
 
-### Cortex-M0+（未着手）
+### Cortex-M0+（済、2026-11-27）
 
-`thumbv6m-none-eabi` はコアに比較交換のアトミック命令が無く、Rust の `alloc::sync`（`Arc`）と `compare_exchange` が無い。ランタイムをビルドすると `typelisp-mem` で 40 件ほどのエラー（2026-11-23）。`typelisp_mem::sync` を、割り込みを止めて代わりにする実装（`portable-atomic` と `critical-section` など）に差し替えれば通る見込み。QEMU のボードは `microbit`（Cortex-M0）。
+`thumbv6m-none-eabi`（`Target::Thumbv6m`）。コアに比較交換のアトミック命令が無いので、Rust の `alloc::sync`（`Arc`）と `compare_exchange` が無い。
+
+- **Arc とアトミックの入口を `typelisp_mem::sync` 1 つにした。** `sync::{Arc, Weak, atomic}` は、ポインタの比較交換があるターゲット（`cfg(target_has_atomic = "ptr")`）では `alloc::sync` と `core::sync::atomic`、無いターゲットでは `portable-atomic-util` と `portable-atomic`（feature `critical-section`、実装は `cortex-m` の `critical-section-single-core`）。ランタイムのクレートはどれもこれを通す（番人 `tests/sync_door_test.rs`）。`portable-atomic-util` の `Arc` は stable では unsized への強制変換ができないので、`Arc<dyn Trait>` は `Arc::from(Box::new(x) as Box<dyn Trait>)` で作る（今のところそういう箇所はボード向けのコードに無い）。直したのは名前の付け替えだけで、`typelisp-mem` の約 50 件のエラーはすべてこれだった。
+- **コアの違いはボードのデータ。** 割り込みは 32 本（`Board::interrupts`、ランタイムの NVIC の数は `typelisp-rt-embedded` の build.rs が三つ組から `cfg(armv6m)` を立てて選ぶ）。例外は NonMaskableInt・SVCall・PendSV・SysTick だけ（`Board::exceptions` を「例外があるか」から「どの例外があるか」に広げた。名前は `typelisp_front::EXCEPTIONS` の部分集合であることを単体テストで確かめる）。
+- **QEMU のボード。** QEMU に Cortex-M0+ のボードは無く、Cortex-M0 の `microbit` は RAM が 16 KiB で、ランタイムが動かない（ヒープの箱の表 `Slab` が最初に 1 塊 1024 スロット＝32 ビットで 16 KiB を取る。デバッグ版ランタイムの hello はフラッシュにも収まらない、リリース版は約 245 KiB）。既定の QEMU ボードは ARMv6-M の命令をそのまま実行する Cortex-M3 の `mps2-an385`（4 MiB/4 MiB）にした。実際の M0 のコアでは、ランタイムを使わないプログラムを `microbit` で動かして確かめる。ボード向けではループの安全地点・変数での割り算・`int` がランタイムを呼ぶので、そのテストはどれも使わない。
+- 残り: RAM が 16 KiB 程度のボードでランタイムを使うには、`Slab` の最初の塊を小さくする（塊を倍々にするなど）必要がある。`riscv32imc`（A 拡張なし）も同じ `sync` の仕組みで通る見込み（未着手）。
+
+テスト: `tests/aot_cortex_m0plus_test.rs`（ネイティブとの比較、語の幅、panic、NVIC の保留レジスタの割り込み、cons を作り続ける間の SysTick、範囲外の割り込みと無い例外の拒否、C のボードの関数、`microbit` での実行）、`size_of_test` と `llvm_size_of_test` の M0+。
 
 ### 段階 7: AVR の判断
 

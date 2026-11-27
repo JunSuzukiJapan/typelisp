@@ -45,3 +45,10 @@ foldhash = { version = "0.1", default-features = false }
 # on macOS the CPU's name, and an exit that allocates nothing.
 [target.'cfg(any(unix, target_os = "wasi"))'.dependencies]
 libc = { version = "0.2", optional = true }
+
+# A core without compare-and-swap (Cortex-M0+): the atomics and `Arc` the
+# runtime uses, made of a critical section (`typelisp_mem::sync`), which the
+# board's runtime implements for the one core.
+[target.'cfg(not(target_has_atomic = "ptr"))'.dependencies]
+portable-atomic = { version = "1.11", default-features = false, features = ["critical-section"] }
+portable-atomic-util = { version = "0.2", default-features = false, features = ["alloc"] }

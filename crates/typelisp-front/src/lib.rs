@@ -43,7 +43,7 @@ pub use read::*;
 pub use mem::*;
 pub use types::*;
 pub use check::*;
-pub use typeck::attribute::{TestCase, TestForms, TestReturn};
+pub use typeck::attribute::{TestCase, TestForms, TestReturn, EXCEPTIONS};
 pub use typeck::describe::{Description, Parts};
 pub use typeck::checker::{Checker, MacroExpander, RedefPolicy, TopLevelForm, MONO_BUNDLE_MODULE};
 pub use typeck::defmacro::MacroLambda;

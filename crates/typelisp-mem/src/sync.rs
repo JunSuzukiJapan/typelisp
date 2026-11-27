@@ -25,13 +25,32 @@ pub type RwLockReadGuard<'a, T> = lock_api::RwLockReadGuard<'a, RawRwLock, T>;
 pub type RwLockWriteGuard<'a, T> = lock_api::RwLockWriteGuard<'a, RawRwLock, T>;
 pub type MappedRwLockReadGuard<'a, T> = lock_api::MappedRwLockReadGuard<'a, RawRwLock, T>;
 
+/// The atomics and the reference-counted pointers (`Arc`, `Weak`) the
+/// runtime's crates use: the core's own where it can compare and swap a
+/// pointer, and on a core that cannot (Cortex-M0+) `portable-atomic`'s, made
+/// of a critical section, which the board's runtime implements for its one
+/// core. Nothing else names `core::sync::atomic` or `alloc::sync`.
+///
+/// `portable-atomic-util`'s `Arc` does not coerce to an unsized type on
+/// stable Rust: an `Arc<dyn Trait>` is made with `Arc::from(Box::new(x) as
+/// Box<dyn Trait>)`, which both build.
+#[cfg(target_has_atomic = "ptr")]
+pub use alloc::sync::{Arc, Weak};
+#[cfg(target_has_atomic = "ptr")]
+pub use core::sync::atomic;
+
+#[cfg(not(target_has_atomic = "ptr"))]
+pub use portable_atomic as atomic;
+#[cfg(not(target_has_atomic = "ptr"))]
+pub use portable_atomic_util::{Arc, Weak};
+
 /// A counter shared between threads: 64 bits where the target has 64-bit
 /// atomics, 32 where it has not (Cortex-M).
 #[cfg(target_has_atomic = "64")]
-pub type AtomicCount = core::sync::atomic::AtomicU64;
+pub type AtomicCount = atomic::AtomicU64;
 
 #[cfg(not(target_has_atomic = "64"))]
-pub type AtomicCount = core::sync::atomic::AtomicU32;
+pub type AtomicCount = atomic::AtomicU32;
 
 #[cfg(feature = "std")]
 pub use parking_lot::Condvar;
@@ -98,7 +117,7 @@ pub use single::Local;
 #[cfg(not(feature = "std"))]
 mod single {
     use core::cell::UnsafeCell;
-    use core::sync::atomic::{AtomicU8, AtomicUsize, Ordering};
+    use super::atomic::{AtomicU8, AtomicUsize, Ordering};
     use lock_api::RawRwLock as _;
 
     /// A mutex for one core: taking it while it is held is a re-entry.

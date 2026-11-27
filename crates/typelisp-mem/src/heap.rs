@@ -58,8 +58,8 @@
 use crate::prelude::*;
 use crate::collections::HashMap;
 use core::ptr;
-use core::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-use alloc::sync::Arc;
+use crate::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use crate::sync::Arc;
 use crate::sync::Mutex;
 
 use crate::sync::RwLock;
@@ -352,7 +352,7 @@ pub struct HeapShared {
     // return, only the plain `Vec` operations `alloc_cell`/`gc` already use
     // (`retain`/`push`/iteration), the same reasoning as `root_stacks`/
     // `permanent_roots`.
-    cell_registry: Mutex<Vec<alloc::sync::Weak<BoxId>>>,
+    cell_registry: Mutex<Vec<crate::sync::Weak<BoxId>>>,
     // Every view, and the stop-the-world flag — see `Heap::gc`.
     threads: ThreadRegistry,
     // How many collections have run, for tests that assert an allocation

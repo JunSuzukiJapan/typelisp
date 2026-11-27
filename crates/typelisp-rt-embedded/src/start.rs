@@ -10,7 +10,7 @@
 //! the stack so.
 
 use core::alloc::{GlobalAlloc, Layout};
-use core::sync::atomic::{AtomicPtr, Ordering};
+use typelisp_mem::sync::atomic::{AtomicPtr, Ordering};
 
 use embedded_alloc::LlffHeap;
 

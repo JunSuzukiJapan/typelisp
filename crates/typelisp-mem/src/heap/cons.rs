@@ -2,7 +2,7 @@
 
 use crate::prelude::*;
 use core::ptr;
-use core::sync::atomic::Ordering;
+use crate::sync::atomic::Ordering;
 use crate::Error;
 use crate::value::{ConsRef, LocId, Value};
 use super::{HEADROOM_DIVISOR, Heap};

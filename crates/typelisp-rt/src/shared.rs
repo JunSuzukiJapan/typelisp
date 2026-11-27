@@ -30,7 +30,7 @@
 use typelisp_mem::prelude::*;
 use core::cell::RefCell;
 use typelisp_mem::collections::HashMap;
-use alloc::sync::Arc;
+use typelisp_mem::sync::Arc;
 
 use typelisp_mem::sync::{Mutex, RwLock};
 

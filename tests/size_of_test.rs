@@ -74,6 +74,14 @@ fn every_width_on_a_cortex_m() {
 }
 
 #[test]
+fn every_width_on_a_cortex_m0plus() {
+    for level in ["-O0", "-O2"] {
+        let elf = built(&format!("widths_m0{}", level), &[level, "--target", "thumbv6m-none-eabi"], ".elf");
+        all_passed(level, &output(&mut on_board("thumbv6m-none-eabi", &elf)));
+    }
+}
+
+#[test]
 fn every_width_on_a_riscv32() {
     for level in ["-O0", "-O2"] {
         let elf = built(&format!("widths_riscv32{}", level), &[level, "--target", "riscv32imac-unknown-none-elf"], ".elf");

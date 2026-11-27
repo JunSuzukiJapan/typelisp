@@ -645,7 +645,7 @@ pub(crate) enum StructPayload {
 /// Shared rather than owned outright only because a [`BoxedObj`] is `Clone`;
 /// nothing copies a native box.
 #[derive(Clone)]
-pub(crate) struct Native(pub(crate) alloc::sync::Arc<crate::sync::Mutex<Box<dyn core::any::Any + Send>>>);
+pub(crate) struct Native(pub(crate) crate::sync::Arc<crate::sync::Mutex<Box<dyn core::any::Any + Send>>>);
 
 impl core::fmt::Debug for Native {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {

@@ -34,7 +34,7 @@ pub const ATMEGA328P: Board = Board {
     features: "",
     // The vector table's entries after reset's.
     interrupts: (1, VECTORS - 1),
-    exceptions: false,
+    exceptions: &[],
     qemu: ("qemu-system-avr", &["-M", "uno"]),
     qemu_memory: "\
 MEMORY

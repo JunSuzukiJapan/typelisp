@@ -19,7 +19,7 @@
 
 use typelisp_mem::prelude::*;
 use typelisp_mem::collections::HashSet;
-use alloc::sync::Arc;
+use typelisp_mem::sync::Arc;
 
 use num_bigint::BigInt;
 use num_rational::BigRational;

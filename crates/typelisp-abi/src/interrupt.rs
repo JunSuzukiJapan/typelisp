@@ -11,7 +11,7 @@
 //! Here rather than in the runtime because this crate is under every one
 //! that answers: the interpreter, the scheduler and the REPL.
 
-use core::sync::atomic::{AtomicBool, Ordering};
+use typelisp_mem::sync::atomic::{AtomicBool, Ordering};
 use core::time::Duration;
 
 static WATCHED: AtomicBool = AtomicBool::new(false);

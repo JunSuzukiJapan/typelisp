@@ -185,7 +185,7 @@ pub unsafe extern "C" fn rt_run_program_alone_int(inits: Word, count: Word, entr
 /// program, on a target that has them: given the program's scheduler before
 /// its first initialiser. An `Err` is a configuration the program cannot run
 /// with, reported as `error: <message>`.
-pub type StartThreads = fn(&alloc::sync::Arc<crate::sched::SchedShared<crate::sched::CompiledTask>>, &mut Heap) -> Result<(), String>;
+pub type StartThreads = fn(&typelisp_mem::sync::Arc<crate::sched::SchedShared<crate::sched::CompiledTask>>, &mut Heap) -> Result<(), String>;
 
 /// The body of every program entry: reads the program, runs it with `run`
 /// ([`run_program`] under a scheduler, [`run_alone`] without one), and
@@ -302,7 +302,7 @@ pub unsafe fn read_program(inits: Word, count: Word, entry: Word) -> Program {
 /// [`rt_run_program`]'s.
 pub unsafe fn run_program(program: &Program, start: Option<StartThreads>) -> Result<Value, Word> {
     let heap = active_heap();
-    let sched = alloc::sync::Arc::new(crate::sched::SchedShared::<crate::sched::CompiledTask>::new());
+    let sched = typelisp_mem::sync::Arc::new(crate::sched::SchedShared::<crate::sched::CompiledTask>::new());
     // The printer reads the prelude's control variables from their compiled
     // slots, and the id -> slot table is this crate's.
     typelisp_print::aot::set_global_slots(global_perm_idx);
