@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ be56bb8a477929497064b8f807acfd1755f2b35b -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 8c1712373ea704e08417e1fe1eafb4ea4a7f41a2 -->
 # typelisp 문법 레퍼런스
 
 typelisp는 S 식으로 쓰는 정적 타입 Lisp이다. 내장 함수와 메서드의 목록은 [내장 함수](functions/README.md), 타입 목록은
@@ -1158,6 +1158,7 @@ test result: FAILED. 1 passed; 1 failed; 0 filtered out
 마이크로컨트롤러용으로 컴파일한 프로그램([컴파일](../guide/compile.md)의 3.8절)에서, 인터럽트가 올 때 호출되는 함수를 씁니다. `#[interrupt(N)]`은 주변 장치 인터럽트 `N`(0~239)의, `#[exception(NAME)]`은 코어 예외 `NAME`의 핸들러가 됩니다. `NAME`은 `NonMaskableInt`, `MemoryManagement`, `BusFault`, `UsageFault`, `SVCall`, `DebugMonitor`, `PendSV`, `SysTick` 중 하나입니다(`HardFault`는 런타임이 맡아 프로그램을 끝냅니다).
 
 - Arduino Uno용에서는 번호를 세는 법과 활성화하는 방법이 다르고, `#[exception(NAME)]`과 `enable-interrupt`는 쓸 수 없습니다([컴파일](../guide/compile.md) 3.9절). 아래 설명 가운데 런타임에 관한 것은 Cortex-M의 것입니다.
+- Cortex-M0+용에서는 `N`이 0〜31이며, `NAME`에 쓸 수 있는 것은 `NonMaskableInt`, `SVCall`, `PendSV`, `SysTick`뿐이다.
 - RISC-V용에서는 `N`이 `mcause`의 인터럽트 번호(0〜31)이며, `#[exception(NAME)]`은 쓸 수 없다. 아래 설명 중 런타임에 관한 것은 RISC-V에서도 같다.
 - 인자를 받지 않고 `()`를 반환하는 최상위 `defun`에 붙입니다(타입 매개변수도 받을 수 없습니다). 인터럽트 하나에 핸들러는 하나, 함수 하나가 맡는 인터럽트도 하나입니다.
 - 주변 장치 인터럽트는 `(enable-interrupt N)`으로 켤 때까지 오지 않습니다(`(disable-interrupt N)`으로 멈춥니다. [시스템](functions/system.md) 참고). SysTick 같은 예외는 그 예외를 일으키도록 레지스터를 설정하면 옵니다.

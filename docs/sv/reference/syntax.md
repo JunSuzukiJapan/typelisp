@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ be56bb8a477929497064b8f807acfd1755f2b35b -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 8c1712373ea704e08417e1fe1eafb4ea4a7f41a2 -->
 # Syntaxreferens för typelisp
 
 typelisp är ett statiskt typat Lisp, skrivet med S-uttryck. För listan över inbyggda funktioner och
@@ -1337,6 +1337,7 @@ Det ett test skriver ut med `print` går direkt till standard ut (det fångas in
 I ett program kompilerat för en mikrokontroller (avsnitt 3.8 i [Kompilera](../guide/compile.md)) är detta de funktioner som anropas när ett avbrott kommer. `#[interrupt(N)]` gör en funktion till hanterare för kringutrustningsavbrottet `N` (0 till 239), och `#[exception(NAME)]` för kärnans undantag `NAME`, ett av `NonMaskableInt`, `MemoryManagement`, `BusFault`, `UsageFault`, `SVCall`, `DebugMonitor`, `PendSV`, `SysTick` (`HardFault` tillhör körtidsmiljön och avslutar programmet).
 
 - För Arduino Uno är numreringen och sättet att slå på annorlunda, och `#[exception(NAME)]` och `enable-interrupt` kan inte användas ([Kompilera](../guide/compile.md), avsnitt 3.9). Det som sägs om körtidsmiljön nedan gäller Cortex-M.
+- För en Cortex-M0+ är `N` 0 till 31, och `NAME` kan bara vara `NonMaskableInt`, `SVCall`, `PendSV` eller `SysTick`.
 - För RISC-V är `N` avbrottets nummer i `mcause` (0 till 31), och `#[exception(NAME)]` kan inte användas. Det som sägs om körmiljön nedan gäller även RISC-V.
 - De sitter på en `defun` på toppnivå som inte tar något och returnerar `()` (inga typparametrar heller). Ett avbrott har en hanterare, och en funktion hanterar ett avbrott.
 - Ett kringutrustningsavbrott kommer inte förrän `(enable-interrupt N)` slår på det (`(disable-interrupt N)` stoppar det; se [System](functions/system.md)). Ett undantag som SysTick kommer så snart registren är inställda för att utlösa det.

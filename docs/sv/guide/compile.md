@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ be56bb8a477929497064b8f807acfd1755f2b35b -->
+<!-- translated-from: docs/ja/guide/compile.md @ 8c1712373ea704e08417e1fe1eafb4ea4a7f41a2 -->
 # Kompilering
 
 Om du inte gör något annat körs typelisp-program i tolken. Dessutom finns två sätt att kompilera till
@@ -227,7 +227,7 @@ const code = await run({ write: (fd, text) => { /* visa den på sidan, till exem
 
 ### 3.8 Kompilera för en mikrokontroller (Cortex-M, RISC-V)
 
-Med `--target thumbv7em-none-eabihf` skapar `typl -c` en körbar fil (ELF) för ett Cortex-M4F- eller M7-kort utan operativsystem. Utan `-o` får den källans namn med `.typl` utbytt mot `.elf`. Med `--target thumbv8m.main-none-eabihf` är den för ett Cortex-M33-kort. Med `--target riscv32imac-unknown-none-elf` är den för ett kort med en 32-bitars RISC-V-kärna (tilläggen M, A och C).
+Med `--target thumbv7em-none-eabihf` skapar `typl -c` en körbar fil (ELF) för ett Cortex-M4F- eller M7-kort utan operativsystem. Utan `-o` får den källans namn med `.typl` utbytt mot `.elf`. Med `--target thumbv8m.main-none-eabihf` är den för ett Cortex-M33-kort. Med `--target riscv32imac-unknown-none-elf` är den för ett kort med en 32-bitars RISC-V-kärna (tilläggen M, A och C). Med `--target thumbv6m-none-eabi` är den för ett Cortex-M0+-kort (M0). QEMU har inget Cortex-M0+-kort, så en körbar fil för ett sådant körs på `mps2-an385`, en Cortex-M3, som kör samma instruktioner som de är (även layouten utan `--linker-script` är det kortets).
 
 ```sh
 $ typl -c hello.typl --target thumbv7em-none-eabihf          # skapar hello.elf
@@ -236,12 +236,15 @@ $ qemu-system-arm -M mps2-an386 -nographic \
 $ typl -c hello.typl --target thumbv8m.main-none-eabihf
 $ qemu-system-arm -M mps2-an505 -nographic \
     -semihosting-config enable=on,target=native -kernel hello.elf   # kör den på QEMU:s Cortex-M33
+$ typl -c hello.typl --target thumbv6m-none-eabi
+$ qemu-system-arm -M mps2-an385 -nographic \
+    -semihosting-config enable=on,target=native -kernel hello.elf   # kör den på QEMU:s Cortex-M3
 $ typl -c hello.typl --target riscv32imac-unknown-none-elf
 $ qemu-system-riscv32 -M virt -bios none -nographic \
     -semihosting-config enable=on,target=native -kernel hello.elf   # kör den på QEMU:s RISC-V
 ```
 
-- En `typl` installerad med `install.sh` kan användas som den är. För att installera med `cargo install`, kör `rustup target add thumbv7em-none-eabihf thumbv8m.main-none-eabihf riscv32imac-unknown-none-elf` och installera sedan med `--features embedded` (`--features wasm,embedded` för båda). Med en debugbygge av `typl` i förrådet, kör `scripts/build-embedded-runtime.sh`. Länkningen använder länkaren i rustup-verktygskedjan.
+- En `typl` installerad med `install.sh` kan användas som den är. För att installera med `cargo install`, kör `rustup target add thumbv7em-none-eabihf thumbv8m.main-none-eabihf thumbv6m-none-eabi riscv32imac-unknown-none-elf` och installera sedan med `--features embedded` (`--features wasm,embedded` för båda). Med en debugbygge av `typl` i förrådet, kör `scripts/build-embedded-runtime.sh`. Länkningen använder länkaren i rustup-verktygskedjan.
 - Ange kortets minne med `--linker-script FILE`. Den skrivs som `cortex-m-rt`:s `memory.x`: adresser och storlekar för FLASH och RAM. En rad som `_typelisp_stack_size = 32K;` anger hur mycket av RAM som stacken tar (64KiB om inget anges); resten av RAM är heapen. Utan flaggan används layouten för QEMU:s `mps2-an386` (`mps2-an505` för en Cortex-M33).
 
   ```
@@ -297,7 +300,7 @@ $ qemu-system-riscv32 -M virt -bios none -nographic \
     (put-byte 104) (put-byte 105) (put-byte 10))                             ; "hi" och en radbrytning
   ```
 
-- Skriv funktionen som anropas när ett avbrott kommer som en `defun` med attributet `#[interrupt(N)]` (kringutrustningsavbrottet `N`) eller ett som `#[exception(SysTick)]`. Slå på ett avbrott med `(enable-interrupt N)`. En hanterare körs genast; bara när den kommer mitt i körtidsmiljöns arbete körs den efter att arbetet är klart. En hanterare kan inte vänta (`sleep` är ett kompileringsfel). Detaljerna finns i avsnitt 3.17 i [syntaxreferensen](../reference/syntax.md). På RISC-V är `N` avbrottets nummer i `mcause` (0 till 31: 3 är mjukvaruavbrottet, 7 timern, 11 de externa avbrotten), och `#[exception(NAME)]` kan inte användas.
+- Skriv funktionen som anropas när ett avbrott kommer som en `defun` med attributet `#[interrupt(N)]` (kringutrustningsavbrottet `N`) eller ett som `#[exception(SysTick)]`. Slå på ett avbrott med `(enable-interrupt N)`. En hanterare körs genast; bara när den kommer mitt i körtidsmiljöns arbete körs den efter att arbetet är klart. En hanterare kan inte vänta (`sleep` är ett kompileringsfel). Detaljerna finns i avsnitt 3.17 i [syntaxreferensen](../reference/syntax.md). På en Cortex-M0+ är `N` 0 till 31, och `#[exception(NAME)]` kan bara namnge `NonMaskableInt`, `SVCall`, `PendSV` och `SysTick`. På RISC-V är `N` avbrottets nummer i `mcause` (0 till 31: 3 är mjukvaruavbrottet, 7 timern, 11 de externa avbrotten), och `#[exception(NAME)]` kan inte användas.
 
   ```lisp
   (use std::board::enable-interrupt)

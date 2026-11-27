@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ be56bb8a477929497064b8f807acfd1755f2b35b -->
+<!-- translated-from: docs/ja/guide/compile.md @ 8c1712373ea704e08417e1fe1eafb4ea4a7f41a2 -->
 # การคอมไพล์
 
 หากไม่ทำอะไรเพิ่ม โปรแกรม typelisp จะรันในอินเทอร์พรีเตอร์ นอกจากนี้ยังมีวิธีคอมไพล์เป็นโค้ดเนทีฟ
@@ -225,7 +225,7 @@ const code = await run({ write: (fd, text) => { /* เช่น แสดงบ�
 
 ### 3.8 คอมไพล์สำหรับไมโครคอนโทรลเลอร์ (Cortex-M, RISC-V)
 
-เมื่อใส่ `--target thumbv7em-none-eabihf` คำสั่ง `typl -c` จะสร้างไฟล์ปฏิบัติการ (ELF) สำหรับบอร์ด Cortex-M4F หรือ M7 ที่ไม่มีระบบปฏิบัติการ ถ้าไม่ใส่ `-o` ชื่อจะเป็นชื่อซอร์สที่เปลี่ยน `.typl` เป็น `.elf` ถ้าใช้ `--target thumbv8m.main-none-eabihf` จะเป็นสำหรับบอร์ด Cortex-M33 ถ้าใส่ `--target riscv32imac-unknown-none-elf` จะเป็นสำหรับบอร์ดที่มีคอร์ RISC-V 32 บิต (ส่วนขยาย M, A และ C)
+เมื่อใส่ `--target thumbv7em-none-eabihf` คำสั่ง `typl -c` จะสร้างไฟล์ปฏิบัติการ (ELF) สำหรับบอร์ด Cortex-M4F หรือ M7 ที่ไม่มีระบบปฏิบัติการ ถ้าไม่ใส่ `-o` ชื่อจะเป็นชื่อซอร์สที่เปลี่ยน `.typl` เป็น `.elf` ถ้าใช้ `--target thumbv8m.main-none-eabihf` จะเป็นสำหรับบอร์ด Cortex-M33 ถ้าใส่ `--target riscv32imac-unknown-none-elf` จะเป็นสำหรับบอร์ดที่มีคอร์ RISC-V 32 บิต (ส่วนขยาย M, A และ C) ถ้าใส่ `--target thumbv6m-none-eabi` จะเป็นสำหรับบอร์ด Cortex-M0+ (M0) QEMU ไม่มีบอร์ด Cortex-M0+ ไฟล์ปฏิบัติการสำหรับบอร์ดนี้จึงรันบน `mps2-an385` ซึ่งเป็น Cortex-M3 ที่รันคำสั่งชุดเดียวกันได้ตามเดิม (การจัดวางเมื่อไม่ใส่ `--linker-script` ก็เป็นของบอร์ดนี้)
 
 ```sh
 $ typl -c hello.typl --target thumbv7em-none-eabihf          # สร้าง hello.elf
@@ -234,12 +234,15 @@ $ qemu-system-arm -M mps2-an386 -nographic \
 $ typl -c hello.typl --target thumbv8m.main-none-eabihf
 $ qemu-system-arm -M mps2-an505 -nographic \
     -semihosting-config enable=on,target=native -kernel hello.elf   # รันบน Cortex-M33 ของ QEMU
+$ typl -c hello.typl --target thumbv6m-none-eabi
+$ qemu-system-arm -M mps2-an385 -nographic \
+    -semihosting-config enable=on,target=native -kernel hello.elf   # รันบน Cortex-M3 ของ QEMU
 $ typl -c hello.typl --target riscv32imac-unknown-none-elf
 $ qemu-system-riscv32 -M virt -bios none -nographic \
     -semihosting-config enable=on,target=native -kernel hello.elf   # รันบน RISC-V ของ QEMU
 ```
 
-- `typl` ที่ติดตั้งด้วย `install.sh` ใช้ได้ทันที ถ้าติดตั้งด้วย `cargo install` ให้รัน `rustup target add thumbv7em-none-eabihf thumbv8m.main-none-eabihf riscv32imac-unknown-none-elf` แล้วติดตั้งพร้อม `--features embedded` (ทั้งสองอย่างใช้ `--features wasm,embedded`) ถ้าใช้ `typl` ที่เป็นบิลด์ดีบักในรีโพสิทอรี ให้รัน `scripts/build-embedded-runtime.sh` การลิงก์ใช้ลิงเกอร์ของ toolchain ของ rustup
+- `typl` ที่ติดตั้งด้วย `install.sh` ใช้ได้ทันที ถ้าติดตั้งด้วย `cargo install` ให้รัน `rustup target add thumbv7em-none-eabihf thumbv8m.main-none-eabihf thumbv6m-none-eabi riscv32imac-unknown-none-elf` แล้วติดตั้งพร้อม `--features embedded` (ทั้งสองอย่างใช้ `--features wasm,embedded`) ถ้าใช้ `typl` ที่เป็นบิลด์ดีบักในรีโพสิทอรี ให้รัน `scripts/build-embedded-runtime.sh` การลิงก์ใช้ลิงเกอร์ของ toolchain ของ rustup
 - ระบุหน่วยความจำของบอร์ดด้วย `--linker-script FILE` เขียนแบบเดียวกับ `memory.x` ของ `cortex-m-rt` คือที่อยู่และขนาดของ FLASH และ RAM บรรทัดอย่าง `_typelisp_stack_size = 32K;` กำหนดว่าสแตกใช้ RAM เท่าใด (ถ้าไม่เขียนคือ 64KiB) ส่วนที่เหลือของ RAM คือฮีป ถ้าไม่ใส่ตัวเลือกนี้จะใช้การจัดวางของ `mps2-an386` (สำหรับ Cortex-M33 คือ `mps2-an505`) ใน QEMU
 
   ```
@@ -295,7 +298,7 @@ $ qemu-system-riscv32 -M virt -bios none -nographic \
     (put-byte 104) (put-byte 105) (put-byte 10))                             ; "hi" และขึ้นบรรทัดใหม่
   ```
 
-- เขียนฟังก์ชันที่ถูกเรียกเมื่ออินเทอร์รัปต์มาถึงเป็น `defun` ที่มีแอตทริบิวต์ `#[interrupt(N)]` (อินเทอร์รัปต์ของอุปกรณ์ต่อพ่วง `N`) หรือแบบ `#[exception(SysTick)]` เปิดอินเทอร์รัปต์ด้วย `(enable-interrupt N)` ตัวจัดการทำงานทันที เฉพาะเมื่อมาระหว่างงานของรันไทม์เท่านั้นจึงทำงานหลังงานนั้นเสร็จ ตัวจัดการรอไม่ได้ (`sleep` เป็นข้อผิดพลาดตอนคอมไพล์) รายละเอียดอยู่ในหัวข้อ 3.17 ของ [ข้อมูลอ้างอิงไวยากรณ์](../reference/syntax.md) บน RISC-V `N` คือหมายเลขของอินเทอร์รัปต์ใน `mcause` (0 ถึง 31: 3 คืออินเทอร์รัปต์ซอฟต์แวร์ 7 คือไทเมอร์ 11 คืออินเทอร์รัปต์ภายนอก) และใช้ `#[exception(NAME)]` ไม่ได้
+- เขียนฟังก์ชันที่ถูกเรียกเมื่ออินเทอร์รัปต์มาถึงเป็น `defun` ที่มีแอตทริบิวต์ `#[interrupt(N)]` (อินเทอร์รัปต์ของอุปกรณ์ต่อพ่วง `N`) หรือแบบ `#[exception(SysTick)]` เปิดอินเทอร์รัปต์ด้วย `(enable-interrupt N)` ตัวจัดการทำงานทันที เฉพาะเมื่อมาระหว่างงานของรันไทม์เท่านั้นจึงทำงานหลังงานนั้นเสร็จ ตัวจัดการรอไม่ได้ (`sleep` เป็นข้อผิดพลาดตอนคอมไพล์) รายละเอียดอยู่ในหัวข้อ 3.17 ของ [ข้อมูลอ้างอิงไวยากรณ์](../reference/syntax.md) บน Cortex-M0+ `N` คือ 0 ถึง 31 และ `#[exception(NAME)]` ระบุได้เพียง `NonMaskableInt`, `SVCall`, `PendSV` และ `SysTick` บน RISC-V `N` คือหมายเลขของอินเทอร์รัปต์ใน `mcause` (0 ถึง 31: 3 คืออินเทอร์รัปต์ซอฟต์แวร์ 7 คือไทเมอร์ 11 คืออินเทอร์รัปต์ภายนอก) และใช้ `#[exception(NAME)]` ไม่ได้
 
   ```lisp
   (use std::board::enable-interrupt)

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ be56bb8a477929497064b8f807acfd1755f2b35b -->
+<!-- translated-from: docs/ja/guide/compile.md @ 8c1712373ea704e08417e1fe1eafb4ea4a7f41a2 -->
 # 編譯
 
 不做任何處理的話，typelisp 程式由直譯器執行。此外還有兩種編譯為原生碼的方法，以及一種保存環境的方法。規格的詳情見
@@ -210,7 +210,7 @@ const code = await run({ write: (fd, text) => { /* 例如顯示在頁面上 */ }
 
 ### 3.8 為微控制器（Cortex-M、RISC-V）編譯
 
-加上 `--target thumbv7em-none-eabihf`，`typl -c` 會為沒有作業系統的 Cortex-M4F、M7 開發板產生可執行檔（ELF）。省略 `-o` 時，名稱是把原始檔的 `.typl` 換成 `.elf`。加上 `--target thumbv8m.main-none-eabihf` 則是針對 Cortex-M33 開發板的。加上 `--target riscv32imac-unknown-none-elf` 則是給 32 位元 RISC-V（M、A、C 擴充）的開發板。
+加上 `--target thumbv7em-none-eabihf`，`typl -c` 會為沒有作業系統的 Cortex-M4F、M7 開發板產生可執行檔（ELF）。省略 `-o` 時，名稱是把原始檔的 `.typl` 換成 `.elf`。加上 `--target thumbv8m.main-none-eabihf` 則是針對 Cortex-M33 開發板的。加上 `--target riscv32imac-unknown-none-elf` 則是給 32 位元 RISC-V（M、A、C 擴充）的開發板。加上 `--target thumbv6m-none-eabi` 則是給 Cortex-M0+（M0）的開發板。QEMU 沒有 Cortex-M0+ 的開發板，所以給它的可執行檔在能原樣執行相同指令的 Cortex-M3 `mps2-an385` 上執行（省略 `--linker-script` 時的配置也是這塊開發板的）。
 
 ```sh
 $ typl -c hello.typl --target thumbv7em-none-eabihf          # 產生 hello.elf
@@ -219,12 +219,15 @@ $ qemu-system-arm -M mps2-an386 -nographic \
 $ typl -c hello.typl --target thumbv8m.main-none-eabihf
 $ qemu-system-arm -M mps2-an505 -nographic \
     -semihosting-config enable=on,target=native -kernel hello.elf   # 在 QEMU 的 Cortex-M33 上執行
+$ typl -c hello.typl --target thumbv6m-none-eabi
+$ qemu-system-arm -M mps2-an385 -nographic \
+    -semihosting-config enable=on,target=native -kernel hello.elf   # 在 QEMU 的 Cortex-M3 上執行
 $ typl -c hello.typl --target riscv32imac-unknown-none-elf
 $ qemu-system-riscv32 -M virt -bios none -nographic \
     -semihosting-config enable=on,target=native -kernel hello.elf   # 在 QEMU 的 RISC-V 上執行
 ```
 
-- 用 `install.sh` 安裝的 `typl` 可以直接使用。用 `cargo install` 安裝時，先執行 `rustup target add thumbv7em-none-eabihf thumbv8m.main-none-eabihf riscv32imac-unknown-none-elf`，再加上 `--features embedded` 安裝（與 wasm 兩者都要則用 `--features wasm,embedded`）。使用儲存庫的除錯建置 `typl` 時，執行 `scripts/build-embedded-runtime.sh`。連結使用 rustup 工具鏈的連結器。
+- 用 `install.sh` 安裝的 `typl` 可以直接使用。用 `cargo install` 安裝時，先執行 `rustup target add thumbv7em-none-eabihf thumbv8m.main-none-eabihf thumbv6m-none-eabi riscv32imac-unknown-none-elf`，再加上 `--features embedded` 安裝（與 wasm 兩者都要則用 `--features wasm,embedded`）。使用儲存庫的除錯建置 `typl` 時，執行 `scripts/build-embedded-runtime.sh`。連結使用 rustup 工具鏈的連結器。
 - 用 `--linker-script FILE` 給出開發板的記憶體配置。寫法與 `cortex-m-rt` 的 `memory.x` 相同，寫 FLASH 和 RAM 的位址與大小。寫 `_typelisp_stack_size = 32K;` 這樣的一行，就是 RAM 中堆疊佔用的大小（不寫則為 64KiB）。RAM 的其餘部分是堆積。省略時使用 QEMU 的 `mps2-an386`（Cortex-M33 為 `mps2-an505`） 的配置。
 
   ```
@@ -280,7 +283,7 @@ $ qemu-system-riscv32 -M virt -bios none -nographic \
     (put-byte 104) (put-byte 105) (put-byte 10))                             ; "hi" 與換行
   ```
 
-- 中斷到來時被呼叫的函式，寫成帶有 `#[interrupt(N)]`（周邊中斷 `N`）或 `#[exception(SysTick)]` 這類屬性的 `defun`。中斷用 `(enable-interrupt N)` 啟用。處理程式當場執行，只有在執行時期處理途中到來時，才會在該處理結束後執行。處理程式中不能等待（`sleep` 是編譯錯誤）。詳見 [語法參考](../reference/syntax.md) 的 3.17 節。在 RISC-V 上，`N` 是 `mcause` 中的中斷編號（0～31。3 是軟體中斷，7 是計時器，11 是外部中斷），不能使用 `#[exception(NAME)]`。
+- 中斷到來時被呼叫的函式，寫成帶有 `#[interrupt(N)]`（周邊中斷 `N`）或 `#[exception(SysTick)]` 這類屬性的 `defun`。中斷用 `(enable-interrupt N)` 啟用。處理程式當場執行，只有在執行時期處理途中到來時，才會在該處理結束後執行。處理程式中不能等待（`sleep` 是編譯錯誤）。詳見 [語法參考](../reference/syntax.md) 的 3.17 節。在 Cortex-M0+ 上，`N` 為 0～31，`#[exception(NAME)]` 只能寫 `NonMaskableInt`、`SVCall`、`PendSV`、`SysTick`。在 RISC-V 上，`N` 是 `mcause` 中的中斷編號（0～31。3 是軟體中斷，7 是計時器，11 是外部中斷），不能使用 `#[exception(NAME)]`。
 
   ```lisp
   (use std::board::enable-interrupt)

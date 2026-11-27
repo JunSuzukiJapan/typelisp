@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ be56bb8a477929497064b8f807acfd1755f2b35b -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 8c1712373ea704e08417e1fe1eafb4ea4a7f41a2 -->
 # typelisp सिंटैक्स संदर्भ
 
 typelisp एक स्टैटिक रूप से टाइप किया गया Lisp है, जो S-एक्सप्रेशन में लिखा जाता है। बिल्ट-इन फ़ंक्शन और मेथड की सूची के लिए [बिल्ट-इन फ़ंक्शन](functions/README.md) देखें; टाइप की सूची के लिए [types.md](types.md); और त्रुटि संदेश पढ़ने के लिए [errors.md](errors.md)।
@@ -1024,6 +1024,7 @@ test result: FAILED. 1 passed; 1 failed; 0 filtered out
 माइक्रोकंट्रोलर के लिए कंपाइल किए गए प्रोग्राम में ([कंपाइल करना](../guide/compile.md) का खंड 3.8), ये वे फ़ंक्शन हैं जो इंटरप्ट आने पर बुलाए जाते हैं। `#[interrupt(N)]` फ़ंक्शन को पेरिफेरल इंटरप्ट `N` (0 से 239) का हैंडलर बनाता है, और `#[exception(NAME)]` कोर एक्सेप्शन `NAME` का, जो `NonMaskableInt`, `MemoryManagement`, `BusFault`, `UsageFault`, `SVCall`, `DebugMonitor`, `PendSV`, `SysTick` में से एक है (`HardFault` रनटाइम का है, और प्रोग्राम को समाप्त करता है)।
 
 - Arduino Uno के लिए संख्या और सक्षम करने का तरीका अलग है, और `#[exception(NAME)]` तथा `enable-interrupt` का उपयोग नहीं किया जा सकता ([कंपाइल](../guide/compile.md), खंड 3.9)। नीचे रनटाइम के बारे में कही बातें Cortex-M की हैं।
+- Cortex-M0+ के लिए `N` 0 से 31 है, और `NAME` केवल `NonMaskableInt`, `SVCall`, `PendSV` या `SysTick` हो सकता है।
 - RISC-V के लिए `N` इंटरप्ट का `mcause` में नंबर है (0 से 31), और `#[exception(NAME)]` का उपयोग नहीं किया जा सकता। नीचे रनटाइम के बारे में जो कहा गया है वह RISC-V पर भी लागू होता है।
 - ये ऐसे टॉप-लेवल `defun` पर लगती हैं जो कुछ नहीं लेता और `()` लौटाता है (टाइप पैरामीटर भी नहीं)। एक इंटरप्ट का एक हैंडलर होता है, और एक फ़ंक्शन एक इंटरप्ट संभालता है।
 - पेरिफेरल इंटरप्ट तब तक नहीं आता जब तक `(enable-interrupt N)` उसे चालू न करे (`(disable-interrupt N)` उसे रोकता है; [सिस्टम](functions/system.md) देखें)। SysTick जैसा एक्सेप्शन रजिस्टरों को उसे उठाने के लिए सेट करते ही आता है।

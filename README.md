@@ -1,4 +1,4 @@
-<!-- translated-from: README_JP.md @ be56bb8a477929497064b8f807acfd1755f2b35b -->
+<!-- translated-from: README_JP.md @ 8c1712373ea704e08417e1fe1eafb4ea4a7f41a2 -->
 # TypeLisp
 
 English | [日本語](README_JP.md) | [简体中文](docs/zh-CN/README.md) | [繁體中文](docs/zh-TW/README.md) | [한국어](docs/ko/README.md) | [Español](docs/es/README.md) | [Português (Brasil)](docs/pt-BR/README.md) | [Deutsch](docs/de/README.md) | [Français](docs/fr/README.md) | [Русский](docs/ru/README.md) | [العربية](docs/ar/README.md) | [Italiano](docs/it/README.md) | [हिन्दी](docs/hi/README.md) | [Türkçe](docs/tr/README.md) | [Tiếng Việt](docs/vi/README.md) | [Bahasa Indonesia](docs/id/README.md) | [Polski](docs/pl/README.md) | [ภาษาไทย](docs/th/README.md) | [Українська](docs/uk/README.md) | [Nederlands](docs/nl/README.md) | [Svenska](docs/sv/README.md)
@@ -305,7 +305,7 @@ it uses `panic`, `throw` or `unwind-protect`.
 
 The prebuilt `typl` can also compile to WebAssembly (`typl -c --target wasm32-wasip1` and the
 like) and for Cortex-M and RISC-V microcontrollers (`--target thumbv7em-none-eabihf`, `--target thumbv8m.main-none-eabihf`,
-`--target riscv32imac-unknown-none-elf`). It links with the linker
+`--target thumbv6m-none-eabi`, `--target riscv32imac-unknown-none-elf`). It links with the linker
 of a rustup toolchain, so `--target` needs rustup.
 
 The environment variable `TYPELISP_HOME` sets the install location, and `TYPELISP_VERSION` sets the
@@ -418,7 +418,7 @@ cargo install --locked --path . --features wasm
 Without it, nothing for WebAssembly is built, and nothing of it goes into `typl`.
 
 To also compile for microcontrollers (`typl -c --target thumbv7em-none-eabihf` and the like), run
-`rustup target add thumbv7em-none-eabihf thumbv8m.main-none-eabihf riscv32imac-unknown-none-elf`, then add `--features embedded` (`--features wasm,embedded`
+`rustup target add thumbv7em-none-eabihf thumbv8m.main-none-eabihf thumbv6m-none-eabi riscv32imac-unknown-none-elf`, then add `--features embedded` (`--features wasm,embedded`
 for both).
 
 ```sh

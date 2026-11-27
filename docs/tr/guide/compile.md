@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ be56bb8a477929497064b8f807acfd1755f2b35b -->
+<!-- translated-from: docs/ja/guide/compile.md @ 8c1712373ea704e08417e1fe1eafb4ea4a7f41a2 -->
 # Derleme
 
 Başka bir şey yapmazsanız typelisp programları yorumlayıcıda çalışır. Buna ek olarak yerel koda
@@ -226,7 +226,7 @@ const code = await run({ write: (fd, text) => { /* örneğin sayfada göstermek 
 
 ### 3.8 Bir mikrodenetleyici (Cortex-M, RISC-V) için derlemek
 
-`--target thumbv7em-none-eabihf` ile `typl -c`, işletim sistemi olmayan bir Cortex-M4F veya M7 kartı için çalıştırılabilir dosya (ELF) üretir. `-o` verilmezse adı, kaynağın `.typl` uzantısı `.elf` yapılarak verilir. `--target thumbv8m.main-none-eabihf` ile Cortex-M33 kartı içindir. `--target riscv32imac-unknown-none-elf` ile 32 bit RISC-V çekirdekli (M, A ve C uzantıları) bir kart içindir.
+`--target thumbv7em-none-eabihf` ile `typl -c`, işletim sistemi olmayan bir Cortex-M4F veya M7 kartı için çalıştırılabilir dosya (ELF) üretir. `-o` verilmezse adı, kaynağın `.typl` uzantısı `.elf` yapılarak verilir. `--target thumbv8m.main-none-eabihf` ile Cortex-M33 kartı içindir. `--target riscv32imac-unknown-none-elf` ile 32 bit RISC-V çekirdekli (M, A ve C uzantıları) bir kart içindir. `--target thumbv6m-none-eabi` ile Cortex-M0+ (M0) kartı içindir. QEMU'da Cortex-M0+ kartı yoktur; bu yüzden onun için çalıştırılabilir dosya, aynı komutları olduğu gibi çalıştıran bir Cortex-M3 olan `mps2-an385` üzerinde çalışır (`--linker-script` verilmediğindeki düzen de bu kartınkidir).
 
 ```sh
 $ typl -c hello.typl --target thumbv7em-none-eabihf          # hello.elf üretir
@@ -235,12 +235,15 @@ $ qemu-system-arm -M mps2-an386 -nographic \
 $ typl -c hello.typl --target thumbv8m.main-none-eabihf
 $ qemu-system-arm -M mps2-an505 -nographic \
     -semihosting-config enable=on,target=native -kernel hello.elf   # QEMU'nun Cortex-M33'ünde çalıştır
+$ typl -c hello.typl --target thumbv6m-none-eabi
+$ qemu-system-arm -M mps2-an385 -nographic \
+    -semihosting-config enable=on,target=native -kernel hello.elf   # QEMU'nun Cortex-M3'ünde çalıştır
 $ typl -c hello.typl --target riscv32imac-unknown-none-elf
 $ qemu-system-riscv32 -M virt -bios none -nographic \
     -semihosting-config enable=on,target=native -kernel hello.elf   # QEMU'nun RISC-V'ünde çalıştır
 ```
 
-- `install.sh` ile kurulan `typl` olduğu gibi kullanılabilir. `cargo install` ile kurmak için önce `rustup target add thumbv7em-none-eabihf thumbv8m.main-none-eabihf riscv32imac-unknown-none-elf` çalıştırın, sonra `--features embedded` ile kurun (ikisi için `--features wasm,embedded`). Depodaki hata ayıklama derlemesi `typl` ile `scripts/build-embedded-runtime.sh` çalıştırın. Bağlama rustup araç zincirinin bağlayıcısını kullanır.
+- `install.sh` ile kurulan `typl` olduğu gibi kullanılabilir. `cargo install` ile kurmak için önce `rustup target add thumbv7em-none-eabihf thumbv8m.main-none-eabihf thumbv6m-none-eabi riscv32imac-unknown-none-elf` çalıştırın, sonra `--features embedded` ile kurun (ikisi için `--features wasm,embedded`). Depodaki hata ayıklama derlemesi `typl` ile `scripts/build-embedded-runtime.sh` çalıştırın. Bağlama rustup araç zincirinin bağlayıcısını kullanır.
 - Kartın belleğini `--linker-script FILE` ile verin. Dosya `cortex-m-rt`'nin `memory.x`'i gibi yazılır: FLASH ve RAM'in adresleri ve boyutları. `_typelisp_stack_size = 32K;` gibi bir satır RAM'in ne kadarını yığının (stack) alacağını belirler (verilmezse 64KiB); RAM'in geri kalanı heap'tir. Seçenek yoksa düzen QEMU'nun `mps2-an386` (Cortex-M33 için `mps2-an505`)'sınınkidir.
 
   ```
@@ -296,7 +299,7 @@ $ qemu-system-riscv32 -M virt -bios none -nographic \
     (put-byte 104) (put-byte 105) (put-byte 10))                             ; "hi" ve yeni satır
   ```
 
-- Bir kesme geldiğinde çağrılan fonksiyonu, `#[interrupt(N)]` (çevre birimi kesmesi `N`) ya da `#[exception(SysTick)]` gibi bir özniteliği olan bir `defun` olarak yazın. Bir kesmeyi `(enable-interrupt N)` ile etkinleştirin. İşleyici hemen çalışır; yalnızca çalışma zamanının işinin ortasında geldiğinde o iş bittikten sonra çalışır. Bir işleyici bekleyemez (`sleep` bir derleme hatasıdır). Ayrıntılar [sözdizimi başvurusu](../reference/syntax.md) bölüm 3.17'dedir. RISC-V'de `N`, kesmenin `mcause` içindeki numarasıdır (0'dan 31'e: 3 yazılım kesmesi, 7 zamanlayıcı, 11 harici kesmeler) ve `#[exception(NAME)]` kullanılamaz.
+- Bir kesme geldiğinde çağrılan fonksiyonu, `#[interrupt(N)]` (çevre birimi kesmesi `N`) ya da `#[exception(SysTick)]` gibi bir özniteliği olan bir `defun` olarak yazın. Bir kesmeyi `(enable-interrupt N)` ile etkinleştirin. İşleyici hemen çalışır; yalnızca çalışma zamanının işinin ortasında geldiğinde o iş bittikten sonra çalışır. Bir işleyici bekleyemez (`sleep` bir derleme hatasıdır). Ayrıntılar [sözdizimi başvurusu](../reference/syntax.md) bölüm 3.17'dedir. Cortex-M0+'da `N` 0'dan 31'e kadardır ve `#[exception(NAME)]` yalnızca `NonMaskableInt`, `SVCall`, `PendSV` ve `SysTick` adlarını alabilir. RISC-V'de `N`, kesmenin `mcause` içindeki numarasıdır (0'dan 31'e: 3 yazılım kesmesi, 7 zamanlayıcı, 11 harici kesmeler) ve `#[exception(NAME)]` kullanılamaz.
 
   ```lisp
   (use std::board::enable-interrupt)

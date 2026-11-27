@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ be56bb8a477929497064b8f807acfd1755f2b35b -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 8c1712373ea704e08417e1fe1eafb4ea4a7f41a2 -->
 # เอกสารอ้างอิงไวยากรณ์ typelisp
 
 typelisp เป็น Lisp ที่มีระบบชนิดแบบสถิต เขียนด้วย S-expression สำหรับรายการฟังก์ชันและเมทอดที่มีให้ในตัว
@@ -1261,6 +1261,7 @@ test result: FAILED. 1 passed; 1 failed; 0 filtered out
 ในโปรแกรมที่คอมไพล์สำหรับไมโครคอนโทรลเลอร์ (หัวข้อ 3.8 ของ [การคอมไพล์](../guide/compile.md)) นี่คือฟังก์ชันที่ถูกเรียกเมื่ออินเทอร์รัปต์มาถึง `#[interrupt(N)]` ทำให้ฟังก์ชันเป็นตัวจัดการอินเทอร์รัปต์ของอุปกรณ์ต่อพ่วง `N` (0 ถึง 239) และ `#[exception(NAME)]` เป็นตัวจัดการเอ็กเซปชันของคอร์ `NAME` ซึ่งเป็นหนึ่งใน `NonMaskableInt`, `MemoryManagement`, `BusFault`, `UsageFault`, `SVCall`, `DebugMonitor`, `PendSV`, `SysTick` (`HardFault` เป็นของรันไทม์ และจบโปรแกรม)
 
 - สำหรับ Arduino Uno การนับหมายเลขและวิธีเปิดใช้ต่างออกไป และใช้ `#[exception(NAME)]` กับ `enable-interrupt` ไม่ได้ ([การคอมไพล์](../guide/compile.md) หัวข้อ 3.9) ส่วนที่กล่าวถึงรันไทม์ด้านล่างเป็นของ Cortex-M
+- บน Cortex-M0+ `N` คือ 0 ถึง 31 และ `NAME` เป็นได้เพียง `NonMaskableInt`, `SVCall`, `PendSV` หรือ `SysTick`
 - บน RISC-V `N` คือหมายเลขของอินเทอร์รัปต์ใน `mcause` (0 ถึง 31) และใช้ `#[exception(NAME)]` ไม่ได้ สิ่งที่กล่าวถึงรันไทม์ด้านล่างใช้กับ RISC-V ด้วย
 - ติดกับ `defun` ระดับบนสุดที่ไม่รับอะไรและคืน `()` (ไม่มีพารามิเตอร์ชนิดด้วย) อินเทอร์รัปต์หนึ่งตัวมีตัวจัดการหนึ่งตัว และฟังก์ชันหนึ่งตัวจัดการอินเทอร์รัปต์หนึ่งตัว
 - อินเทอร์รัปต์ของอุปกรณ์ต่อพ่วงจะไม่มาจนกว่า `(enable-interrupt N)` จะเปิดมัน (`(disable-interrupt N)` หยุดมัน ดู [ระบบ](functions/system.md)) เอ็กเซปชันอย่าง SysTick จะมาทันทีที่ตั้งรีจิสเตอร์ให้ก่อมัน

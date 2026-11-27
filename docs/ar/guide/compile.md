@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ be56bb8a477929497064b8f807acfd1755f2b35b -->
+<!-- translated-from: docs/ja/guide/compile.md @ 8c1712373ea704e08417e1fe1eafb4ea4a7f41a2 -->
 # الترجمة
 
 إذا لم تفعل شيئًا آخر فإن برامج typelisp تعمل في المفسِّر (interpreter). وإضافة إلى ذلك توجد طريقتان
@@ -223,7 +223,7 @@ const code = await run({ write: (fd, text) => { /* اعرضه في الصفحة 
 
 ### 3.8 الترجمة لمتحكم دقيق (Cortex-M، RISC-V)
 
-مع `--target thumbv7em-none-eabihf` ينشئ `typl -c` ملفًا تنفيذيًا (ELF) للوحة Cortex-M4F أو M7 بلا نظام تشغيل. بدون `-o` يُسمّى باسم المصدر مع استبدال `.typl` بـ`.elf`. ومع `--target thumbv8m.main-none-eabihf` يكون للوحة Cortex-M33. ومع `--target riscv32imac-unknown-none-elf` يكون للوحة بنواة RISC-V بعرض 32 بت (الامتدادات M وA وC).
+مع `--target thumbv7em-none-eabihf` ينشئ `typl -c` ملفًا تنفيذيًا (ELF) للوحة Cortex-M4F أو M7 بلا نظام تشغيل. بدون `-o` يُسمّى باسم المصدر مع استبدال `.typl` بـ`.elf`. ومع `--target thumbv8m.main-none-eabihf` يكون للوحة Cortex-M33. ومع `--target riscv32imac-unknown-none-elf` يكون للوحة بنواة RISC-V بعرض 32 بت (الامتدادات M وA وC). ومع `--target thumbv6m-none-eabi` يكون للوحة Cortex-M0+ (M0). لا توجد في QEMU لوحة Cortex-M0+، لذا يعمل الملف التنفيذي لها على `mps2-an385`، وهو Cortex-M3 ينفّذ التعليمات نفسها كما هي (والتخطيط عند حذف `--linker-script` هو تخطيط هذه اللوحة أيضًا).
 
 ```sh
 $ typl -c hello.typl --target thumbv7em-none-eabihf          # ينشئ hello.elf
@@ -232,12 +232,15 @@ $ qemu-system-arm -M mps2-an386 -nographic \
 $ typl -c hello.typl --target thumbv8m.main-none-eabihf
 $ qemu-system-arm -M mps2-an505 -nographic \
     -semihosting-config enable=on,target=native -kernel hello.elf   # شغّله على Cortex-M33 في QEMU
+$ typl -c hello.typl --target thumbv6m-none-eabi
+$ qemu-system-arm -M mps2-an385 -nographic \
+    -semihosting-config enable=on,target=native -kernel hello.elf   # شغّله على Cortex-M3 في QEMU
 $ typl -c hello.typl --target riscv32imac-unknown-none-elf
 $ qemu-system-riscv32 -M virt -bios none -nographic \
     -semihosting-config enable=on,target=native -kernel hello.elf   # شغّله على RISC-V في QEMU
 ```
 
-- يمكن استخدام `typl` المثبّت بـ`install.sh` كما هو. للتثبيت بـ`cargo install` شغّل `rustup target add thumbv7em-none-eabihf thumbv8m.main-none-eabihf riscv32imac-unknown-none-elf` ثم ثبّت مع `--features embedded` (و`--features wasm,embedded` للاثنين). مع نسخة التصحيح من `typl` في المستودع شغّل `scripts/build-embedded-runtime.sh`. يستخدم الربط رابط سلسلة أدوات rustup.
+- يمكن استخدام `typl` المثبّت بـ`install.sh` كما هو. للتثبيت بـ`cargo install` شغّل `rustup target add thumbv7em-none-eabihf thumbv8m.main-none-eabihf thumbv6m-none-eabi riscv32imac-unknown-none-elf` ثم ثبّت مع `--features embedded` (و`--features wasm,embedded` للاثنين). مع نسخة التصحيح من `typl` في المستودع شغّل `scripts/build-embedded-runtime.sh`. يستخدم الربط رابط سلسلة أدوات rustup.
 - مرّر ذاكرة اللوحة بـ`--linker-script FILE`. يُكتب الملف مثل `memory.x` في `cortex-m-rt`: عناوين FLASH وRAM وأحجامها. سطر مثل `_typelisp_stack_size = 32K;` يحدد ما يأخذه المكدس من RAM (64KiB إن لم يُذكر)؛ وبقية RAM هي الكومة. بدون الخيار يُستخدم تخطيط `mps2-an386` (و`mps2-an505` لـ Cortex-M33) في QEMU.
 
   ```
@@ -293,7 +296,7 @@ $ qemu-system-riscv32 -M virt -bios none -nographic \
     (put-byte 104) (put-byte 105) (put-byte 10))                             ; "hi" وسطر جديد
   ```
 
-- اكتب الدالة التي تُستدعى عند وصول مقاطعة على هيئة `defun` بالسمة `#[interrupt(N)]` (مقاطعة الطرفية `N`) أو سمة مثل `#[exception(SysTick)]`. فعّل المقاطعة بـ `(enable-interrupt N)`. يعمل المعالج فورًا، ولا يعمل بعد انتهاء العمل إلا إذا وصل في منتصف عمل بيئة التشغيل. لا يستطيع المعالج الانتظار (`sleep` خطأ ترجمة). التفاصيل في القسم 3.17 من [مرجع الصياغة](../reference/syntax.md). على RISC-V يكون `N` رقم المقاطعة في `mcause` (من 0 إلى 31: 3 مقاطعة البرمجيات، و7 المؤقت، و11 المقاطعات الخارجية)، ولا يمكن استخدام `#[exception(NAME)]`.
+- اكتب الدالة التي تُستدعى عند وصول مقاطعة على هيئة `defun` بالسمة `#[interrupt(N)]` (مقاطعة الطرفية `N`) أو سمة مثل `#[exception(SysTick)]`. فعّل المقاطعة بـ `(enable-interrupt N)`. يعمل المعالج فورًا، ولا يعمل بعد انتهاء العمل إلا إذا وصل في منتصف عمل بيئة التشغيل. لا يستطيع المعالج الانتظار (`sleep` خطأ ترجمة). التفاصيل في القسم 3.17 من [مرجع الصياغة](../reference/syntax.md). على Cortex-M0+ يكون `N` من 0 إلى 31، ولا يسمّي `#[exception(NAME)]` إلا `NonMaskableInt` و`SVCall` و`PendSV` و`SysTick`. على RISC-V يكون `N` رقم المقاطعة في `mcause` (من 0 إلى 31: 3 مقاطعة البرمجيات، و7 المؤقت، و11 المقاطعات الخارجية)، ولا يمكن استخدام `#[exception(NAME)]`.
 
   ```lisp
   (use std::board::enable-interrupt)

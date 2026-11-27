@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ be56bb8a477929497064b8f807acfd1755f2b35b -->
+<!-- translated-from: docs/ja/guide/compile.md @ 8c1712373ea704e08417e1fe1eafb4ea4a7f41a2 -->
 # Compileren
 
 Tenzij je iets anders doet, draaien typelisp-programma's in de interpreter. Daarnaast zijn er twee
@@ -234,7 +234,7 @@ const code = await run({ write: (fd, text) => { /* bijvoorbeeld op de pagina ton
 
 ### 3.8 Compileren voor een microcontroller (Cortex-M, RISC-V)
 
-Met `--target thumbv7em-none-eabihf` maakt `typl -c` een uitvoerbaar bestand (ELF) voor een Cortex-M4F- of M7-bord zonder besturingssysteem. Zonder `-o` krijgt het de naam van de bron met `.typl` vervangen door `.elf`. Met `--target thumbv8m.main-none-eabihf` is het voor een Cortex-M33-bord. Met `--target riscv32imac-unknown-none-elf` is het voor een bord met een 32-bits RISC-V-kern (de uitbreidingen M, A en C).
+Met `--target thumbv7em-none-eabihf` maakt `typl -c` een uitvoerbaar bestand (ELF) voor een Cortex-M4F- of M7-bord zonder besturingssysteem. Zonder `-o` krijgt het de naam van de bron met `.typl` vervangen door `.elf`. Met `--target thumbv8m.main-none-eabihf` is het voor een Cortex-M33-bord. Met `--target riscv32imac-unknown-none-elf` is het voor een bord met een 32-bits RISC-V-kern (de uitbreidingen M, A en C). Met `--target thumbv6m-none-eabi` is het voor een Cortex-M0+-bord (M0). QEMU heeft geen Cortex-M0+-bord, dus een uitvoerbaar bestand daarvoor draait op `mps2-an385`, een Cortex-M3, die dezelfde instructies ongewijzigd uitvoert (ook de indeling zonder `--linker-script` is die van dat bord).
 
 ```sh
 $ typl -c hello.typl --target thumbv7em-none-eabihf          # maakt hello.elf
@@ -243,12 +243,15 @@ $ qemu-system-arm -M mps2-an386 -nographic \
 $ typl -c hello.typl --target thumbv8m.main-none-eabihf
 $ qemu-system-arm -M mps2-an505 -nographic \
     -semihosting-config enable=on,target=native -kernel hello.elf   # uitvoeren op de Cortex-M33 van QEMU
+$ typl -c hello.typl --target thumbv6m-none-eabi
+$ qemu-system-arm -M mps2-an385 -nographic \
+    -semihosting-config enable=on,target=native -kernel hello.elf   # uitvoeren op de Cortex-M3 van QEMU
 $ typl -c hello.typl --target riscv32imac-unknown-none-elf
 $ qemu-system-riscv32 -M virt -bios none -nographic \
     -semihosting-config enable=on,target=native -kernel hello.elf   # uitvoeren op de RISC-V van QEMU
 ```
 
-- Een met `install.sh` geïnstalleerde `typl` kan direct worden gebruikt. Voor `cargo install` voer je eerst `rustup target add thumbv7em-none-eabihf thumbv8m.main-none-eabihf riscv32imac-unknown-none-elf` uit en installeer je met `--features embedded` (`--features wasm,embedded` voor beide). Met een debugbuild van `typl` in de repository voer je `scripts/build-embedded-runtime.sh` uit. Het linken gebruikt de linker van de rustup-toolchain.
+- Een met `install.sh` geïnstalleerde `typl` kan direct worden gebruikt. Voor `cargo install` voer je eerst `rustup target add thumbv7em-none-eabihf thumbv8m.main-none-eabihf thumbv6m-none-eabi riscv32imac-unknown-none-elf` uit en installeer je met `--features embedded` (`--features wasm,embedded` voor beide). Met een debugbuild van `typl` in de repository voer je `scripts/build-embedded-runtime.sh` uit. Het linken gebruikt de linker van de rustup-toolchain.
 - Geef het geheugen van het bord op met `--linker-script FILE`. Het heeft de vorm van de `memory.x` van `cortex-m-rt`: de adressen en groottes van FLASH en RAM. Een regel als `_typelisp_stack_size = 32K;` bepaalt hoeveel RAM de stack inneemt (zonder opgave 64KiB); de rest van het RAM is de heap. Zonder de optie geldt de indeling van QEMU's `mps2-an386` (`mps2-an505` voor een Cortex-M33).
 
   ```
@@ -304,7 +307,7 @@ $ qemu-system-riscv32 -M virt -bios none -nographic \
     (put-byte 104) (put-byte 105) (put-byte 10))                             ; "hi" en een nieuwe regel
   ```
 
-- Schrijf de functie die wordt aangeroepen als er een interrupt komt als een `defun` met het attribuut `#[interrupt(N)]` (periferie-interrupt `N`) of een zoals `#[exception(SysTick)]`. Schakel een interrupt in met `(enable-interrupt N)`. Een handler draait meteen; alleen als hij midden in werk van de runtime komt, draait hij nadat dat werk klaar is. Een handler kan niet wachten (`sleep` is een compileerfout). De details staan in paragraaf 3.17 van de [syntaxreferentie](../reference/syntax.md). Op RISC-V is `N` het nummer van de interrupt in `mcause` (0 tot en met 31: 3 is de software-interrupt, 7 de timer, 11 de externe interrupts), en `#[exception(NAME)]` kan niet worden gebruikt.
+- Schrijf de functie die wordt aangeroepen als er een interrupt komt als een `defun` met het attribuut `#[interrupt(N)]` (periferie-interrupt `N`) of een zoals `#[exception(SysTick)]`. Schakel een interrupt in met `(enable-interrupt N)`. Een handler draait meteen; alleen als hij midden in werk van de runtime komt, draait hij nadat dat werk klaar is. Een handler kan niet wachten (`sleep` is een compileerfout). De details staan in paragraaf 3.17 van de [syntaxreferentie](../reference/syntax.md). Op een Cortex-M0+ is `N` 0 tot en met 31, en kan `#[exception(NAME)]` alleen `NonMaskableInt`, `SVCall`, `PendSV` en `SysTick` noemen. Op RISC-V is `N` het nummer van de interrupt in `mcause` (0 tot en met 31: 3 is de software-interrupt, 7 de timer, 11 de externe interrupts), en `#[exception(NAME)]` kan niet worden gebruikt.
 
   ```lisp
   (use std::board::enable-interrupt)

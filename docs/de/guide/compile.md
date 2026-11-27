@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ be56bb8a477929497064b8f807acfd1755f2b35b -->
+<!-- translated-from: docs/ja/guide/compile.md @ 8c1712373ea704e08417e1fe1eafb4ea4a7f41a2 -->
 # Kompilierung
 
 Ohne weiteres Zutun laufen typelisp-Programme im Interpreter. Darüber hinaus gibt es zwei Wege, in nativen
@@ -230,7 +230,7 @@ const code = await run({ write: (fd, text) => { /* zum Beispiel auf der Seite an
 
 ### 3.8 Für einen Mikrocontroller (Cortex-M, RISC-V) kompilieren
 
-Mit `--target thumbv7em-none-eabihf` erzeugt `typl -c` eine ausführbare Datei (ELF) für eine Cortex-M4F- oder M7-Platine ohne Betriebssystem. Ohne `-o` wird sie nach der Quelle benannt, wobei `.typl` durch `.elf` ersetzt wird. Mit `--target thumbv8m.main-none-eabihf` ist sie für eine Cortex-M33-Platine. Mit `--target riscv32imac-unknown-none-elf` ist sie für eine Platine mit einem 32-Bit-RISC-V-Kern (Erweiterungen M, A und C).
+Mit `--target thumbv7em-none-eabihf` erzeugt `typl -c` eine ausführbare Datei (ELF) für eine Cortex-M4F- oder M7-Platine ohne Betriebssystem. Ohne `-o` wird sie nach der Quelle benannt, wobei `.typl` durch `.elf` ersetzt wird. Mit `--target thumbv8m.main-none-eabihf` ist sie für eine Cortex-M33-Platine. Mit `--target riscv32imac-unknown-none-elf` ist sie für eine Platine mit einem 32-Bit-RISC-V-Kern (Erweiterungen M, A und C). Mit `--target thumbv6m-none-eabi` ist sie für eine Cortex-M0+-Platine (M0). QEMU hat keine Cortex-M0+-Platine, daher läuft eine ausführbare Datei dafür auf `mps2-an385`, einem Cortex-M3, der dieselben Befehle unverändert ausführt (auch die Aufteilung ohne `--linker-script` ist die dieser Platine).
 
 ```sh
 $ typl -c hello.typl --target thumbv7em-none-eabihf          # erzeugt hello.elf
@@ -239,12 +239,15 @@ $ qemu-system-arm -M mps2-an386 -nographic \
 $ typl -c hello.typl --target thumbv8m.main-none-eabihf
 $ qemu-system-arm -M mps2-an505 -nographic \
     -semihosting-config enable=on,target=native -kernel hello.elf   # auf dem Cortex-M33 von QEMU ausführen
+$ typl -c hello.typl --target thumbv6m-none-eabi
+$ qemu-system-arm -M mps2-an385 -nographic \
+    -semihosting-config enable=on,target=native -kernel hello.elf   # auf dem Cortex-M3 von QEMU ausführen
 $ typl -c hello.typl --target riscv32imac-unknown-none-elf
 $ qemu-system-riscv32 -M virt -bios none -nographic \
     -semihosting-config enable=on,target=native -kernel hello.elf   # auf dem RISC-V von QEMU ausführen
 ```
 
-- Ein mit `install.sh` installiertes `typl` kann direkt verwendet werden. Für `cargo install` zuerst `rustup target add thumbv7em-none-eabihf thumbv8m.main-none-eabihf riscv32imac-unknown-none-elf` ausführen und dann mit `--features embedded` installieren (`--features wasm,embedded` für beides). Mit einem Debug-Build von `typl` im Repository `scripts/build-embedded-runtime.sh` ausführen. Gelinkt wird mit dem Linker der rustup-Toolchain.
+- Ein mit `install.sh` installiertes `typl` kann direkt verwendet werden. Für `cargo install` zuerst `rustup target add thumbv7em-none-eabihf thumbv8m.main-none-eabihf thumbv6m-none-eabi riscv32imac-unknown-none-elf` ausführen und dann mit `--features embedded` installieren (`--features wasm,embedded` für beides). Mit einem Debug-Build von `typl` im Repository `scripts/build-embedded-runtime.sh` ausführen. Gelinkt wird mit dem Linker der rustup-Toolchain.
 - Den Speicher der Platine mit `--linker-script FILE` angeben. Die Datei hat die Form von `memory.x` aus `cortex-m-rt`: Adressen und Größen von FLASH und RAM. Eine Zeile wie `_typelisp_stack_size = 32K;` legt fest, wie viel des RAM der Stack belegt (ohne Angabe 64KiB); der Rest des RAM ist der Heap. Ohne die Option gilt die Aufteilung von QEMUs `mps2-an386` (für einen Cortex-M33 `mps2-an505`).
 
   ```
@@ -300,7 +303,7 @@ $ qemu-system-riscv32 -M virt -bios none -nographic \
     (put-byte 104) (put-byte 105) (put-byte 10))                             ; "hi" und ein Zeilenumbruch
   ```
 
-- Die Funktion, die bei einem Interrupt aufgerufen wird, schreibt man als `defun` mit dem Attribut `#[interrupt(N)]` (Peripherie-Interrupt `N`) oder einem wie `#[exception(SysTick)]`. Ein Interrupt wird mit `(enable-interrupt N)` eingeschaltet. Ein Handler läuft sofort; nur wenn er mitten in der Arbeit der Laufzeit kommt, läuft er, nachdem diese fertig ist. Ein Handler kann nicht warten (`sleep` ist ein Kompilierfehler). Details stehen in Abschnitt 3.17 der [Syntaxreferenz](../reference/syntax.md). Unter RISC-V ist `N` die Nummer des Interrupts in `mcause` (0 bis 31: 3 ist der Software-Interrupt, 7 der Timer, 11 die externen Interrupts), und `#[exception(NAME)]` kann nicht verwendet werden.
+- Die Funktion, die bei einem Interrupt aufgerufen wird, schreibt man als `defun` mit dem Attribut `#[interrupt(N)]` (Peripherie-Interrupt `N`) oder einem wie `#[exception(SysTick)]`. Ein Interrupt wird mit `(enable-interrupt N)` eingeschaltet. Ein Handler läuft sofort; nur wenn er mitten in der Arbeit der Laufzeit kommt, läuft er, nachdem diese fertig ist. Ein Handler kann nicht warten (`sleep` ist ein Kompilierfehler). Details stehen in Abschnitt 3.17 der [Syntaxreferenz](../reference/syntax.md). Auf einem Cortex-M0+ ist `N` 0 bis 31, und `#[exception(NAME)]` kann nur `NonMaskableInt`, `SVCall`, `PendSV` und `SysTick` nennen. Unter RISC-V ist `N` die Nummer des Interrupts in `mcause` (0 bis 31: 3 ist der Software-Interrupt, 7 der Timer, 11 die externen Interrupts), und `#[exception(NAME)]` kann nicht verwendet werden.
 
   ```lisp
   (use std::board::enable-interrupt)

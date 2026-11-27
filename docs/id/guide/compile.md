@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ be56bb8a477929497064b8f807acfd1755f2b35b -->
+<!-- translated-from: docs/ja/guide/compile.md @ 8c1712373ea704e08417e1fe1eafb4ea4a7f41a2 -->
 # Kompilasi
 
 Jika Anda tidak melakukan apa-apa lagi, program typelisp berjalan di interpreter. Selain itu ada dua
@@ -229,7 +229,7 @@ const code = await run({ write: (fd, text) => { /* misalnya tampilkan di halaman
 
 ### 3.8 Mengompilasi untuk mikrokontroler (Cortex-M, RISC-V)
 
-Dengan `--target thumbv7em-none-eabihf`, `typl -c` membuat berkas eksekusi (ELF) untuk papan Cortex-M4F atau M7 tanpa sistem operasi. Tanpa `-o`, namanya mengikuti sumber dengan `.typl` diganti `.elf`. Dengan `--target thumbv8m.main-none-eabihf`, untuk papan Cortex-M33. Dengan `--target riscv32imac-unknown-none-elf`, untuk papan dengan inti RISC-V 32-bit (ekstensi M, A, dan C).
+Dengan `--target thumbv7em-none-eabihf`, `typl -c` membuat berkas eksekusi (ELF) untuk papan Cortex-M4F atau M7 tanpa sistem operasi. Tanpa `-o`, namanya mengikuti sumber dengan `.typl` diganti `.elf`. Dengan `--target thumbv8m.main-none-eabihf`, untuk papan Cortex-M33. Dengan `--target riscv32imac-unknown-none-elf`, untuk papan dengan inti RISC-V 32-bit (ekstensi M, A, dan C). Dengan `--target thumbv6m-none-eabi`, untuk papan Cortex-M0+ (M0). QEMU tidak punya papan Cortex-M0+, jadi berkas eksekusi untuknya dijalankan di `mps2-an385`, sebuah Cortex-M3 yang menjalankan instruksi yang sama apa adanya (tata letak tanpa `--linker-script` juga milik papan ini).
 
 ```sh
 $ typl -c hello.typl --target thumbv7em-none-eabihf          # membuat hello.elf
@@ -238,12 +238,15 @@ $ qemu-system-arm -M mps2-an386 -nographic \
 $ typl -c hello.typl --target thumbv8m.main-none-eabihf
 $ qemu-system-arm -M mps2-an505 -nographic \
     -semihosting-config enable=on,target=native -kernel hello.elf   # jalankan di Cortex-M33 milik QEMU
+$ typl -c hello.typl --target thumbv6m-none-eabi
+$ qemu-system-arm -M mps2-an385 -nographic \
+    -semihosting-config enable=on,target=native -kernel hello.elf   # jalankan di Cortex-M3 milik QEMU
 $ typl -c hello.typl --target riscv32imac-unknown-none-elf
 $ qemu-system-riscv32 -M virt -bios none -nographic \
     -semihosting-config enable=on,target=native -kernel hello.elf   # jalankan di RISC-V milik QEMU
 ```
 
-- `typl` yang dipasang dengan `install.sh` dapat langsung dipakai. Untuk memasang dengan `cargo install`, jalankan `rustup target add thumbv7em-none-eabihf thumbv8m.main-none-eabihf riscv32imac-unknown-none-elf`, lalu pasang dengan `--features embedded` (`--features wasm,embedded` untuk keduanya). Dengan build debug `typl` di repositori, jalankan `scripts/build-embedded-runtime.sh`. Penautan memakai linker toolchain rustup.
+- `typl` yang dipasang dengan `install.sh` dapat langsung dipakai. Untuk memasang dengan `cargo install`, jalankan `rustup target add thumbv7em-none-eabihf thumbv8m.main-none-eabihf thumbv6m-none-eabi riscv32imac-unknown-none-elf`, lalu pasang dengan `--features embedded` (`--features wasm,embedded` untuk keduanya). Dengan build debug `typl` di repositori, jalankan `scripts/build-embedded-runtime.sh`. Penautan memakai linker toolchain rustup.
 - Berikan memori papan dengan `--linker-script FILE`. Ditulis seperti `memory.x` milik `cortex-m-rt`: alamat dan ukuran FLASH dan RAM. Baris seperti `_typelisp_stack_size = 32K;` menentukan berapa banyak RAM yang dipakai stack (64KiB jika tidak diberikan); sisa RAM adalah heap. Tanpa opsi ini, tata letaknya milik `mps2-an386` (`mps2-an505` untuk Cortex-M33) di QEMU.
 
   ```
@@ -299,7 +302,7 @@ $ qemu-system-riscv32 -M virt -bios none -nographic \
     (put-byte 104) (put-byte 105) (put-byte 10))                             ; "hi" dan baris baru
   ```
 
-- Tulis fungsi yang dipanggil saat interupsi datang sebagai `defun` dengan atribut `#[interrupt(N)]` (interupsi periferal `N`) atau seperti `#[exception(SysTick)]`. Aktifkan interupsi dengan `(enable-interrupt N)`. Penangan berjalan saat itu juga; hanya jika datang di tengah pekerjaan runtime ia berjalan setelah pekerjaan itu selesai. Penangan tidak dapat menunggu (`sleep` adalah galat kompilasi). Rinciannya ada di bagian 3.17 [referensi sintaks](../reference/syntax.md). Pada RISC-V, `N` adalah nomor interupsi di `mcause` (0 sampai 31: 3 interupsi perangkat lunak, 7 pewaktu, 11 interupsi eksternal), dan `#[exception(NAME)]` tidak dapat dipakai.
+- Tulis fungsi yang dipanggil saat interupsi datang sebagai `defun` dengan atribut `#[interrupt(N)]` (interupsi periferal `N`) atau seperti `#[exception(SysTick)]`. Aktifkan interupsi dengan `(enable-interrupt N)`. Penangan berjalan saat itu juga; hanya jika datang di tengah pekerjaan runtime ia berjalan setelah pekerjaan itu selesai. Penangan tidak dapat menunggu (`sleep` adalah galat kompilasi). Rinciannya ada di bagian 3.17 [referensi sintaks](../reference/syntax.md). Pada Cortex-M0+, `N` adalah 0 sampai 31, dan `#[exception(NAME)]` hanya dapat menamai `NonMaskableInt`, `SVCall`, `PendSV`, dan `SysTick`. Pada RISC-V, `N` adalah nomor interupsi di `mcause` (0 sampai 31: 3 interupsi perangkat lunak, 7 pewaktu, 11 interupsi eksternal), dan `#[exception(NAME)]` tidak dapat dipakai.
 
   ```lisp
   (use std::board::enable-interrupt)

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ be56bb8a477929497064b8f807acfd1755f2b35b -->
+<!-- translated-from: docs/ja/guide/compile.md @ 8c1712373ea704e08417e1fe1eafb4ea4a7f41a2 -->
 # Compilação
 
 Se você não fizer nada além disso, os programas typelisp são executados no interpretador. Além disso há duas
@@ -225,7 +225,7 @@ const code = await run({ write: (fd, text) => { /* mostrar na página, por exemp
 
 ### 3.8 Compilar para um microcontrolador (Cortex-M, RISC-V)
 
-Com `--target thumbv7em-none-eabihf`, `typl -c` cria um executável (ELF) para uma placa Cortex-M4F ou M7 sem sistema operacional. Sem `-o`, ele recebe o nome do fonte com `.typl` trocado por `.elf`. Com `--target thumbv8m.main-none-eabihf`, é para uma placa Cortex-M33. Com `--target riscv32imac-unknown-none-elf`, é para uma placa com um núcleo RISC-V de 32 bits (extensões M, A e C).
+Com `--target thumbv7em-none-eabihf`, `typl -c` cria um executável (ELF) para uma placa Cortex-M4F ou M7 sem sistema operacional. Sem `-o`, ele recebe o nome do fonte com `.typl` trocado por `.elf`. Com `--target thumbv8m.main-none-eabihf`, é para uma placa Cortex-M33. Com `--target riscv32imac-unknown-none-elf`, é para uma placa com um núcleo RISC-V de 32 bits (extensões M, A e C). Com `--target thumbv6m-none-eabi`, é para uma placa Cortex-M0+ (M0). O QEMU não tem placa Cortex-M0+, então um executável para ela roda no `mps2-an385`, um Cortex-M3, que executa as mesmas instruções como estão (o layout sem `--linker-script` também é o dessa placa).
 
 ```sh
 $ typl -c hello.typl --target thumbv7em-none-eabihf          # cria hello.elf
@@ -234,12 +234,15 @@ $ qemu-system-arm -M mps2-an386 -nographic \
 $ typl -c hello.typl --target thumbv8m.main-none-eabihf
 $ qemu-system-arm -M mps2-an505 -nographic \
     -semihosting-config enable=on,target=native -kernel hello.elf   # executar no Cortex-M33 do QEMU
+$ typl -c hello.typl --target thumbv6m-none-eabi
+$ qemu-system-arm -M mps2-an385 -nographic \
+    -semihosting-config enable=on,target=native -kernel hello.elf   # executar no Cortex-M3 do QEMU
 $ typl -c hello.typl --target riscv32imac-unknown-none-elf
 $ qemu-system-riscv32 -M virt -bios none -nographic \
     -semihosting-config enable=on,target=native -kernel hello.elf   # executar no RISC-V do QEMU
 ```
 
-- Um `typl` instalado com `install.sh` pode ser usado como está. Para instalar com `cargo install`, rode `rustup target add thumbv7em-none-eabihf thumbv8m.main-none-eabihf riscv32imac-unknown-none-elf` e então instale com `--features embedded` (`--features wasm,embedded` para os dois). Com um build de depuração do `typl` no repositório, rode `scripts/build-embedded-runtime.sh`. A ligação usa o linker da toolchain do rustup.
+- Um `typl` instalado com `install.sh` pode ser usado como está. Para instalar com `cargo install`, rode `rustup target add thumbv7em-none-eabihf thumbv8m.main-none-eabihf thumbv6m-none-eabi riscv32imac-unknown-none-elf` e então instale com `--features embedded` (`--features wasm,embedded` para os dois). Com um build de depuração do `typl` no repositório, rode `scripts/build-embedded-runtime.sh`. A ligação usa o linker da toolchain do rustup.
 - Informe a memória da placa com `--linker-script FILE`. Ele é escrito como o `memory.x` do `cortex-m-rt`: endereços e tamanhos de FLASH e RAM. Uma linha como `_typelisp_stack_size = 32K;` define quanto da RAM a pilha ocupa (64KiB se não for dada); o resto da RAM é o heap. Sem a opção, o layout é o do `mps2-an386` (`mps2-an505` para um Cortex-M33) do QEMU.
 
   ```
@@ -295,7 +298,7 @@ $ qemu-system-riscv32 -M virt -bios none -nographic \
     (put-byte 104) (put-byte 105) (put-byte 10))                             ; "hi" e uma quebra de linha
   ```
 
-- Escreva a função chamada quando chega uma interrupção como um `defun` com o atributo `#[interrupt(N)]` (a interrupção de periférico `N`) ou um como `#[exception(SysTick)]`. Habilite uma interrupção com `(enable-interrupt N)`. Um tratador roda na hora; só quando chega no meio do trabalho do runtime ele roda depois que esse trabalho termina. Um tratador não pode esperar (`sleep` é um erro de compilação). Os detalhes estão na seção 3.17 da [referência de sintaxe](../reference/syntax.md). No RISC-V, `N` é o número da interrupção em `mcause` (de 0 a 31: 3 é a interrupção de software, 7 o temporizador, 11 as interrupções externas), e `#[exception(NAME)]` não pode ser usado.
+- Escreva a função chamada quando chega uma interrupção como um `defun` com o atributo `#[interrupt(N)]` (a interrupção de periférico `N`) ou um como `#[exception(SysTick)]`. Habilite uma interrupção com `(enable-interrupt N)`. Um tratador roda na hora; só quando chega no meio do trabalho do runtime ele roda depois que esse trabalho termina. Um tratador não pode esperar (`sleep` é um erro de compilação). Os detalhes estão na seção 3.17 da [referência de sintaxe](../reference/syntax.md). Num Cortex-M0+, `N` vai de 0 a 31, e `#[exception(NAME)]` só pode nomear `NonMaskableInt`, `SVCall`, `PendSV` e `SysTick`. No RISC-V, `N` é o número da interrupção em `mcause` (de 0 a 31: 3 é a interrupção de software, 7 o temporizador, 11 as interrupções externas), e `#[exception(NAME)]` não pode ser usado.
 
   ```lisp
   (use std::board::enable-interrupt)

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ be56bb8a477929497064b8f807acfd1755f2b35b -->
+<!-- translated-from: docs/ja/guide/compile.md @ 8c1712373ea704e08417e1fe1eafb4ea4a7f41a2 -->
 # कंपाइल करना
 
 यदि आप और कुछ न करें, तो typelisp प्रोग्राम इंटरप्रेटर में चलते हैं। इसके अलावा नेटिव कोड में कंपाइल करने के दो तरीके हैं, और एक पर्यावरण को सहेजने का तरीका है। विनिर्देश का विवरण [सिंटैक्स संदर्भ अध्याय 10](../reference/syntax.md#10-कंपाइलेशन) में है।
@@ -199,7 +199,7 @@ const code = await run({ write: (fd, text) => { /* उदाहरण के ल
 
 ### 3.8 माइक्रोकंट्रोलर (Cortex-M, RISC-V) के लिए कंपाइल करना
 
-`--target thumbv7em-none-eabihf` के साथ `typl -c` बिना ऑपरेटिंग सिस्टम वाले Cortex-M4F या M7 बोर्ड के लिए एक्ज़ीक्यूटेबल (ELF) बनाता है। `-o` न देने पर नाम स्रोत का होता है, `.typl` की जगह `.elf`। `--target thumbv8m.main-none-eabihf` के साथ यह Cortex-M33 बोर्ड के लिए होती है। `--target riscv32imac-unknown-none-elf` के साथ यह 32-बिट RISC-V कोर (M, A और C एक्सटेंशन) वाले बोर्ड के लिए है।
+`--target thumbv7em-none-eabihf` के साथ `typl -c` बिना ऑपरेटिंग सिस्टम वाले Cortex-M4F या M7 बोर्ड के लिए एक्ज़ीक्यूटेबल (ELF) बनाता है। `-o` न देने पर नाम स्रोत का होता है, `.typl` की जगह `.elf`। `--target thumbv8m.main-none-eabihf` के साथ यह Cortex-M33 बोर्ड के लिए होती है। `--target riscv32imac-unknown-none-elf` के साथ यह 32-बिट RISC-V कोर (M, A और C एक्सटेंशन) वाले बोर्ड के लिए है। `--target thumbv6m-none-eabi` के साथ यह Cortex-M0+ (M0) बोर्ड के लिए है। QEMU में Cortex-M0+ बोर्ड नहीं है, इसलिए उसके लिए एक्ज़ीक्यूटेबल `mps2-an385` पर चलता है, जो एक Cortex-M3 है और वही निर्देश ज्यों के त्यों चलाता है (`--linker-script` न देने पर लेआउट भी इसी बोर्ड का होता है)।
 
 ```sh
 $ typl -c hello.typl --target thumbv7em-none-eabihf          # hello.elf बनाता है
@@ -208,12 +208,15 @@ $ qemu-system-arm -M mps2-an386 -nographic \
 $ typl -c hello.typl --target thumbv8m.main-none-eabihf
 $ qemu-system-arm -M mps2-an505 -nographic \
     -semihosting-config enable=on,target=native -kernel hello.elf   # QEMU के Cortex-M33 पर चलाएँ
+$ typl -c hello.typl --target thumbv6m-none-eabi
+$ qemu-system-arm -M mps2-an385 -nographic \
+    -semihosting-config enable=on,target=native -kernel hello.elf   # QEMU के Cortex-M3 पर चलाएँ
 $ typl -c hello.typl --target riscv32imac-unknown-none-elf
 $ qemu-system-riscv32 -M virt -bios none -nographic \
     -semihosting-config enable=on,target=native -kernel hello.elf   # QEMU के RISC-V पर चलाएँ
 ```
 
-- `install.sh` से इंस्टॉल किया गया `typl` वैसे ही उपयोग किया जा सकता है। `cargo install` से इंस्टॉल करने के लिए `rustup target add thumbv7em-none-eabihf thumbv8m.main-none-eabihf riscv32imac-unknown-none-elf` चलाएँ, फिर `--features embedded` के साथ इंस्टॉल करें (दोनों के लिए `--features wasm,embedded`)। रिपॉज़िटरी के डीबग बिल्ड वाले `typl` के साथ `scripts/build-embedded-runtime.sh` चलाएँ। लिंक करने में rustup टूलचेन का लिंकर उपयोग होता है।
+- `install.sh` से इंस्टॉल किया गया `typl` वैसे ही उपयोग किया जा सकता है। `cargo install` से इंस्टॉल करने के लिए `rustup target add thumbv7em-none-eabihf thumbv8m.main-none-eabihf thumbv6m-none-eabi riscv32imac-unknown-none-elf` चलाएँ, फिर `--features embedded` के साथ इंस्टॉल करें (दोनों के लिए `--features wasm,embedded`)। रिपॉज़िटरी के डीबग बिल्ड वाले `typl` के साथ `scripts/build-embedded-runtime.sh` चलाएँ। लिंक करने में rustup टूलचेन का लिंकर उपयोग होता है।
 - बोर्ड की मेमोरी `--linker-script FILE` से दें। यह `cortex-m-rt` के `memory.x` जैसा लिखा जाता है: FLASH और RAM के पते और आकार। `_typelisp_stack_size = 32K;` जैसी पंक्ति तय करती है कि RAM का कितना हिस्सा स्टैक लेता है (न देने पर 64KiB); बाकी RAM हीप है। विकल्प न होने पर QEMU के `mps2-an386` (Cortex-M33 के लिए `mps2-an505`) का लेआउट होता है।
 
   ```
@@ -269,7 +272,7 @@ $ qemu-system-riscv32 -M virt -bios none -nographic \
     (put-byte 104) (put-byte 105) (put-byte 10))                             ; "hi" और नई पंक्ति
   ```
 
-- इंटरप्ट आने पर बुलाया जाने वाला फ़ंक्शन `#[interrupt(N)]` (पेरिफेरल इंटरप्ट `N`) या `#[exception(SysTick)]` जैसी विशेषता वाले `defun` के रूप में लिखें। इंटरप्ट को `(enable-interrupt N)` से चालू करें। हैंडलर तुरंत चलता है, और केवल रनटाइम के काम के बीच आने पर ही उस काम के बाद चलता है। हैंडलर प्रतीक्षा नहीं कर सकता (`sleep` कंपाइल त्रुटि है)। विवरण [सिंटैक्स संदर्भ](../reference/syntax.md) के खंड 3.17 में है। RISC-V पर `N` इंटरप्ट का `mcause` में नंबर है (0 से 31: 3 सॉफ़्टवेयर इंटरप्ट, 7 टाइमर, 11 बाहरी इंटरप्ट), और `#[exception(NAME)]` का उपयोग नहीं किया जा सकता।
+- इंटरप्ट आने पर बुलाया जाने वाला फ़ंक्शन `#[interrupt(N)]` (पेरिफेरल इंटरप्ट `N`) या `#[exception(SysTick)]` जैसी विशेषता वाले `defun` के रूप में लिखें। इंटरप्ट को `(enable-interrupt N)` से चालू करें। हैंडलर तुरंत चलता है, और केवल रनटाइम के काम के बीच आने पर ही उस काम के बाद चलता है। हैंडलर प्रतीक्षा नहीं कर सकता (`sleep` कंपाइल त्रुटि है)। विवरण [सिंटैक्स संदर्भ](../reference/syntax.md) के खंड 3.17 में है। Cortex-M0+ पर `N` 0 से 31 है, और `#[exception(NAME)]` केवल `NonMaskableInt`, `SVCall`, `PendSV` और `SysTick` का नाम ले सकता है। RISC-V पर `N` इंटरप्ट का `mcause` में नंबर है (0 से 31: 3 सॉफ़्टवेयर इंटरप्ट, 7 टाइमर, 11 बाहरी इंटरप्ट), और `#[exception(NAME)]` का उपयोग नहीं किया जा सकता।
 
   ```lisp
   (use std::board::enable-interrupt)

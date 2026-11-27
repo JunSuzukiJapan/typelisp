@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ be56bb8a477929497064b8f807acfd1755f2b35b -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 8c1712373ea704e08417e1fe1eafb4ea4a7f41a2 -->
 # Riferimento della sintassi di typelisp
 
 typelisp è un Lisp a tipizzazione statica, scritto in S-expression. Per l'elenco delle funzioni e dei
@@ -1387,6 +1387,7 @@ Ciò che un test stampa con `print` va direttamente sullo standard output (non v
 In un programma compilato per un microcontrollore (sezione 3.8 di [Compilare](../guide/compile.md)), sono le funzioni chiamate quando arriva un interrupt. `#[interrupt(N)]` rende una funzione il gestore dell'interrupt di periferica `N` (da 0 a 239), e `#[exception(NAME)]` quello dell'eccezione del core `NAME`, una tra `NonMaskableInt`, `MemoryManagement`, `BusFault`, `UsageFault`, `SVCall`, `DebugMonitor`, `PendSV`, `SysTick` (`HardFault` è del runtime, e termina il programma).
 
 - Per l'Arduino Uno la numerazione e l'abilitazione sono diverse, e `#[exception(NAME)]` e `enable-interrupt` non si possono usare ([Compilare](../guide/compile.md), sezione 3.9). Ciò che sotto riguarda il runtime vale per il Cortex-M.
+- Su un Cortex-M0+, `N` va da 0 a 31, e `NAME` può essere solo `NonMaskableInt`, `SVCall`, `PendSV` o `SysTick`.
 - Su RISC-V, `N` è il numero dell'interrupt in `mcause` (da 0 a 31), e `#[exception(NAME)]` non si può usare. Quanto detto sotto sul runtime vale anche per RISC-V.
 - Vanno su un `defun` di primo livello che non prende nulla e restituisce `()` (nemmeno parametri di tipo). Un interrupt ha un gestore, e una funzione gestisce un interrupt.
 - Un interrupt di periferica non arriva finché `(enable-interrupt N)` non lo abilita (`(disable-interrupt N)` lo ferma; vedi [Sistema](functions/system.md)). Un'eccezione come SysTick arriva appena i registri sono impostati per sollevarla.

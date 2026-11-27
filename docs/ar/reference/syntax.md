@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ be56bb8a477929497064b8f807acfd1755f2b35b -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 8c1712373ea704e08417e1fe1eafb4ea4a7f41a2 -->
 # مرجع صياغة typelisp
 
 typelisp لغة Lisp ذات أنواع ساكنة، تُكتب بتعبيرات رمزية (S-expressions). ولقائمة الدوال والتوابع المضمنة
@@ -1244,6 +1244,7 @@ test result: FAILED. 1 passed; 1 failed; 0 filtered out
 في برنامج مترجم لمتحكم دقيق (القسم 3.8 من [الترجمة](../guide/compile.md))، هذه هي الدوال التي تُستدعى عند وصول مقاطعة. تجعل `#[interrupt(N)]` الدالة معالجًا لمقاطعة الطرفية `N` (من 0 إلى 239)، و`#[exception(NAME)]` معالجًا لاستثناء النواة `NAME`، وهو أحد `NonMaskableInt`, `MemoryManagement`, `BusFault`, `UsageFault`, `SVCall`, `DebugMonitor`, `PendSV`, `SysTick` (`HardFault` لبيئة التشغيل، وينهي البرنامج).
 
 - في Arduino Uno يختلف الترقيم وطريقة التفعيل، ولا يمكن استخدام `#[exception(NAME)]` و`enable-interrupt` ([التصريف](../guide/compile.md)، القسم 3.9). وما يُذكر أدناه عن بيئة التشغيل يخص Cortex-M.
+- على Cortex-M0+ يكون `N` من 0 إلى 31، ولا يكون `NAME` إلا `NonMaskableInt` أو `SVCall` أو `PendSV` أو `SysTick`.
 - على RISC-V يكون `N` رقم المقاطعة في `mcause` (من 0 إلى 31)، ولا يمكن استخدام `#[exception(NAME)]`. وما يُقال أدناه عن بيئة التشغيل يصحّ على RISC-V أيضًا.
 - توضع على `defun` في المستوى الأعلى لا يأخذ شيئًا ويعيد `()` (ولا معاملات نوع). للمقاطعة الواحدة معالج واحد، والدالة الواحدة تعالج مقاطعة واحدة.
 - لا تصل مقاطعة الطرفية حتى يفعّلها `(enable-interrupt N)` (و`(disable-interrupt N)` يوقفها؛ انظر [النظام](functions/system.md)). يصل استثناء مثل SysTick بمجرد ضبط السجلات لإحداثه.
