@@ -323,6 +323,13 @@ $ qemu-system-riscv32 -M virt -bios none -nographic \
   コードも RAM に置くボードでは、ボードの RAM の残りがコードの領域になります。ランタイムが最初に確保する量は、ヒープの大きさに
   合わせて小さくなります。`--linker-script` と一緒には使えません。
 
+- ボードには OS が無いので、スタックがあふれても止めるものがありません。そのため実行ファイルは、プログラムの関数の入口ごとに
+  スタックの残りを確かめ、足りなければ `stack overflow: the program needs more than the ... bytes of the stack` と書いて
+  終了コード 1 で終わります。スタックを大きくするには、`--linker-script` のファイルの `_typelisp_stack_size` か `--ram` を
+  大きくします。`--no-stack-check` を付けると、この検査を入れません（少し小さく速くなりますが、あふれたスタックはヒープを黙って
+  壊すことがあります）。どちらの場合も、ランタイムの中であふれてスタックの下端を越えたときは、その後の panic や HardFault の
+  報告の前に `stack overflow: the stack has run past its bottom into the heap` と書きます。
+
 - 出力・入力・終了・時刻（ボードの関数）を誰が与えるかは `--board-functions` で選びます。
   - `semihosting`（既定）: semihosting で与えます。QEMU（`-semihosting-config enable=on`）やデバッガで動かすときに使います。
   - `c`: ボードが C の関数で与えます。次の関数を定義したオブジェクトか静的ライブラリを `--link FILE` で渡します
