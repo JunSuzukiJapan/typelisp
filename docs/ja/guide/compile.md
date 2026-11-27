@@ -318,6 +318,11 @@ $ qemu-system-riscv32 -M virt -bios none -nographic \
   _typelisp_stack_size = 4K;
   ```
 
+- RAM の小さいボードでは、`--linker-script` の代わりに `--ram SIZE`（`16K` など）で、データ・ヒープ・スタックに使う RAM の
+  大きさだけを指定できます。既定の配置の RAM がその大きさになり、スタックはその 4 分の 1 までになります。RISC-V の `virt` のように
+  コードも RAM に置くボードでは、ボードの RAM の残りがコードの領域になります。ランタイムが最初に確保する量は、ヒープの大きさに
+  合わせて小さくなります。`--linker-script` と一緒には使えません。
+
 - 出力・入力・終了・時刻（ボードの関数）を誰が与えるかは `--board-functions` で選びます。
   - `semihosting`（既定）: semihosting で与えます。QEMU（`-semihosting-config enable=on`）やデバッガで動かすときに使います。
   - `c`: ボードが C の関数で与えます。次の関数を定義したオブジェクトか静的ライブラリを `--link FILE` で渡します
