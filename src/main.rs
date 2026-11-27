@@ -33,7 +33,7 @@ Usage:
   typl [OPTIONS] FILE [ARGS...]                  run FILE; ARGS are its (command-line-args)
   typl [--lib-dir DIR] [-O<N>] -c SOURCE [-o OUTPUT] [--heap-cells N]
        [--max-memory SIZE] [--no-cons] [--target TARGET] [--linker-script FILE]
-       [--ram SIZE] [--board-functions WHO] [--link FILE]
+       [--ram SIZE] [--no-stack-check] [--board-functions WHO] [--link FILE]
                                                  compile SOURCE to an executable
   typl [OPTIONS] test [FILE.typl] [FILTER]       run the #[test] functions of the
                                                  project here (or of FILE) whose
@@ -75,6 +75,10 @@ Options:
                          the RAM for the data, the heap and the stack, in
                          bytes (K, M or G may follow), in place of the default
                          layout's; the stack takes at most a quarter of it
+  --no-stack-check       after --target for a board: leave out the check, on
+                         entering each function, that the stack has room
+                         left (without it, a stack that runs into the heap
+                         may go unnoticed)
   --board-functions WHO  after --target for a board: who gives the board's
                          output, input, exit and clock: semihosting (QEMU or
                          a debugger; the default) or c (the board's
@@ -337,6 +341,9 @@ fn compile_command(flag: &str, args: &[String], heap_cells: Option<usize>) -> i3
     while let Some(a) = it.next() {
         if a == "--no-cons" {
             options.no_cons = true;
+        } else if a == "--no-stack-check" {
+            options.no_stack_check = true;
+            board_only = Some("--no-stack-check");
         } else if let Some(v) = flag_value(a, "--target", &mut it) {
             let Some(v) = v else {
                 eprintln!("--target: needs a target (wasm32-wasip1, wasm32-unknown-unknown, {})", typelisp::compile::aot::Target::board_names());
@@ -425,7 +432,7 @@ fn compile_command(flag: &str, args: &[String], heap_cells: Option<usize>) -> i3
         } else if source.is_none() && !a.starts_with('-') {
             source = Some(PathBuf::from(a));
         } else {
-            eprintln!("{}: unexpected argument `{}` (usage: typl {} SOURCE [-o OUTPUT] [--release] [-O<N>] [--max-memory SIZE] [--no-cons] [--target TARGET] [--linker-script FILE | --ram SIZE] [--board-functions WHO] [--link FILE])", flag, a, flag);
+            eprintln!("{}: unexpected argument `{}` (usage: typl {} SOURCE [-o OUTPUT] [--release] [-O<N>] [--max-memory SIZE] [--no-cons] [--target TARGET] [--linker-script FILE | --ram SIZE] [--no-stack-check] [--board-functions WHO] [--link FILE])", flag, a, flag);
             return 1;
         }
     }
@@ -439,14 +446,14 @@ fn compile_command(flag: &str, args: &[String], heap_cells: Option<usize>) -> i3
     }
     if !options.target.has_runtime() {
         // What these are for is the runtime's.
-        let runtime_only = [("--board-functions", board_functions), ("--heap-cells", heap_cells.is_some()), ("--max-memory", options.max_memory.is_some())];
+        let runtime_only = [("--board-functions", board_functions), ("--heap-cells", heap_cells.is_some()), ("--max-memory", options.max_memory.is_some()), ("--no-stack-check", options.no_stack_check)];
         if let Some((flag, _)) = runtime_only.iter().find(|(_, given)| *given) {
             eprintln!("{}: the target {} has no runtime", flag, options.target.name());
             return 1;
         }
     }
     let Some(source) = source else {
-        eprintln!("{}: needs a source file (usage: typl {} SOURCE [-o OUTPUT] [--release] [-O<N>] [--max-memory SIZE] [--no-cons] [--target TARGET] [--linker-script FILE | --ram SIZE] [--board-functions WHO] [--link FILE])", flag, flag);
+        eprintln!("{}: needs a source file (usage: typl {} SOURCE [-o OUTPUT] [--release] [-O<N>] [--max-memory SIZE] [--no-cons] [--target TARGET] [--linker-script FILE | --ram SIZE] [--no-stack-check] [--board-functions WHO] [--link FILE])", flag, flag);
         return 1;
     };
     let output = match output {

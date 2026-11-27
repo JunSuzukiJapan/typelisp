@@ -24,6 +24,14 @@ fn start() -> ! {
     crate::start::run()
 }
 
+/// Where the stack is now.
+pub(crate) fn stack_pointer() -> usize {
+    let sp: usize;
+    // SAFETY: reads the stack pointer.
+    unsafe { core::arch::asm!("mov {0}, sp", out(reg) sp, options(nomem, nostack, preserves_flags)) };
+    sp
+}
+
 /// Nothing to do: the core takes the interrupts the NVIC lets through from
 /// reset on.
 pub(crate) fn interrupts_may_come() {}

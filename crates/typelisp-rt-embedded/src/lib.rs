@@ -63,6 +63,7 @@ mod panic {
     /// the code a typelisp panic ends it with.
     #[panic_handler]
     fn panic(info: &core::panic::PanicInfo) -> ! {
+        crate::start::say_if_overflowed();
         let _ = writeln!(Stderr, "{}", info);
         typelisp_mem::host::exit(typelisp_rt::EXIT_CODE_PANIC as i32)
     }

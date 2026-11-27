@@ -218,13 +218,16 @@ fn a_cortex_m0_runs_the_code() {
     assert_eq!(out.status.code(), Some(0));
 }
 
-/// `--ram`: the board's RAM is 16 KiB (a micro:bit's), at the default
-/// layout's address. The runtime starts its tables and its arena as small as
-/// that asks, and a program that prints and collects runs in it.
+/// `--ram`: the board's RAM is 24 KiB, at the default layout's address. The
+/// runtime starts its tables and its arena as small as that asks, and a
+/// program that prints and collects runs in it. Not 16 KiB (a micro:bit's):
+/// the tests link the debug build of the runtime, which takes the program's
+/// stack past the 4 KiB that leaves it (the release build takes under
+/// 1.5 KiB).
 #[test]
 fn a_board_with_little_ram_runs_a_program() {
     let elf = built(
-        "m0_ram_16k",
+        "m0_ram_24k",
         r#"
 (defun build ((n int) (acc Option<Sexpr>)) Option<Sexpr>
   (if (= n 0) acc (build (- n 1) (Some (Sexpr::Cons (Sexpr::Int n) acc)))))
@@ -235,7 +238,7 @@ fn a_board_with_little_ram_runs_a_program() {
   3)
 "#,
         "prog.elf",
-        &target_flags(TARGET, &["--ram", "16K"]),
+        &target_flags(TARGET, &["--ram", "24K"]),
     );
     let out = run_on(TARGET, &elf);
     assert_eq!(text(&out.stdout), "hello 50\n", "stderr: {}", text(&out.stderr));
@@ -243,7 +246,8 @@ fn a_board_with_little_ram_runs_a_program() {
 }
 
 /// `--ram` is the size of the default layout's RAM: a linker script says its
-/// own, and a target that is not a board has no layout.
+/// own, and a target that is not a board has no layout; nor has it a stack
+/// the program checks (`--no-stack-check`).
 #[test]
 fn ram_is_for_the_default_layout_of_a_board() {
     let (out, _) = build("m0_ram_and_script", "(defun main () int 0)", "prog.elf", &target_flags(TARGET, &["--ram", "16K", "--linker-script", "memory.x"]));
@@ -255,4 +259,36 @@ fn ram_is_for_the_default_layout_of_a_board() {
     let (out, _) = build("m0_ram_bad", "(defun main () int 0)", "prog.elf", &target_flags(TARGET, &["--ram", "lots"]));
     assert_eq!(out.status.code(), Some(1));
     assert!(text(&out.stderr).contains("--ram: `lots` is not a positive size"), "{}", text(&out.stderr));
+    let (out, _) = build("m0_stack_check_host", "(defun main () int 0)", "prog", &["--no-stack-check"]);
+    assert_eq!(out.status.code(), Some(1));
+    assert!(text(&out.stderr).contains("--no-stack-check: only for a board"), "{}", text(&out.stderr));
+}
+
+/// A recursion deeper than the stack. The check each function starts with
+/// ends the program before the stack reaches the heap; without it
+/// (`--no-stack-check`, which leaves the check out of the executable) the
+/// stack runs on into the heap and then out of RAM, and the guard words at
+/// its bottom say what the fault was.
+#[test]
+fn a_stack_that_runs_out_ends_the_program() {
+    let source = r#"
+(defun depth ((n int)) int (if (= n 0) 0 (+ 1 (depth (- n 1)))))
+(defun main () int (println "~a" (depth 100000)) 0)
+"#;
+    let elf = built("m0_stack_checked", source, "prog.elf", &target_flags(TARGET, &["--ram", "16K"]));
+    let out = run_on(TARGET, &elf);
+    assert_eq!(text(&out.stdout), "");
+    assert!(text(&out.stderr).contains("stack overflow: the program needs more than the 0x00001000 bytes of the stack (_typelisp_stack_size)"), "{}", text(&out.stderr));
+    assert_eq!(out.status.code(), Some(1));
+
+    let elf = built("m0_stack_unchecked", source, "prog.elf", &target_flags(TARGET, &["--ram", "16K", "--no-stack-check"]));
+    let symbols = Command::new(std::path::Path::new(&std::env::var("LLVM_SYS_221_PREFIX").unwrap()).join("bin").join("llvm-nm"))
+        .arg(&elf)
+        .output()
+        .expect("failed to start llvm-nm");
+    assert!(!text(&symbols.stdout).contains("typelisp_stack_check"), "the stack is checked");
+    let out = run_on(TARGET, &elf);
+    let err = text(&out.stderr);
+    assert!(err.contains("stack overflow: the stack has run past its bottom into the heap\nhard fault at pc "), "{}", err);
+    assert_eq!(out.status.code(), Some(1));
 }

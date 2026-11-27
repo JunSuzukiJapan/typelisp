@@ -30,6 +30,11 @@
 //! (`typelisp_rt::interrupt`): every call the module makes into the runtime
 //! is made through a function that marks the runtime busy around it
 //! ([`busy_around_runtime_calls`]).
+//!
+//! Unless `--no-stack-check` is given, every function the module defines
+//! starts by asking the runtime whether the stack has room left
+//! ([`stack_checked`]): a board has no operating system to stop a stack
+//! that runs into the heap.
 
 use std::fs;
 use std::path::Path;
@@ -402,6 +407,31 @@ fn busy_around_runtime_calls(module: &Module<'static>) -> Result<(), String> {
     Ok(())
 }
 
+/// Makes every function `module` defines call `typelisp_stack_check` first,
+/// as GCC's `-fstack-limit-symbol` does: the runtime ends the program when
+/// the stack is all but used up, or has run past its end (the guard words at
+/// its bottom are not as the runtime wrote them), before the function's
+/// frame is any deeper. A call, not a comparison here, so that no block is
+/// split and the entry block keeps its allocas. Before
+/// [`busy_around_runtime_calls`], so that its brackets have none.
+fn stack_checked(module: &Module<'static>) -> Result<(), String> {
+    let ctx = module.get_context();
+    let check = module
+        .get_function("typelisp_stack_check")
+        .unwrap_or_else(|| module.add_function("typelisp_stack_check", ctx.void_type().fn_type(&[], false), None));
+    let defined: Vec<_> = module.get_functions().filter(|f| f.count_basic_blocks() > 0).collect();
+    let builder = ctx.create_builder();
+    for f in defined {
+        let entry = f.get_first_basic_block().expect("a defined function has a block");
+        match entry.get_first_instruction() {
+            Some(first) => builder.position_before(&first),
+            None => builder.position_at_end(entry),
+        }
+        builder.build_call(check, &[], "").map_err(|e| format!("failed to build a stack check: {}", e))?;
+    }
+    Ok(())
+}
+
 /// Names `value`'s section `name`, as it is. Not inkwell's `set_section`,
 /// which on a macOS host puts a comma in front of a name without one (Mach-O
 /// spells a section `segment,section`) whatever the module's target is.
@@ -428,6 +458,9 @@ pub(super) fn write_executable(
     let tm = board.target_machine(crate::compile::optimize::codegen_level())?;
     for_board(module, &tm)?;
     crate::compile::codegen_prep::prepare(module)?;
+    if !options.no_stack_check {
+        stack_checked(module)?;
+    }
     busy_around_runtime_calls(module)?;
     crate::compile::optimize::run_llvm_passes(module, &tm)?;
     sections_of_their_own(module);

@@ -315,6 +315,9 @@ pub struct BuildOptions {
     /// the data, the heap and the stack have (`--ram`), in place of the QEMU
     /// board's ([`embedded::Layout::memory_x`]).
     pub ram: Option<usize>,
+    /// For a board with the runtime: no check of the stack on entering each
+    /// function (`--no-stack-check`, [`embedded`]'s `stack_checked`).
+    pub no_stack_check: bool,
     /// For a board: who gives the board's functions (`--board-functions`).
     pub board_functions: BoardFunctions,
     /// For a board: objects and static libraries to link the program with

@@ -422,3 +422,24 @@ fn a_board_with_little_ram_runs_a_program() {
     assert_eq!(text(&out.stdout), "2432902008176640000\n", "stderr: {}", text(&out.stderr));
     assert_eq!(out.status.code(), Some(5));
 }
+
+/// A recursion deeper than the stack ends the program before the stack
+/// reaches the heap: below RAM there is nothing on QEMU's `virt` that would
+/// fault, so without the check the stack would overwrite the code. In
+/// 16 KiB, where the stack runs out before the heap does.
+#[test]
+fn a_stack_that_runs_out_ends_the_program() {
+    let elf = built(
+        "riscv_stack_checked",
+        r#"
+(defun depth ((n int)) int (if (= n 0) 0 (+ 1 (depth (- n 1)))))
+(defun main () int (println "~a" (depth 1000000)) 0)
+"#,
+        "prog.elf",
+        &target_flags(TARGET, &["--ram", "16K"]),
+    );
+    let out = run_on(TARGET, &elf);
+    assert_eq!(text(&out.stdout), "");
+    assert!(text(&out.stderr).contains("stack overflow: the program needs more than the 0x00001000 bytes of the stack (_typelisp_stack_size)"), "{}", text(&out.stderr));
+    assert_eq!(out.status.code(), Some(1));
+}
