@@ -1,7 +1,7 @@
 //! Symbols, paths, strings and the boxed objects: allocation and access.
 
 use crate::prelude::*;
-use core::sync::atomic::Ordering;
+use crate::sync::atomic::Ordering;
 use crate::symbols::{self, SymRef};
 use crate::value::{BoxId, BoxedObj, FloatBox, NarrowInt, PathId, StrId, StructPayload, TypeId, Value};
 use super::{Heap, NAMES_HELD, NamesGuard};
@@ -257,7 +257,7 @@ impl Heap {
     /// one made installs how a bignum is written in a message
     /// ([`bignum_text`](Self::bignum_text)).
     fn box_bignum(&mut self, n: num_bigint::BigInt) -> Value {
-        TYPELISP_BIGNUM_TEXT.store(decimal as fn(&num_bigint::BigInt) -> String as *mut (), core::sync::atomic::Ordering::Relaxed);
+        TYPELISP_BIGNUM_TEXT.store(decimal as fn(&num_bigint::BigInt) -> String as *mut (), crate::sync::atomic::Ordering::Relaxed);
         self.alloc_boxed(BoxedObj::Bignum(n))
     }
 
@@ -265,7 +265,7 @@ impl Heap {
     /// bignum's maker installed: writing a `BigInt` is linked into an
     /// executable only when the program can make one.
     pub fn bignum_text(&self, id: BoxId) -> String {
-        let text = TYPELISP_BIGNUM_TEXT.load(core::sync::atomic::Ordering::Relaxed);
+        let text = TYPELISP_BIGNUM_TEXT.load(crate::sync::atomic::Ordering::Relaxed);
         if text.is_null() {
             panic!("internal error: a bignum box exists and nothing made one");
         }
@@ -596,13 +596,13 @@ impl Heap {
     /// `Arc`, not `Rc`: the handle must stay a valid liveness proof no
     /// matter which thread ends up holding it or running `gc()` — see
     /// `shared.cell_registry`'s doc comment.
-    pub fn alloc_cell(&mut self, v: Value) -> alloc::sync::Arc<BoxId> {
+    pub fn alloc_cell(&mut self, v: Value) -> crate::sync::Arc<BoxId> {
         let id = match self.alloc_boxed(BoxedObj::Cell(v)) {
             Value::Boxed(id) => id,
             _ => unreachable!("alloc_boxed always returns Value::Boxed"),
         };
-        let rc = alloc::sync::Arc::new(id);
-        self.shared.cell_registry.lock().push(alloc::sync::Arc::downgrade(&rc));
+        let rc = crate::sync::Arc::new(id);
+        self.shared.cell_registry.lock().push(crate::sync::Arc::downgrade(&rc));
         rc
     }
 
@@ -814,7 +814,7 @@ impl Heap {
 /// take the one value ever stored for the only one it can hold and call
 /// `decimal` directly.
 #[no_mangle]
-static TYPELISP_BIGNUM_TEXT: core::sync::atomic::AtomicPtr<()> = core::sync::atomic::AtomicPtr::new(core::ptr::null_mut());
+static TYPELISP_BIGNUM_TEXT: crate::sync::atomic::AtomicPtr<()> = crate::sync::atomic::AtomicPtr::new(core::ptr::null_mut());
 
 fn decimal(n: &num_bigint::BigInt) -> String {
     n.to_string()

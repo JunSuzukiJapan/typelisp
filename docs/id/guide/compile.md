@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ be56bb8a477929497064b8f807acfd1755f2b35b -->
+<!-- translated-from: docs/ja/guide/compile.md @ f5fad21e6962ea3c90d803827468d58aaae4ceaa -->
 # Kompilasi
 
 Jika Anda tidak melakukan apa-apa lagi, program typelisp berjalan di interpreter. Selain itu ada dua
@@ -169,14 +169,16 @@ salin lagi.
 ```sh
 $ typl --heap-cells 100000 -c hello.typl    # tetapkan arena cons pada 100000 sel
 $ typl -c hello.typl --max-memory 64M       # alokasikan paling banyak 64 MiB
+$ typl -c hello.typl --frame-memory 1M      # paling banyak 1 MiB pemanggilan yang berjalan per tugas
 $ typl -c hello.typl --no-cons              # tidak memakai sel cons
 ```
 
 - `--heap-cells N` menetapkan kapasitas arena sel cons pada `N` sel. Arena tidak tumbuh melebihinya: jika pengumpulan sampah tidak bisa membebaskan satu sel pun, program berhenti dengan galat waktu jalan. Tanpa opsi ini, arena dimulai dengan 65536 sel dan tumbuh sesuai kebutuhan.
 - `--max-memory SIZE` membatasi total memori yang dialokasikan berkas eksekusi. Semuanya dihitung: arena cons, string, nilai seperti vektor dan tabel hash, serta memori yang dipakai runtime itu sendiri. `SIZE` adalah jumlah byte dan boleh diikuti `K`, `M`, atau `G` (1024, 1024², dan 1024³ kali). Alokasi yang akan melewati batas dilaporkan, dan program keluar dengan kode keluar 1. Keluar seperti ini tidak dapat ditangkap dengan `catch`. Tanpa opsi ini, tidak ada batas.
+- `--frame-memory SIZE` membatasi, untuk setiap tugas, memori yang dipakai catatan pemanggilan yang sedang berjalan (yang disimpan pemanggilan sampai selesai, seperti argumen dan variabel lokalnya). Catatan itu ada di heap dan bertambah seiring rekursi makin dalam. `SIZE` ditulis seperti pada `--max-memory`. Pemanggilan yang akan melewati batas tidak dilakukan: executable memberitahukannya dan berakhir dengan kode keluar 1, yang juga tidak bisa ditangkap `catch`. Pada papan dengan memori kecil, ini menghentikan rekursi yang terlalu dalam sebelum menghabiskan heap. Tanpa opsi ini tidak ada batas.
 - `--no-cons` membuat berkas eksekusi yang tidak memakai sel cons. Ia tidak punya arena cons, jadi program yang melakukan sesuatu yang memerlukan sel cons menjadi **galat kompilasi**, yang menampilkan operasi itu dan rangkaian fungsi dari `main` yang mencapainya. Sel cons diperlukan untuk membuat list `Sexpr` (termasuk list yang di-quote dan yang dibuat dengan quasiquote) atau argumen `&rest`, serta oleh `read`, `eval`, dan `macroexpand`. Operasi pada angka, string, vektor, tabel hash, struct, kanal, dan sejenisnya, serta `print`/`println`/`format`, tidak memakainya. Tidak dapat diberikan bersama `--heap-cells`, dan ditulis setelah `-c`.
 
-`--max-memory` ditulis setelah `-c`. `--heap-cells` boleh ditulis sebelum atau setelah `-c`, dan menjadi kapasitas arena cons berkas eksekusi. Arena cons ikut dihitung dalam batas memori, jadi dengan batas yang tidak memuat arena, program berhenti sebelum mulai.
+`--max-memory` dan `--frame-memory` ditulis setelah `-c`. `--heap-cells` boleh ditulis sebelum atau setelah `-c`, dan menjadi kapasitas arena cons berkas eksekusi. Arena cons ikut dihitung dalam batas memori, jadi dengan batas yang tidak memuat arena, program berhenti sebelum mulai.
 
 ### 3.6 Mengompilasi untuk WebAssembly
 
@@ -201,7 +203,7 @@ fib(25) = 75025
   TLS, resolusi nama), thread OS (`Thread`), fungsi C (`defffi`), `get-internal-run-time`, `machine-instance`, `software-version`, `file-author`,
   dan `ed`.
 - WASI tidak punya cara untuk mengetahui zona waktu, jadi waktu lokal tidak diketahui. `decode-universal-time` dan `encode-universal-time` tanpa `zone`, serta `get-decoded-time`, panic saat dijalankan. Keduanya bisa dipakai jika `zone` diberikan.
-- `--heap-cells`, `--max-memory`, `--no-cons`, `-O<N>`, dan `--release` berlaku seperti untuk berkas eksekusi.
+- `--heap-cells`, `--max-memory`, `--frame-memory`, `--no-cons`, `-O<N>`, dan `--release` berlaku seperti untuk berkas eksekusi.
 
 ### 3.7 Menjalankan di peramban atau Node.js
 
@@ -229,7 +231,7 @@ const code = await run({ write: (fd, text) => { /* misalnya tampilkan di halaman
 
 ### 3.8 Mengompilasi untuk mikrokontroler (Cortex-M, RISC-V)
 
-Dengan `--target thumbv7em-none-eabihf`, `typl -c` membuat berkas eksekusi (ELF) untuk papan Cortex-M4F atau M7 tanpa sistem operasi. Tanpa `-o`, namanya mengikuti sumber dengan `.typl` diganti `.elf`. Dengan `--target thumbv8m.main-none-eabihf`, untuk papan Cortex-M33. Dengan `--target riscv32imac-unknown-none-elf`, untuk papan dengan inti RISC-V 32-bit (ekstensi M, A, dan C).
+Dengan `--target thumbv7em-none-eabihf`, `typl -c` membuat berkas eksekusi (ELF) untuk papan Cortex-M4F atau M7 tanpa sistem operasi. Tanpa `-o`, namanya mengikuti sumber dengan `.typl` diganti `.elf`. Dengan `--target thumbv8m.main-none-eabihf`, untuk papan Cortex-M33. Dengan `--target riscv32imac-unknown-none-elf`, untuk papan dengan inti RISC-V 32-bit (ekstensi M, A, dan C). Dengan `--target thumbv6m-none-eabi`, untuk papan Cortex-M0+ (M0). QEMU tidak punya papan Cortex-M0+, jadi berkas eksekusi untuknya dijalankan di `mps2-an385`, sebuah Cortex-M3 yang menjalankan instruksi yang sama apa adanya (tata letak tanpa `--linker-script` juga milik papan ini).
 
 ```sh
 $ typl -c hello.typl --target thumbv7em-none-eabihf          # membuat hello.elf
@@ -238,12 +240,15 @@ $ qemu-system-arm -M mps2-an386 -nographic \
 $ typl -c hello.typl --target thumbv8m.main-none-eabihf
 $ qemu-system-arm -M mps2-an505 -nographic \
     -semihosting-config enable=on,target=native -kernel hello.elf   # jalankan di Cortex-M33 milik QEMU
+$ typl -c hello.typl --target thumbv6m-none-eabi
+$ qemu-system-arm -M mps2-an385 -nographic \
+    -semihosting-config enable=on,target=native -kernel hello.elf   # jalankan di Cortex-M3 milik QEMU
 $ typl -c hello.typl --target riscv32imac-unknown-none-elf
 $ qemu-system-riscv32 -M virt -bios none -nographic \
     -semihosting-config enable=on,target=native -kernel hello.elf   # jalankan di RISC-V milik QEMU
 ```
 
-- `typl` yang dipasang dengan `install.sh` dapat langsung dipakai. Untuk memasang dengan `cargo install`, jalankan `rustup target add thumbv7em-none-eabihf thumbv8m.main-none-eabihf riscv32imac-unknown-none-elf`, lalu pasang dengan `--features embedded` (`--features wasm,embedded` untuk keduanya). Dengan build debug `typl` di repositori, jalankan `scripts/build-embedded-runtime.sh`. Penautan memakai linker toolchain rustup.
+- `typl` yang dipasang dengan `install.sh` dapat langsung dipakai. Untuk memasang dengan `cargo install`, jalankan `rustup target add thumbv7em-none-eabihf thumbv8m.main-none-eabihf thumbv6m-none-eabi riscv32imac-unknown-none-elf`, lalu pasang dengan `--features embedded` (`--features wasm,embedded` untuk keduanya). Dengan build debug `typl` di repositori, jalankan `scripts/build-embedded-runtime.sh`. Penautan memakai linker toolchain rustup.
 - Berikan memori papan dengan `--linker-script FILE`. Ditulis seperti `memory.x` milik `cortex-m-rt`: alamat dan ukuran FLASH dan RAM. Baris seperti `_typelisp_stack_size = 32K;` menentukan berapa banyak RAM yang dipakai stack (64KiB jika tidak diberikan); sisa RAM adalah heap. Tanpa opsi ini, tata letaknya milik `mps2-an386` (`mps2-an505` untuk Cortex-M33) di QEMU.
 
   ```
@@ -272,6 +277,10 @@ $ qemu-system-riscv32 -M virt -bios none -nographic \
   _typelisp_stack_size = 4K;
   ```
 
+- Pada papan dengan RAM kecil, sebagai ganti `--linker-script`, `--ram SIZE` (`16K` dan sebagainya) hanya memberi besar RAM untuk data, heap, dan stack. RAM tata letak bawaan menjadi sebesar itu, dan stack memakai paling banyak seperempatnya. Pada papan yang juga menaruh kode di RAM, seperti `virt` pada RISC-V, kode ditaruh di sisa RAM papan. Yang dialokasikan runtime di awal dibuat kecil agar muat di heap. Tidak dapat dipakai bersama `--linker-script`.
+
+- Papan tidak punya sistem operasi, jadi tidak ada yang menghentikan stack yang meluap. Karena itu executable memeriksa, saat masuk ke setiap fungsi program, berapa sisa stack; jika terlalu sedikit, ia menulis `stack overflow: the program needs more than the ... bytes of the stack` dan berakhir dengan kode keluar 1. Untuk memperbesar stack, perbesar `_typelisp_stack_size` di berkas `--linker-script`, atau `--ram`. `--no-stack-check` tidak memasang pemeriksaan ini (executable sedikit lebih kecil dan cepat, tetapi stack yang meluap bisa merusak heap tanpa terlihat). Dalam kedua kasus, bila stack meluap di dalam runtime dan melewati dasarnya, laporan panic atau HardFault yang menyusul didahului `stack overflow: the stack has run past its bottom into the heap`. Hal yang sama ditulis, dengan kode keluar 1, bila program berjalan sampai selesai. Kedalaman rekursi tidak memakai stack (catatan pemanggilan disimpan di heap, dan rekursi yang terlalu dalam kehabisan memori); yang memakai stack dalam-dalam adalah pekerjaan runtime. Untuk menghentikannya lebih awal, gunakan `--frame-memory` (bagian 3.5).
+
 - `--board-functions` memilih siapa yang memberikan keluaran, masukan, penghentian, dan jam (fungsi papan).
   - `semihosting` (bawaan): lewat semihosting, untuk menjalankan di QEMU (`-semihosting-config enable=on`) atau debugger.
   - `c`: papan memberikannya sebagai fungsi C. Berikan dengan `--link FILE` objek atau pustaka statis yang mendefinisikan fungsi di bawah (`--link` dapat diulang; pustaka vendor yang dipanggil `defffi` diberikan dengan cara yang sama).
@@ -299,7 +308,7 @@ $ qemu-system-riscv32 -M virt -bios none -nographic \
     (put-byte 104) (put-byte 105) (put-byte 10))                             ; "hi" dan baris baru
   ```
 
-- Tulis fungsi yang dipanggil saat interupsi datang sebagai `defun` dengan atribut `#[interrupt(N)]` (interupsi periferal `N`) atau seperti `#[exception(SysTick)]`. Aktifkan interupsi dengan `(enable-interrupt N)`. Penangan berjalan saat itu juga; hanya jika datang di tengah pekerjaan runtime ia berjalan setelah pekerjaan itu selesai. Penangan tidak dapat menunggu (`sleep` adalah galat kompilasi). Rinciannya ada di bagian 3.17 [referensi sintaks](../reference/syntax.md). Pada RISC-V, `N` adalah nomor interupsi di `mcause` (0 sampai 31: 3 interupsi perangkat lunak, 7 pewaktu, 11 interupsi eksternal), dan `#[exception(NAME)]` tidak dapat dipakai.
+- Tulis fungsi yang dipanggil saat interupsi datang sebagai `defun` dengan atribut `#[interrupt(N)]` (interupsi periferal `N`) atau seperti `#[exception(SysTick)]`. Aktifkan interupsi dengan `(enable-interrupt N)`. Penangan berjalan saat itu juga; hanya jika datang di tengah pekerjaan runtime ia berjalan setelah pekerjaan itu selesai. Penangan tidak dapat menunggu (`sleep` adalah galat kompilasi). Rinciannya ada di bagian 3.17 [referensi sintaks](../reference/syntax.md). Pada Cortex-M0+, `N` adalah 0 sampai 31, dan `#[exception(NAME)]` hanya dapat menamai `NonMaskableInt`, `SVCall`, `PendSV`, dan `SysTick`. Pada RISC-V, `N` adalah nomor interupsi di `mcause` (0 sampai 31: 3 interupsi perangkat lunak, 7 pewaktu, 11 interupsi eksternal), dan `#[exception(NAME)]` tidak dapat dipakai.
 
   ```lisp
   (use std::board::enable-interrupt)
@@ -316,7 +325,7 @@ $ qemu-system-riscv32 -M virt -bios none -nographic \
 - Runtime memulai program (tabel vektor dan menyiapkan RAM) dan mengalokasikan memori. HardFault (pada RISC-V sebuah eksepsi) atau interupsi tanpa penangan mengakhiri program dengan kode keluar panic (1).
 - `throw`/`catch`/`panic`, bilangan besar, pecahan, dan bilangan titik mengambang, serta tugas, kanal, dan `sleep` berperilaku seperti pada berkas eksekusi. Tugas berjalan bergiliran di satu inti. Fungsi C (`defffi`) dapat dipakai.
 - Program yang memakai sesuatu yang tidak dimiliki papan adalah **galat kompilasi**: selain yang tidak dapat dipakai di bagian 3.7, `eval` dan `macroexpand`. Waktu lokal tidak diketahui (seperti di bagian 3.6).
-- Arena cons dimulai dengan 1024 sel dan tumbuh saat diperlukan. `--heap-cells`, `--max-memory`, `--no-cons`, `-O<N>`, dan `--release` bekerja seperti biasa.
+- Arena cons dimulai dengan 1024 sel dan tumbuh saat diperlukan. `--heap-cells`, `--max-memory`, `--frame-memory`, `--no-cons`, `-O<N>`, dan `--release` bekerja seperti biasa.
 
 ### 3.9 Mengompilasi untuk Arduino Uno (AVR)
 

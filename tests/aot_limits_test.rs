@@ -1,6 +1,7 @@
 //! The resources an executable built by `typl -c` may use:
 //! `--heap-cells N` fixes its cons arena at `N` cells, and
-//! `--max-memory SIZE` bounds what the whole process allocates, and
+//! `--max-memory SIZE` bounds what the whole process allocates,
+//! `--frame-memory SIZE` what the calls in progress of each task take, and
 //! `--no-cons` refuses at compile time a program that would take a cons
 //! cell (`compile::aot::BuildOptions`). Driven through the `typl` binary, since
 //! the flags are the CLI's, and checked by running what it builds.
@@ -92,6 +93,37 @@ fn a_memory_limit_below_the_arena_stops_at_startup() {
     let run = build_and_run("limits-memory-arena", BIG_VECTOR, &["--max-memory", "100K"]);
     assert_eq!(run.status.code(), Some(1));
     assert!(String::from_utf8_lossy(&run.stderr).contains("memory limit exceeded"), "{}", String::from_utf8_lossy(&run.stderr));
+}
+
+/// A recursion 100000 deep: its calls' records are on the heap, and grow
+/// with it.
+const DEEP_RECURSION: &str = r#"
+(defun depth ((n int)) int (if (= n 0) 0 (+ 1 (depth (- n 1)))))
+(defun main () int (println "~a" (depth 100000)) 0)
+"#;
+
+#[test]
+fn calls_within_the_frame_memory_run() {
+    let run = build_and_run("limits-frames-enough", DEEP_RECURSION, &["--frame-memory", "64M"]);
+    assert_eq!(String::from_utf8_lossy(&run.stdout), "100000\n");
+    assert_eq!(run.status.code(), Some(0), "{}", String::from_utf8_lossy(&run.stderr));
+}
+
+/// A call that would take the records past the bound ends the program,
+/// saying so, before the recursion has taken more.
+#[test]
+fn a_call_past_the_frame_memory_ends_the_program() {
+    let run = build_and_run("limits-frames-short", DEEP_RECURSION, &["--frame-memory", "64K"]);
+    assert_eq!(String::from_utf8_lossy(&run.stdout), "");
+    assert_eq!(run.status.code(), Some(1));
+    let err = String::from_utf8_lossy(&run.stderr);
+    assert!(err.contains("typelisp runtime error: the calls in progress take more than the 65536 bytes --frame-memory allows a task ("), "{}", err);
+}
+
+#[test]
+fn a_frame_memory_is_a_size() {
+    let err = refused("limits-frames-bad", DEEP_RECURSION, &["--frame-memory", "deep"]);
+    assert!(err.contains("--frame-memory: `deep` is not a positive size"), "{}", err);
 }
 
 /// Printing with arguments, arithmetic, strings, vectors, a hash table and

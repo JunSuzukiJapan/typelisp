@@ -26,6 +26,14 @@ fn start() -> ! {
     crate::start::run()
 }
 
+/// Where the stack is now.
+pub(crate) fn stack_pointer() -> usize {
+    let sp: usize;
+    // SAFETY: reads the stack pointer.
+    unsafe { core::arch::asm!("mv {0}, sp", out(reg) sp, options(nomem, nostack, preserves_flags)) };
+    sp
+}
+
 /// Lets the interrupts `mie` lets through come: `mstatus.MIE`, which is
 /// clear from reset. `mie` itself is clear, so none comes until the program
 /// enables one.

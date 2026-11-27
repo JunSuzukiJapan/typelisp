@@ -138,3 +138,80 @@ pub fn board_object(dir: &Path, ir_text: &str, llc_flags: &[&str]) -> PathBuf {
     assert!(out.status.success(), "llc failed: {}", text(&out.stderr));
     object
 }
+
+/// The board's functions (`typelisp_host_*`) as a Cortex-M board gives them, written
+/// in LLVM IR for want of a C compiler for the board in every environment the
+/// tests run in: output to the UART of QEMU's board (CMSDK APB UART 0 at
+/// `0x40004000`, which `-nographic` shows on standard output), a clock that
+/// advances by itself, and the end of the program through semihosting, for
+/// the exit code to reach the test.
+const CORTEX_M_BOARD_FUNCTIONS_IR: &str = r#"
+target triple = "TRIPLE"
+
+@clock = internal global i64 0
+
+define void @typelisp_host_write(i32 %fd, ptr %p, i32 %len) {
+entry:
+  store volatile i32 1, ptr inttoptr (i32 1073758216 to ptr)
+  br label %next
+next:
+  %i = phi i32 [0, %entry], [%i1, %sent]
+  %done = icmp eq i32 %i, %len
+  br i1 %done, label %out, label %wait
+wait:
+  %state = load volatile i32, ptr inttoptr (i32 1073758212 to ptr)
+  %full = and i32 %state, 1
+  %busy = icmp ne i32 %full, 0
+  br i1 %busy, label %wait, label %send
+send:
+  %a = getelementptr i8, ptr %p, i32 %i
+  %c = load i8, ptr %a
+  %w = zext i8 %c to i32
+  store volatile i32 %w, ptr inttoptr (i32 1073758208 to ptr)
+  br label %sent
+sent:
+  %i1 = add i32 %i, 1
+  br label %next
+out:
+  ret void
+}
+
+define i32 @typelisp_host_read(i32 %fd, ptr %p, i32 %len) {
+  ret i32 0
+}
+
+define void @typelisp_host_exit(i32 %code) noreturn {
+  %block = alloca [2 x i32]
+  store i32 131110, ptr %block
+  %second = getelementptr i32, ptr %block, i32 1
+  store i32 %code, ptr %second
+  call void asm sideeffect "movs r0, #0x20\0Abkpt #0xab", "{r1},~{r0},~{memory}"(ptr %block)
+  br label %stay
+stay:
+  br label %stay
+}
+
+define i64 @typelisp_host_now_us() {
+  %t = load i64, ptr @clock
+  %t1 = add i64 %t, 1000
+  store i64 %t1, ptr @clock
+  ret i64 %t1
+}
+
+define i64 @typelisp_host_unix_us() {
+  %t = call i64 @typelisp_host_now_us()
+  ret i64 %t
+}
+
+define void @typelisp_host_sleep_us(i64 %us) {
+  %t = load i64, ptr @clock
+  %t1 = add i64 %t, %us
+  store i64 %t1, ptr @clock
+  ret void
+}
+"#;
+
+/// [`CORTEX_M_BOARD_FUNCTIONS_IR`] for the LLVM triple `triple`.
+pub fn cortex_m_board_functions_ir(triple: &str) -> String {
+    CORTEX_M_BOARD_FUNCTIONS_IR.replace("TRIPLE", triple)
+}

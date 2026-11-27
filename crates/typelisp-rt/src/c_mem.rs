@@ -35,7 +35,7 @@ use typelisp_mem::Word;
 use typelisp_mem::prelude::*;
 use alloc::alloc::Layout;
 use alloc::collections::BTreeMap;
-use alloc::sync::Arc;
+use typelisp_mem::sync::Arc;
 use typelisp_mem::collections::HashMap;
 use typelisp_mem::sync::Mutex;
 

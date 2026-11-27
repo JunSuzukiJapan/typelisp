@@ -19,7 +19,8 @@
 //! gives the heap its memory and calls the module's `main` under the name
 //! [`BOARD_MAIN`]. Where flash and RAM are is the linker script `memory.x`,
 //! which that crate's `link.x` includes: the user's
-//! (`--linker-script`), or the QEMU board's ([`Board::qemu_memory`]). The rest of what the runtime asks
+//! (`--linker-script`), or the QEMU board's ([`Board::qemu_memory`], its RAM
+//! the size `--ram` gives). The rest of what the runtime asks
 //! of the board (`typelisp_host_*`) the runtime gives over semihosting, or
 //! the board as C functions in the objects and libraries the link is given
 //! (`--board-functions`, `--link`).
@@ -29,6 +30,11 @@
 //! (`typelisp_rt::interrupt`): every call the module makes into the runtime
 //! is made through a function that marks the runtime busy around it
 //! ([`busy_around_runtime_calls`]).
+//!
+//! Unless `--no-stack-check` is given, every function the module defines
+//! starts by asking the runtime whether the stack has room left
+//! ([`stack_checked`]): a board has no operating system to stop a stack
+//! that runs into the heap.
 
 use std::fs;
 use std::path::Path;
@@ -84,16 +90,60 @@ pub struct Board {
     pub features: &'static str,
     /// The interrupts `#[interrupt(N)]` may name, the lowest and the highest.
     pub interrupts: (u16, u16),
-    /// Whether the core has the exceptions `#[exception(NAME)]` names (a
-    /// Cortex-M's).
-    pub exceptions: bool,
+    /// The core exceptions `#[exception(NAME)]` may name on it, of the ones
+    /// a Cortex-M has (`typelisp_front::EXCEPTIONS`).
+    pub exceptions: &'static [&'static str],
     /// The QEMU that emulates the core, and the arguments that pick the
     /// board (`-M ...`) before `-kernel`.
     pub qemu: (&'static str, &'static [&'static str]),
-    /// The QEMU board's memory, as a `memory.x`. The stack takes 1 MiB of
-    /// the RAM, so that recursion goes deep in the tests; the rest above
-    /// `.bss` is the heap.
-    pub qemu_memory: &'static str,
+    /// The QEMU board's memory, which a program is linked for when the user
+    /// gives no linker script.
+    pub qemu_memory: Layout,
+}
+
+/// Where a board's memory is: what its `memory.x` says ([`Layout::memory_x`]).
+pub struct Layout {
+    /// Where code goes, its origin and length, if not in RAM.
+    pub flash: Option<(u64, u64)>,
+    /// RAM, its origin and length.
+    pub ram: (u64, u64),
+    /// How much of the RAM the stack takes (`_typelisp_stack_size`), where the
+    /// runtime places it; the rest above `.bss` is the heap. On the QEMU
+    /// boards 1 MiB, so that recursion goes deep in the tests.
+    pub stack: Option<u64>,
+}
+
+impl Layout {
+    /// The layout as a `memory.x` for `core`, with `ram` bytes of RAM for
+    /// the data, the heap and the stack in place of the board's (`--ram`),
+    /// and then a stack of at most a quarter of it. On a board whose code is
+    /// in RAM too (no flash), the code keeps the rest of the board's RAM,
+    /// below the `ram` bytes at its end.
+    pub(super) fn memory_x(&self, core: Core, ram: Option<u64>) -> String {
+        let (board_origin, board_ram) = self.ram;
+        let (flash, ram_origin, ram_length) = match (self.flash, ram) {
+            (None, Some(ram)) if ram < board_ram => (Some((board_origin, board_ram - ram)), board_origin + board_ram - ram, ram),
+            (flash, ram) => (flash, board_origin, ram.unwrap_or(board_ram)),
+        };
+        let mut text = String::from("MEMORY\n{\n");
+        if let Some((origin, length)) = flash {
+            text.push_str(&format!("  FLASH : ORIGIN = {:#x}, LENGTH = {}\n", origin, length));
+        }
+        text.push_str(&format!("  RAM : ORIGIN = {:#x}, LENGTH = {}\n}}\n", ram_origin, ram_length));
+        // `riscv-rt` places each kind of section in the region its alias
+        // names: code and constants in flash where there is one.
+        if core == Core::Riscv32 {
+            let code = if flash.is_some() { "FLASH" } else { "RAM" };
+            for (region, memory) in [("TEXT", code), ("RODATA", code), ("DATA", "RAM"), ("BSS", "RAM"), ("HEAP", "RAM"), ("STACK", "RAM")] {
+                text.push_str(&format!("REGION_ALIAS(\"REGION_{}\", {});\n", region, memory));
+            }
+        }
+        if let Some(stack) = self.stack {
+            let stack = if ram.is_some() { stack.min(ram_length / 4) } else { stack };
+            text.push_str(&format!("_typelisp_stack_size = {};\n", stack));
+        }
+        text
+    }
 }
 
 impl Board {
@@ -124,8 +174,20 @@ impl Board {
     pub(super) fn handled(&self, target: super::Target, vector: u16, path: &crate::types::Path) -> Result<u16, String> {
         let (lowest, highest) = self.interrupts;
         match vector.checked_sub(FIRST_INTERRUPT) {
-            None if self.exceptions => Ok(vector),
-            None => Err(format!("`{}` handles a core exception, and --target {} has none", path, target.name())),
+            None => {
+                let name = typelisp_front::EXCEPTIONS.iter().find(|(_, v)| *v == vector).map_or("?", |(name, _)| *name);
+                match self.exceptions {
+                    [] => Err(format!("`{}` handles a core exception, and --target {} has none", path, target.name())),
+                    has if has.contains(&name) => Ok(vector),
+                    has => Err(format!(
+                        "`{}` handles the exception {}, which --target {} has not got (its exceptions are {})",
+                        path,
+                        name,
+                        target.name(),
+                        has.join(", ")
+                    )),
+                }
+            }
             Some(n) if (lowest..=highest).contains(&n) => Ok(n),
             Some(n) => Err(format!(
                 "`{}` handles interrupt {}: the interrupts of --target {} are {} to {}",
@@ -143,6 +205,32 @@ impl Board {
 /// (`typeck::attribute`): a Cortex-M's exceptions come before it.
 const FIRST_INTERRUPT: u16 = 16;
 
+/// The exceptions of an ARMv7-M or ARMv8-M Mainline core (Cortex-M3, M4, M7,
+/// M33): all a program may handle.
+const ARMV7M_EXCEPTIONS: [&str; 8] =
+    ["NonMaskableInt", "MemoryManagement", "BusFault", "UsageFault", "SVCall", "DebugMonitor", "PendSV", "SysTick"];
+
+/// The exceptions of an ARMv6-M core (Cortex-M0, M0+), which has no fault
+/// but HardFault and no debug monitor.
+const ARMV6M_EXCEPTIONS: [&str; 4] = ["NonMaskableInt", "SVCall", "PendSV", "SysTick"];
+
+/// `thumbv6m-none-eabi`, a Cortex-M0+: no floating-point unit, no
+/// compare-and-swap (`typelisp_mem::sync`), and 32 interrupts. QEMU has no
+/// Cortex-M0+ board, and its Cortex-M0 one (`microbit`) has 16 KiB of RAM,
+/// less than the runtime takes, so the core stands on `mps2-an385` (Arm's
+/// AN385, a Cortex-M3, which runs every ARMv6-M instruction as an M0+
+/// does): 4 MiB of code memory at 0 and 4 MiB of RAM at `0x20000000`.
+pub const CORTEX_M0PLUS: Board = Board {
+    core: Core::CortexM,
+    llvm_triple: "thumbv6m-none-eabi",
+    cpu: "cortex-m0plus",
+    features: "",
+    interrupts: (0, 31),
+    exceptions: &ARMV6M_EXCEPTIONS,
+    qemu: ("qemu-system-arm", &["-M", "mps2-an385"]),
+    qemu_memory: Layout { flash: Some((0x0, 4 << 20)), ram: (0x20000000, 4 << 20), stack: Some(1 << 20) },
+};
+
 /// `thumbv7em-none-eabihf`, on QEMU's `mps2-an386` (Arm's AN386, a
 /// Cortex-M4 on an MPS2 FPGA board): 4 MiB of code memory at 0 and 4 MiB of
 /// RAM at `0x20000000`.
@@ -152,16 +240,9 @@ pub const CORTEX_M4: Board = Board {
     cpu: "cortex-m4",
     features: "",
     interrupts: (0, 239),
-    exceptions: true,
+    exceptions: &ARMV7M_EXCEPTIONS,
     qemu: ("qemu-system-arm", &["-M", "mps2-an386"]),
-    qemu_memory: "\
-MEMORY
-{
-  FLASH : ORIGIN = 0x00000000, LENGTH = 4M
-  RAM : ORIGIN = 0x20000000, LENGTH = 4M
-}
-_typelisp_stack_size = 1M;
-",
+    qemu_memory: Layout { flash: Some((0x0, 4 << 20)), ram: (0x20000000, 4 << 20), stack: Some(1 << 20) },
 };
 
 /// `thumbv8m.main-none-eabihf`, on QEMU's `mps2-an505` (Arm's AN505, a
@@ -174,16 +255,9 @@ pub const CORTEX_M33: Board = Board {
     cpu: "cortex-m33",
     features: "",
     interrupts: (0, 239),
-    exceptions: true,
+    exceptions: &ARMV7M_EXCEPTIONS,
     qemu: ("qemu-system-arm", &["-M", "mps2-an505"]),
-    qemu_memory: "\
-MEMORY
-{
-  FLASH : ORIGIN = 0x10000000, LENGTH = 4M
-  RAM : ORIGIN = 0x38000000, LENGTH = 4M
-}
-_typelisp_stack_size = 1M;
-",
+    qemu_memory: Layout { flash: Some((0x10000000, 4 << 20)), ram: (0x38000000, 4 << 20), stack: Some(1 << 20) },
 };
 
 /// `riscv32imac-unknown-none-elf`, on QEMU's `virt` board with a 32-bit
@@ -197,21 +271,9 @@ pub const RISCV32_VIRT: Board = Board {
     cpu: "generic-rv32",
     features: "+m,+a,+c",
     interrupts: (0, 31),
-    exceptions: false,
+    exceptions: &[],
     qemu: ("qemu-system-riscv32", &["-M", "virt", "-bios", "none"]),
-    qemu_memory: "\
-MEMORY
-{
-  RAM : ORIGIN = 0x80000000, LENGTH = 16M
-}
-REGION_ALIAS(\"REGION_TEXT\", RAM);
-REGION_ALIAS(\"REGION_RODATA\", RAM);
-REGION_ALIAS(\"REGION_DATA\", RAM);
-REGION_ALIAS(\"REGION_BSS\", RAM);
-REGION_ALIAS(\"REGION_HEAP\", RAM);
-REGION_ALIAS(\"REGION_STACK\", RAM);
-_typelisp_stack_size = 1M;
-",
+    qemu_memory: Layout { flash: None, ram: (0x80000000, 16 << 20), stack: Some(1 << 20) },
 };
 
 /// How much of RAM the stack takes when the user's `memory.x` does not say
@@ -219,7 +281,7 @@ _typelisp_stack_size = 1M;
 const DEFAULT_STACK: &str = "PROVIDE(_typelisp_stack_size = 64K);\n";
 
 /// What says where the board's flash and RAM are: the user's linker script
-/// (`--linker-script`), or the QEMU board's. Refuses a `--link` file that is
+/// (`--linker-script`), or the QEMU board's, with the RAM `--ram` gives. Refuses a `--link` file that is
 /// not there, before anything is emitted.
 pub(super) fn board_memory(board: &Board, options: &BuildOptions) -> Result<String, String> {
     for file in &options.link {
@@ -229,7 +291,7 @@ pub(super) fn board_memory(board: &Board, options: &BuildOptions) -> Result<Stri
     }
     match options.linker_script.as_deref() {
         Some(path) => fs::read_to_string(path).map_err(|e| format!("--linker-script: {}: {}", path.display(), e)),
-        None => Ok(board.qemu_memory.to_string()),
+        None => Ok(board.qemu_memory.memory_x(board.core, options.ram.map(|r| r as u64))),
     }
 }
 
@@ -345,6 +407,31 @@ fn busy_around_runtime_calls(module: &Module<'static>) -> Result<(), String> {
     Ok(())
 }
 
+/// Makes every function `module` defines call `typelisp_stack_check` first,
+/// as GCC's `-fstack-limit-symbol` does: the runtime ends the program when
+/// the stack is all but used up, or has run past its end (the guard words at
+/// its bottom are not as the runtime wrote them), before the function's
+/// frame is any deeper. A call, not a comparison here, so that no block is
+/// split and the entry block keeps its allocas. Before
+/// [`busy_around_runtime_calls`], so that its brackets have none.
+fn stack_checked(module: &Module<'static>) -> Result<(), String> {
+    let ctx = module.get_context();
+    let check = module
+        .get_function("typelisp_stack_check")
+        .unwrap_or_else(|| module.add_function("typelisp_stack_check", ctx.void_type().fn_type(&[], false), None));
+    let defined: Vec<_> = module.get_functions().filter(|f| f.count_basic_blocks() > 0).collect();
+    let builder = ctx.create_builder();
+    for f in defined {
+        let entry = f.get_first_basic_block().expect("a defined function has a block");
+        match entry.get_first_instruction() {
+            Some(first) => builder.position_before(&first),
+            None => builder.position_at_end(entry),
+        }
+        builder.build_call(check, &[], "").map_err(|e| format!("failed to build a stack check: {}", e))?;
+    }
+    Ok(())
+}
+
 /// Names `value`'s section `name`, as it is. Not inkwell's `set_section`,
 /// which on a macOS host puts a comma in front of a name without one (Mach-O
 /// spells a section `segment,section`) whatever the module's target is.
@@ -371,6 +458,9 @@ pub(super) fn write_executable(
     let tm = board.target_machine(crate::compile::optimize::codegen_level())?;
     for_board(module, &tm)?;
     crate::compile::codegen_prep::prepare(module)?;
+    if !options.no_stack_check {
+        stack_checked(module)?;
+    }
     busy_around_runtime_calls(module)?;
     crate::compile::optimize::run_llvm_passes(module, &tm)?;
     sections_of_their_own(module);
@@ -399,4 +489,35 @@ pub(super) fn write_executable(
                 .arg(output_path)
         })
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Core, CORTEX_M0PLUS, RISCV32_VIRT};
+
+    /// `--ram` gives the RAM's length, at the board's address, and a stack
+    /// of at most a quarter of it.
+    #[test]
+    fn ram_replaces_the_board_s_and_bounds_the_stack() {
+        let x = CORTEX_M0PLUS.qemu_memory.memory_x(Core::CortexM, Some(16 << 10));
+        assert!(x.contains("RAM : ORIGIN = 0x20000000, LENGTH = 16384\n"), "{}", x);
+        assert!(x.contains("_typelisp_stack_size = 4096;"), "{}", x);
+        let x = CORTEX_M0PLUS.qemu_memory.memory_x(Core::CortexM, None);
+        assert!(x.contains("LENGTH = 4194304\n") && x.contains("_typelisp_stack_size = 1048576;"), "{}", x);
+        let x = RISCV32_VIRT.qemu_memory.memory_x(Core::Riscv32, Some(64 << 10));
+        assert!(x.contains("FLASH : ORIGIN = 0x80000000, LENGTH = 16711680\n"), "{}", x);
+        assert!(x.contains("RAM : ORIGIN = 0x80ff0000, LENGTH = 65536\n") && x.contains("REGION_ALIAS(\"REGION_TEXT\", FLASH);"), "{}", x);
+        let x = RISCV32_VIRT.qemu_memory.memory_x(Core::Riscv32, None);
+        assert!(!x.contains("FLASH") && x.contains("REGION_ALIAS(\"REGION_TEXT\", RAM);"), "{}", x);
+    }
+
+    /// Every exception a board lists is one an attribute can name.
+    #[test]
+    fn a_board_s_exceptions_are_named_by_the_attribute() {
+        for target in super::super::Target::BOARDS {
+            for name in target.board().expect("a board").exceptions {
+                assert!(typelisp_front::EXCEPTIONS.iter().any(|(n, _)| n == name), "{}: {}", target.name(), name);
+            }
+        }
+    }
 }

@@ -83,6 +83,11 @@ fn every_width_on_a_cortex_m() {
 }
 
 #[test]
+fn every_width_on_a_cortex_m0plus() {
+    each_level("llvm_sizes_m0", &THIRTY_TWO, &["--target", "thumbv6m-none-eabi"], ".elf", |elf| on_board("thumbv6m-none-eabi", &elf));
+}
+
+#[test]
 fn every_width_on_a_riscv32() {
     each_level("llvm_sizes_riscv32", &THIRTY_TWO, &["--target", "riscv32imac-unknown-none-elf"], ".elf", |elf| {
         on_board("riscv32imac-unknown-none-elf", &elf)

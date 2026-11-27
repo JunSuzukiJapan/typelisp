@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ be56bb8a477929497064b8f807acfd1755f2b35b -->
+<!-- translated-from: docs/ja/guide/compile.md @ f5fad21e6962ea3c90d803827468d58aaae4ceaa -->
 # 编译
 
 如果不做任何处理，typelisp 程序由解释器执行。除此之外，还有两种编译为本机代码的方法，以及一种保存环境的方法。
@@ -153,14 +153,16 @@ $ typl --lib-dir ~/lib/typelisp build.typl
 ```sh
 $ typl --heap-cells 100000 -c hello.typl    # 把 cons 区域固定为 100000 个单元
 $ typl -c hello.typl --max-memory 64M       # 最多分配 64 MiB 内存
+$ typl -c hello.typl --frame-memory 1M      # 每个任务进行中的调用最多占用 1 MiB
 $ typl -c hello.typl --no-cons              # 不使用 cons 单元
 ```
 
 - `--heap-cells N` 把 cons 单元区域的容量固定为 `N` 个单元。区域不会再变大。垃圾回收后仍无法腾出空单元时，以运行时错误停止。不指定时从 65536 个单元开始，按需变大。
 - `--max-memory SIZE` 是可执行文件分配的内存总量的上限。cons 区域、字符串、向量和哈希表等值、运行时自身使用的内存全部计算在内。`SIZE` 是字节数，可以加上 `K` `M` `G`（分别为 1024 倍、1024² 倍、1024³ 倍）。试图超过上限分配时，会显示这一情况并以退出码 1 结束。这种结束无法用 `catch` 捕获。不指定时没有上限。
+- `--frame-memory SIZE` 是每个任务进行中的调用的记录（调用结束前一直持有的参数、局部变量等）可使用的内存的上限。记录放在堆上，递归越深越多。`SIZE` 的写法与 `--max-memory` 相同。若要进行超过上限的调用，会显示这一情况并以退出码 1 结束，这种结束同样无法用 `catch` 捕获。在内存较少的开发板上，可用它在过深的递归耗尽堆之前将其停止。不指定时没有上限。
 - `--no-cons` 生成不使用 cons 单元的可执行文件。它没有 cons 区域，因此进行需要 cons 单元的操作的程序会成为**编译错误**。错误中会显示该操作，以及从 `main` 到达那里的函数序列。需要 cons 单元的情况是：构造 `Sexpr` 列表（包括引用的列表和用准引用构造的列表）或 `&rest` 参数时，以及使用 `read`、`eval`、`macroexpand` 时。数值、字符串、向量、哈希表、结构体、通道等的操作，以及 `print`/`println`/`format` 都不使用 cons 单元。不能与 `--heap-cells` 一起指定，写在 `-c` 之后。
 
-`--max-memory` 写在 `-c` 之后。`--heap-cells` 写在 `-c` 之前或之后都可以，这时它是可执行文件的 cons 区域的容量。cons 区域也计入内存上限，所以指定了放不下区域的上限时，程序会在开始之前停止。
+`--max-memory` 和 `--frame-memory` 写在 `-c` 之后。`--heap-cells` 写在 `-c` 之前或之后都可以，这时它是可执行文件的 cons 区域的容量。cons 区域也计入内存上限，所以指定了放不下区域的上限时，程序会在开始之前停止。
 
 ### 3.6 编译为 WebAssembly
 
@@ -185,7 +187,7 @@ fib(25) = 75025
   TLS、名称解析）、操作系统线程（`Thread`）、C 函数（`defffi`）、`get-internal-run-time`, `machine-instance`, `software-version`, `file-author`
   以及 `ed`。
 - WASI 没有获知时区的手段，因此本地时间未知。省略 `zone` 的 `decode-universal-time`、`encode-universal-time` 以及 `get-decoded-time` 会在运行时 panic。传入 `zone` 即可使用。
-- `--heap-cells`、`--max-memory`、`--no-cons`、`-O<N>`、`--release` 照常可用。
+- `--heap-cells`、`--max-memory`、`--frame-memory`、`--no-cons`、`-O<N>`、`--release` 照常可用。
 
 ### 3.7 在浏览器或 Node.js 中运行
 
@@ -213,7 +215,7 @@ const code = await run({ write: (fd, text) => { /* 例如显示在页面上 */ }
 
 ### 3.8 为微控制器（Cortex-M、RISC-V）编译
 
-加上 `--target thumbv7em-none-eabihf`，`typl -c` 会为没有操作系统的 Cortex-M4F、M7 开发板生成可执行文件（ELF）。省略 `-o` 时，名字是把源文件的 `.typl` 换成 `.elf`。加上 `--target thumbv8m.main-none-eabihf` 则是面向 Cortex-M33 开发板的。加上 `--target riscv32imac-unknown-none-elf` 则面向 32 位 RISC-V（M、A、C 扩展）的开发板。
+加上 `--target thumbv7em-none-eabihf`，`typl -c` 会为没有操作系统的 Cortex-M4F、M7 开发板生成可执行文件（ELF）。省略 `-o` 时，名字是把源文件的 `.typl` 换成 `.elf`。加上 `--target thumbv8m.main-none-eabihf` 则是面向 Cortex-M33 开发板的。加上 `--target riscv32imac-unknown-none-elf` 则面向 32 位 RISC-V（M、A、C 扩展）的开发板。加上 `--target thumbv6m-none-eabi` 则面向 Cortex-M0+（M0）的开发板。QEMU 没有 Cortex-M0+ 的开发板，所以面向它的可执行文件在能原样执行相同指令的 Cortex-M3 `mps2-an385` 上运行（省略 `--linker-script` 时的布局也是这块开发板的）。
 
 ```sh
 $ typl -c hello.typl --target thumbv7em-none-eabihf          # 生成 hello.elf
@@ -222,12 +224,15 @@ $ qemu-system-arm -M mps2-an386 -nographic \
 $ typl -c hello.typl --target thumbv8m.main-none-eabihf
 $ qemu-system-arm -M mps2-an505 -nographic \
     -semihosting-config enable=on,target=native -kernel hello.elf   # 在 QEMU 的 Cortex-M33 上运行
+$ typl -c hello.typl --target thumbv6m-none-eabi
+$ qemu-system-arm -M mps2-an385 -nographic \
+    -semihosting-config enable=on,target=native -kernel hello.elf   # 在 QEMU 的 Cortex-M3 上运行
 $ typl -c hello.typl --target riscv32imac-unknown-none-elf
 $ qemu-system-riscv32 -M virt -bios none -nographic \
     -semihosting-config enable=on,target=native -kernel hello.elf   # 在 QEMU 的 RISC-V 上运行
 ```
 
-- 用 `install.sh` 安装的 `typl` 可以直接使用。用 `cargo install` 安装时，先运行 `rustup target add thumbv7em-none-eabihf thumbv8m.main-none-eabihf riscv32imac-unknown-none-elf`，再加上 `--features embedded` 安装（与 wasm 两者都要则用 `--features wasm,embedded`）。使用仓库的调试构建 `typl` 时，运行 `scripts/build-embedded-runtime.sh`。链接使用 rustup 工具链的链接器。
+- 用 `install.sh` 安装的 `typl` 可以直接使用。用 `cargo install` 安装时，先运行 `rustup target add thumbv7em-none-eabihf thumbv8m.main-none-eabihf thumbv6m-none-eabi riscv32imac-unknown-none-elf`，再加上 `--features embedded` 安装（与 wasm 两者都要则用 `--features wasm,embedded`）。使用仓库的调试构建 `typl` 时，运行 `scripts/build-embedded-runtime.sh`。链接使用 rustup 工具链的链接器。
 - 用 `--linker-script FILE` 给出开发板的内存布局。写法与 `cortex-m-rt` 的 `memory.x` 相同，写 FLASH 和 RAM 的地址与大小。写 `_typelisp_stack_size = 32K;` 这样的一行，就是 RAM 中栈占用的大小（不写则为 64KiB）。RAM 的其余部分是堆。省略时使用 QEMU 的 `mps2-an386`（Cortex-M33 为 `mps2-an505`） 的布局。
 
   ```
@@ -256,6 +261,10 @@ $ qemu-system-riscv32 -M virt -bios none -nographic \
   _typelisp_stack_size = 4K;
   ```
 
+- 在 RAM 较小的开发板上，可以用 `--ram SIZE`（如 `16K`）代替 `--linker-script`，只指定数据、堆和栈所用 RAM 的大小。默认布局的 RAM 变为这个大小，栈最多占其四分之一。在像 RISC-V 的 `virt` 这样代码也放在 RAM 中的开发板上，开发板 RAM 的其余部分成为代码的区域。运行时最初分配的量会配合堆的大小而变小。不能与 `--linker-script` 一起使用。
+
+- 开发板没有操作系统，栈溢出时没有任何东西能阻止它。因此可执行文件在进入程序的每个函数时检查栈还剩多少；不够时写出 `stack overflow: the program needs more than the ... bytes of the stack` 并以退出码 1 结束。要让栈更大，请增大 `--linker-script` 文件中的 `_typelisp_stack_size`，或增大 `--ram`。加上 `--no-stack-check` 则不插入此检查（可执行文件会稍小、稍快，但溢出的栈可能悄无声息地破坏堆）。无论哪种情况，当栈在运行时内部溢出并越过栈底时，随后的 panic 或 HardFault 报告之前都会写出 `stack overflow: the stack has run past its bottom into the heap`。 程序运行到结束时也会写出同样的内容，并以退出码 1 结束。另外，递归的深度不占用栈（调用记录放在堆上，过深的递归会导致内存不足）；深度使用栈的是运行时的处理。要在此之前停止，请使用 3.5 节的 `--frame-memory`。
+
 - 由谁提供输出、输入、结束和时钟（开发板的函数），用 `--board-functions` 选择。
   - `semihosting`（默认）：通过 semihosting 提供。在 QEMU（`-semihosting-config enable=on`）或调试器下运行时使用。
   - `c`：由开发板以 C 函数提供。用 `--link FILE` 传入定义了下列函数的目标文件或静态库（`--link` 可以写多次；`defffi` 调用的厂商库也同样传入）。
@@ -283,7 +292,7 @@ $ qemu-system-riscv32 -M virt -bios none -nographic \
     (put-byte 104) (put-byte 105) (put-byte 10))                             ; "hi" 和换行
   ```
 
-- 中断到来时被调用的函数，写成带有 `#[interrupt(N)]`（外设中断 `N`）或 `#[exception(SysTick)]` 这类属性的 `defun`。中断用 `(enable-interrupt N)` 启用。处理程序当场执行，只有在运行时处理途中到来时，才会在该处理结束后执行。处理程序中不能等待（`sleep` 是编译错误）。详见 [语法参考](../reference/syntax.md) 的 3.17 节。在 RISC-V 上，`N` 是 `mcause` 中的中断编号（0～31。3 是软件中断，7 是定时器，11 是外部中断），不能使用 `#[exception(NAME)]`。
+- 中断到来时被调用的函数，写成带有 `#[interrupt(N)]`（外设中断 `N`）或 `#[exception(SysTick)]` 这类属性的 `defun`。中断用 `(enable-interrupt N)` 启用。处理程序当场执行，只有在运行时处理途中到来时，才会在该处理结束后执行。处理程序中不能等待（`sleep` 是编译错误）。详见 [语法参考](../reference/syntax.md) 的 3.17 节。在 Cortex-M0+ 上，`N` 为 0～31，`#[exception(NAME)]` 只能写 `NonMaskableInt`、`SVCall`、`PendSV`、`SysTick`。在 RISC-V 上，`N` 是 `mcause` 中的中断编号（0～31。3 是软件中断，7 是定时器，11 是外部中断），不能使用 `#[exception(NAME)]`。
 
   ```lisp
   (use std::board::enable-interrupt)
@@ -300,7 +309,7 @@ $ qemu-system-riscv32 -M virt -bios none -nographic \
 - 启动（向量表和 RAM 的准备）和内存分配由运行时完成。发生 HardFault（在 RISC-V 上为异常） 或未处理的中断时，以与 panic 相同的退出码（1）结束。
 - `throw`/`catch`/`panic`、bignum、ratio、浮点数，以及任务、通道和 `sleep` 的行为与可执行文件相同。任务在唯一的核心上依次执行。也可以使用 C 函数（`defffi`）。
 - 使用开发板没有的东西的程序是**编译错误**。除了 3.7 节中不能使用的东西，还不能使用 `eval` 和 `macroexpand`。本地时间未知（与 3.6 节相同）。
-- cons 区域从 1024 个单元开始，不够时会增长。`--heap-cells`、`--max-memory`、`--no-cons`、`-O<N>`、`--release` 可以照常使用。
+- cons 区域从 1024 个单元开始，不够时会增长。`--heap-cells`、`--max-memory`、`--frame-memory`、`--no-cons`、`-O<N>`、`--release` 可以照常使用。
 
 ### 3.9 为 Arduino Uno（AVR）编译
 

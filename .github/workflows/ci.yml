@@ -71,7 +71,7 @@ jobs:
       # QEMU with), and without them (a board that gives its own).
       - name: Check the boards' runtimes (warnings are errors)
         run: |
-          for target in thumbv7em-none-eabihf thumbv8m.main-none-eabihf riscv32imac-unknown-none-elf; do
+          for target in thumbv7em-none-eabihf thumbv8m.main-none-eabihf thumbv6m-none-eabi riscv32imac-unknown-none-elf; do
             cargo check -p typelisp-rt-embedded --target "$target" --locked
             cargo check -p typelisp-rt-semihosting --target "$target" --locked
           done
@@ -137,7 +137,7 @@ jobs:
       # QEMU with), and without them (a board that gives its own).
       - name: Check the boards' runtimes (warnings are errors)
         run: |
-          for target in thumbv7em-none-eabihf thumbv8m.main-none-eabihf riscv32imac-unknown-none-elf; do
+          for target in thumbv7em-none-eabihf thumbv8m.main-none-eabihf thumbv6m-none-eabi riscv32imac-unknown-none-elf; do
             cargo check -p typelisp-rt-embedded --target "$target" --locked
             cargo check -p typelisp-rt-semihosting --target "$target" --locked
           done

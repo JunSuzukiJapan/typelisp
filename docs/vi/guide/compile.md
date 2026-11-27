@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ be56bb8a477929497064b8f807acfd1755f2b35b -->
+<!-- translated-from: docs/ja/guide/compile.md @ f5fad21e6962ea3c90d803827468d58aaae4ceaa -->
 # Biên dịch
 
 Nếu bạn không làm gì thêm, chương trình typelisp chạy trong trình thông dịch. Ngoài ra còn có hai
@@ -163,14 +163,16 @@ với `typl` được build cùng với nó. Sau khi build lại `typl`, hãy sa
 ```sh
 $ typl --heap-cells 100000 -c hello.typl    # cố định vùng cons ở 100000 ô
 $ typl -c hello.typl --max-memory 64M       # cấp phát tối đa 64 MiB
+$ typl -c hello.typl --frame-memory 1M      # tối đa 1 MiB cho các lời gọi đang chạy của mỗi tác vụ
 $ typl -c hello.typl --no-cons              # không dùng ô cons
 ```
 
 - `--heap-cells N` cố định dung lượng vùng ô cons ở `N` ô. Vùng không lớn thêm: nếu thu gom rác không giải phóng được ô nào, chương trình dừng với lỗi thời gian chạy. Khi không chỉ định, vùng bắt đầu với 65536 ô và lớn dần khi cần.
 - `--max-memory SIZE` giới hạn tổng bộ nhớ tệp thực thi cấp phát. Mọi thứ đều được tính: vùng cons, chuỗi, các giá trị như vector và bảng băm, và bộ nhớ mà chính runtime dùng. `SIZE` là số byte và có thể theo sau bởi `K`, `M` hoặc `G` (gấp 1024, 1024² và 1024³ lần). Một lần cấp phát vượt quá giới hạn sẽ được báo, và chương trình kết thúc với mã thoát 1. Kết thúc này không bắt được bằng `catch`. Khi không chỉ định thì không có giới hạn.
+- `--frame-memory SIZE` giới hạn, cho mỗi tác vụ, bộ nhớ mà bản ghi của các lời gọi đang chạy chiếm (những gì một lời gọi giữ cho tới khi kết thúc, như đối số và biến cục bộ). Các bản ghi nằm trên heap và tăng lên khi đệ quy sâu hơn. `SIZE` viết như với `--max-memory`. Lời gọi sẽ vượt giới hạn thì không được thực hiện: tệp thực thi báo điều đó và kết thúc với mã thoát 1, `catch` cũng không bắt được. Trên bo mạch ít bộ nhớ, nó dừng một đệ quy quá sâu trước khi dùng hết heap. Không có tùy chọn này thì không có giới hạn.
 - `--no-cons` tạo tệp thực thi không dùng ô cons nào. Nó không có vùng cons, nên một chương trình làm việc cần đến ô cons là **lỗi biên dịch**, hiển thị thao tác đó và chuỗi hàm từ `main` dẫn tới nó. Ô cons cần cho việc tạo danh sách `Sexpr` (kể cả danh sách được quote và danh sách tạo bằng quasiquote) hoặc đối số `&rest`, và cho `read`, `eval`, `macroexpand`. Các thao tác trên số, chuỗi, vector, bảng băm, struct, kênh và những thứ tương tự, cùng `print`/`println`/`format`, không dùng ô nào. Không thể chỉ định cùng `--heap-cells`, và được viết sau `-c`.
 
-`--max-memory` được viết sau `-c`. `--heap-cells` có thể viết trước hoặc sau `-c`, và khi đó là dung lượng vùng cons của tệp thực thi. Vùng cons được tính vào giới hạn bộ nhớ, nên với một giới hạn không chứa nổi vùng, chương trình dừng trước khi bắt đầu.
+`--max-memory` và `--frame-memory` được viết sau `-c`. `--heap-cells` có thể viết trước hoặc sau `-c`, và khi đó là dung lượng vùng cons của tệp thực thi. Vùng cons được tính vào giới hạn bộ nhớ, nên với một giới hạn không chứa nổi vùng, chương trình dừng trước khi bắt đầu.
 
 ### 3.6 Biên dịch sang WebAssembly
 
@@ -195,7 +197,7 @@ fib(25) = 75025
   TLS, phân giải tên), luồng của hệ điều hành (`Thread`), hàm C (`defffi`), `get-internal-run-time`, `machine-instance`, `software-version`, `file-author`
   và `ed`.
 - WASI không có cách nào biết múi giờ, nên giờ địa phương là không biết được. `decode-universal-time` và `encode-universal-time` khi bỏ `zone`, cùng `get-decoded-time`, sẽ panic khi chạy. Chúng dùng được khi đưa `zone`.
-- `--heap-cells`, `--max-memory`, `--no-cons`, `-O<N>` và `--release` dùng được như với tệp thực thi.
+- `--heap-cells`, `--max-memory`, `--frame-memory`, `--no-cons`, `-O<N>` và `--release` dùng được như với tệp thực thi.
 
 ### 3.7 Chạy trong trình duyệt hoặc Node.js
 
@@ -223,7 +225,7 @@ const code = await run({ write: (fd, text) => { /* ví dụ hiển thị lên tr
 
 ### 3.8 Biên dịch cho vi điều khiển (Cortex-M, RISC-V)
 
-Với `--target thumbv7em-none-eabihf`, `typl -c` tạo tệp thực thi (ELF) cho bo mạch Cortex-M4F hoặc M7 không có hệ điều hành. Nếu không có `-o`, tên là tên mã nguồn với `.typl` đổi thành `.elf`. Với `--target thumbv8m.main-none-eabihf`, là cho bo mạch Cortex-M33. Với `--target riscv32imac-unknown-none-elf`, là cho bo mạch có lõi RISC-V 32 bit (các phần mở rộng M, A và C).
+Với `--target thumbv7em-none-eabihf`, `typl -c` tạo tệp thực thi (ELF) cho bo mạch Cortex-M4F hoặc M7 không có hệ điều hành. Nếu không có `-o`, tên là tên mã nguồn với `.typl` đổi thành `.elf`. Với `--target thumbv8m.main-none-eabihf`, là cho bo mạch Cortex-M33. Với `--target riscv32imac-unknown-none-elf`, là cho bo mạch có lõi RISC-V 32 bit (các phần mở rộng M, A và C). Với `--target thumbv6m-none-eabi`, là cho bo mạch Cortex-M0+ (M0). QEMU không có bo mạch Cortex-M0+, nên tệp thực thi cho nó chạy trên `mps2-an385`, một Cortex-M3 chạy nguyên các lệnh đó (bố cục khi không có `--linker-script` cũng là của bo mạch này).
 
 ```sh
 $ typl -c hello.typl --target thumbv7em-none-eabihf          # tạo hello.elf
@@ -232,12 +234,15 @@ $ qemu-system-arm -M mps2-an386 -nographic \
 $ typl -c hello.typl --target thumbv8m.main-none-eabihf
 $ qemu-system-arm -M mps2-an505 -nographic \
     -semihosting-config enable=on,target=native -kernel hello.elf   # chạy trên Cortex-M33 của QEMU
+$ typl -c hello.typl --target thumbv6m-none-eabi
+$ qemu-system-arm -M mps2-an385 -nographic \
+    -semihosting-config enable=on,target=native -kernel hello.elf   # chạy trên Cortex-M3 của QEMU
 $ typl -c hello.typl --target riscv32imac-unknown-none-elf
 $ qemu-system-riscv32 -M virt -bios none -nographic \
     -semihosting-config enable=on,target=native -kernel hello.elf   # chạy trên RISC-V của QEMU
 ```
 
-- `typl` cài bằng `install.sh` dùng được ngay. Để cài bằng `cargo install`, chạy `rustup target add thumbv7em-none-eabihf thumbv8m.main-none-eabihf riscv32imac-unknown-none-elf` rồi cài với `--features embedded` (`--features wasm,embedded` cho cả hai). Với bản build gỡ lỗi của `typl` trong kho mã, chạy `scripts/build-embedded-runtime.sh`. Việc liên kết dùng trình liên kết của toolchain rustup.
+- `typl` cài bằng `install.sh` dùng được ngay. Để cài bằng `cargo install`, chạy `rustup target add thumbv7em-none-eabihf thumbv8m.main-none-eabihf thumbv6m-none-eabi riscv32imac-unknown-none-elf` rồi cài với `--features embedded` (`--features wasm,embedded` cho cả hai). Với bản build gỡ lỗi của `typl` trong kho mã, chạy `scripts/build-embedded-runtime.sh`. Việc liên kết dùng trình liên kết của toolchain rustup.
 - Cho biết bộ nhớ của bo mạch bằng `--linker-script FILE`. Tệp được viết như `memory.x` của `cortex-m-rt`: địa chỉ và kích thước của FLASH và RAM. Một dòng như `_typelisp_stack_size = 32K;` đặt phần RAM mà ngăn xếp dùng (mặc định 64KiB); phần RAM còn lại là heap. Không có tùy chọn này thì dùng bố trí của `mps2-an386` (`mps2-an505` cho Cortex-M33) trong QEMU.
 
   ```
@@ -266,6 +271,10 @@ $ qemu-system-riscv32 -M virt -bios none -nographic \
   _typelisp_stack_size = 4K;
   ```
 
+- Trên bo mạch ít RAM, thay cho `--linker-script`, `--ram SIZE` (`16K` v.v.) chỉ cho biết dữ liệu, heap và ngăn xếp có bao nhiêu RAM. RAM của bố cục mặc định có kích thước đó, và ngăn xếp dùng tối đa một phần tư. Trên bo mạch cũng đặt mã trong RAM, như `virt` của RISC-V, mã nằm ở phần RAM còn lại của bo mạch. Những gì runtime cấp phát lúc đầu được thu nhỏ cho vừa heap. Không dùng chung được với `--linker-script`.
+
+- Bo mạch không có hệ điều hành nên không gì chặn được stack bị tràn. Vì vậy tệp thực thi kiểm tra, khi vào mỗi hàm của chương trình, còn bao nhiêu stack; nếu còn quá ít, nó ghi `stack overflow: the program needs more than the ... bytes of the stack` và kết thúc với mã thoát 1. Muốn stack lớn hơn, hãy tăng `_typelisp_stack_size` trong tệp của `--linker-script`, hoặc `--ram`. `--no-stack-check` bỏ việc kiểm tra này (tệp nhỏ và nhanh hơn một chút, nhưng stack bị tràn có thể âm thầm làm hỏng heap). Trong cả hai trường hợp, khi stack tràn bên trong runtime và vượt qua đáy của nó, báo cáo panic hoặc HardFault theo sau sẽ được ghi sau dòng `stack overflow: the stack has run past its bottom into the heap`. Điều tương tự cũng được ghi, với mã thoát 1, khi chương trình chạy đến cuối. Lưu ý rằng độ sâu của đệ quy không dùng stack (bản ghi các lời gọi nằm trên heap, và đệ quy quá sâu sẽ hết bộ nhớ); thứ dùng stack sâu là công việc của runtime. Muốn dừng nó trước đó, hãy dùng `--frame-memory` (mục 3.5).
+
 - `--board-functions` chọn ai cung cấp đầu ra, đầu vào, kết thúc và đồng hồ (các hàm của bo mạch).
   - `semihosting` (mặc định): qua semihosting, để chạy trong QEMU (`-semihosting-config enable=on`) hoặc trình gỡ lỗi.
   - `c`: bo mạch cung cấp chúng dưới dạng hàm C. Truyền bằng `--link FILE` một tệp đối tượng hoặc thư viện tĩnh định nghĩa các hàm dưới đây (`--link` có thể lặp lại; thư viện của nhà sản xuất mà `defffi` gọi cũng truyền như vậy).
@@ -293,7 +302,7 @@ $ qemu-system-riscv32 -M virt -bios none -nographic \
     (put-byte 104) (put-byte 105) (put-byte 10))                             ; "hi" và xuống dòng
   ```
 
-- Viết hàm được gọi khi có ngắt đến dưới dạng `defun` có thuộc tính `#[interrupt(N)]` (ngắt ngoại vi `N`) hoặc như `#[exception(SysTick)]`. Bật ngắt bằng `(enable-interrupt N)`. Trình xử lý chạy ngay; chỉ khi ngắt đến giữa lúc runtime đang làm việc thì nó chạy sau khi công việc đó xong. Trình xử lý không thể chờ (`sleep` là lỗi biên dịch). Chi tiết ở mục 3.17 của [tài liệu tham khảo cú pháp](../reference/syntax.md). Trên RISC-V, `N` là số hiệu của ngắt trong `mcause` (0 đến 31: 3 là ngắt phần mềm, 7 là bộ định thời, 11 là ngắt ngoài), và không dùng được `#[exception(NAME)]`.
+- Viết hàm được gọi khi có ngắt đến dưới dạng `defun` có thuộc tính `#[interrupt(N)]` (ngắt ngoại vi `N`) hoặc như `#[exception(SysTick)]`. Bật ngắt bằng `(enable-interrupt N)`. Trình xử lý chạy ngay; chỉ khi ngắt đến giữa lúc runtime đang làm việc thì nó chạy sau khi công việc đó xong. Trình xử lý không thể chờ (`sleep` là lỗi biên dịch). Chi tiết ở mục 3.17 của [tài liệu tham khảo cú pháp](../reference/syntax.md). Trên Cortex-M0+, `N` từ 0 đến 31, và `#[exception(NAME)]` chỉ có thể là `NonMaskableInt`, `SVCall`, `PendSV` và `SysTick`. Trên RISC-V, `N` là số hiệu của ngắt trong `mcause` (0 đến 31: 3 là ngắt phần mềm, 7 là bộ định thời, 11 là ngắt ngoài), và không dùng được `#[exception(NAME)]`.
 
   ```lisp
   (use std::board::enable-interrupt)
@@ -310,7 +319,7 @@ $ qemu-system-riscv32 -M virt -bios none -nographic \
 - Runtime khởi động chương trình (bảng vector và chuẩn bị RAM) và cấp phát bộ nhớ. Một HardFault (trên RISC-V là một ngoại lệ) hoặc ngắt không được xử lý kết thúc chương trình với mã thoát của panic (1).
 - `throw`/`catch`/`panic`, số lớn, phân số và số thực dấu phẩy động, cùng tác vụ, kênh và `sleep` hoạt động như trong tệp thực thi. Các tác vụ chạy lần lượt trên lõi duy nhất. Có thể dùng hàm C (`defffi`).
 - Chương trình dùng thứ bo mạch không có là **lỗi biên dịch**: ngoài những gì không dùng được ở mục 3.7, còn `eval` và `macroexpand`. Giờ địa phương không xác định (như ở mục 3.6).
-- Vùng cons bắt đầu với 1024 ô và lớn lên khi cần. `--heap-cells`, `--max-memory`, `--no-cons`, `-O<N>` và `--release` dùng như bình thường.
+- Vùng cons bắt đầu với 1024 ô và lớn lên khi cần. `--heap-cells`, `--max-memory`, `--frame-memory`, `--no-cons`, `-O<N>` và `--release` dùng như bình thường.
 
 ### 3.9 Biên dịch cho Arduino Uno (AVR)
 

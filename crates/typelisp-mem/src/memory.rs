@@ -6,7 +6,7 @@
 //! process whose allocator does not, nothing is ever counted and no
 //! collection is made for memory.
 
-use core::sync::atomic::{AtomicUsize, Ordering};
+use crate::sync::atomic::{AtomicUsize, Ordering};
 
 /// Bytes currently allocated.
 static IN_USE: AtomicUsize = AtomicUsize::new(0);
@@ -46,6 +46,12 @@ pub fn set_limit(bytes: usize) {
 
 pub fn limit() -> usize {
     LIMIT.load(Ordering::Relaxed)
+}
+
+/// The most there is to allocate, where that is known (a board's heap);
+/// `usize::MAX` where it is not.
+pub fn capacity() -> usize {
+    CAPACITY.load(Ordering::Relaxed)
 }
 
 /// Says there are `bytes` bytes to allocate from in all.

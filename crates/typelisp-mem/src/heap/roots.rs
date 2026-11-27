@@ -15,11 +15,11 @@ impl Heap {
     /// method that changes either, and always points at a live `RootStack`
     /// owned by `root_stacks` (never dangling: `drop_root_stack` refuses to
     /// drop the running stack).
-    fn roots(&self) -> &[Value] {
+    fn roots(&self) -> &crate::chunked::ChunkStack<Value> {
         &unsafe { &*self.current }.roots
     }
 
-    pub(super) fn roots_mut(&mut self) -> &mut Vec<Value> {
+    pub(super) fn roots_mut(&mut self) -> &mut crate::chunked::ChunkStack<Value> {
         &mut unsafe { &mut *self.current }.roots
     }
 
@@ -79,8 +79,7 @@ impl Heap {
     /// `let`/`match` scopes happen to be open. A no-op if `len >= root_count()`
     /// already (a `break`/`return` with nothing open above the loop it's
     /// jumping out of) — same "truncating to at-or-past the current length
-    /// does nothing" behavior as [`Vec::truncate`], which this delegates to
-    /// directly.
+    /// does nothing" behavior as [`Vec::truncate`].
     ///
     /// Closes every compiled frame opened at `len` or deeper with them (see
     /// [`open_frame`](Self::open_frame)).

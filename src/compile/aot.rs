@@ -300,6 +300,10 @@ pub struct BuildOptions {
     /// The bound on the bytes the running executable allocates
     /// (`--max-memory`, `typelisp_rt::mem_limit`). `None` is no bound.
     pub max_memory: Option<usize>,
+    /// The bound on the bytes each task's calls in progress take
+    /// (`--frame-memory`, `typelisp_mem::heap::set_frame_memory`): a call
+    /// past it ends the program. `None` is no bound.
+    pub frame_memory: Option<usize>,
     /// No cons arena at all (`--no-cons`): a program that would take a cell
     /// from it is refused at compile time (`reach`), and the executable's
     /// arena has no cells. Not with [`Self::heap_cells`].
@@ -311,6 +315,13 @@ pub struct BuildOptions {
     /// `memory.x`. `None` is the QEMU board that stands for the target's
     /// core ([`embedded::Board::qemu_memory`]).
     pub linker_script: Option<std::path::PathBuf>,
+    /// For a board without [`Self::linker_script`]: how many bytes of RAM
+    /// the data, the heap and the stack have (`--ram`), in place of the QEMU
+    /// board's ([`embedded::Layout::memory_x`]).
+    pub ram: Option<usize>,
+    /// For a board with the runtime: no check of the stack on entering each
+    /// function (`--no-stack-check`, [`embedded`]'s `stack_checked`).
+    pub no_stack_check: bool,
     /// For a board: who gives the board's functions (`--board-functions`).
     pub board_functions: BoardFunctions,
     /// For a board: objects and static libraries to link the program with
@@ -367,6 +378,8 @@ pub enum Target {
     Thumbv7em,
     /// `thumbv8m.main-none-eabihf`: the same for a Cortex-M33 board.
     Thumbv8mMain,
+    /// `thumbv6m-none-eabi`: the same for a Cortex-M0+ (or M0) board.
+    Thumbv6m,
     /// `riscv32imac-unknown-none-elf`: the same for a board with a 32-bit
     /// RISC-V core that has the M, A and C extensions.
     Riscv32imac,
@@ -383,6 +396,7 @@ impl Target {
             "wasm32-unknown-unknown" => Ok(Target::Wasm32Unknown),
             "thumbv7em-none-eabihf" => Ok(Target::Thumbv7em),
             "thumbv8m.main-none-eabihf" => Ok(Target::Thumbv8mMain),
+            "thumbv6m-none-eabi" => Ok(Target::Thumbv6m),
             "riscv32imac-unknown-none-elf" => Ok(Target::Riscv32imac),
             "avr-atmega328p" => Ok(Target::AvrAtmega328p),
             _ => Err(format!(
@@ -394,13 +408,14 @@ impl Target {
     }
 
     /// The targets that are boards without an operating system.
-    pub const BOARDS: [Target; 4] = [Target::Thumbv7em, Target::Thumbv8mMain, Target::Riscv32imac, Target::AvrAtmega328p];
+    pub const BOARDS: [Target; 5] = [Target::Thumbv7em, Target::Thumbv8mMain, Target::Thumbv6m, Target::Riscv32imac, Target::AvrAtmega328p];
 
     /// The board the target is, if it is one.
     pub fn board(self) -> Option<&'static embedded::Board> {
         match self {
             Target::Thumbv7em => Some(&embedded::CORTEX_M4),
             Target::Thumbv8mMain => Some(&embedded::CORTEX_M33),
+            Target::Thumbv6m => Some(&embedded::CORTEX_M0PLUS),
             Target::Riscv32imac => Some(&embedded::RISCV32_VIRT),
             Target::AvrAtmega328p => Some(&avr::ATMEGA328P),
             Target::Host | Target::Wasip1 | Target::Wasm32Unknown => None,
@@ -426,7 +441,7 @@ impl Target {
             Target::Host => &[],
             Target::Wasip1 => &[RuntimeCrate::Posix],
             Target::Wasm32Unknown => &[RuntimeCrate::Sys, RuntimeCrate::Posix],
-            Target::Thumbv7em | Target::Thumbv8mMain | Target::Riscv32imac | Target::AvrAtmega328p => {
+            Target::Thumbv7em | Target::Thumbv8mMain | Target::Thumbv6m | Target::Riscv32imac | Target::AvrAtmega328p => {
                 &[RuntimeCrate::Sys, RuntimeCrate::Posix, RuntimeCrate::Front]
             }
         }
@@ -437,7 +452,7 @@ impl Target {
         use typelisp_mem::target::DataModel;
         match self {
             Target::Host => DataModel::HOST,
-            Target::Wasip1 | Target::Wasm32Unknown | Target::Thumbv7em | Target::Thumbv8mMain | Target::Riscv32imac => DataModel::ILP32,
+            Target::Wasip1 | Target::Wasm32Unknown | Target::Thumbv7em | Target::Thumbv8mMain | Target::Thumbv6m | Target::Riscv32imac => DataModel::ILP32,
             Target::AvrAtmega328p => DataModel::AVR,
         }
     }
@@ -450,6 +465,7 @@ impl Target {
             Target::Wasm32Unknown => "wasm32-unknown-unknown",
             Target::Thumbv7em => "thumbv7em-none-eabihf",
             Target::Thumbv8mMain => "thumbv8m.main-none-eabihf",
+            Target::Thumbv6m => "thumbv6m-none-eabi",
             Target::Riscv32imac => "riscv32imac-unknown-none-elf",
             Target::AvrAtmega328p => "avr-atmega328p",
         }
@@ -462,7 +478,7 @@ impl Target {
         match self {
             Target::Host => "",
             Target::Wasip1 | Target::Wasm32Unknown => "wasm",
-            Target::Thumbv7em | Target::Thumbv8mMain | Target::Riscv32imac | Target::AvrAtmega328p => "elf",
+            Target::Thumbv7em | Target::Thumbv8mMain | Target::Thumbv6m | Target::Riscv32imac | Target::AvrAtmega328p => "elf",
         }
     }
 }
@@ -1143,6 +1159,7 @@ pub fn compile_file_with(source_path: &str, output_path: &str, options: &BuildOp
                 },
                 fixed: options.heap_cells.is_some() || options.no_cons,
                 max_memory: options.max_memory,
+                frame_memory: options.frame_memory,
             },
         )
             .and_then(|()| m.verify().map_err(|e| format!("module failed verification: {}", e)))
@@ -1196,7 +1213,7 @@ pub fn compile_file_with(source_path: &str, output_path: &str, options: &BuildOp
             .and_then(|()| match options.target {
                 Target::Host => write_executable(&m, output_path, &link_libraries, &items),
                 Target::AvrAtmega328p => Err("internal error: a target without a runtime is built without a driver".to_string()),
-                Target::Wasip1 | Target::Wasm32Unknown | Target::Thumbv7em | Target::Thumbv8mMain | Target::Riscv32imac => {
+                Target::Wasip1 | Target::Wasm32Unknown | Target::Thumbv7em | Target::Thumbv8mMain | Target::Thumbv6m | Target::Riscv32imac => {
                     let missing = options.target.missing_runtimes();
                     // A board calls its vendor's C functions; a WebAssembly
                     // module has no C library to find them in.
@@ -1413,7 +1430,8 @@ fn build_main_wrapper(
     // before `tl_main` (or anything it calls) touches the heap at all.
     //
     // The bound on memory is set by the same call, before the arena is
-    // allocated, so the arena counts toward it (0 is no bound).
+    // allocated, so the arena counts toward it, and the bound on each task's
+    // calls in progress (0 is no bound, for both).
     call_shim(
         module,
         &builder,
@@ -1422,6 +1440,7 @@ fn build_main_wrapper(
             crate::compile::carriers::word().const_int(heap.cells as u64, false),
             crate::compile::carriers::word().const_int(heap.max_memory.unwrap_or(0) as u64, false),
             crate::compile::carriers::word().const_int(heap.fixed as u64, false),
+            crate::compile::carriers::word().const_int(heap.frame_memory.unwrap_or(0) as u64, false),
         ],
     )?;
     // Between the heap and the vtables and global inits, and that position
@@ -2134,12 +2153,13 @@ fn emit_print_registration(
 }
 
 /// What the generated `main` asks `rt_heap_init` for: the cons arena's
-/// capacity, whether it stays at that capacity, and the bound on the
-/// process's allocations.
+/// capacity, whether it stays at that capacity, the bound on the process's
+/// allocations, and the bound on each task's calls in progress.
 struct HeapInit {
     cells: usize,
     fixed: bool,
     max_memory: Option<usize>,
+    frame_memory: Option<usize>,
 }
 
 /// The cons-cell arena a board's executable starts with, which grows as the
@@ -2407,7 +2427,7 @@ mod tests {
         builder.build_call(exit, &[code.into()], "").unwrap();
         builder.build_unreachable().unwrap();
 
-        build_main_wrapper(ctx, &module, "tl_main", None, &[], &super::Globals::default(), &[], &[], &[], &[], &[], &[], &[], &[], &[], None, false, super::Target::Host, super::HeapInit { cells: typelisp_rt::DEFAULT_AOT_HEAP_CAPACITY, fixed: false, max_memory: None }).expect("build_main_wrapper failed");
+        build_main_wrapper(ctx, &module, "tl_main", None, &[], &super::Globals::default(), &[], &[], &[], &[], &[], &[], &[], &[], &[], None, false, super::Target::Host, super::HeapInit { cells: typelisp_rt::DEFAULT_AOT_HEAP_CAPACITY, fixed: false, max_memory: None, frame_memory: None }).expect("build_main_wrapper failed");
         module.verify().expect("module failed verification");
 
         let out_path = tmp_path("rt_ping_test");
@@ -2441,7 +2461,7 @@ mod tests {
         let (_, result) = crate::compile::runtime_abi::call_declared(&builder, rt_heap_live_count, &sig, &[]).unwrap();
         builder.build_return(Some(&result)).unwrap();
 
-        build_main_wrapper(ctx, &module, "tl_main", None, &[], &super::Globals::default(), &[], &[], &[], &[], &[], &[], &[], &[], &[], None, false, super::Target::Host, super::HeapInit { cells: typelisp_rt::DEFAULT_AOT_HEAP_CAPACITY, fixed: false, max_memory: None }).expect("build_main_wrapper failed");
+        build_main_wrapper(ctx, &module, "tl_main", None, &[], &super::Globals::default(), &[], &[], &[], &[], &[], &[], &[], &[], &[], None, false, super::Target::Host, super::HeapInit { cells: typelisp_rt::DEFAULT_AOT_HEAP_CAPACITY, fixed: false, max_memory: None, frame_memory: None }).expect("build_main_wrapper failed");
         module.verify().expect("module failed verification");
 
         let out_path = tmp_path("rt_heap_init_test");

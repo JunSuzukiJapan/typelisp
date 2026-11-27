@@ -893,7 +893,7 @@ fn entry_shims() -> &'static [(&'static str, Shim)] {
             rt_run_program_int,
         };
         [
-            ("rt_heap_init", shim(rt_heap_init as unsafe extern "C" fn(Word, Word, Word) -> Word)),
+            ("rt_heap_init", shim(rt_heap_init as unsafe extern "C" fn(Word, Word, Word, Word) -> Word)),
             ("rt_main_answered", shim(rt_main_answered as unsafe extern "C" fn(Word) -> Word)),
             ("rt_main_returned", shim(rt_main_returned as unsafe extern "C" fn() -> Word)),
             ("rt_run_entry", shim(rt_run_entry as unsafe extern "C" fn(Word) -> Word)),

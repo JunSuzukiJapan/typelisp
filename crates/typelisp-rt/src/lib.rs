@@ -179,7 +179,7 @@ mod tests {
 
     #[test]
     fn rt_heap_init_registers_a_freshly_created_heap() {
-        assert_eq!(unsafe { rt_heap_init(4, 0, 0) }, 0);
+        assert_eq!(unsafe { rt_heap_init(4, 0, 0, 0) }, 0);
         assert_eq!(unsafe { rt_heap_live_count() }, 0);
 
         // `rt_heap_init` deliberately never frees the `Heap` it allocates

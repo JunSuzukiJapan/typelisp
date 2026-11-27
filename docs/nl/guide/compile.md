@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ be56bb8a477929497064b8f807acfd1755f2b35b -->
+<!-- translated-from: docs/ja/guide/compile.md @ f5fad21e6962ea3c90d803827468d58aaae4ceaa -->
 # Compileren
 
 Tenzij je iets anders doet, draaien typelisp-programma's in de interpreter. Daarnaast zijn er twee
@@ -174,14 +174,16 @@ gebouwd.
 ```sh
 $ typl --heap-cells 100000 -c hello.typl    # zet de cons-arena vast op 100000 cellen
 $ typl -c hello.typl --max-memory 64M       # alloceer hoogstens 64 MiB
+$ typl -c hello.typl --frame-memory 1M      # hoogstens 1 MiB lopende aanroepen per taak
 $ typl -c hello.typl --no-cons              # gebruik geen cons-cellen
 ```
 
 - `--heap-cells N` zet de capaciteit van de arena van cons-cellen vast op `N` cellen. De arena groeit daar niet voorbij: kan de garbage collection geen cel vrijmaken, dan stopt het programma met een runtimefout. Zonder de optie begint de arena met 65536 cellen en groeit ze naar behoefte.
 - `--max-memory SIZE` begrenst het totale geheugen dat het uitvoerbare bestand alloceert. Alles telt mee: de cons-arena, strings, waarden zoals vectoren en hashtabellen, en het geheugen van de runtime zelf. `SIZE` is een aantal bytes, eventueel gevolgd door `K`, `M` of `G` (1024, 1024² en 1024³ keer). Een allocatie die over de grens zou gaan wordt gemeld, en het programma eindigt met exitcode 1. Dit einde is niet met `catch` op te vangen. Zonder de optie is er geen grens.
+- `--frame-memory SIZE` begrenst per taak het geheugen dat de gegevens van de lopende aanroepen innemen (wat een aanroep bewaart tot hij klaar is, zoals zijn argumenten en lokale variabelen). Die gegevens staan op de heap en groeien naarmate een recursie dieper gaat. `SIZE` schrijf je zoals bij `--max-memory`. Een aanroep die over de grens zou gaan, gebeurt niet: het programma meldt het en eindigt met exitcode 1, die ook `catch` niet opvangt. Op een bord met weinig geheugen houdt het een te diepe recursie tegen voordat die de heap opmaakt. Zonder de optie is er geen grens.
 - `--no-cons` maakt een uitvoerbaar bestand dat geen cons-cellen gebruikt. Het heeft geen cons-arena, dus een programma dat iets doet waarvoor cons-cellen nodig zijn is een **compileerfout**, die die bewerking toont en de keten van functies vanaf `main` die haar bereikt. Cons-cellen zijn nodig om een `Sexpr`-lijst (ook een gequote lijst of een die met quasiquote is gebouwd) of een `&rest`-argument te bouwen, en voor `read`, `eval` en `macroexpand`. Bewerkingen op getallen, strings, vectoren, hashtabellen, structs, kanalen en dergelijke, en `print`/`println`/`format`, gebruiken er geen. Kan niet samen met `--heap-cells` worden opgegeven en staat na `-c`.
 
-`--max-memory` schrijf je na `-c`. `--heap-cells` mag voor of na `-c` staan en is dan de capaciteit van de cons-arena van het uitvoerbare bestand. De cons-arena telt mee voor de geheugengrens: bij een grens waar de arena niet in past, stopt het programma voordat het begint.
+`--max-memory` en `--frame-memory` schrijf je na `-c`. `--heap-cells` mag voor of na `-c` staan en is dan de capaciteit van de cons-arena van het uitvoerbare bestand. De cons-arena telt mee voor de geheugengrens: bij een grens waar de arena niet in past, stopt het programma voordat het begint.
 
 ### 3.6 Compileren voor WebAssembly
 
@@ -206,7 +208,7 @@ fib(25) = 75025
   TLS, naamresolutie), OS-threads (`Thread`), C-functies (`defffi`), `get-internal-run-time`, `machine-instance`, `software-version`, `file-author`
   en `ed`.
 - WASI kan de tijdzone niet opvragen, dus de lokale tijd is onbekend. `decode-universal-time` en `encode-universal-time` zonder `zone`, en `get-decoded-time`, geven tijdens het uitvoeren een panic. Met `zone` werken ze.
-- `--heap-cells`, `--max-memory`, `--no-cons`, `-O<N>` en `--release` werken zoals bij een uitvoerbaar bestand.
+- `--heap-cells`, `--max-memory`, `--frame-memory`, `--no-cons`, `-O<N>` en `--release` werken zoals bij een uitvoerbaar bestand.
 
 ### 3.7 Uitvoeren in een browser of in Node.js
 
@@ -234,7 +236,7 @@ const code = await run({ write: (fd, text) => { /* bijvoorbeeld op de pagina ton
 
 ### 3.8 Compileren voor een microcontroller (Cortex-M, RISC-V)
 
-Met `--target thumbv7em-none-eabihf` maakt `typl -c` een uitvoerbaar bestand (ELF) voor een Cortex-M4F- of M7-bord zonder besturingssysteem. Zonder `-o` krijgt het de naam van de bron met `.typl` vervangen door `.elf`. Met `--target thumbv8m.main-none-eabihf` is het voor een Cortex-M33-bord. Met `--target riscv32imac-unknown-none-elf` is het voor een bord met een 32-bits RISC-V-kern (de uitbreidingen M, A en C).
+Met `--target thumbv7em-none-eabihf` maakt `typl -c` een uitvoerbaar bestand (ELF) voor een Cortex-M4F- of M7-bord zonder besturingssysteem. Zonder `-o` krijgt het de naam van de bron met `.typl` vervangen door `.elf`. Met `--target thumbv8m.main-none-eabihf` is het voor een Cortex-M33-bord. Met `--target riscv32imac-unknown-none-elf` is het voor een bord met een 32-bits RISC-V-kern (de uitbreidingen M, A en C). Met `--target thumbv6m-none-eabi` is het voor een Cortex-M0+-bord (M0). QEMU heeft geen Cortex-M0+-bord, dus een uitvoerbaar bestand daarvoor draait op `mps2-an385`, een Cortex-M3, die dezelfde instructies ongewijzigd uitvoert (ook de indeling zonder `--linker-script` is die van dat bord).
 
 ```sh
 $ typl -c hello.typl --target thumbv7em-none-eabihf          # maakt hello.elf
@@ -243,12 +245,15 @@ $ qemu-system-arm -M mps2-an386 -nographic \
 $ typl -c hello.typl --target thumbv8m.main-none-eabihf
 $ qemu-system-arm -M mps2-an505 -nographic \
     -semihosting-config enable=on,target=native -kernel hello.elf   # uitvoeren op de Cortex-M33 van QEMU
+$ typl -c hello.typl --target thumbv6m-none-eabi
+$ qemu-system-arm -M mps2-an385 -nographic \
+    -semihosting-config enable=on,target=native -kernel hello.elf   # uitvoeren op de Cortex-M3 van QEMU
 $ typl -c hello.typl --target riscv32imac-unknown-none-elf
 $ qemu-system-riscv32 -M virt -bios none -nographic \
     -semihosting-config enable=on,target=native -kernel hello.elf   # uitvoeren op de RISC-V van QEMU
 ```
 
-- Een met `install.sh` geïnstalleerde `typl` kan direct worden gebruikt. Voor `cargo install` voer je eerst `rustup target add thumbv7em-none-eabihf thumbv8m.main-none-eabihf riscv32imac-unknown-none-elf` uit en installeer je met `--features embedded` (`--features wasm,embedded` voor beide). Met een debugbuild van `typl` in de repository voer je `scripts/build-embedded-runtime.sh` uit. Het linken gebruikt de linker van de rustup-toolchain.
+- Een met `install.sh` geïnstalleerde `typl` kan direct worden gebruikt. Voor `cargo install` voer je eerst `rustup target add thumbv7em-none-eabihf thumbv8m.main-none-eabihf thumbv6m-none-eabi riscv32imac-unknown-none-elf` uit en installeer je met `--features embedded` (`--features wasm,embedded` voor beide). Met een debugbuild van `typl` in de repository voer je `scripts/build-embedded-runtime.sh` uit. Het linken gebruikt de linker van de rustup-toolchain.
 - Geef het geheugen van het bord op met `--linker-script FILE`. Het heeft de vorm van de `memory.x` van `cortex-m-rt`: de adressen en groottes van FLASH en RAM. Een regel als `_typelisp_stack_size = 32K;` bepaalt hoeveel RAM de stack inneemt (zonder opgave 64KiB); de rest van het RAM is de heap. Zonder de optie geldt de indeling van QEMU's `mps2-an386` (`mps2-an505` voor een Cortex-M33).
 
   ```
@@ -277,6 +282,10 @@ $ qemu-system-riscv32 -M virt -bios none -nographic \
   _typelisp_stack_size = 4K;
   ```
 
+- Op een bord met weinig RAM geeft `--ram SIZE` (`16K` enzovoort) in plaats van `--linker-script` alleen op hoeveel RAM de data, de heap en de stack hebben. Het RAM van de standaardindeling krijgt die grootte, en de stack neemt er hoogstens een kwart van in. Op een bord dat ook de code in het RAM houdt, zoals `virt` bij RISC-V, komt de code in de rest van het RAM van het bord. Wat de runtime eerst toewijst, wordt klein gehouden zodat het in de heap past. Het kan niet samen met `--linker-script` worden gebruikt.
+
+- Een bord heeft geen besturingssysteem, dus niets houdt een overlopende stack tegen. Het programma controleert daarom bij het binnengaan van elke functie hoeveel stack er over is; is dat te weinig, dan schrijft het `stack overflow: the program needs more than the ... bytes of the stack` en eindigt het met exitcode 1. Voor meer stack maakt u `_typelisp_stack_size` in het bestand van `--linker-script`, of `--ram`, groter. `--no-stack-check` laat de controle weg (het programma wordt iets kleiner en sneller, maar een overlopende stack kan de heap ongemerkt beschadigen). In beide gevallen staat, wanneer de stack in de runtime overloopt en voorbij zijn onderkant gaat, vóór het verslag van de panic of HardFault die volgt `stack overflow: the stack has run past its bottom into the heap`. Hetzelfde wordt geschreven, met exitcode 1, wanneer het programma tot het einde loopt. De diepte van een recursie gebruikt overigens geen stack (de aanroepen worden op de heap bijgehouden, en een te diepe recursie raakt door het geheugen heen); wat de stack diep gebruikt, is het werk van de runtime. Om haar eerder te stoppen, gebruik je `--frame-memory` (paragraaf 3.5).
+
 - `--board-functions` kiest wie uitvoer, invoer, afsluiten en de klok (de functies van het bord) levert.
   - `semihosting` (standaard): via semihosting, om onder QEMU (`-semihosting-config enable=on`) of een debugger te draaien.
   - `c`: het bord levert ze als C-functies. Geef met `--link FILE` een object of statische bibliotheek door die de functies hieronder definieert (`--link` mag herhaald worden; een bibliotheek van de fabrikant die `defffi` aanroept geef je op dezelfde manier door).
@@ -304,7 +313,7 @@ $ qemu-system-riscv32 -M virt -bios none -nographic \
     (put-byte 104) (put-byte 105) (put-byte 10))                             ; "hi" en een nieuwe regel
   ```
 
-- Schrijf de functie die wordt aangeroepen als er een interrupt komt als een `defun` met het attribuut `#[interrupt(N)]` (periferie-interrupt `N`) of een zoals `#[exception(SysTick)]`. Schakel een interrupt in met `(enable-interrupt N)`. Een handler draait meteen; alleen als hij midden in werk van de runtime komt, draait hij nadat dat werk klaar is. Een handler kan niet wachten (`sleep` is een compileerfout). De details staan in paragraaf 3.17 van de [syntaxreferentie](../reference/syntax.md). Op RISC-V is `N` het nummer van de interrupt in `mcause` (0 tot en met 31: 3 is de software-interrupt, 7 de timer, 11 de externe interrupts), en `#[exception(NAME)]` kan niet worden gebruikt.
+- Schrijf de functie die wordt aangeroepen als er een interrupt komt als een `defun` met het attribuut `#[interrupt(N)]` (periferie-interrupt `N`) of een zoals `#[exception(SysTick)]`. Schakel een interrupt in met `(enable-interrupt N)`. Een handler draait meteen; alleen als hij midden in werk van de runtime komt, draait hij nadat dat werk klaar is. Een handler kan niet wachten (`sleep` is een compileerfout). De details staan in paragraaf 3.17 van de [syntaxreferentie](../reference/syntax.md). Op een Cortex-M0+ is `N` 0 tot en met 31, en kan `#[exception(NAME)]` alleen `NonMaskableInt`, `SVCall`, `PendSV` en `SysTick` noemen. Op RISC-V is `N` het nummer van de interrupt in `mcause` (0 tot en met 31: 3 is de software-interrupt, 7 de timer, 11 de externe interrupts), en `#[exception(NAME)]` kan niet worden gebruikt.
 
   ```lisp
   (use std::board::enable-interrupt)
@@ -321,7 +330,7 @@ $ qemu-system-riscv32 -M virt -bios none -nographic \
 - De runtime start het programma (de vectortabel en het klaarmaken van het RAM) en wijst geheugen toe. Een HardFault (op RISC-V een exceptie) of een onafgehandelde interrupt beëindigt het programma met de exitcode van een panic (1).
 - `throw`/`catch`/`panic`, bignums, breuken en drijvende-kommagetallen, en taken, kanalen en `sleep` gedragen zich zoals in het uitvoerbare bestand. Taken draaien om de beurt op de ene kern. C-functies (`defffi`) kunnen worden gebruikt.
 - Een programma dat iets gebruikt wat het bord niet heeft, is een **compileerfout**: naast wat in paragraaf 3.7 niet kan, `eval` en `macroexpand`. De lokale tijd is onbekend (zoals in paragraaf 3.6).
-- De cons-arena begint met 1024 cellen en groeit wanneer nodig. `--heap-cells`, `--max-memory`, `--no-cons`, `-O<N>` en `--release` werken zoals ze zijn.
+- De cons-arena begint met 1024 cellen en groeit wanneer nodig. `--heap-cells`, `--max-memory`, `--frame-memory`, `--no-cons`, `-O<N>` en `--release` werken zoals ze zijn.
 
 ### 3.9 Compileren voor een Arduino Uno (AVR)
 

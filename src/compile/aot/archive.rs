@@ -315,9 +315,9 @@ include!(concat!(env!("OUT_DIR"), "/bundled_boards.rs"));
 ///   in its tree, `<target dir>/embedded-runtime/<profile>/<triple>/`, beside
 ///   which the script also links the toolchain's linker ([`embedded_linker`]).
 pub(super) fn embedded_runtime_dir(triple: &str) -> Result<std::path::PathBuf, String> {
-    use super::BoardFunctions;
     #[cfg(typelisp_bundled_embedded)]
     {
+        use super::BoardFunctions;
         let dir = bundled_archive_dir()?.join(triple);
         let [link_x, c, semihosting] =
             bundled_board(triple).ok_or_else(|| format!("internal error: no runtime for a board for {}", triple))?;
@@ -336,6 +336,7 @@ pub(super) fn embedded_runtime_dir(triple: &str) -> Result<std::path::PathBuf, S
     }
     #[cfg(not(typelisp_bundled_runtime))]
     {
+        use super::BoardFunctions;
         let profile_dir = std::path::Path::new(env!("TYPELISP_PROFILE_DIR"));
         let (Some(target_dir), Some(profile)) = (profile_dir.parent(), profile_dir.file_name()) else {
             return Err(format!("internal error: {} is not <target dir>/<profile>", profile_dir.display()));

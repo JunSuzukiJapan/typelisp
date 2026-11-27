@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ be56bb8a477929497064b8f807acfd1755f2b35b -->
+<!-- translated-from: docs/ja/guide/compile.md @ f5fad21e6962ea3c90d803827468d58aaae4ceaa -->
 # การคอมไพล์
 
 หากไม่ทำอะไรเพิ่ม โปรแกรม typelisp จะรันในอินเทอร์พรีเตอร์ นอกจากนี้ยังมีวิธีคอมไพล์เป็นโค้ดเนทีฟ
@@ -165,14 +165,16 @@ $ typl --lib-dir ~/lib/typelisp build.typl
 ```sh
 $ typl --heap-cells 100000 -c hello.typl    # ตรึง arena ของ cons ไว้ที่ 100000 เซลล์
 $ typl -c hello.typl --max-memory 64M       # จองหน่วยความจำได้ไม่เกิน 64 MiB
+$ typl -c hello.typl --frame-memory 1M      # การเรียกที่กำลังทำงานของแต่ละงานใช้ได้ไม่เกิน 1 MiB
 $ typl -c hello.typl --no-cons              # ไม่ใช้เซลล์ cons
 ```
 
 - `--heap-cells N` ตรึงความจุของ arena ของเซลล์ cons ไว้ที่ `N` เซลล์ arena จะไม่โตเกินนั้น ถ้าการเก็บขยะคืนเซลล์ไม่ได้เลย โปรแกรมจะหยุดด้วยข้อผิดพลาดขณะทำงาน ถ้าไม่ระบุ arena จะเริ่มที่ 65536 เซลล์และโตขึ้นตามต้องการ
 - `--max-memory SIZE` จำกัดหน่วยความจำทั้งหมดที่ไฟล์ปฏิบัติการจอง นับทุกอย่าง ได้แก่ arena ของ cons สตริง ค่าอย่างเวกเตอร์และตารางแฮช และหน่วยความจำที่รันไทม์ใช้เอง `SIZE` เป็นจำนวนไบต์ และต่อท้ายด้วย `K` `M` หรือ `G` (1024, 1024² และ 1024³ เท่า) ได้ การจองที่จะเกินขีดจำกัดจะถูกรายงาน และโปรแกรมจบด้วยรหัสออก 1 การจบแบบนี้จับด้วย `catch` ไม่ได้ ถ้าไม่ระบุจะไม่มีขีดจำกัด
+- `--frame-memory SIZE` กำหนดเพดานหน่วยความจำต่องาน ที่บันทึกของการเรียกที่กำลังทำงานใช้ได้ (สิ่งที่การเรียกเก็บไว้จนกว่าจะจบ เช่นอาร์กิวเมนต์และตัวแปรภายใน) บันทึกเหล่านี้อยู่ในฮีปและเพิ่มขึ้นเมื่อการเรียกซ้ำลึกขึ้น `SIZE` เขียนแบบเดียวกับ `--max-memory` การเรียกที่จะเกินเพดานจะไม่ถูกทำ ไฟล์ปฏิบัติการจะแจ้งแล้วจบด้วยรหัสออก 1 ซึ่ง `catch` ก็จับไม่ได้เช่นกัน บนบอร์ดที่มีหน่วยความจำน้อย ใช้หยุดการเรียกซ้ำที่ลึกเกินไปก่อนที่ฮีปจะหมด ถ้าไม่ระบุก็ไม่มีเพดาน
 - `--no-cons` สร้างไฟล์ปฏิบัติการที่ไม่ใช้เซลล์ cons เลย ไม่มี arena ของ cons โปรแกรมที่ทำสิ่งที่ต้องใช้เซลล์ cons จึงเป็น**ข้อผิดพลาดตอนคอมไพล์** ซึ่งแสดงการดำเนินการนั้นและลำดับฟังก์ชันจาก `main` ที่ไปถึง ต้องใช้เซลล์ cons เมื่อสร้างลิสต์ `Sexpr` (รวมถึงลิสต์ที่ quote และลิสต์ที่สร้างด้วย quasiquote) หรืออาร์กิวเมนต์ `&rest` และเมื่อใช้ `read` `eval` `macroexpand` การดำเนินการกับตัวเลข สตริง เวกเตอร์ ตารางแฮช struct แชนเนล และอื่น ๆ รวมถึง `print`/`println`/`format` ไม่ใช้เลย ระบุร่วมกับ `--heap-cells` ไม่ได้ และเขียนหลัง `-c`
 
-`--max-memory` เขียนหลัง `-c` ส่วน `--heap-cells` เขียนก่อนหรือหลัง `-c` ก็ได้ และจะเป็นความจุของ arena ของ cons ของไฟล์ปฏิบัติการ arena ของ cons ถูกนับรวมในขีดจำกัดหน่วยความจำ ถ้าขีดจำกัดเล็กเกินกว่าจะใส่ arena ได้ โปรแกรมจะหยุดก่อนเริ่ม
+`--max-memory` และ `--frame-memory` เขียนหลัง `-c` ส่วน `--heap-cells` เขียนก่อนหรือหลัง `-c` ก็ได้ และจะเป็นความจุของ arena ของ cons ของไฟล์ปฏิบัติการ arena ของ cons ถูกนับรวมในขีดจำกัดหน่วยความจำ ถ้าขีดจำกัดเล็กเกินกว่าจะใส่ arena ได้ โปรแกรมจะหยุดก่อนเริ่ม
 
 ### 3.6 คอมไพล์เป็น WebAssembly
 
@@ -197,7 +199,7 @@ fib(25) = 75025
   TLS, การแปลงชื่อ), เธรดของระบบปฏิบัติการ (`Thread`), ฟังก์ชัน C (`defffi`), `get-internal-run-time`, `machine-instance`, `software-version`, `file-author`,
   และ `ed`
 - WASI ไม่มีวิธีรู้เขตเวลา จึงไม่รู้เวลาท้องถิ่น `decode-universal-time` และ `encode-universal-time` ที่ละ `zone` รวมถึง `get-decoded-time` จะ panic ตอนรัน ถ้าให้ `zone` ก็ใช้ได้
-- `--heap-cells`, `--max-memory`, `--no-cons`, `-O<N>` และ `--release` ใช้ได้เหมือนกับไฟล์ปฏิบัติการ
+- `--heap-cells`, `--max-memory`, `--frame-memory`, `--no-cons`, `-O<N>` และ `--release` ใช้ได้เหมือนกับไฟล์ปฏิบัติการ
 
 ### 3.7 รันในเบราว์เซอร์หรือ Node.js
 
@@ -225,7 +227,7 @@ const code = await run({ write: (fd, text) => { /* เช่น แสดงบ�
 
 ### 3.8 คอมไพล์สำหรับไมโครคอนโทรลเลอร์ (Cortex-M, RISC-V)
 
-เมื่อใส่ `--target thumbv7em-none-eabihf` คำสั่ง `typl -c` จะสร้างไฟล์ปฏิบัติการ (ELF) สำหรับบอร์ด Cortex-M4F หรือ M7 ที่ไม่มีระบบปฏิบัติการ ถ้าไม่ใส่ `-o` ชื่อจะเป็นชื่อซอร์สที่เปลี่ยน `.typl` เป็น `.elf` ถ้าใช้ `--target thumbv8m.main-none-eabihf` จะเป็นสำหรับบอร์ด Cortex-M33 ถ้าใส่ `--target riscv32imac-unknown-none-elf` จะเป็นสำหรับบอร์ดที่มีคอร์ RISC-V 32 บิต (ส่วนขยาย M, A และ C)
+เมื่อใส่ `--target thumbv7em-none-eabihf` คำสั่ง `typl -c` จะสร้างไฟล์ปฏิบัติการ (ELF) สำหรับบอร์ด Cortex-M4F หรือ M7 ที่ไม่มีระบบปฏิบัติการ ถ้าไม่ใส่ `-o` ชื่อจะเป็นชื่อซอร์สที่เปลี่ยน `.typl` เป็น `.elf` ถ้าใช้ `--target thumbv8m.main-none-eabihf` จะเป็นสำหรับบอร์ด Cortex-M33 ถ้าใส่ `--target riscv32imac-unknown-none-elf` จะเป็นสำหรับบอร์ดที่มีคอร์ RISC-V 32 บิต (ส่วนขยาย M, A และ C) ถ้าใส่ `--target thumbv6m-none-eabi` จะเป็นสำหรับบอร์ด Cortex-M0+ (M0) QEMU ไม่มีบอร์ด Cortex-M0+ ไฟล์ปฏิบัติการสำหรับบอร์ดนี้จึงรันบน `mps2-an385` ซึ่งเป็น Cortex-M3 ที่รันคำสั่งชุดเดียวกันได้ตามเดิม (การจัดวางเมื่อไม่ใส่ `--linker-script` ก็เป็นของบอร์ดนี้)
 
 ```sh
 $ typl -c hello.typl --target thumbv7em-none-eabihf          # สร้าง hello.elf
@@ -234,12 +236,15 @@ $ qemu-system-arm -M mps2-an386 -nographic \
 $ typl -c hello.typl --target thumbv8m.main-none-eabihf
 $ qemu-system-arm -M mps2-an505 -nographic \
     -semihosting-config enable=on,target=native -kernel hello.elf   # รันบน Cortex-M33 ของ QEMU
+$ typl -c hello.typl --target thumbv6m-none-eabi
+$ qemu-system-arm -M mps2-an385 -nographic \
+    -semihosting-config enable=on,target=native -kernel hello.elf   # รันบน Cortex-M3 ของ QEMU
 $ typl -c hello.typl --target riscv32imac-unknown-none-elf
 $ qemu-system-riscv32 -M virt -bios none -nographic \
     -semihosting-config enable=on,target=native -kernel hello.elf   # รันบน RISC-V ของ QEMU
 ```
 
-- `typl` ที่ติดตั้งด้วย `install.sh` ใช้ได้ทันที ถ้าติดตั้งด้วย `cargo install` ให้รัน `rustup target add thumbv7em-none-eabihf thumbv8m.main-none-eabihf riscv32imac-unknown-none-elf` แล้วติดตั้งพร้อม `--features embedded` (ทั้งสองอย่างใช้ `--features wasm,embedded`) ถ้าใช้ `typl` ที่เป็นบิลด์ดีบักในรีโพสิทอรี ให้รัน `scripts/build-embedded-runtime.sh` การลิงก์ใช้ลิงเกอร์ของ toolchain ของ rustup
+- `typl` ที่ติดตั้งด้วย `install.sh` ใช้ได้ทันที ถ้าติดตั้งด้วย `cargo install` ให้รัน `rustup target add thumbv7em-none-eabihf thumbv8m.main-none-eabihf thumbv6m-none-eabi riscv32imac-unknown-none-elf` แล้วติดตั้งพร้อม `--features embedded` (ทั้งสองอย่างใช้ `--features wasm,embedded`) ถ้าใช้ `typl` ที่เป็นบิลด์ดีบักในรีโพสิทอรี ให้รัน `scripts/build-embedded-runtime.sh` การลิงก์ใช้ลิงเกอร์ของ toolchain ของ rustup
 - ระบุหน่วยความจำของบอร์ดด้วย `--linker-script FILE` เขียนแบบเดียวกับ `memory.x` ของ `cortex-m-rt` คือที่อยู่และขนาดของ FLASH และ RAM บรรทัดอย่าง `_typelisp_stack_size = 32K;` กำหนดว่าสแตกใช้ RAM เท่าใด (ถ้าไม่เขียนคือ 64KiB) ส่วนที่เหลือของ RAM คือฮีป ถ้าไม่ใส่ตัวเลือกนี้จะใช้การจัดวางของ `mps2-an386` (สำหรับ Cortex-M33 คือ `mps2-an505`) ใน QEMU
 
   ```
@@ -268,6 +273,10 @@ $ qemu-system-riscv32 -M virt -bios none -nographic \
   _typelisp_stack_size = 4K;
   ```
 
+- บนบอร์ดที่มี RAM น้อย ใช้ `--ram SIZE` (เช่น `16K`) แทน `--linker-script` เพื่อระบุเพียงขนาด RAM สำหรับข้อมูล ฮีป และสแตก RAM ของการจัดวางเริ่มต้นจะมีขนาดนั้น และสแตกใช้ไม่เกินหนึ่งในสี่ บนบอร์ดที่เก็บโค้ดไว้ใน RAM ด้วย เช่น `virt` ของ RISC-V โค้ดจะอยู่ใน RAM ส่วนที่เหลือของบอร์ด สิ่งที่รันไทม์จัดสรรตอนเริ่มจะถูกทำให้เล็กพอที่จะอยู่ในฮีป ใช้ร่วมกับ `--linker-script` ไม่ได้
+
+- บอร์ดไม่มีระบบปฏิบัติการ จึงไม่มีอะไรหยุดสแตกที่ล้นได้ ไฟล์ปฏิบัติการจึงตรวจที่ทางเข้าของทุกฟังก์ชันของโปรแกรมว่าสแตกเหลือเท่าใด ถ้าเหลือน้อยเกินไปจะเขียน `stack overflow: the program needs more than the ... bytes of the stack` แล้วจบด้วยรหัสออก 1 หากต้องการสแตกใหญ่ขึ้น ให้เพิ่ม `_typelisp_stack_size` ในไฟล์ของ `--linker-script` หรือเพิ่ม `--ram` ส่วน `--no-stack-check` จะไม่ใส่การตรวจนี้ (ไฟล์เล็กลงและเร็วขึ้นเล็กน้อย แต่สแตกที่ล้นอาจทำให้ฮีปเสียหายโดยไม่มีสัญญาณ) ไม่ว่ากรณีใด เมื่อสแตกล้นภายในรันไทม์จนเลยก้นของมัน จะเขียน `stack overflow: the stack has run past its bottom into the heap` ก่อนรายงาน panic หรือ HardFault ที่ตามมา เมื่อโปรแกรมทำงานจนจบก็จะเขียนข้อความเดียวกันและจบด้วยรหัสออก 1 โปรดสังเกตว่าความลึกของการเรียกซ้ำไม่ได้ใช้สแตก (บันทึกการเรียกเก็บไว้ในฮีป และการเรียกซ้ำที่ลึกเกินไปจะทำให้หน่วยความจำหมด) สิ่งที่ใช้สแตกลึกคืองานของรันไทม์ หากต้องการหยุดก่อนนั้น ให้ใช้ `--frame-memory` (หัวข้อ 3.5)
+
 - `--board-functions` เลือกว่าใครให้เอาต์พุต อินพุต การจบโปรแกรม และนาฬิกา (ฟังก์ชันของบอร์ด)
   - `semihosting` (ค่าเริ่มต้น): ให้ผ่าน semihosting สำหรับรันใน QEMU (`-semihosting-config enable=on`) หรือดีบักเกอร์
   - `c`: บอร์ดให้เป็นฟังก์ชัน C ส่งออบเจ็กต์หรือไลบรารีแบบสแตติกที่นิยามฟังก์ชันด้านล่างด้วย `--link FILE` (`--link` ใส่ซ้ำได้ ไลบรารีของผู้ผลิตที่ `defffi` เรียกก็ส่งแบบเดียวกัน)
@@ -295,7 +304,7 @@ $ qemu-system-riscv32 -M virt -bios none -nographic \
     (put-byte 104) (put-byte 105) (put-byte 10))                             ; "hi" และขึ้นบรรทัดใหม่
   ```
 
-- เขียนฟังก์ชันที่ถูกเรียกเมื่ออินเทอร์รัปต์มาถึงเป็น `defun` ที่มีแอตทริบิวต์ `#[interrupt(N)]` (อินเทอร์รัปต์ของอุปกรณ์ต่อพ่วง `N`) หรือแบบ `#[exception(SysTick)]` เปิดอินเทอร์รัปต์ด้วย `(enable-interrupt N)` ตัวจัดการทำงานทันที เฉพาะเมื่อมาระหว่างงานของรันไทม์เท่านั้นจึงทำงานหลังงานนั้นเสร็จ ตัวจัดการรอไม่ได้ (`sleep` เป็นข้อผิดพลาดตอนคอมไพล์) รายละเอียดอยู่ในหัวข้อ 3.17 ของ [ข้อมูลอ้างอิงไวยากรณ์](../reference/syntax.md) บน RISC-V `N` คือหมายเลขของอินเทอร์รัปต์ใน `mcause` (0 ถึง 31: 3 คืออินเทอร์รัปต์ซอฟต์แวร์ 7 คือไทเมอร์ 11 คืออินเทอร์รัปต์ภายนอก) และใช้ `#[exception(NAME)]` ไม่ได้
+- เขียนฟังก์ชันที่ถูกเรียกเมื่ออินเทอร์รัปต์มาถึงเป็น `defun` ที่มีแอตทริบิวต์ `#[interrupt(N)]` (อินเทอร์รัปต์ของอุปกรณ์ต่อพ่วง `N`) หรือแบบ `#[exception(SysTick)]` เปิดอินเทอร์รัปต์ด้วย `(enable-interrupt N)` ตัวจัดการทำงานทันที เฉพาะเมื่อมาระหว่างงานของรันไทม์เท่านั้นจึงทำงานหลังงานนั้นเสร็จ ตัวจัดการรอไม่ได้ (`sleep` เป็นข้อผิดพลาดตอนคอมไพล์) รายละเอียดอยู่ในหัวข้อ 3.17 ของ [ข้อมูลอ้างอิงไวยากรณ์](../reference/syntax.md) บน Cortex-M0+ `N` คือ 0 ถึง 31 และ `#[exception(NAME)]` ระบุได้เพียง `NonMaskableInt`, `SVCall`, `PendSV` และ `SysTick` บน RISC-V `N` คือหมายเลขของอินเทอร์รัปต์ใน `mcause` (0 ถึง 31: 3 คืออินเทอร์รัปต์ซอฟต์แวร์ 7 คือไทเมอร์ 11 คืออินเทอร์รัปต์ภายนอก) และใช้ `#[exception(NAME)]` ไม่ได้
 
   ```lisp
   (use std::board::enable-interrupt)
@@ -312,7 +321,7 @@ $ qemu-system-riscv32 -M virt -bios none -nographic \
 - รันไทม์เริ่มโปรแกรม (ตารางเวกเตอร์และการเตรียม RAM) และจัดสรรหน่วยความจำ เมื่อเกิด HardFault (บน RISC-V คือเอกซ์เซปชัน) หรืออินเทอร์รัปต์ที่ไม่มีตัวจัดการ โปรแกรมจะจบด้วยรหัสออกเดียวกับ panic (1)
 - `throw`/`catch`/`panic` จำนวนเต็มขนาดใหญ่ เศษส่วน และทศนิยม รวมถึงงาน แชนเนล และ `sleep` ทำงานเหมือนในไฟล์ปฏิบัติการ งานรันสลับกันบนคอร์เดียว ใช้ฟังก์ชัน C (`defffi`) ได้
 - โปรแกรมที่ใช้สิ่งที่บอร์ดไม่มีเป็น**ข้อผิดพลาดตอนคอมไพล์** นอกจากสิ่งที่ใช้ไม่ได้ในหัวข้อ 3.7 แล้วยังมี `eval` และ `macroexpand` เวลาท้องถิ่นไม่ทราบ (เหมือนหัวข้อ 3.6)
-- อารีนาของ cons เริ่มที่ 1024 เซลล์และขยายเมื่อไม่พอ `--heap-cells`, `--max-memory`, `--no-cons`, `-O<N>` และ `--release` ใช้ได้ตามเดิม
+- อารีนาของ cons เริ่มที่ 1024 เซลล์และขยายเมื่อไม่พอ `--heap-cells`, `--max-memory`, `--frame-memory`, `--no-cons`, `-O<N>` และ `--release` ใช้ได้ตามเดิม
 
 ### 3.9 คอมไพล์สำหรับ Arduino Uno (AVR)
 

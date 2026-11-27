@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ be56bb8a477929497064b8f807acfd1755f2b35b -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 8c1712373ea704e08417e1fe1eafb4ea4a7f41a2 -->
 # typelisp Sözdizimi Başvurusu
 
 typelisp, S-ifadelerle yazılan, statik tür denetimli bir Lisp'tir. Yerleşik fonksiyonların ve metotların
@@ -1332,6 +1332,7 @@ Bir testin `print` ile yazdıkları doğrudan standart çıktıya gider (yakalan
 Bir mikrodenetleyici için derlenen programda ([Derleme](../guide/compile.md) bölüm 3.8), bunlar bir kesme geldiğinde çağrılan fonksiyonlardır. `#[interrupt(N)]` bir fonksiyonu çevre birimi kesmesi `N`'nin (0 ile 239 arası), `#[exception(NAME)]` ise `NonMaskableInt`, `MemoryManagement`, `BusFault`, `UsageFault`, `SVCall`, `DebugMonitor`, `PendSV`, `SysTick` arasından çekirdek istisnası `NAME`'in işleyicisi yapar (`HardFault` çalışma zamanınındır ve programı bitirir).
 
 - Arduino Uno'da numaralama ve etkinleştirme farklıdır; `#[exception(NAME)]` ve `enable-interrupt` kullanılamaz ([Derleme](../guide/compile.md), bölüm 3.9). Aşağıda çalışma zamanı hakkında söylenenler Cortex-M içindir.
+- Cortex-M0+ için `N` 0'dan 31'e kadardır ve `NAME` yalnızca `NonMaskableInt`, `SVCall`, `PendSV` veya `SysTick` olabilir.
 - RISC-V için `N`, kesmenin `mcause` içindeki numarasıdır (0'dan 31'e) ve `#[exception(NAME)]` kullanılamaz. Aşağıda çalışma zamanı hakkında söylenenler RISC-V için de geçerlidir.
 - Hiçbir şey almayan ve `()` döndüren üst düzey bir `defun` üzerine konur (tür parametresi de olmaz). Bir kesmenin bir işleyicisi vardır ve bir fonksiyon bir kesmeyi işler.
 - Bir çevre birimi kesmesi, `(enable-interrupt N)` onu etkinleştirene kadar gelmez (`(disable-interrupt N)` onu durdurur; bkz. [Sistem](functions/system.md)). SysTick gibi bir istisna, yazmaçlar onu tetikleyecek biçimde ayarlanınca gelir.

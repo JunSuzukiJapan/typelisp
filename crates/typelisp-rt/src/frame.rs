@@ -31,10 +31,30 @@ pub unsafe extern "C" fn rt_frame_open(nslots: Word, mask: Word) -> Word {
         fatal(&format!("rt_frame_open: {} slots leave no room for the driver protocol's own", nslots));
     }
     typelisp_abi::call_state::with_heap(|heap, s| {
-        let data = heap.open_frame(nslots as usize, mask).data() as Word;
+        let data = opened(heap.open_frame(nslots as usize, mask)).data() as Word;
         s.publish_frame(data);
         data
     })
+}
+
+/// The frame `open` opened, or, when it would have taken the task's calls in
+/// progress past `--frame-memory`, the end of the program with the code a
+/// panic ends it with. Not a `panic` a `catch` sees: the frame of the call
+/// that would have caught it is the one there is no room for, as an
+/// allocation that fails is not one.
+fn opened(open: Result<typelisp_mem::FrameRaw, typelisp_mem::heap::FrameMemoryExceeded>) -> typelisp_mem::FrameRaw {
+    match open {
+        Ok(raw) => raw,
+        Err(e) => {
+            typelisp_mem::host::eprintln(format_args!(
+                "typelisp runtime error: the calls in progress take more than the {} bytes --frame-memory allows a task ({} in use, {} more for the next call)",
+                typelisp_mem::heap::frame_memory(),
+                e.in_use,
+                e.cost
+            ));
+            typelisp_mem::host::exit(crate::program::EXIT_CODE_PANIC as i32)
+        }
+    }
 }
 
 /// `rt_local_frame_open(nslots, mask)` — a direct function's frame: the
@@ -49,7 +69,7 @@ pub unsafe extern "C" fn rt_frame_open(nslots: Word, mask: Word) -> Word {
 /// the frame. A `Heap` must be registered on this thread.
 #[no_mangle]
 pub unsafe extern "C" fn rt_local_frame_open(nslots: Word, mask: Word) -> Word {
-    typelisp_abi::call_state::with_heap(|heap, _| heap.open_frame(nslots as usize, mask as usize as *const u64).data() as Word)
+    typelisp_abi::call_state::with_heap(|heap, _| opened(heap.open_frame(nslots as usize, mask as usize as *const u64)).data() as Word)
 }
 
 /// `rt_local_frame_close(data)` — closes the frame [`rt_local_frame_open`]

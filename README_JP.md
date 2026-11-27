@@ -305,7 +305,7 @@ Apple Silicon では macOS 26 以降、Intel では macOS 15 以降で動きま�
 
 ビルド済みの `typl` は WebAssembly 向けのコンパイル（`typl -c --target wasm32-wasip1` など）と、
 Cortex-M と RISC-V のマイコン向けのコンパイル（`--target thumbv7em-none-eabihf`、`--target thumbv8m.main-none-eabihf`、
-`--target riscv32imac-unknown-none-elf`）にも対応しています。リンクに
+`--target thumbv6m-none-eabi`、`--target riscv32imac-unknown-none-elf`）にも対応しています。リンクに
 rustup の toolchain のリンカを使うので、`--target` を使うときは rustup が要ります。
 
 インストール先は環境変数 `TYPELISP_HOME` で、バージョンは `TYPELISP_VERSION` で指定できます
@@ -422,7 +422,7 @@ cargo install --locked --path . --features wasm
 付けないときは、WebAssembly のためのものは何もビルドせず、`typl` にも入れません。
 
 マイコン向けのコンパイル（`typl -c --target thumbv7em-none-eabihf` など）も使うときは、
-`rustup target add thumbv7em-none-eabihf thumbv8m.main-none-eabihf riscv32imac-unknown-none-elf` を実行してから、`--features embedded` を付けます
+`rustup target add thumbv7em-none-eabihf thumbv8m.main-none-eabihf thumbv6m-none-eabi riscv32imac-unknown-none-elf` を実行してから、`--features embedded` を付けます
 （両方なら `--features wasm,embedded`）。
 
 ```sh

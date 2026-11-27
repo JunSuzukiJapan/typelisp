@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ be56bb8a477929497064b8f807acfd1755f2b35b -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 8c1712373ea704e08417e1fe1eafb4ea4a7f41a2 -->
 # typelisp Syntax Reference
 
 typelisp is a statically typed Lisp, written in S-expressions. For the list of built-in functions and
@@ -1340,6 +1340,7 @@ What a test `print`s goes straight to standard output (it is not captured). For 
 In a program compiled for a microcontroller (section 3.8 of [Compiling](../guide/compile.md)), these are the functions called when an interrupt comes. `#[interrupt(N)]` makes one the handler of the peripheral interrupt `N` (0 to 239), and `#[exception(NAME)]` of the core exception `NAME`, one of `NonMaskableInt`, `MemoryManagement`, `BusFault`, `UsageFault`, `SVCall`, `DebugMonitor`, `PendSV`, `SysTick` (`HardFault` is the runtime's, and ends the program).
 
 - For the Arduino Uno the numbering and the way of enabling differ, and `#[exception(NAME)]` and `enable-interrupt` cannot be used ([Compiling](../guide/compile.md), section 3.9). What is said of the runtime below is about the Cortex-M.
+- For a Cortex-M0+, `N` is 0 to 31, and `NAME` can be only `NonMaskableInt`, `SVCall`, `PendSV` or `SysTick`.
 - For RISC-V, `N` is the interrupt's number in `mcause` (0 to 31), and `#[exception(NAME)]` cannot be used. What is said of the runtime below holds for RISC-V too.
 - They go on a top-level `defun` that takes nothing and returns `()` (no type parameters either). One interrupt has one handler, and one function handles one interrupt.
 - A peripheral interrupt does not come until `(enable-interrupt N)` enables it (`(disable-interrupt N)` stops it; see [System](functions/system.md)). An exception such as SysTick comes once the registers are set to raise it.

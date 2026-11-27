@@ -92,7 +92,7 @@ pub enum Paused {
 /// put down mid-call: everything the chain needs is a `Vec` of heap objects,
 /// and the collector already traces each of them.
 pub struct FrameStack {
-    frames: Vec<Entry>,
+    frames: typelisp_mem::chunked::ChunkStack<Entry>,
     /// Whether this chain is counted in [`LIVE_CHAINS`] — kept in step with
     /// "has frames" at the end of every drive ([`FrameStack::drive`]) and on
     /// drop.
@@ -115,20 +115,24 @@ pub struct FrameStack {
 /// freed memory. The compiler asks this ([`live_chains`]) and keeps what it
 /// retired while it is not zero. Counted per chain rather than per frame so
 /// that a call costs nothing: the count moves only when a drive ends.
-static LIVE_CHAINS: core::sync::atomic::AtomicUsize = core::sync::atomic::AtomicUsize::new(0);
+static LIVE_CHAINS: typelisp_mem::sync::atomic::AtomicUsize = typelisp_mem::sync::atomic::AtomicUsize::new(0);
 
 /// See [`LIVE_CHAINS`].
 pub fn live_chains() -> usize {
-    LIVE_CHAINS.load(core::sync::atomic::Ordering::SeqCst)
+    LIVE_CHAINS.load(typelisp_mem::sync::atomic::Ordering::SeqCst)
 }
 
 impl Drop for FrameStack {
     fn drop(&mut self) {
         if self.counted {
-            LIVE_CHAINS.fetch_sub(1, core::sync::atomic::Ordering::SeqCst);
+            LIVE_CHAINS.fetch_sub(1, typelisp_mem::sync::atomic::Ordering::SeqCst);
         }
     }
 }
+
+/// What the driver keeps of each frame, which `--frame-memory` counts
+/// (`typelisp_mem::heap::set_frame_memory`).
+pub(crate) const ENTRY_BYTES: usize = size_of::<Entry>();
 
 /// One frame of the chain, and what the driver has to know about it that the
 /// frame itself does not say.
@@ -156,13 +160,13 @@ impl Default for FrameStack {
 
 impl FrameStack {
     pub fn new() -> Self {
-        FrameStack { frames: Vec::new(), counted: false, interruptible: false }
+        FrameStack { frames: typelisp_mem::chunked::ChunkStack::new(), counted: false, interruptible: false }
     }
 
     /// A task's chain, whose compiled code an interrupt handler may break
     /// into — see [`FrameStack::interruptible`].
     pub fn for_task() -> Self {
-        FrameStack { frames: Vec::new(), counted: false, interruptible: true }
+        FrameStack { frames: typelisp_mem::chunked::ChunkStack::new(), counted: false, interruptible: true }
     }
 
     /// How deep the chain is. Zero means finished or not yet started.
@@ -190,7 +194,9 @@ impl FrameStack {
         let status = unsafe { activation(f, 0, self.interruptible) };
         match call_state::with(|s| s.entered(published)) {
             // SAFETY: the word is the address a prologue just published.
-            Some(data) => self.frames.push(Entry { body: f, raw: unsafe { FrameRaw::from_data(data as *mut Word) }, roots }),
+            Some(data) => {
+                self.frames.push(Entry { body: f, raw: unsafe { FrameRaw::from_data(data as *mut Word) }, roots });
+            }
             None if status & 0b11 != STATUS_UNWIND => panic!("a coroutine function did not publish its frame on entry"),
             None => {}
         }
@@ -487,9 +493,9 @@ impl FrameStack {
         if standing != self.counted {
             self.counted = standing;
             if standing {
-                LIVE_CHAINS.fetch_add(1, core::sync::atomic::Ordering::SeqCst);
+                LIVE_CHAINS.fetch_add(1, typelisp_mem::sync::atomic::Ordering::SeqCst);
             } else {
-                LIVE_CHAINS.fetch_sub(1, core::sync::atomic::Ordering::SeqCst);
+                LIVE_CHAINS.fetch_sub(1, typelisp_mem::sync::atomic::Ordering::SeqCst);
             }
         }
     }

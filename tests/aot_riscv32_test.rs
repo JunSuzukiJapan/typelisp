@@ -405,3 +405,71 @@ _typelisp_stack_size = 256K;
     assert_eq!(text(&out.stdout), "from the data 2432902008176640000\n", "stderr: {}", text(&out.stderr));
     assert_eq!(out.status.code(), Some(9));
 }
+
+/// `--ram` for RISC-V: 64 KiB of the board's RAM, code and data alike.
+#[test]
+fn a_board_with_little_ram_runs_a_program() {
+    let elf = built(
+        "riscv_ram_64k",
+        r#"
+(defun fact ((n int)) int (if (= n 0) 1 (* n (fact (- n 1)))))
+(defun main () int (println "~a" (fact 20)) 5)
+"#,
+        "prog.elf",
+        &target_flags(TARGET, &["--ram", "64K"]),
+    );
+    let out = run_on(TARGET, &elf);
+    assert_eq!(text(&out.stdout), "2432902008176640000\n", "stderr: {}", text(&out.stderr));
+    assert_eq!(out.status.code(), Some(5));
+}
+
+/// A stack smaller than the program needs (1 KiB, in a layout of the
+/// user's) ends the program before the stack reaches the heap, and without
+/// the check (`--no-stack-check`) the guard words at its bottom say at the
+/// end that it ran into it.
+#[test]
+fn a_stack_too_small_for_the_program_is_found() {
+    let dir = scratch("riscv_small_stack");
+    let memory_x = dir.join("memory.x");
+    std::fs::write(
+        &memory_x,
+        "MEMORY\n{\n  FLASH : ORIGIN = 0x80000000, LENGTH = 1M\n  RAM : ORIGIN = 0x80100000, LENGTH = 32K\n}\n\
+         REGION_ALIAS(\"REGION_TEXT\", FLASH);\nREGION_ALIAS(\"REGION_RODATA\", FLASH);\nREGION_ALIAS(\"REGION_DATA\", RAM);\n\
+         REGION_ALIAS(\"REGION_BSS\", RAM);\nREGION_ALIAS(\"REGION_HEAP\", RAM);\nREGION_ALIAS(\"REGION_STACK\", RAM);\n\
+         _typelisp_stack_size = 1K;\n",
+    )
+    .unwrap();
+    let source = "(defun main () int (println \"hello\") 0)";
+    let script = memory_x.to_str().unwrap();
+    let elf = built("riscv_stack_checked", source, "prog.elf", &target_flags(TARGET, &["--linker-script", script]));
+    let out = run_on(TARGET, &elf);
+    assert_eq!(text(&out.stdout), "");
+    assert!(text(&out.stderr).contains("stack overflow: the program needs more than the 0x00000400 bytes of the stack (_typelisp_stack_size)"), "{}", text(&out.stderr));
+    assert_eq!(out.status.code(), Some(1));
+
+    let elf = built("riscv_stack_unchecked", source, "prog.elf", &target_flags(TARGET, &["--linker-script", script, "--no-stack-check"]));
+    let out = run_on(TARGET, &elf);
+    assert_eq!(text(&out.stdout), "hello\n");
+    assert!(text(&out.stderr).contains("stack overflow: the stack has run past its bottom into the heap"), "{}", text(&out.stderr));
+    assert_eq!(out.status.code(), Some(1));
+}
+
+/// A board's calls in progress bounded by `--frame-memory`: a recursion
+/// past it ends the program, saying so, instead of taking the board's heap
+/// until an allocation fails.
+#[test]
+fn the_frame_memory_bounds_a_recursion() {
+    let elf = built(
+        "riscv_frame_memory",
+        r#"
+(defun depth ((n int)) int (if (= n 0) 0 (+ 1 (depth (- n 1)))))
+(defun main () int (println "~a" (depth 200)) (println "~a" (depth 100000)) 0)
+"#,
+        "prog.elf",
+        &target_flags(TARGET, &["--ram", "256K", "--frame-memory", "32K"]),
+    );
+    let out = run_on(TARGET, &elf);
+    assert_eq!(text(&out.stdout), "200\n");
+    assert!(text(&out.stderr).contains("the calls in progress take more than the 32768 bytes --frame-memory allows a task ("), "{}", text(&out.stderr));
+    assert_eq!(out.status.code(), Some(1));
+}

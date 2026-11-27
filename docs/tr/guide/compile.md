@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ be56bb8a477929497064b8f807acfd1755f2b35b -->
+<!-- translated-from: docs/ja/guide/compile.md @ f5fad21e6962ea3c90d803827468d58aaae4ceaa -->
 # Derleme
 
 Başka bir şey yapmazsanız typelisp programları yorumlayıcıda çalışır. Buna ek olarak yerel koda
@@ -166,14 +166,16 @@ derlenmiş `typl` ile çalışır. `typl`'yi yeniden derledikten sonra onu yenid
 ```sh
 $ typl --heap-cells 100000 -c hello.typl    # cons alanını 100000 hücrede sabitle
 $ typl -c hello.typl --max-memory 64M       # en çok 64 MiB ayır
+$ typl -c hello.typl --frame-memory 1M      # görev başına en çok 1 MiB süren çağrı
 $ typl -c hello.typl --no-cons              # cons hücresi kullanma
 ```
 
 - `--heap-cells N`, cons hücre alanının kapasitesini `N` hücrede sabitler. Alan bunun ötesine büyümez: çöp toplama tek bir hücre bile boşaltamazsa program bir çalışma zamanı hatasıyla durur. Seçenek verilmezse alan 65536 hücreyle başlar ve gerektikçe büyür.
 - `--max-memory SIZE`, çalıştırılabilir dosyanın ayırdığı toplam belleği sınırlar. Her şey sayılır: cons alanı, dizgeler, vektörler ve karma tablolar gibi değerler ve çalışma zamanının kendisinin kullandığı bellek. `SIZE` bir bayt sayısıdır ve ardından `K`, `M` veya `G` (1024, 1024² ve 1024³ katı) gelebilir. Sınırı aşacak bir ayırma bildirilir ve program 1 çıkış koduyla sonlanır. Bu sonlanma `catch` ile yakalanamaz. Seçenek verilmezse sınır yoktur.
+- `--frame-memory SIZE`, her görev için süren çağrıların kayıtlarının (bir çağrının bitene kadar tuttuğu, argümanları ve yerel değişkenleri gibi şeyler) kullanabileceği belleği sınırlar. Kayıtlar heap'tedir ve özyineleme derinleştikçe büyür. `SIZE`, `--max-memory`'deki gibi yazılır. Sınırı aşacak bir çağrı yapılmaz: çalıştırılabilir dosya bunu bildirir ve 1 çıkış koduyla biter; bunu da `catch` yakalayamaz. Belleği az bir kartta, fazla derin bir özyinelemeyi heap'i bitirmeden durdurur. Verilmezse sınır yoktur.
 - `--no-cons`, cons hücresi kullanmayan bir çalıştırılabilir dosya oluşturur. Cons alanı yoktur; bu yüzden cons hücresi gerektiren bir şey yapan program bir **derleme hatasıdır** ve bu işlemi ve `main`'den ona ulaşan fonksiyon zincirini gösterir. Cons hücreleri bir `Sexpr` listesi (alıntılanmış liste ve quasiquote ile kurulan liste dahil) veya bir `&rest` argümanı kurmak için, ayrıca `read`, `eval` ve `macroexpand` için gerekir. Sayılar, dizgeler, vektörler, karma tablolar, yapılar, kanallar ve benzerleri üzerindeki işlemler ile `print`/`println`/`format` hiç kullanmaz. `--heap-cells` ile birlikte verilemez ve `-c`'den sonra yazılır.
 
-`--max-memory`, `-c`'den sonra yazılır. `--heap-cells`, `-c`'den önce veya sonra yazılabilir ve o zaman çalıştırılabilir dosyanın cons alanının kapasitesidir. Cons alanı bellek sınırına dahildir; alanın sığmadığı bir sınırla program başlamadan durur.
+`--max-memory` ve `--frame-memory`, `-c`'den sonra yazılır. `--heap-cells`, `-c`'den önce veya sonra yazılabilir ve o zaman çalıştırılabilir dosyanın cons alanının kapasitesidir. Cons alanı bellek sınırına dahildir; alanın sığmadığı bir sınırla program başlamadan durur.
 
 ### 3.6 WebAssembly için derlemek
 
@@ -198,7 +200,7 @@ fib(25) = 75025
   TLS, ad çözümleme), işletim sistemi iş parçacıkları (`Thread`), C fonksiyonları (`defffi`), `get-internal-run-time`, `machine-instance`, `software-version`, `file-author`
   ve `ed`.
 - WASI'nin saat dilimini öğrenme yolu yoktur, bu yüzden yerel saat bilinmez. `zone` verilmeden `decode-universal-time` ve `encode-universal-time` ile `get-decoded-time` çalışma zamanında panic olur. `zone` verilirse kullanılabilirler.
-- `--heap-cells`, `--max-memory`, `--no-cons`, `-O<N>` ve `--release` çalıştırılabilir dosyada olduğu gibi çalışır.
+- `--heap-cells`, `--max-memory`, `--frame-memory`, `--no-cons`, `-O<N>` ve `--release` çalıştırılabilir dosyada olduğu gibi çalışır.
 
 ### 3.7 Tarayıcıda veya Node.js'te çalıştırmak
 
@@ -226,7 +228,7 @@ const code = await run({ write: (fd, text) => { /* örneğin sayfada göstermek 
 
 ### 3.8 Bir mikrodenetleyici (Cortex-M, RISC-V) için derlemek
 
-`--target thumbv7em-none-eabihf` ile `typl -c`, işletim sistemi olmayan bir Cortex-M4F veya M7 kartı için çalıştırılabilir dosya (ELF) üretir. `-o` verilmezse adı, kaynağın `.typl` uzantısı `.elf` yapılarak verilir. `--target thumbv8m.main-none-eabihf` ile Cortex-M33 kartı içindir. `--target riscv32imac-unknown-none-elf` ile 32 bit RISC-V çekirdekli (M, A ve C uzantıları) bir kart içindir.
+`--target thumbv7em-none-eabihf` ile `typl -c`, işletim sistemi olmayan bir Cortex-M4F veya M7 kartı için çalıştırılabilir dosya (ELF) üretir. `-o` verilmezse adı, kaynağın `.typl` uzantısı `.elf` yapılarak verilir. `--target thumbv8m.main-none-eabihf` ile Cortex-M33 kartı içindir. `--target riscv32imac-unknown-none-elf` ile 32 bit RISC-V çekirdekli (M, A ve C uzantıları) bir kart içindir. `--target thumbv6m-none-eabi` ile Cortex-M0+ (M0) kartı içindir. QEMU'da Cortex-M0+ kartı yoktur; bu yüzden onun için çalıştırılabilir dosya, aynı komutları olduğu gibi çalıştıran bir Cortex-M3 olan `mps2-an385` üzerinde çalışır (`--linker-script` verilmediğindeki düzen de bu kartınkidir).
 
 ```sh
 $ typl -c hello.typl --target thumbv7em-none-eabihf          # hello.elf üretir
@@ -235,12 +237,15 @@ $ qemu-system-arm -M mps2-an386 -nographic \
 $ typl -c hello.typl --target thumbv8m.main-none-eabihf
 $ qemu-system-arm -M mps2-an505 -nographic \
     -semihosting-config enable=on,target=native -kernel hello.elf   # QEMU'nun Cortex-M33'ünde çalıştır
+$ typl -c hello.typl --target thumbv6m-none-eabi
+$ qemu-system-arm -M mps2-an385 -nographic \
+    -semihosting-config enable=on,target=native -kernel hello.elf   # QEMU'nun Cortex-M3'ünde çalıştır
 $ typl -c hello.typl --target riscv32imac-unknown-none-elf
 $ qemu-system-riscv32 -M virt -bios none -nographic \
     -semihosting-config enable=on,target=native -kernel hello.elf   # QEMU'nun RISC-V'ünde çalıştır
 ```
 
-- `install.sh` ile kurulan `typl` olduğu gibi kullanılabilir. `cargo install` ile kurmak için önce `rustup target add thumbv7em-none-eabihf thumbv8m.main-none-eabihf riscv32imac-unknown-none-elf` çalıştırın, sonra `--features embedded` ile kurun (ikisi için `--features wasm,embedded`). Depodaki hata ayıklama derlemesi `typl` ile `scripts/build-embedded-runtime.sh` çalıştırın. Bağlama rustup araç zincirinin bağlayıcısını kullanır.
+- `install.sh` ile kurulan `typl` olduğu gibi kullanılabilir. `cargo install` ile kurmak için önce `rustup target add thumbv7em-none-eabihf thumbv8m.main-none-eabihf thumbv6m-none-eabi riscv32imac-unknown-none-elf` çalıştırın, sonra `--features embedded` ile kurun (ikisi için `--features wasm,embedded`). Depodaki hata ayıklama derlemesi `typl` ile `scripts/build-embedded-runtime.sh` çalıştırın. Bağlama rustup araç zincirinin bağlayıcısını kullanır.
 - Kartın belleğini `--linker-script FILE` ile verin. Dosya `cortex-m-rt`'nin `memory.x`'i gibi yazılır: FLASH ve RAM'in adresleri ve boyutları. `_typelisp_stack_size = 32K;` gibi bir satır RAM'in ne kadarını yığının (stack) alacağını belirler (verilmezse 64KiB); RAM'in geri kalanı heap'tir. Seçenek yoksa düzen QEMU'nun `mps2-an386` (Cortex-M33 için `mps2-an505`)'sınınkidir.
 
   ```
@@ -269,6 +274,10 @@ $ qemu-system-riscv32 -M virt -bios none -nographic \
   _typelisp_stack_size = 4K;
   ```
 
+- RAM'i az olan bir kartta `--linker-script` yerine `--ram SIZE` (`16K` vb.) ile yalnızca verilerin, yığın belleğin (heap) ve yığının (stack) kullanacağı RAM miktarı verilebilir. Varsayılan düzenin RAM'i bu boyutu alır ve yığın en fazla dörtte birini kullanır. RISC-V'nin `virt`'i gibi kodu da RAM'de tutan bir kartta kod, kartın RAM'inin geri kalanına konur. Çalışma zamanının başta ayırdığı miktar, yığın belleğe sığacak kadar küçültülür. `--linker-script` ile birlikte kullanılamaz.
+
+- Bir kartta işletim sistemi yoktur, bu yüzden taşan bir yığını hiçbir şey durdurmaz. Çalıştırılabilir dosya bu nedenle programın her fonksiyonuna girerken ne kadar yığın kaldığını denetler; çok az kaldıysa `stack overflow: the program needs more than the ... bytes of the stack` yazar ve 1 çıkış koduyla biter. Yığını büyütmek için `--linker-script` dosyasındaki `_typelisp_stack_size` değerini ya da `--ram` değerini büyütün. `--no-stack-check` bu denetimi koymaz (dosya biraz daha küçük ve hızlı olur, ama taşan yığın heap'i sessizce bozabilir). Her iki durumda da yığın çalışma zamanının içinde taşıp tabanını geçtiğinde, ardından gelen panic veya HardFault raporundan önce `stack overflow: the stack has run past its bottom into the heap` yazılır. Program sonuna kadar çalıştığında da aynısı yazılır ve çıkış kodu 1 olur. Bu arada özyinelemenin derinliği yığını kullanmaz (çağrıların kaydı heap'te tutulur ve fazla derin bir özyineleme belleği tüketir); yığını derin kullanan, çalışma zamanının işidir. Ondan önce durdurmak için `--frame-memory` kullanılır (bölüm 3.5).
+
 - `--board-functions`, çıktıyı, girdiyi, bitirmeyi ve saati (kartın işlevlerini) kimin sağlayacağını seçer.
   - `semihosting` (varsayılan): semihosting ile; QEMU (`-semihosting-config enable=on`) veya bir hata ayıklayıcı altında çalıştırmak için.
   - `c`: kart bunları C işlevleri olarak sağlar. Aşağıdaki işlevleri tanımlayan bir nesne dosyasını veya statik kitaplığı `--link FILE` ile verin (`--link` tekrarlanabilir; `defffi`'nin çağırdığı bir üretici kitaplığı da aynı şekilde verilir).
@@ -296,7 +305,7 @@ $ qemu-system-riscv32 -M virt -bios none -nographic \
     (put-byte 104) (put-byte 105) (put-byte 10))                             ; "hi" ve yeni satır
   ```
 
-- Bir kesme geldiğinde çağrılan fonksiyonu, `#[interrupt(N)]` (çevre birimi kesmesi `N`) ya da `#[exception(SysTick)]` gibi bir özniteliği olan bir `defun` olarak yazın. Bir kesmeyi `(enable-interrupt N)` ile etkinleştirin. İşleyici hemen çalışır; yalnızca çalışma zamanının işinin ortasında geldiğinde o iş bittikten sonra çalışır. Bir işleyici bekleyemez (`sleep` bir derleme hatasıdır). Ayrıntılar [sözdizimi başvurusu](../reference/syntax.md) bölüm 3.17'dedir. RISC-V'de `N`, kesmenin `mcause` içindeki numarasıdır (0'dan 31'e: 3 yazılım kesmesi, 7 zamanlayıcı, 11 harici kesmeler) ve `#[exception(NAME)]` kullanılamaz.
+- Bir kesme geldiğinde çağrılan fonksiyonu, `#[interrupt(N)]` (çevre birimi kesmesi `N`) ya da `#[exception(SysTick)]` gibi bir özniteliği olan bir `defun` olarak yazın. Bir kesmeyi `(enable-interrupt N)` ile etkinleştirin. İşleyici hemen çalışır; yalnızca çalışma zamanının işinin ortasında geldiğinde o iş bittikten sonra çalışır. Bir işleyici bekleyemez (`sleep` bir derleme hatasıdır). Ayrıntılar [sözdizimi başvurusu](../reference/syntax.md) bölüm 3.17'dedir. Cortex-M0+'da `N` 0'dan 31'e kadardır ve `#[exception(NAME)]` yalnızca `NonMaskableInt`, `SVCall`, `PendSV` ve `SysTick` adlarını alabilir. RISC-V'de `N`, kesmenin `mcause` içindeki numarasıdır (0'dan 31'e: 3 yazılım kesmesi, 7 zamanlayıcı, 11 harici kesmeler) ve `#[exception(NAME)]` kullanılamaz.
 
   ```lisp
   (use std::board::enable-interrupt)
@@ -313,7 +322,7 @@ $ qemu-system-riscv32 -M virt -bios none -nographic \
 - Çalışma zamanı programı başlatır (vektör tablosu ve RAM'in hazırlanması) ve belleği ayırır. Bir HardFault (RISC-V'de bir istisna) veya işlenmeyen bir kesme, programı bir panic'in çıkış koduyla (1) bitirir.
 - `throw`/`catch`/`panic`, büyük sayılar, kesirler ve kayan noktalı sayılar ile görevler, kanallar ve `sleep` çalıştırılabilir dosyadaki gibi davranır. Görevler tek çekirdekte sırayla çalışır. C işlevleri (`defffi`) kullanılabilir.
 - Kartta olmayan bir şeyi kullanan program bir **derleme hatasıdır**: Bölüm 3.7'de kullanılamayanlara ek olarak `eval` ve `macroexpand`. Yerel saat bilinmez (Bölüm 3.6'daki gibi).
-- Cons arenası 1024 hücreyle başlar ve gerektiğinde büyür. `--heap-cells`, `--max-memory`, `--no-cons`, `-O<N>` ve `--release` olduğu gibi çalışır.
+- Cons arenası 1024 hücreyle başlar ve gerektiğinde büyür. `--heap-cells`, `--max-memory`, `--frame-memory`, `--no-cons`, `-O<N>` ve `--release` olduğu gibi çalışır.
 
 ### 3.9 Arduino Uno (AVR) için derlemek
 

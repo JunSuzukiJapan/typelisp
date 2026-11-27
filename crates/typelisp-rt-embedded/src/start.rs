@@ -8,9 +8,19 @@
 //! (`_stack_start`), a symbol the linker script typl links with defines.
 //! Both startup crates' linker scripts name the end of `.bss` and the top of
 //! the stack so.
+//!
+//! Nothing stops the stack at its bottom: below it is the heap, which a stack
+//! that grows past it overwrites. The bottom's first words are guard words
+//! ([`GUARD`]), written before the program starts; each function the
+//! program compiled to starts by calling [`typelisp_stack_check`] (unless
+//! `--no-stack-check`), which ends the program when the stack is all but
+//! used up or the guard words are not as written. The runtime's own
+//! functions are not checked on entry: one that runs the stack past its
+//! bottom is found by the guard words at the next check, or when the program
+//! panics, faults or ends, which then says so.
 
 use core::alloc::{GlobalAlloc, Layout};
-use core::sync::atomic::{AtomicPtr, Ordering};
+use typelisp_mem::sync::atomic::{AtomicPtr, Ordering};
 
 use embedded_alloc::LlffHeap;
 
@@ -32,11 +42,72 @@ extern "C" {
     fn typelisp_main() -> i32;
 }
 
-/// Runs the program and ends with what it answers. What the core's entry
-/// calls.
+/// The words at the bottom of the stack, written before the program starts:
+/// a stack that has grown past its bottom has overwritten them.
+const GUARD: [u32; 4] = [0x5354_4143, 0x4b20_454e, 0x4420_4845, 0x5245_2121];
+
+/// What the program says when the stack has run past its bottom.
+const OVERFLOWED: &[u8] = b"stack overflow: the stack has run past its bottom into the heap";
+
+/// The least room on the stack a function may start with: what is below is
+/// for the runtime functions it calls and for ending the program.
+const STACK_RESERVE: usize = 512;
+
+/// The bottom of the stack, where the heap ends: `_typelisp_stack_size`
+/// bytes below the top of RAM. Ends the program when that leaves no room
+/// for a heap after `.bss`.
+fn stack_bottom() -> usize {
+    // Only the symbols' addresses are taken, which the linker script gives.
+    let (heap_start, stack_top, stack_size) = (
+        core::ptr::addr_of!(__sheap) as usize,
+        core::ptr::addr_of!(_stack_start) as usize,
+        core::ptr::addr_of!(_typelisp_stack_size) as usize,
+    );
+    match stack_top.checked_sub(stack_size) {
+        Some(bottom) if bottom > heap_start => bottom,
+        _ => {
+            let (size, top, bss) = (hex(stack_size as u32), hex(stack_top as u32), hex(heap_start as u32));
+            end(&[b"no room for a heap: the stack takes ", &size, b" bytes below ", &top, b", and .bss ends at ", &bss])
+        }
+    }
+}
+
+/// The guard words' place: the first word of the stack from its bottom up.
+fn guard() -> *mut [u32; 4] {
+    ((stack_bottom() + 3) & !3) as *mut [u32; 4]
+}
+
+/// Whether the stack has grown past its bottom: the guard words are not as
+/// [`run`] wrote them.
+pub(crate) fn overflowed() -> bool {
+    // SAFETY: the bottom of the stack, which is RAM, on a word.
+    unsafe { core::ptr::read_volatile(guard()) != GUARD }
+}
+
+/// Ends the program when the stack has less than [`STACK_RESERVE`] bytes
+/// left above its bottom, or has run past it. What every function the
+/// program compiled to calls first.
+#[no_mangle]
+extern "C" fn typelisp_stack_check() {
+    let bottom = stack_bottom();
+    if this_core::stack_pointer() < bottom + STACK_RESERVE || overflowed() {
+        let size = hex(core::ptr::addr_of!(_typelisp_stack_size) as usize as u32);
+        end(&[b"stack overflow: the program needs more than the ", &size, b" bytes of the stack (_typelisp_stack_size)"])
+    }
+}
+
+/// Runs the program and ends with what it answers, or, when the stack has
+/// run past its bottom on the way, with the code a panic ends it with: what
+/// it answers was worked out with a heap the stack wrote over. What the
+/// core's entry calls.
 pub(crate) fn run() -> ! {
+    // SAFETY: the bottom of the stack, far below the frames there are yet.
+    unsafe { core::ptr::write_volatile(guard(), GUARD) };
     // SAFETY: the program typl compiled, which takes nothing.
     let code = unsafe { typelisp_main() };
+    if overflowed() {
+        end(&[OVERFLOWED])
+    }
     typelisp_mem::host::exit(code)
 }
 
@@ -49,19 +120,7 @@ pub(crate) fn run() -> ! {
 /// Called once, before anything allocates.
 #[no_mangle]
 unsafe extern "C" fn typelisp_board_start() {
-    // Only the symbols' addresses are taken, which the linker script gives.
-    let (heap_start, stack_top, stack_size) = (
-        core::ptr::addr_of!(__sheap) as usize,
-        core::ptr::addr_of!(_stack_start) as usize,
-        core::ptr::addr_of!(_typelisp_stack_size) as usize,
-    );
-    let heap_end = match stack_top.checked_sub(stack_size) {
-        Some(end) if end > heap_start => end,
-        _ => {
-            let (size, top, bss) = (hex(stack_size as u32), hex(stack_top as u32), hex(heap_start as u32));
-            die(&[b"no room for a heap: the stack takes ", &size, b" bytes below ", &top, b", and .bss ends at ", &bss])
-        }
-    };
+    let (heap_start, heap_end) = (core::ptr::addr_of!(__sheap) as usize, stack_bottom());
     // SAFETY: once, before anything allocates, with memory nothing else uses.
     unsafe { HEAP.init(heap_start, heap_end - heap_start) };
     typelisp_mem::memory::set_capacity(heap_end - heap_start);
@@ -99,9 +158,25 @@ pub(crate) fn arrived(vector: usize, what: &[u8], number: i32) {
 }
 
 /// Ends the program with the code a panic ends it with, having written
-/// `parts` and a newline on standard error. Not through `core::fmt`, which
-/// every program would carry for it.
+/// `parts` and a newline on standard error, after saying so when the stack
+/// has run past its bottom: the fault may be what that did to the heap.
 pub(crate) fn die(parts: &[&[u8]]) -> ! {
+    say_if_overflowed();
+    end(parts)
+}
+
+/// Writes on standard error that the stack has run past its bottom, when it
+/// has.
+pub(crate) fn say_if_overflowed() {
+    if overflowed() {
+        let _ = typelisp_mem::host::write_stderr(OVERFLOWED);
+        let _ = typelisp_mem::host::write_stderr(b"\n");
+    }
+}
+
+/// [`die`], without looking at the stack. Not through `core::fmt`, which
+/// every program would carry for it.
+fn end(parts: &[&[u8]]) -> ! {
     for part in parts {
         let _ = typelisp_mem::host::write_stderr(part);
     }

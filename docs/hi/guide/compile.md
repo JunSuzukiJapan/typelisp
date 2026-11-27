@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ be56bb8a477929497064b8f807acfd1755f2b35b -->
+<!-- translated-from: docs/ja/guide/compile.md @ f5fad21e6962ea3c90d803827468d58aaae4ceaa -->
 # कंपाइल करना
 
 यदि आप और कुछ न करें, तो typelisp प्रोग्राम इंटरप्रेटर में चलते हैं। इसके अलावा नेटिव कोड में कंपाइल करने के दो तरीके हैं, और एक पर्यावरण को सहेजने का तरीका है। विनिर्देश का विवरण [सिंटैक्स संदर्भ अध्याय 10](../reference/syntax.md#10-कंपाइलेशन) में है।
@@ -139,14 +139,16 @@ $ typl --lib-dir ~/lib/typelisp build.typl
 ```sh
 $ typl --heap-cells 100000 -c hello.typl    # cons arena को 100000 सेल पर स्थिर करें
 $ typl -c hello.typl --max-memory 64M       # अधिकतम 64 MiB आवंटित करें
+$ typl -c hello.typl --frame-memory 1M      # हर task के चल रहे calls के लिए अधिकतम 1 MiB
 $ typl -c hello.typl --no-cons              # cons सेल का उपयोग न करें
 ```
 
 - `--heap-cells N` cons सेल के arena की क्षमता को `N` सेल पर स्थिर करता है। arena इससे आगे नहीं बढ़ता: यदि garbage collection एक भी सेल मुक्त नहीं कर पाता, तो प्रोग्राम रनटाइम त्रुटि के साथ रुक जाता है। विकल्प न देने पर arena 65536 सेल से शुरू होता है और ज़रूरत के अनुसार बढ़ता है।
 - `--max-memory SIZE` एक्ज़ीक्यूटेबल द्वारा आवंटित कुल मेमोरी की सीमा तय करता है। सब कुछ गिना जाता है: cons arena, स्ट्रिंग, वेक्टर और हैश तालिका जैसे मान, और रनटाइम द्वारा स्वयं उपयोग की गई मेमोरी। `SIZE` बाइट की संख्या है और उसके बाद `K`, `M` या `G` (1024, 1024² और 1024³ गुना) लिखा जा सकता है। सीमा पार करने वाला आवंटन बताया जाता है, और प्रोग्राम एग्ज़िट कोड 1 के साथ समाप्त होता है। इस समाप्ति को `catch` से पकड़ा नहीं जा सकता। विकल्प न देने पर कोई सीमा नहीं होती।
+- `--frame-memory SIZE` हर task के लिए चल रहे calls के रिकॉर्ड (call पूरा होने तक जो रखता है, जैसे उसके arguments और local variables) की मेमोरी की सीमा तय करता है। रिकॉर्ड heap पर रहते हैं और recursion गहरा होने के साथ बढ़ते हैं। `SIZE` वैसे ही लिखा जाता है जैसे `--max-memory` में। सीमा पार करने वाला call नहीं होता: executable यह बताकर exit code 1 के साथ समाप्त होता है, जिसे `catch` भी नहीं पकड़ सकता। कम मेमोरी वाले बोर्ड पर यह बहुत गहरे recursion को heap ख़त्म होने से पहले रोक देता है। इसके बिना कोई सीमा नहीं होती।
 - `--no-cons` ऐसा एक्ज़ीक्यूटेबल बनाता है जो कोई cons सेल उपयोग नहीं करता। उसमें cons arena नहीं होता, इसलिए जो प्रोग्राम ऐसा कुछ करता है जिसके लिए cons सेल चाहिए, वह **कंपाइल त्रुटि** होता है, जो वह क्रिया और `main` से वहाँ तक पहुँचने वाले फ़ंक्शनों की श्रृंखला दिखाती है। cons सेल `Sexpr` सूची (quote की गई सूची और quasiquote से बनी सूची सहित) या `&rest` आर्ग्युमेंट बनाने के लिए, और `read`, `eval` व `macroexpand` के लिए चाहिए। संख्याओं, स्ट्रिंग, वेक्टर, हैश तालिका, struct, चैनल आदि पर क्रियाएँ, तथा `print`/`println`/`format` कोई cons सेल उपयोग नहीं करते। इसे `--heap-cells` के साथ नहीं दिया जा सकता, और यह `-c` के बाद लिखा जाता है।
 
-`--max-memory` को `-c` के बाद लिखा जाता है। `--heap-cells` को `-c` से पहले या बाद में लिखा जा सकता है, और तब वह एक्ज़ीक्यूटेबल के cons arena की क्षमता होता है। cons arena मेमोरी सीमा में गिना जाता है, इसलिए ऐसी सीमा पर जिसमें arena न समाए, प्रोग्राम शुरू होने से पहले ही रुक जाता है।
+`--max-memory` और `--frame-memory` को `-c` के बाद लिखा जाता है। `--heap-cells` को `-c` से पहले या बाद में लिखा जा सकता है, और तब वह एक्ज़ीक्यूटेबल के cons arena की क्षमता होता है। cons arena मेमोरी सीमा में गिना जाता है, इसलिए ऐसी सीमा पर जिसमें arena न समाए, प्रोग्राम शुरू होने से पहले ही रुक जाता है।
 
 ### 3.6 WebAssembly के लिए कंपाइल करना
 
@@ -171,7 +173,7 @@ fib(25) = 75025
   TLS, नाम समाधान), OS थ्रेड (`Thread`), C फ़ंक्शन (`defffi`), `get-internal-run-time`, `machine-instance`, `software-version`, `file-author`,
   और `ed`।
 - WASI के पास समय क्षेत्र जानने का कोई तरीका नहीं है, इसलिए स्थानीय समय अज्ञात है। `zone` के बिना `decode-universal-time` और `encode-universal-time`, तथा `get-decoded-time`, रन टाइम पर panic करते हैं। `zone` देने पर ये काम करते हैं।
-- `--heap-cells`, `--max-memory`, `--no-cons`, `-O<N>` और `--release` एक्ज़ीक्यूटेबल की तरह ही काम करते हैं।
+- `--heap-cells`, `--max-memory`, `--frame-memory`, `--no-cons`, `-O<N>` और `--release` एक्ज़ीक्यूटेबल की तरह ही काम करते हैं।
 
 ### 3.7 ब्राउज़र या Node.js में चलाना
 
@@ -199,7 +201,7 @@ const code = await run({ write: (fd, text) => { /* उदाहरण के ल
 
 ### 3.8 माइक्रोकंट्रोलर (Cortex-M, RISC-V) के लिए कंपाइल करना
 
-`--target thumbv7em-none-eabihf` के साथ `typl -c` बिना ऑपरेटिंग सिस्टम वाले Cortex-M4F या M7 बोर्ड के लिए एक्ज़ीक्यूटेबल (ELF) बनाता है। `-o` न देने पर नाम स्रोत का होता है, `.typl` की जगह `.elf`। `--target thumbv8m.main-none-eabihf` के साथ यह Cortex-M33 बोर्ड के लिए होती है। `--target riscv32imac-unknown-none-elf` के साथ यह 32-बिट RISC-V कोर (M, A और C एक्सटेंशन) वाले बोर्ड के लिए है।
+`--target thumbv7em-none-eabihf` के साथ `typl -c` बिना ऑपरेटिंग सिस्टम वाले Cortex-M4F या M7 बोर्ड के लिए एक्ज़ीक्यूटेबल (ELF) बनाता है। `-o` न देने पर नाम स्रोत का होता है, `.typl` की जगह `.elf`। `--target thumbv8m.main-none-eabihf` के साथ यह Cortex-M33 बोर्ड के लिए होती है। `--target riscv32imac-unknown-none-elf` के साथ यह 32-बिट RISC-V कोर (M, A और C एक्सटेंशन) वाले बोर्ड के लिए है। `--target thumbv6m-none-eabi` के साथ यह Cortex-M0+ (M0) बोर्ड के लिए है। QEMU में Cortex-M0+ बोर्ड नहीं है, इसलिए उसके लिए एक्ज़ीक्यूटेबल `mps2-an385` पर चलता है, जो एक Cortex-M3 है और वही निर्देश ज्यों के त्यों चलाता है (`--linker-script` न देने पर लेआउट भी इसी बोर्ड का होता है)।
 
 ```sh
 $ typl -c hello.typl --target thumbv7em-none-eabihf          # hello.elf बनाता है
@@ -208,12 +210,15 @@ $ qemu-system-arm -M mps2-an386 -nographic \
 $ typl -c hello.typl --target thumbv8m.main-none-eabihf
 $ qemu-system-arm -M mps2-an505 -nographic \
     -semihosting-config enable=on,target=native -kernel hello.elf   # QEMU के Cortex-M33 पर चलाएँ
+$ typl -c hello.typl --target thumbv6m-none-eabi
+$ qemu-system-arm -M mps2-an385 -nographic \
+    -semihosting-config enable=on,target=native -kernel hello.elf   # QEMU के Cortex-M3 पर चलाएँ
 $ typl -c hello.typl --target riscv32imac-unknown-none-elf
 $ qemu-system-riscv32 -M virt -bios none -nographic \
     -semihosting-config enable=on,target=native -kernel hello.elf   # QEMU के RISC-V पर चलाएँ
 ```
 
-- `install.sh` से इंस्टॉल किया गया `typl` वैसे ही उपयोग किया जा सकता है। `cargo install` से इंस्टॉल करने के लिए `rustup target add thumbv7em-none-eabihf thumbv8m.main-none-eabihf riscv32imac-unknown-none-elf` चलाएँ, फिर `--features embedded` के साथ इंस्टॉल करें (दोनों के लिए `--features wasm,embedded`)। रिपॉज़िटरी के डीबग बिल्ड वाले `typl` के साथ `scripts/build-embedded-runtime.sh` चलाएँ। लिंक करने में rustup टूलचेन का लिंकर उपयोग होता है।
+- `install.sh` से इंस्टॉल किया गया `typl` वैसे ही उपयोग किया जा सकता है। `cargo install` से इंस्टॉल करने के लिए `rustup target add thumbv7em-none-eabihf thumbv8m.main-none-eabihf thumbv6m-none-eabi riscv32imac-unknown-none-elf` चलाएँ, फिर `--features embedded` के साथ इंस्टॉल करें (दोनों के लिए `--features wasm,embedded`)। रिपॉज़िटरी के डीबग बिल्ड वाले `typl` के साथ `scripts/build-embedded-runtime.sh` चलाएँ। लिंक करने में rustup टूलचेन का लिंकर उपयोग होता है।
 - बोर्ड की मेमोरी `--linker-script FILE` से दें। यह `cortex-m-rt` के `memory.x` जैसा लिखा जाता है: FLASH और RAM के पते और आकार। `_typelisp_stack_size = 32K;` जैसी पंक्ति तय करती है कि RAM का कितना हिस्सा स्टैक लेता है (न देने पर 64KiB); बाकी RAM हीप है। विकल्प न होने पर QEMU के `mps2-an386` (Cortex-M33 के लिए `mps2-an505`) का लेआउट होता है।
 
   ```
@@ -242,6 +247,10 @@ $ qemu-system-riscv32 -M virt -bios none -nographic \
   _typelisp_stack_size = 4K;
   ```
 
+- कम RAM वाले बोर्ड पर `--linker-script` के बजाय `--ram SIZE` (`16K` आदि) से केवल यह बताया जा सकता है कि डेटा, हीप और स्टैक के लिए कितनी RAM है। डिफ़ॉल्ट लेआउट की RAM उतनी हो जाती है, और स्टैक उसका अधिकतम एक चौथाई लेता है। RISC-V के `virt` जैसे बोर्ड पर, जो कोड भी RAM में रखता है, कोड बोर्ड की बाकी RAM में जाता है। रनटाइम शुरू में जितना आवंटित करता है, वह हीप में समाने लायक छोटा कर दिया जाता है। इसे `--linker-script` के साथ नहीं इस्तेमाल किया जा सकता।
+
+- बोर्ड पर कोई ऑपरेटिंग सिस्टम नहीं होता, इसलिए उमड़ते स्टैक को कुछ नहीं रोकता। इसलिए executable प्रोग्राम के हर फ़ंक्शन में प्रवेश पर जाँचता है कि कितना स्टैक बचा है; बहुत कम हो तो वह `stack overflow: the program needs more than the ... bytes of the stack` लिखकर exit code 1 के साथ समाप्त होता है। स्टैक बड़ा करने के लिए `--linker-script` की फ़ाइल में `_typelisp_stack_size` या `--ram` बढ़ाएँ। `--no-stack-check` यह जाँच नहीं डालता (executable थोड़ा छोटा और तेज़ होता है, पर उमड़ता स्टैक heap को चुपचाप बिगाड़ सकता है)। दोनों ही स्थितियों में, जब स्टैक runtime के भीतर उमड़कर अपने तल से आगे निकल जाता है, तो उसके बाद आने वाले panic या HardFault की रिपोर्ट से पहले `stack overflow: the stack has run past its bottom into the heap` लिखा जाता है। प्रोग्राम अंत तक चलने पर भी यही लिखा जाता है और exit code 1 होता है। ध्यान दें कि recursion की गहराई स्टैक का उपयोग नहीं करती (कॉल का रिकॉर्ड heap पर रखा जाता है, और बहुत गहरा recursion मेमोरी ख़त्म कर देता है); स्टैक का गहरा उपयोग runtime का काम करता है। उससे पहले रोकने के लिए `--frame-memory` (अनुभाग 3.5) का उपयोग करें।
+
 - `--board-functions` चुनता है कि आउटपुट, इनपुट, समाप्ति और घड़ी (बोर्ड के फ़ंक्शन) कौन देगा।
   - `semihosting` (डिफ़ॉल्ट): semihosting से, QEMU (`-semihosting-config enable=on`) या डीबगर के तहत चलाने के लिए।
   - `c`: बोर्ड उन्हें C फ़ंक्शन के रूप में देता है। नीचे के फ़ंक्शन परिभाषित करने वाली ऑब्जेक्ट फ़ाइल या स्टैटिक लाइब्रेरी `--link FILE` से दें (`--link` दोहराया जा सकता है; `defffi` से बुलाई जाने वाली विक्रेता की लाइब्रेरी भी इसी तरह दी जाती है)।
@@ -269,7 +278,7 @@ $ qemu-system-riscv32 -M virt -bios none -nographic \
     (put-byte 104) (put-byte 105) (put-byte 10))                             ; "hi" और नई पंक्ति
   ```
 
-- इंटरप्ट आने पर बुलाया जाने वाला फ़ंक्शन `#[interrupt(N)]` (पेरिफेरल इंटरप्ट `N`) या `#[exception(SysTick)]` जैसी विशेषता वाले `defun` के रूप में लिखें। इंटरप्ट को `(enable-interrupt N)` से चालू करें। हैंडलर तुरंत चलता है, और केवल रनटाइम के काम के बीच आने पर ही उस काम के बाद चलता है। हैंडलर प्रतीक्षा नहीं कर सकता (`sleep` कंपाइल त्रुटि है)। विवरण [सिंटैक्स संदर्भ](../reference/syntax.md) के खंड 3.17 में है। RISC-V पर `N` इंटरप्ट का `mcause` में नंबर है (0 से 31: 3 सॉफ़्टवेयर इंटरप्ट, 7 टाइमर, 11 बाहरी इंटरप्ट), और `#[exception(NAME)]` का उपयोग नहीं किया जा सकता।
+- इंटरप्ट आने पर बुलाया जाने वाला फ़ंक्शन `#[interrupt(N)]` (पेरिफेरल इंटरप्ट `N`) या `#[exception(SysTick)]` जैसी विशेषता वाले `defun` के रूप में लिखें। इंटरप्ट को `(enable-interrupt N)` से चालू करें। हैंडलर तुरंत चलता है, और केवल रनटाइम के काम के बीच आने पर ही उस काम के बाद चलता है। हैंडलर प्रतीक्षा नहीं कर सकता (`sleep` कंपाइल त्रुटि है)। विवरण [सिंटैक्स संदर्भ](../reference/syntax.md) के खंड 3.17 में है। Cortex-M0+ पर `N` 0 से 31 है, और `#[exception(NAME)]` केवल `NonMaskableInt`, `SVCall`, `PendSV` और `SysTick` का नाम ले सकता है। RISC-V पर `N` इंटरप्ट का `mcause` में नंबर है (0 से 31: 3 सॉफ़्टवेयर इंटरप्ट, 7 टाइमर, 11 बाहरी इंटरप्ट), और `#[exception(NAME)]` का उपयोग नहीं किया जा सकता।
 
   ```lisp
   (use std::board::enable-interrupt)
@@ -286,7 +295,7 @@ $ qemu-system-riscv32 -M virt -bios none -nographic \
 - रनटाइम प्रोग्राम शुरू करता है (वेक्टर टेबल और RAM की तैयारी) और मेमोरी आवंटित करता है। HardFault (RISC-V पर एक्सेप्शन) या बिना हैंडलर का इंटरप्ट प्रोग्राम को panic के निकास कोड (1) से समाप्त करता है।
 - `throw`/`catch`/`panic`, बड़े पूर्णांक, भिन्न और फ़्लोटिंग पॉइंट, तथा टास्क, चैनल और `sleep` एक्ज़ीक्यूटेबल की तरह ही व्यवहार करते हैं। टास्क एक कोर पर बारी-बारी से चलते हैं। C फ़ंक्शन (`defffi`) उपयोग किए जा सकते हैं।
 - जो प्रोग्राम बोर्ड में न होने वाली चीज़ उपयोग करे वह **कंपाइल त्रुटि** है: खंड 3.7 में जो उपयोग नहीं हो सकता उसके अलावा `eval` और `macroexpand`। स्थानीय समय अज्ञात है (खंड 3.6 की तरह)।
-- cons एरीना 1024 सेल से शुरू होता है और ज़रूरत पड़ने पर बढ़ता है। `--heap-cells`, `--max-memory`, `--no-cons`, `-O<N>` और `--release` वैसे ही काम करते हैं।
+- cons एरीना 1024 सेल से शुरू होता है और ज़रूरत पड़ने पर बढ़ता है। `--heap-cells`, `--max-memory`, `--frame-memory`, `--no-cons`, `-O<N>` और `--release` वैसे ही काम करते हैं।
 
 ### 3.9 Arduino Uno (AVR) के लिए कंपाइल करना
 

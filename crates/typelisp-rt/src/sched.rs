@@ -514,7 +514,7 @@ struct TaskSlot<B> {
 /// Starts the OS thread that runs a pinned task — see
 /// [`Scheduler::set_thread_starter`]. Called with the scheduler's lock held;
 /// it only starts the thread, which takes the lock itself once it runs.
-pub type ThreadStarter = alloc::sync::Arc<dyn Fn(TaskId) -> Result<(), String> + Send + Sync>;
+pub type ThreadStarter = typelisp_mem::sync::Arc<dyn Fn(TaskId) -> Result<(), String> + Send + Sync>;
 
 /// One position in the scheduler's table.
 ///

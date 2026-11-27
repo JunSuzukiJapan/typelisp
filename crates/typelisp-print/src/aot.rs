@@ -25,7 +25,7 @@
 use typelisp_mem::Word;
 use typelisp_mem::prelude::*;
 use core::cell::RefCell;
-use core::sync::atomic::{AtomicPtr, Ordering};
+use typelisp_mem::sync::atomic::{AtomicPtr, Ordering};
 
 use typelisp_abi::{decode, encode, fatal};
 use typelisp_mem::{Heap, TypeId, Value};

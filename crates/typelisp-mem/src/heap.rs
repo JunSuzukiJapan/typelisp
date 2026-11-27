@@ -24,7 +24,7 @@
 //!   use the same growable-slot-store shape. Both stores are a [`Slab`], not
 //!   a plain `Vec<Option<_>>`: growth appends a chunk rather than
 //!   reallocating everything, so an already-issued slot's address never
-//!   moves — see `Slab`'s doc comment.
+//!   moves — see [`ChunkStack`](crate::chunked::ChunkStack)'s doc comment.
 //! * **Mark-sweep.** `gc()` marks everything reachable from the root set
 //!   (iteratively — no native recursion), then rebuilds the cons free list and
 //!   sweeps strings. Cycles are reclaimed (unlike reference counting).
@@ -58,8 +58,8 @@
 use crate::prelude::*;
 use crate::collections::HashMap;
 use core::ptr;
-use core::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-use alloc::sync::Arc;
+use crate::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use crate::sync::Arc;
 use crate::sync::Mutex;
 
 use crate::sync::RwLock;
@@ -68,7 +68,6 @@ use super::symbols::{self, SymRef};
 use super::value::{BoxId, BoxedObj, Cell, ConsRef, LocId, Value};
 
 mod frames;
-mod slab;
 mod gc;
 mod roots;
 mod objects;
@@ -78,8 +77,11 @@ mod native;
 mod cons;
 
 pub use frames::*;
-use slab::*;
 use gc::*;
+
+/// A slot store, indexed like `Vec<Option<T>>` (`str_slots`, `box_slots`,
+/// `permanent_roots`), whose slots never move.
+type Slab<T> = crate::chunked::ChunkStack<Option<T>>;
 
 /// How far past its initial capacity a heap may grow by default — see
 /// [`Heap::with_capacity`]. Large enough that program text plus a working set
@@ -116,7 +118,7 @@ pub struct RootStackId(usize);
 /// `docs/dev/os-threads-design.md` §3.
 #[derive(Default)]
 struct RootStack {
-    roots: Vec<Value>,
+    roots: crate::chunked::ChunkStack<Value>,
     /// The value a `throw` currently travelling through *this task's* frames
     /// is carrying — see [`Heap::set_in_flight_throw`]. Per stack rather than
     /// a single field on `Heap`, so that a different task running on the same
@@ -307,7 +309,7 @@ pub struct HeapShared {
     // per-view below instead of read through this lock on every push/pop.
     root_stacks: Mutex<Vec<Option<Box<RootStack>>>>,
     // Always `Some` once written — `Slab` rather than a plain `Vec<Value>`
-    // for the address stability described on `Slab`'s doc comment, not
+    // for the address stability described on `ChunkStack`'s doc comment, not
     // because any entry is ever removed (`push_permanent_root` never
     // provides a way to). Shared because a `defvar` global (what this
     // backs — see `push_permanent_root`) must read the same way from every
@@ -352,7 +354,7 @@ pub struct HeapShared {
     // return, only the plain `Vec` operations `alloc_cell`/`gc` already use
     // (`retain`/`push`/iteration), the same reasoning as `root_stacks`/
     // `permanent_roots`.
-    cell_registry: Mutex<Vec<alloc::sync::Weak<BoxId>>>,
+    cell_registry: Mutex<Vec<crate::sync::Weak<BoxId>>>,
     // Every view, and the stop-the-world flag — see `Heap::gc`.
     threads: ThreadRegistry,
     // How many collections have run, for tests that assert an allocation
@@ -422,7 +424,17 @@ impl Heap {
     /// list ending in `tail`. Returns the chunk and the new free-list head
     /// (`tail` itself when `len` is 0).
     fn alloc_chunk(len: usize, tail: *mut Cell) -> (Chunk, *mut Cell) {
-        let mut v: Vec<Cell> = Vec::with_capacity(len);
+        Self::try_alloc_chunk(len, tail).unwrap_or_else(|| {
+            let layout = core::alloc::Layout::array::<Cell>(len).expect("a chunk the address space holds");
+            alloc::alloc::handle_alloc_error(layout)
+        })
+    }
+
+    /// [`Self::alloc_chunk`], or `None` when there is not the memory for it:
+    /// what growing an arena asks, which can go on without growing.
+    fn try_alloc_chunk(len: usize, tail: *mut Cell) -> Option<(Chunk, *mut Cell)> {
+        let mut v: Vec<Cell> = Vec::new();
+        v.try_reserve_exact(len).ok()?;
         for _ in 0..len {
             v.push(Cell::blank());
         }
@@ -436,7 +448,20 @@ impl Heap {
             }
         }
 
-        (Chunk { base, len }, if len > 0 { base } else { tail })
+        Some((Chunk { base, len }, if len > 0 { base } else { tail }))
+    }
+
+    /// How many cells an arena that asks for `cells` starts or grows by:
+    /// where the memory there is to allocate from is known (a board's heap,
+    /// `memory::capacity`), no more than an eighth of it, so that a board
+    /// with little RAM has room for the rest — but at least a few.
+    pub fn fitting_cells(cells: usize) -> usize {
+        /// The fewest cells an arena starts or grows by.
+        const FEWEST: usize = 16;
+        match crate::memory::capacity() {
+            usize::MAX => cells,
+            room => cells.min((room / 8 / Self::cell_size()).max(FEWEST)),
+        }
     }
 
     /// Create a heap with `capacity` cons cells pre-allocated, growing by
@@ -448,6 +473,11 @@ impl Heap {
     /// allocation is at most `isize::MAX` bytes. A request past this is not
     /// memory the machine lacks but an arena no address space can hold, so a
     /// driver can refuse it by name instead of letting the allocation panic.
+    /// The bytes one cons cell of the arena takes.
+    pub const fn cell_size() -> usize {
+        core::mem::size_of::<Cell>()
+    }
+
     pub const fn max_capacity() -> usize {
         isize::MAX as usize / core::mem::size_of::<Cell>()
     }

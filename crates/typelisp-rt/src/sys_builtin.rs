@@ -155,7 +155,7 @@ static NEXT_THREAD_ID: typelisp_mem::sync::AtomicCount = typelisp_mem::sync::Ato
 
 typelisp_mem::thread_local! {
     /// This thread's number, taken the first time it is asked for.
-    static THREAD_ID: i64 = NEXT_THREAD_ID.fetch_add(1, core::sync::atomic::Ordering::Relaxed) as i64;
+    static THREAD_ID: i64 = NEXT_THREAD_ID.fetch_add(1, typelisp_mem::sync::atomic::Ordering::Relaxed) as i64;
 }
 
 /// `(Thread::current-id)`: a number naming the OS thread running the caller,

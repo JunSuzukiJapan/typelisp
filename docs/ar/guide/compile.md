@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ be56bb8a477929497064b8f807acfd1755f2b35b -->
+<!-- translated-from: docs/ja/guide/compile.md @ f5fad21e6962ea3c90d803827468d58aaae4ceaa -->
 # الترجمة
 
 إذا لم تفعل شيئًا آخر فإن برامج typelisp تعمل في المفسِّر (interpreter). وإضافة إلى ذلك توجد طريقتان
@@ -163,14 +163,16 @@ $ typl --lib-dir ~/lib/typelisp build.typl
 ```sh
 $ typl --heap-cells 100000 -c hello.typl    # تثبيت ساحة cons على 100000 خلية
 $ typl -c hello.typl --max-memory 64M       # حجز 64 MiB على الأكثر
+$ typl -c hello.typl --frame-memory 1M      # 1 MiB على الأكثر للاستدعاءات الجارية لكل مهمة
 $ typl -c hello.typl --no-cons              # لا تستخدم خلايا cons
 ```
 
 - `--heap-cells N` يثبّت سعة ساحة خلايا cons على `N` خلية. لا تكبر الساحة بعدها: إذا لم يستطع جمع القمامة تحرير أي خلية، يتوقف البرنامج بخطأ وقت التشغيل. ومن دون الخيار تبدأ الساحة بـ 65536 خلية وتكبر عند الحاجة.
 - `--max-memory SIZE` يحدّ مجموع الذاكرة التي يحجزها الملف التنفيذي. يُحسب كل شيء: ساحة cons والسلاسل النصية والقيم مثل المتجهات وجداول التجزئة والذاكرة التي يستخدمها وقت التشغيل نفسه. `SIZE` عدد من البايتات ويجوز أن يليه `K` أو `M` أو `G` (1024 و1024² و1024³ ضعفًا). يُبلَّغ عن أي حجز يتجاوز الحد، وينتهي البرنامج برمز الخروج 1. لا يمكن التقاط هذا الخروج بـ `catch`. ومن دون الخيار لا يوجد حد.
+- يحدّ `--frame-memory SIZE` لكل مهمة الذاكرةَ التي تشغلها سجلات الاستدعاءات الجارية (ما يحتفظ به الاستدعاء حتى ينتهي، كوسائطه ومتغيراته المحلية). تقع السجلات في الكومة وتكبر كلما تعمق الاستدعاء الذاتي. يُكتب `SIZE` كما في `--max-memory`. لا يُجرى استدعاء يتجاوز الحد: يذكر الملف التنفيذي ذلك وينتهي برمز الخروج 1، ولا يلتقطه `catch` أيضًا. على لوحة ذات ذاكرة قليلة يوقف هذا استدعاءً ذاتيًا عميقًا جدًا قبل أن يستنفد الكومة. وبدونه لا حد.
 - `--no-cons` ينشئ ملفًا تنفيذيًا لا يستخدم أي خلية cons. ليست له ساحة cons، لذا فالبرنامج الذي يفعل شيئًا يحتاج إلى خلايا cons يُعدّ **خطأ ترجمة** يعرض تلك العملية وسلسلة الدوال من `main` التي تصل إليها. تُحتاج خلايا cons لبناء قائمة `Sexpr` (بما فيها القائمة المقتبسة والقائمة المبنية بشبه الاقتباس) أو وسيط `&rest`، وكذلك لـ `read` و`eval` و`macroexpand`. أما العمليات على الأعداد والسلاسل النصية والمتجهات وجداول التجزئة والبنى والقنوات ونحوها، و`print`/`println`/`format`، فلا تستخدم أيًا منها. لا يمكن تمريره مع `--heap-cells`، ويُكتب بعد `-c`.
 
-يُكتب `--max-memory` بعد `-c`. ويجوز كتابة `--heap-cells` قبل `-c` أو بعده، ويكون حينئذ سعة ساحة cons للملف التنفيذي. تُحسب ساحة cons ضمن حد الذاكرة، فإذا كان الحد لا يسع الساحة توقف البرنامج قبل أن يبدأ.
+يُكتب `--max-memory` و`--frame-memory` بعد `-c`. ويجوز كتابة `--heap-cells` قبل `-c` أو بعده، ويكون حينئذ سعة ساحة cons للملف التنفيذي. تُحسب ساحة cons ضمن حد الذاكرة، فإذا كان الحد لا يسع الساحة توقف البرنامج قبل أن يبدأ.
 
 ### 3.6 الترجمة إلى WebAssembly
 
@@ -195,7 +197,7 @@ fib(25) = 75025
   وTLS وتحليل الأسماء)، وخيوط نظام التشغيل (`Thread`)، ودوال C (`defffi`)، و`get-internal-run-time`, `machine-instance`, `software-version`, `file-author`،
   و`ed`.
 - لا تملك WASI وسيلة لمعرفة المنطقة الزمنية، لذا فالتوقيت المحلي مجهول. وتُحدث `decode-universal-time` و`encode-universal-time` بدون `zone`، وكذلك `get-decoded-time`، panic وقت التشغيل. وتعمل عند إعطاء `zone`.
-- تعمل `--heap-cells` و`--max-memory` و`--no-cons` و`-O<N>` و`--release` كما تعمل مع الملف التنفيذي.
+- تعمل `--heap-cells` و`--max-memory` و`--frame-memory` و`--no-cons` و`-O<N>` و`--release` كما تعمل مع الملف التنفيذي.
 
 ### 3.7 التشغيل في متصفح أو في Node.js
 
@@ -223,7 +225,7 @@ const code = await run({ write: (fd, text) => { /* اعرضه في الصفحة 
 
 ### 3.8 الترجمة لمتحكم دقيق (Cortex-M، RISC-V)
 
-مع `--target thumbv7em-none-eabihf` ينشئ `typl -c` ملفًا تنفيذيًا (ELF) للوحة Cortex-M4F أو M7 بلا نظام تشغيل. بدون `-o` يُسمّى باسم المصدر مع استبدال `.typl` بـ`.elf`. ومع `--target thumbv8m.main-none-eabihf` يكون للوحة Cortex-M33. ومع `--target riscv32imac-unknown-none-elf` يكون للوحة بنواة RISC-V بعرض 32 بت (الامتدادات M وA وC).
+مع `--target thumbv7em-none-eabihf` ينشئ `typl -c` ملفًا تنفيذيًا (ELF) للوحة Cortex-M4F أو M7 بلا نظام تشغيل. بدون `-o` يُسمّى باسم المصدر مع استبدال `.typl` بـ`.elf`. ومع `--target thumbv8m.main-none-eabihf` يكون للوحة Cortex-M33. ومع `--target riscv32imac-unknown-none-elf` يكون للوحة بنواة RISC-V بعرض 32 بت (الامتدادات M وA وC). ومع `--target thumbv6m-none-eabi` يكون للوحة Cortex-M0+ (M0). لا توجد في QEMU لوحة Cortex-M0+، لذا يعمل الملف التنفيذي لها على `mps2-an385`، وهو Cortex-M3 ينفّذ التعليمات نفسها كما هي (والتخطيط عند حذف `--linker-script` هو تخطيط هذه اللوحة أيضًا).
 
 ```sh
 $ typl -c hello.typl --target thumbv7em-none-eabihf          # ينشئ hello.elf
@@ -232,12 +234,15 @@ $ qemu-system-arm -M mps2-an386 -nographic \
 $ typl -c hello.typl --target thumbv8m.main-none-eabihf
 $ qemu-system-arm -M mps2-an505 -nographic \
     -semihosting-config enable=on,target=native -kernel hello.elf   # شغّله على Cortex-M33 في QEMU
+$ typl -c hello.typl --target thumbv6m-none-eabi
+$ qemu-system-arm -M mps2-an385 -nographic \
+    -semihosting-config enable=on,target=native -kernel hello.elf   # شغّله على Cortex-M3 في QEMU
 $ typl -c hello.typl --target riscv32imac-unknown-none-elf
 $ qemu-system-riscv32 -M virt -bios none -nographic \
     -semihosting-config enable=on,target=native -kernel hello.elf   # شغّله على RISC-V في QEMU
 ```
 
-- يمكن استخدام `typl` المثبّت بـ`install.sh` كما هو. للتثبيت بـ`cargo install` شغّل `rustup target add thumbv7em-none-eabihf thumbv8m.main-none-eabihf riscv32imac-unknown-none-elf` ثم ثبّت مع `--features embedded` (و`--features wasm,embedded` للاثنين). مع نسخة التصحيح من `typl` في المستودع شغّل `scripts/build-embedded-runtime.sh`. يستخدم الربط رابط سلسلة أدوات rustup.
+- يمكن استخدام `typl` المثبّت بـ`install.sh` كما هو. للتثبيت بـ`cargo install` شغّل `rustup target add thumbv7em-none-eabihf thumbv8m.main-none-eabihf thumbv6m-none-eabi riscv32imac-unknown-none-elf` ثم ثبّت مع `--features embedded` (و`--features wasm,embedded` للاثنين). مع نسخة التصحيح من `typl` في المستودع شغّل `scripts/build-embedded-runtime.sh`. يستخدم الربط رابط سلسلة أدوات rustup.
 - مرّر ذاكرة اللوحة بـ`--linker-script FILE`. يُكتب الملف مثل `memory.x` في `cortex-m-rt`: عناوين FLASH وRAM وأحجامها. سطر مثل `_typelisp_stack_size = 32K;` يحدد ما يأخذه المكدس من RAM (64KiB إن لم يُذكر)؛ وبقية RAM هي الكومة. بدون الخيار يُستخدم تخطيط `mps2-an386` (و`mps2-an505` لـ Cortex-M33) في QEMU.
 
   ```
@@ -266,6 +271,10 @@ $ qemu-system-riscv32 -M virt -bios none -nographic \
   _typelisp_stack_size = 4K;
   ```
 
+- على لوحة ذات RAM قليلة يمكن بدل `--linker-script` تمرير `--ram SIZE` (مثل `16K`) لتحديد مقدار RAM للبيانات والكومة والمكدس فقط. تصبح RAM في التخطيط الافتراضي بهذا الحجم، ولا يأخذ المكدس أكثر من ربعها. وعلى لوحة تضع الشيفرة أيضًا في RAM مثل `virt` في RISC-V تذهب الشيفرة إلى بقية RAM اللوحة. ويُصغَّر ما تخصّصه بيئة التشغيل في البداية ليناسب الكومة. ولا يُستخدم مع `--linker-script`.
+
+- ليس للوحة نظام تشغيل، فلا شيء يوقف مكدسًا يفيض. لذلك يتحقق الملف التنفيذي عند الدخول إلى كل دالة من دوال البرنامج من مقدار المكدس المتبقي؛ وإن كان قليلًا جدًا كتب `stack overflow: the program needs more than the ... bytes of the stack` وانتهى برمز الخروج 1. لتكبير المكدس كبّر `_typelisp_stack_size` في ملف `--linker-script` أو كبّر `--ram`. يحذف `--no-stack-check` هذا التحقق (يصبح الملف أصغر وأسرع قليلًا، لكن المكدس الفائض قد يفسد الكومة بصمت). وفي الحالتين، إذا فاض المكدس داخل بيئة التشغيل وتجاوز قاعه، يُكتب `stack overflow: the stack has run past its bottom into the heap` قبل تقرير الـ panic أو الـ HardFault الذي يليه. ويُكتب الشيء نفسه برمز الخروج 1 إذا عمل البرنامج حتى نهايته. لاحظ أن عمق الاستدعاء الذاتي لا يستهلك المكدس (تُحفظ سجلات الاستدعاءات في الكومة، والاستدعاء الذاتي العميق جدًا يستنفد الذاكرة)؛ وما يستعمل المكدس بعمق هو عمل بيئة التشغيل. ولإيقافه قبل ذلك استعمل `--frame-memory` (القسم 3.5).
+
 - يختار `--board-functions` من يوفّر الإخراج والإدخال والإنهاء والساعة (دوال اللوحة).
   - `semihosting` (الافتراضي): عبر semihosting، للتشغيل تحت QEMU (`-semihosting-config enable=on`) أو مصحّح.
   - `c`: توفّرها اللوحة كدوال C. مرّر بـ`--link FILE` ملف كائن أو مكتبة ثابتة تعرّف الدوال أدناه (يمكن تكرار `--link`؛ وتُمرَّر مكتبة المصنّع التي يستدعيها `defffi` بالطريقة نفسها).
@@ -293,7 +302,7 @@ $ qemu-system-riscv32 -M virt -bios none -nographic \
     (put-byte 104) (put-byte 105) (put-byte 10))                             ; "hi" وسطر جديد
   ```
 
-- اكتب الدالة التي تُستدعى عند وصول مقاطعة على هيئة `defun` بالسمة `#[interrupt(N)]` (مقاطعة الطرفية `N`) أو سمة مثل `#[exception(SysTick)]`. فعّل المقاطعة بـ `(enable-interrupt N)`. يعمل المعالج فورًا، ولا يعمل بعد انتهاء العمل إلا إذا وصل في منتصف عمل بيئة التشغيل. لا يستطيع المعالج الانتظار (`sleep` خطأ ترجمة). التفاصيل في القسم 3.17 من [مرجع الصياغة](../reference/syntax.md). على RISC-V يكون `N` رقم المقاطعة في `mcause` (من 0 إلى 31: 3 مقاطعة البرمجيات، و7 المؤقت، و11 المقاطعات الخارجية)، ولا يمكن استخدام `#[exception(NAME)]`.
+- اكتب الدالة التي تُستدعى عند وصول مقاطعة على هيئة `defun` بالسمة `#[interrupt(N)]` (مقاطعة الطرفية `N`) أو سمة مثل `#[exception(SysTick)]`. فعّل المقاطعة بـ `(enable-interrupt N)`. يعمل المعالج فورًا، ولا يعمل بعد انتهاء العمل إلا إذا وصل في منتصف عمل بيئة التشغيل. لا يستطيع المعالج الانتظار (`sleep` خطأ ترجمة). التفاصيل في القسم 3.17 من [مرجع الصياغة](../reference/syntax.md). على Cortex-M0+ يكون `N` من 0 إلى 31، ولا يسمّي `#[exception(NAME)]` إلا `NonMaskableInt` و`SVCall` و`PendSV` و`SysTick`. على RISC-V يكون `N` رقم المقاطعة في `mcause` (من 0 إلى 31: 3 مقاطعة البرمجيات، و7 المؤقت، و11 المقاطعات الخارجية)، ولا يمكن استخدام `#[exception(NAME)]`.
 
   ```lisp
   (use std::board::enable-interrupt)
@@ -310,7 +319,7 @@ $ qemu-system-riscv32 -M virt -bios none -nographic \
 - تبدأ بيئة التشغيل البرنامج (جدول المتجهات وتهيئة RAM) وتخصّص الذاكرة. HardFault (استثناء على RISC-V) أو مقاطعة بلا معالج ينهي البرنامج برمز خروج panic (1).
 - يعمل `throw`/`catch`/`panic` والأعداد الكبيرة والكسور والأعداد العشرية والمهام والقنوات و`sleep` كما في الملف التنفيذي. تعمل المهام بالتناوب على النواة الوحيدة. يمكن استخدام دوال C (`defffi`).
 - البرنامج الذي يستخدم ما ليس في اللوحة **خطأ ترجمة**: بالإضافة إلى ما لا يمكن استخدامه في القسم 3.7، `eval` و`macroexpand`. الوقت المحلي غير معروف (كما في القسم 3.6).
-- تبدأ ساحة cons بـ1024 خلية وتكبر عند الحاجة. تعمل `--heap-cells` و`--max-memory` و`--no-cons` و`-O<N>` و`--release` كما هي.
+- تبدأ ساحة cons بـ1024 خلية وتكبر عند الحاجة. تعمل `--heap-cells` و`--max-memory` و`--frame-memory` و`--no-cons` و`-O<N>` و`--release` كما هي.
 
 ### 3.9 الترجمة لـ Arduino Uno ‏(AVR)
 

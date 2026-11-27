@@ -174,6 +174,7 @@ $ typl --lib-dir ~/lib/typelisp build.typl
 ```sh
 $ typl --heap-cells 100000 -c hello.typl    # cons アリーナを 100000 セルに固定する
 $ typl -c hello.typl --max-memory 64M       # 確保するメモリを 64 MiB までにする
+$ typl -c hello.typl --frame-memory 1M      # 実行中の呼び出しの記録を、タスクごとに 1 MiB までにする
 $ typl -c hello.typl --no-cons              # cons セルを使わない
 ```
 
@@ -185,6 +186,11 @@ $ typl -c hello.typl --no-cons              # cons セルを使わない
   `K` `M` `G`（それぞれ 1024 倍、1024² 倍、1024³ 倍）を付けて書けます。上限を超えて確保しようと
   すると、そのことを表示して終了コード 1 で終了します。この終了は `catch` では捕まえられません。
   指定しないときは上限はありません。
+- `--frame-memory SIZE` は、実行中の呼び出しの記録（呼び出しが終わるまで持っている、引数や局所変数など）に
+  使ってよいメモリの、タスクごとの上限です。記録はヒープに置かれ、再帰が深くなるほど増えます。`SIZE` の
+  書き方は `--max-memory` と同じです。上限を超える呼び出しをしようとすると、そのことを表示して終了コード 1 で
+  終了します。この終了も `catch` では捕まえられません。メモリの少ないボードで、深すぎる再帰がヒープを
+  使い切る前に止めるのに使えます。指定しないときは上限はありません。
 - `--no-cons` は、cons セルを使わない実行ファイルを作ります。cons アリーナを持たないので、
   cons セルが必要な操作をするプログラムは**コンパイルエラー**になります。エラーには、その操作と、
   `main` からそこへ届く関数の並びが表示されます。cons セルが必要になるのは、`Sexpr` のリスト
@@ -192,7 +198,7 @@ $ typl -c hello.typl --no-cons              # cons セルを使わない
   `macroexpand` を使うときです。数値・文字列・ベクタ・ハッシュ表・構造体・チャネルなどの操作と、
   `print`/`println`/`format` は cons セルを使いません。`--heap-cells` とは一緒に指定できません。
 
-`--max-memory` と `--no-cons` は `-c` の後ろに書きます。`--heap-cells` は `-c` の前にも後ろにも書けます。
+`--max-memory`、`--frame-memory`、`--no-cons` は `-c` の後ろに書きます。`--heap-cells` は `-c` の前にも後ろにも書けます。
 cons アリーナもメモリの上限に数えられるので、アリーナがそのまま入らない上限を指定すると、
 プログラムが始まる前に止まります。
 
@@ -226,7 +232,7 @@ fib(25) = 75025
 - WASI には時間帯を知る手段がないので、地方時は分かりません。`zone` を省いた
   `decode-universal-time`・`encode-universal-time` と `get-decoded-time` は、実行時に panic します。
   `zone` を渡せば使えます。
-- `--heap-cells`、`--max-memory`、`--no-cons`、`-O<N>`、`--release` はそのまま使えます。
+- `--heap-cells`、`--max-memory`、`--frame-memory`、`--no-cons`、`-O<N>`、`--release` はそのまま使えます。
 
 ### 3.7 ブラウザや Node.js で動かす
 
@@ -263,8 +269,10 @@ const code = await run({ write: (fd, text) => { /* 画面に出すなど */ } })
 
 `--target thumbv7em-none-eabihf` を付けると、OS の無い Cortex-M4F・M7 のボード向けの実行ファイル
 （ELF）を作ります。`--target thumbv8m.main-none-eabihf` なら Cortex-M33 のボード向け、
-`--target riscv32imac-unknown-none-elf` なら 32 ビットの RISC-V（M・A・C 拡張）のボード向けです。`-o` を
+`--target thumbv6m-none-eabi` なら Cortex-M0+（M0）のボード向け、`--target riscv32imac-unknown-none-elf` なら 32 ビットの RISC-V（M・A・C 拡張）のボード向けです。`-o` を
 省くと、ソースの `.typl` を `.elf` に変えた名前になります。
+QEMU には Cortex-M0+ のボードが無いので、M0+ 向けの実行ファイルは、同じ命令がそのまま動く Cortex-M3 の
+`mps2-an385` で動かします（`--linker-script` を省いたときの配置もこのボードのものです）。
 
 ```sh
 $ typl -c hello.typl --target thumbv7em-none-eabihf          # hello.elf ができる
@@ -273,13 +281,16 @@ $ qemu-system-arm -M mps2-an386 -nographic \
 $ typl -c hello.typl --target thumbv8m.main-none-eabihf
 $ qemu-system-arm -M mps2-an505 -nographic \
     -semihosting-config enable=on,target=native -kernel hello.elf   # QEMU の Cortex-M33 で実行する
+$ typl -c hello.typl --target thumbv6m-none-eabi
+$ qemu-system-arm -M mps2-an385 -nographic \
+    -semihosting-config enable=on,target=native -kernel hello.elf   # QEMU の Cortex-M3 で実行する
 $ typl -c hello.typl --target riscv32imac-unknown-none-elf
 $ qemu-system-riscv32 -M virt -bios none -nographic \
     -semihosting-config enable=on,target=native -kernel hello.elf   # QEMU の RISC-V で実行する
 ```
 
 - `install.sh` で入れた `typl` はそのまま使えます。`cargo install` で入れるときは、
-  `rustup target add thumbv7em-none-eabihf thumbv8m.main-none-eabihf riscv32imac-unknown-none-elf` を実行してから `--features embedded` を付けてインストールします
+  `rustup target add thumbv7em-none-eabihf thumbv8m.main-none-eabihf thumbv6m-none-eabi riscv32imac-unknown-none-elf` を実行してから `--features embedded` を付けてインストールします
   （wasm と両方なら `--features wasm,embedded`）。リポジトリのデバッグビルドの `typl` では
   `scripts/build-embedded-runtime.sh` を実行します。リンクには rustup の toolchain のリンカを使います。
 - ボードのメモリの配置は `--linker-script FILE` で渡します。書き方は `cortex-m-rt` の `memory.x` と同じで、
@@ -312,6 +323,20 @@ $ qemu-system-riscv32 -M virt -bios none -nographic \
   REGION_ALIAS("REGION_STACK", RAM);
   _typelisp_stack_size = 4K;
   ```
+
+- RAM の小さいボードでは、`--linker-script` の代わりに `--ram SIZE`（`16K` など）で、データ・ヒープ・スタックに使う RAM の
+  大きさだけを指定できます。既定の配置の RAM がその大きさになり、スタックはその 4 分の 1 までになります。RISC-V の `virt` のように
+  コードも RAM に置くボードでは、ボードの RAM の残りがコードの領域になります。ランタイムが最初に確保する量は、ヒープの大きさに
+  合わせて小さくなります。`--linker-script` と一緒には使えません。
+
+- ボードには OS が無いので、スタックがあふれても止めるものがありません。そのため実行ファイルは、プログラムの関数の入口ごとに
+  スタックの残りを確かめ、足りなければ `stack overflow: the program needs more than the ... bytes of the stack` と書いて
+  終了コード 1 で終わります。スタックを大きくするには、`--linker-script` のファイルの `_typelisp_stack_size` か `--ram` を
+  大きくします。`--no-stack-check` を付けると、この検査を入れません（少し小さく速くなりますが、あふれたスタックはヒープを黙って
+  壊すことがあります）。どちらの場合も、ランタイムの中であふれてスタックの下端を越えたときは、その後の panic や HardFault の
+  報告の前に `stack overflow: the stack has run past its bottom into the heap` と書きます。プログラムが最後まで動いたときも
+  同じことを書き、終了コード 1 で終わります。なお、再帰の深さはスタックを使いません（呼び出しの記録はヒープに置かれ、
+  深すぎる再帰はメモリ不足になります。その前に止めるには、3.5 節の `--frame-memory` を使います）。スタックを深く使うのはランタイムの処理です。
 
 - 出力・入力・終了・時刻（ボードの関数）を誰が与えるかは `--board-functions` で選びます。
   - `semihosting`（既定）: semihosting で与えます。QEMU（`-semihosting-config enable=on`）やデバッガで動かすときに使います。
@@ -350,6 +375,7 @@ $ qemu-system-riscv32 -M virt -bios none -nographic \
   ハンドラはその場で実行され、ランタイムの処理の途中に来たときだけ、その処理が終わってから実行されます。
   ハンドラの中では待てません（`sleep` はコンパイルエラーです）。詳しくは
   [構文リファレンス](../reference/syntax.md) の 3.17 節にあります。
+  Cortex-M0+ では `N` は 0〜31 で、`#[exception(NAME)]` に書けるのは `NonMaskableInt`・`SVCall`・`PendSV`・`SysTick` だけです。
   RISC-V では `N` は `mcause` の割り込みの番号（0〜31。3 がソフトウェア割り込み、7 がタイマー、11 が外部割り込み）で、
   `#[exception(NAME)]` は使えません。
 
@@ -371,8 +397,8 @@ $ qemu-system-riscv32 -M virt -bios none -nographic \
   振る舞います。タスクは 1 つのコアで順に実行されます。C の関数（`defffi`）も使えます。
 - ボードにないものを使うプログラムは**コンパイルエラー**になります。3.7 節で使えないものに加えて、
   `eval`・`macroexpand` が使えません。地方時は分かりません（3.6 節と同じ）。
-- cons アリーナは 1024 セルから始まり、足りなければ伸びます。`--heap-cells`、`--max-memory`、`--no-cons`、
-  `-O<N>`、`--release` はそのまま使えます。
+- cons アリーナは 1024 セルから始まり、足りなければ伸びます。`--heap-cells`、`--max-memory`、
+  `--frame-memory`、`--no-cons`、`-O<N>`、`--release` はそのまま使えます。
 
 ### 3.9 Arduino Uno（AVR）向けにコンパイルする
 

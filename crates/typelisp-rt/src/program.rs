@@ -27,27 +27,44 @@ pub const DEFAULT_AOT_HEAP_CAPACITY: usize = 1 << 16;
 /// [`crate::mem_limit`]); it is set before the arena is allocated, so the
 /// arena counts toward it. `fixed`, if not 0, fixes the arena at its
 /// capacity (`typl -c --heap-cells`); otherwise it grows as
-/// [`Heap::with_capacity`] lets it. The allocated `Heap` is deliberately
+/// [`Heap::with_capacity`] lets it. `frame_memory`, if not 0, is the bound
+/// on the bytes each task's calls in progress take (`typl -c
+/// --frame-memory`, `typelisp_mem::heap::set_frame_memory`). The allocated `Heap` is deliberately
 /// never freed — it must outlive every other compiled function in the
 /// process, i.e. live until the OS reclaims everything at process exit.
 ///
 /// # Safety
 ///
 /// None: it only allocates. `cells` is the cons arena's size,
-/// `max_memory` the memory limit (0 for none), and `fixed` nonzero when the
-/// arena must not grow.
+/// `max_memory` the memory limit (0 for none), `fixed` nonzero when the
+/// arena must not grow, and `frame_memory` the bound on a task's calls in
+/// progress (0 for none).
 #[no_mangle]
-pub unsafe extern "C" fn rt_heap_init(cells: Word, max_memory: Word, fixed: Word) -> Word {
+pub unsafe extern "C" fn rt_heap_init(cells: Word, max_memory: Word, fixed: Word, frame_memory: Word) -> Word {
     typelisp_mem::host::install_panic_report();
     if max_memory != 0 {
         crate::mem_limit::set_memory_limit(max_memory as usize);
     }
-    let mut heap = Box::new(Heap::with_capacity(cells as usize));
+    if frame_memory != 0 {
+        typelisp_mem::heap::set_frame_memory(frame_memory as usize, crate::coroutine::ENTRY_BYTES);
+    }
+    let mut heap = Box::new(Heap::with_capacity(arena_start(cells as usize, fixed != 0)));
     if fixed != 0 {
         heap.set_growth_limit(0);
     }
     set_active_heap(Box::into_raw(heap));
     0
+}
+
+/// How many cells the arena starts with, `cells` asked for: as many as fit
+/// the memory there is (`Heap::fitting_cells`), unless the arena is fixed at
+/// its size (`--heap-cells`).
+fn arena_start(cells: usize, fixed: bool) -> usize {
+    if fixed {
+        cells
+    } else {
+        Heap::fitting_cells(cells)
+    }
 }
 
 /// Diagnostic-only: the active `Heap`'s live cons-cell count
@@ -185,7 +202,7 @@ pub unsafe extern "C" fn rt_run_program_alone_int(inits: Word, count: Word, entr
 /// program, on a target that has them: given the program's scheduler before
 /// its first initialiser. An `Err` is a configuration the program cannot run
 /// with, reported as `error: <message>`.
-pub type StartThreads = fn(&alloc::sync::Arc<crate::sched::SchedShared<crate::sched::CompiledTask>>, &mut Heap) -> Result<(), String>;
+pub type StartThreads = fn(&typelisp_mem::sync::Arc<crate::sched::SchedShared<crate::sched::CompiledTask>>, &mut Heap) -> Result<(), String>;
 
 /// The body of every program entry: reads the program, runs it with `run`
 /// ([`run_program`] under a scheduler, [`run_alone`] without one), and
@@ -302,7 +319,7 @@ pub unsafe fn read_program(inits: Word, count: Word, entry: Word) -> Program {
 /// [`rt_run_program`]'s.
 pub unsafe fn run_program(program: &Program, start: Option<StartThreads>) -> Result<Value, Word> {
     let heap = active_heap();
-    let sched = alloc::sync::Arc::new(crate::sched::SchedShared::<crate::sched::CompiledTask>::new());
+    let sched = typelisp_mem::sync::Arc::new(crate::sched::SchedShared::<crate::sched::CompiledTask>::new());
     // The printer reads the prelude's control variables from their compiled
     // slots, and the id -> slot table is this crate's.
     typelisp_print::aot::set_global_slots(global_perm_idx);

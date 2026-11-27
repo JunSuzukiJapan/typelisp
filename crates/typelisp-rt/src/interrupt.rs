@@ -40,7 +40,7 @@
 
 use typelisp_mem::Word;
 use typelisp_mem::prelude::*;
-use core::sync::atomic::{AtomicBool, AtomicPtr, AtomicU32, AtomicUsize, Ordering::SeqCst};
+use typelisp_mem::sync::atomic::{AtomicBool, AtomicPtr, AtomicU32, AtomicUsize, Ordering::SeqCst};
 
 use typelisp_abi::raise;
 

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ be56bb8a477929497064b8f807acfd1755f2b35b -->
+<!-- translated-from: docs/ja/guide/compile.md @ f5fad21e6962ea3c90d803827468d58aaae4ceaa -->
 # Compilazione
 
 Se non fai altro, i programmi typelisp vengono eseguiti nell'interprete. Inoltre esistono due modi per
@@ -168,14 +168,16 @@ funziona solo con il `typl` compilato insieme ad esso. Dopo aver ricompilato `ty
 ```sh
 $ typl --heap-cells 100000 -c hello.typl    # fissa l'arena cons a 100000 celle
 $ typl -c hello.typl --max-memory 64M       # alloca al massimo 64 MiB
+$ typl -c hello.typl --frame-memory 1M      # al massimo 1 MiB di chiamate in corso per task
 $ typl -c hello.typl --no-cons              # non usa celle cons
 ```
 
 - `--heap-cells N` fissa la capacità dell'arena delle celle cons a `N` celle. L'arena non cresce oltre: se la garbage collection non riesce a liberare una cella, il programma si ferma con un errore di esecuzione. Senza l'opzione, l'arena parte da 65536 celle e cresce quando serve.
 - `--max-memory SIZE` limita la memoria totale che l'eseguibile alloca. Conta tutto: l'arena cons, le stringhe, valori come vettori e tabelle hash, e la memoria del runtime stesso. `SIZE` è un numero di byte e può essere seguito da `K`, `M` o `G` (1024, 1024² e 1024³ volte). Un'allocazione che supererebbe il limite viene segnalata e il programma termina con codice di uscita 1. Questa uscita non si può intercettare con `catch`. Senza l'opzione non c'è limite.
+- `--frame-memory SIZE` limita, per ogni task, la memoria che occupano i record delle chiamate in corso (ciò che una chiamata conserva finché non termina, come i suoi argomenti e le variabili locali). I record stanno nello heap e crescono con la profondità di una ricorsione. `SIZE` si scrive come per `--max-memory`. Una chiamata che supererebbe il limite non viene fatta: l'eseguibile lo segnala e termina con il codice di uscita 1, che nemmeno `catch` può catturare. Su una scheda con poca memoria ferma una ricorsione troppo profonda prima che esaurisca lo heap. Senza l'opzione non c'è limite.
 - `--no-cons` crea un eseguibile che non usa celle cons. Non ha un'arena cons, quindi un programma che fa qualcosa che richiede celle cons è un **errore di compilazione**, che mostra quell'operazione e la catena di funzioni da `main` che la raggiunge. Le celle cons servono per costruire una lista `Sexpr` (anche una lista quotata o costruita con il quasiquote) o un argomento `&rest`, e per `read`, `eval` e `macroexpand`. Le operazioni su numeri, stringhe, vettori, tabelle hash, struct, canali e simili, e `print`/`println`/`format`, non ne usano. Non si può indicare insieme a `--heap-cells` e si scrive dopo `-c`.
 
-`--max-memory` si scrive dopo `-c`. `--heap-cells` si può scrivere prima o dopo `-c`, e allora è la capacità dell'arena cons dell'eseguibile. L'arena cons conta nel limite di memoria, quindi con un limite in cui l'arena non entra il programma si ferma prima di iniziare.
+`--max-memory` e `--frame-memory` si scrivono dopo `-c`. `--heap-cells` si può scrivere prima o dopo `-c`, e allora è la capacità dell'arena cons dell'eseguibile. L'arena cons conta nel limite di memoria, quindi con un limite in cui l'arena non entra il programma si ferma prima di iniziare.
 
 ### 3.6 Compilare per WebAssembly
 
@@ -200,7 +202,7 @@ fib(25) = 75025
   TLS, risoluzione dei nomi), thread del sistema (`Thread`), funzioni C (`defffi`), `get-internal-run-time`, `machine-instance`, `software-version`, `file-author`
   ed `ed`.
 - WASI non ha modo di conoscere il fuso orario, quindi l'ora locale è sconosciuta. `decode-universal-time` ed `encode-universal-time` senza `zone`, e `get-decoded-time`, vanno in panic durante l'esecuzione. Funzionano se si passa `zone`.
-- `--heap-cells`, `--max-memory`, `--no-cons`, `-O<N>` e `--release` valgono come per un eseguibile.
+- `--heap-cells`, `--max-memory`, `--frame-memory`, `--no-cons`, `-O<N>` e `--release` valgono come per un eseguibile.
 
 ### 3.7 Eseguire in un browser o in Node.js
 
@@ -228,7 +230,7 @@ const code = await run({ write: (fd, text) => { /* mostrarlo nella pagina, per e
 
 ### 3.8 Compilare per un microcontrollore (Cortex-M, RISC-V)
 
-Con `--target thumbv7em-none-eabihf`, `typl -c` crea un eseguibile (ELF) per una scheda Cortex-M4F o M7 senza sistema operativo. Senza `-o`, prende il nome del sorgente con `.typl` sostituito da `.elf`. Con `--target thumbv8m.main-none-eabihf`, è per una scheda Cortex-M33. Con `--target riscv32imac-unknown-none-elf`, è per una scheda con un core RISC-V a 32 bit (estensioni M, A e C).
+Con `--target thumbv7em-none-eabihf`, `typl -c` crea un eseguibile (ELF) per una scheda Cortex-M4F o M7 senza sistema operativo. Senza `-o`, prende il nome del sorgente con `.typl` sostituito da `.elf`. Con `--target thumbv8m.main-none-eabihf`, è per una scheda Cortex-M33. Con `--target riscv32imac-unknown-none-elf`, è per una scheda con un core RISC-V a 32 bit (estensioni M, A e C). Con `--target thumbv6m-none-eabi`, è per una scheda Cortex-M0+ (M0). QEMU non ha una scheda Cortex-M0+, quindi un eseguibile per essa gira su `mps2-an385`, un Cortex-M3, che esegue le stesse istruzioni così come sono (anche la disposizione senza `--linker-script` è quella di questa scheda).
 
 ```sh
 $ typl -c hello.typl --target thumbv7em-none-eabihf          # crea hello.elf
@@ -237,12 +239,15 @@ $ qemu-system-arm -M mps2-an386 -nographic \
 $ typl -c hello.typl --target thumbv8m.main-none-eabihf
 $ qemu-system-arm -M mps2-an505 -nographic \
     -semihosting-config enable=on,target=native -kernel hello.elf   # eseguirlo sul Cortex-M33 di QEMU
+$ typl -c hello.typl --target thumbv6m-none-eabi
+$ qemu-system-arm -M mps2-an385 -nographic \
+    -semihosting-config enable=on,target=native -kernel hello.elf   # eseguirlo sul Cortex-M3 di QEMU
 $ typl -c hello.typl --target riscv32imac-unknown-none-elf
 $ qemu-system-riscv32 -M virt -bios none -nographic \
     -semihosting-config enable=on,target=native -kernel hello.elf   # eseguirlo sul RISC-V di QEMU
 ```
 
-- Un `typl` installato con `install.sh` si usa così com'è. Per installare con `cargo install`, esegui `rustup target add thumbv7em-none-eabihf thumbv8m.main-none-eabihf riscv32imac-unknown-none-elf` e poi installa con `--features embedded` (`--features wasm,embedded` per entrambi). Con una build di debug di `typl` nel repository, esegui `scripts/build-embedded-runtime.sh`. Il collegamento usa il linker della toolchain di rustup.
+- Un `typl` installato con `install.sh` si usa così com'è. Per installare con `cargo install`, esegui `rustup target add thumbv7em-none-eabihf thumbv8m.main-none-eabihf thumbv6m-none-eabi riscv32imac-unknown-none-elf` e poi installa con `--features embedded` (`--features wasm,embedded` per entrambi). Con una build di debug di `typl` nel repository, esegui `scripts/build-embedded-runtime.sh`. Il collegamento usa il linker della toolchain di rustup.
 - Indica la memoria della scheda con `--linker-script FILE`. Si scrive come il `memory.x` di `cortex-m-rt`: indirizzi e dimensioni di FLASH e RAM. Una riga come `_typelisp_stack_size = 32K;` stabilisce quanta RAM occupa lo stack (64KiB se non indicato); il resto della RAM è l'heap. Senza l'opzione, la disposizione è quella del `mps2-an386` (`mps2-an505` per un Cortex-M33) di QEMU.
 
   ```
@@ -271,6 +276,10 @@ $ qemu-system-riscv32 -M virt -bios none -nographic \
   _typelisp_stack_size = 4K;
   ```
 
+- Su una scheda con poca RAM, al posto di `--linker-script`, `--ram SIZE` (`16K` ecc.) indica solo quanta RAM hanno i dati, l'heap e lo stack. La RAM della disposizione predefinita prende quella dimensione, e lo stack ne occupa al massimo un quarto. Su una scheda che tiene anche il codice in RAM, come `virt` per RISC-V, il codice va nel resto della RAM della scheda. Ciò che il runtime alloca all'inizio viene ridotto per stare nell'heap. Non si può usare insieme a `--linker-script`.
+
+- Una scheda non ha sistema operativo, quindi nulla ferma uno stack che trabocca. L'eseguibile controlla perciò, all'ingresso di ogni funzione del programma, quanto stack resta; se ne resta troppo poco, scrive `stack overflow: the program needs more than the ... bytes of the stack` e termina con il codice di uscita 1. Per dare più spazio allo stack, aumentare `_typelisp_stack_size` nel file di `--linker-script`, oppure `--ram`. `--no-stack-check` omette il controllo (l'eseguibile è un po' più piccolo e veloce, ma uno stack che trabocca può corrompere lo heap senza avvisare). In entrambi i casi, quando lo stack trabocca dentro il runtime e supera il suo fondo, il rapporto del panic o dell'HardFault che segue è preceduto da `stack overflow: the stack has run past its bottom into the heap`. Lo stesso viene scritto, con il codice di uscita 1, quando il programma arriva alla fine. La profondità di una ricorsione non usa lo stack (le chiamate sono registrate nello heap, e una ricorsione troppo profonda esaurisce la memoria); a usare lo stack in profondità è il lavoro del runtime. Per fermarla prima, si usa `--frame-memory` (sezione 3.5).
+
 - `--board-functions` sceglie chi fornisce output, input, terminazione e orologio (le funzioni della scheda).
   - `semihosting` (predefinito): tramite semihosting, per eseguire sotto QEMU (`-semihosting-config enable=on`) o un debugger.
   - `c`: la scheda le fornisce come funzioni C. Passa con `--link FILE` un oggetto o una libreria statica che definisce le funzioni seguenti (`--link` si può ripetere; una libreria del produttore chiamata da `defffi` si passa allo stesso modo).
@@ -298,7 +307,7 @@ $ qemu-system-riscv32 -M virt -bios none -nographic \
     (put-byte 104) (put-byte 105) (put-byte 10))                             ; "hi" e un a capo
   ```
 
-- La funzione chiamata quando arriva un interrupt si scrive come un `defun` con l'attributo `#[interrupt(N)]` (l'interrupt di periferica `N`) o uno come `#[exception(SysTick)]`. Un interrupt si abilita con `(enable-interrupt N)`. Un gestore si esegue subito; solo se arriva a metà del lavoro del runtime si esegue dopo che quel lavoro è finito. Un gestore non può attendere (`sleep` è un errore di compilazione). I dettagli sono nella sezione 3.17 del [riferimento della sintassi](../reference/syntax.md). Su RISC-V, `N` è il numero dell'interrupt in `mcause` (da 0 a 31: 3 è l'interrupt software, 7 il timer, 11 gli interrupt esterni), e `#[exception(NAME)]` non si può usare.
+- La funzione chiamata quando arriva un interrupt si scrive come un `defun` con l'attributo `#[interrupt(N)]` (l'interrupt di periferica `N`) o uno come `#[exception(SysTick)]`. Un interrupt si abilita con `(enable-interrupt N)`. Un gestore si esegue subito; solo se arriva a metà del lavoro del runtime si esegue dopo che quel lavoro è finito. Un gestore non può attendere (`sleep` è un errore di compilazione). I dettagli sono nella sezione 3.17 del [riferimento della sintassi](../reference/syntax.md). Su un Cortex-M0+, `N` va da 0 a 31, e `#[exception(NAME)]` può nominare solo `NonMaskableInt`, `SVCall`, `PendSV` e `SysTick`. Su RISC-V, `N` è il numero dell'interrupt in `mcause` (da 0 a 31: 3 è l'interrupt software, 7 il timer, 11 gli interrupt esterni), e `#[exception(NAME)]` non si può usare.
 
   ```lisp
   (use std::board::enable-interrupt)
@@ -315,7 +324,7 @@ $ qemu-system-riscv32 -M virt -bios none -nographic \
 - Il runtime avvia il programma (la tabella dei vettori e la preparazione della RAM) e alloca la memoria. Un HardFault (un'eccezione su RISC-V) o un interrupt non gestito termina il programma con il codice di uscita di un panic (1).
 - `throw`/`catch`/`panic`, bignum, frazioni e numeri in virgola mobile, e task, canali e `sleep` si comportano come nell'eseguibile. I task vengono eseguiti a turno sull'unico core. Si possono usare funzioni C (`defffi`).
 - Un programma che usa ciò che la scheda non ha è un **errore di compilazione**: oltre a ciò che non si può usare nella sezione 3.7, `eval` e `macroexpand`. L'ora locale è sconosciuta (come nella sezione 3.6).
-- L'arena dei cons parte da 1024 celle e cresce quando serve. `--heap-cells`, `--max-memory`, `--no-cons`, `-O<N>` e `--release` funzionano così come sono.
+- L'arena dei cons parte da 1024 celle e cresce quando serve. `--heap-cells`, `--max-memory`, `--frame-memory`, `--no-cons`, `-O<N>` e `--release` funzionano così come sono.
 
 ### 3.9 Compilare per Arduino Uno (AVR)
 

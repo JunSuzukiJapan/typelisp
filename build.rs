@@ -221,9 +221,10 @@ fn bundled_embedded(cargo: &str, manifest_dir: &std::path::Path, target_dir: &st
 /// The triples of the boards `typl -c --target` builds for with a runtime
 /// (`compile::aot::Target::BOARDS`), each with the crate that starts the
 /// program on its core and writes `link.x`.
-const BOARDS: [(&str, &str); 3] = [
+const BOARDS: [(&str, &str); 4] = [
     ("thumbv7em-none-eabihf", "cortex-m-rt"),
     ("thumbv8m.main-none-eabihf", "cortex-m-rt"),
+    ("thumbv6m-none-eabi", "cortex-m-rt"),
     ("riscv32imac-unknown-none-elf", "riscv-rt"),
 ];
 

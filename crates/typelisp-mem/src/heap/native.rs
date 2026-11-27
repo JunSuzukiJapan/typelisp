@@ -2,7 +2,7 @@
 
 use crate::prelude::*;
 use core::any::Any;
-use alloc::sync::Arc;
+use crate::sync::Arc;
 
 use crate::value::{BoxId, BoxedObj, Native, StructPayload, TypeId, Value};
 use super::Heap;

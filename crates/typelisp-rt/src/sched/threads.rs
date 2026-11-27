@@ -43,7 +43,7 @@ pub struct SchedShared<B: TaskBody> {
     /// is one thread's, which is all of it when nothing else steps tasks
     /// (`TYPELISP_THREADS=1`, or an interpreter's drive with no compiled
     /// task for a worker to take).
-    every_step: core::sync::atomic::AtomicBool,
+    every_step: typelisp_mem::sync::atomic::AtomicBool,
 }
 
 struct SharedState<B: TaskBody> {
@@ -70,7 +70,7 @@ struct SharedState<B: TaskBody> {
 struct OtherThreads {
     /// How a thread waiting on the scheduler's sockets is woken when
     /// something it should see changes.
-    waker: alloc::sync::Arc<dyn Waker>,
+    waker: typelisp_mem::sync::Arc<dyn Waker>,
     /// Threads that live for one drive at a time, or `None` for workers that
     /// live as long as the program.
     crew: Option<Crew>,
@@ -84,7 +84,7 @@ pub trait Joiner: Send {
 }
 
 /// Starts worker `i` of a [`Crew`], running [`drive_worker`].
-pub type Spawner = alloc::sync::Arc<dyn Fn(usize) -> Result<alloc::boxed::Box<dyn Joiner>, String> + Send + Sync>;
+pub type Spawner = typelisp_mem::sync::Arc<dyn Fn(usize) -> Result<alloc::boxed::Box<dyn Joiner>, String> + Send + Sync>;
 
 /// How the runtime crate that has OS threads lets a scheduler use them
 /// ([`SchedShared::install_threads`]).
@@ -92,7 +92,7 @@ pub struct Threads {
     /// What `thread` starts an OS thread with, running [`drive_pinned`].
     pub starter: ThreadStarter,
     /// How a thread waiting on the scheduler's sockets is woken.
-    pub waker: alloc::sync::Arc<dyn Waker>,
+    pub waker: typelisp_mem::sync::Arc<dyn Waker>,
     /// For a scheduler whose owner is not always driving it: how many
     /// workers a drive may start, and how. `None` when the workers were
     /// started already and live as long as the program.
@@ -133,7 +133,7 @@ impl<B: TaskBody> SchedShared<B> {
             }),
             changed: typelisp_mem::sync::Condvar::new(),
             joinable: typelisp_mem::sync::Mutex::new(Vec::new()),
-            every_step: core::sync::atomic::AtomicBool::new(false),
+            every_step: typelisp_mem::sync::atomic::AtomicBool::new(false),
         }
     }
 
@@ -184,7 +184,7 @@ impl<B: TaskBody> SchedShared<B> {
 
     /// Switch tasks after every step — the tests' knob, see the field.
     pub fn set_switch_every_step(&self, on: bool) {
-        self.every_step.store(on, core::sync::atomic::Ordering::Relaxed);
+        self.every_step.store(on, typelisp_mem::sync::atomic::Ordering::Relaxed);
     }
 
     /// Ends a [`Crew`]'s drive: stops its threads, waits for each to finish
@@ -329,7 +329,7 @@ impl<'a, B: TaskBody> Locked<'a, B> {
         if crew.up || crew.workers == 0 {
             return Ok(());
         }
-        let (n, spawn) = (crew.workers, alloc::sync::Arc::clone(&crew.spawn));
+        let (n, spawn) = (crew.workers, typelisp_mem::sync::Arc::clone(&crew.spawn));
         let slots = &self.guard.sched.slots;
         let for_workers = self.guard.sched.ready.iter().any(|t| !matches!(&slots[t.0], Slot::Parked(s) if s.main_only));
         if !for_workers {
@@ -380,7 +380,7 @@ impl<'a, B: TaskBody> Locked<'a, B> {
         self.guard.polling = true;
         let waits = self.guard.sched.io_snapshot();
         let mut fds: Vec<(i32, super::Interest)> = waits.iter().map(|w| (w.fd, w.interest)).collect();
-        let waker = self.guard.threads.as_ref().map(|t| alloc::sync::Arc::clone(&t.waker));
+        let waker = self.guard.threads.as_ref().map(|t| typelisp_mem::sync::Arc::clone(&t.waker));
         if let Some(w) = &waker {
             fds.push((w.read_fd(), super::Interest::Readable));
         }
@@ -538,7 +538,7 @@ fn run_one<B: TaskBody>(
     mut slot: TaskSlot<B>,
 ) {
     heap.switch_to_root_stack(slot.roots);
-    let every_step = shared.every_step.load(core::sync::atomic::Ordering::Relaxed);
+    let every_step = shared.every_step.load(typelisp_mem::sync::atomic::Ordering::Relaxed);
     let outcome = loop {
         match slot.task.step(heap, cx) {
             Progress::Running if every_step => break Progress::Running,

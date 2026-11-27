@@ -26,7 +26,8 @@
 #   scripts/build-embedded-runtime.sh release    # the release profile
 #
 # Needs a rustup toolchain with the boards' targets (`rustup target add
-# thumbv7em-none-eabihf thumbv8m.main-none-eabihf riscv32imac-unknown-none-elf`): $TYPELISP_EMBEDDED_TOOLCHAIN, or
+# thumbv7em-none-eabihf thumbv8m.main-none-eabihf thumbv6m-none-eabi
+# riscv32imac-unknown-none-elf`): $TYPELISP_EMBEDDED_TOOLCHAIN, or
 # rustup's default one when that is not set. A Rust that is not rustup's (a
 # package manager's) has no such target to add, so the toolchain is asked of
 # rustup rather than taken from PATH.
@@ -61,7 +62,7 @@ build_dir="$target_dir/embedded"
 mkdir -p "$target_dir/embedded-runtime/$profile"
 ln -sf "$lld" "$target_dir/embedded-runtime/$profile/ld.lld"
 
-for target in thumbv7em-none-eabihf thumbv8m.main-none-eabihf riscv32imac-unknown-none-elf; do
+for target in thumbv7em-none-eabihf thumbv8m.main-none-eabihf thumbv6m-none-eabi riscv32imac-unknown-none-elf; do
   # The crate that starts the program on the core, whose build script writes
   # `link.x`.
   case "$target" in

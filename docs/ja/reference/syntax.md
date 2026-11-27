@@ -1296,6 +1296,7 @@ test result: FAILED. 1 passed; 1 failed; 0 filtered out
 
 - Arduino Uno 向けでは番号の数え方と有効にする方法が違い、`#[exception(NAME)]` と `enable-interrupt` は使えない
   （[コンパイル](../guide/compile.md) の 3.9 節）。下の説明のうちランタイムに関わるものは、Cortex-M のもの。
+- Cortex-M0+ 向けでは `N` は 0〜31 で、`NAME` に書けるのは `NonMaskableInt`、`SVCall`、`PendSV`、`SysTick` だけ。
 - RISC-V 向けでは `N` は `mcause` の割り込みの番号（0〜31）で、`#[exception(NAME)]` は使えない。下の説明のうち
   ランタイムに関わるものは RISC-V でも同じ。
 - 引数を取らず `()` を返す、トップレベルの `defun` に付ける（型パラメータも取れない）。1 つの割り込みに

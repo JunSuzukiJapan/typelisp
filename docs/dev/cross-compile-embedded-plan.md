@@ -174,9 +174,33 @@ Cortex-M と共通にしたもの:
 
 テスト: `tests/aot_riscv32_test.rs`（ネイティブとの比較、語の幅、panic、CLINT のソフトウェア割り込みとタイマー割り込み（cons を作り続ける間）、範囲外の割り込み番号と例外の拒否、ファイル操作の拒否、16550 UART の volatile、C のボードの関数、ILP32 の `c-long` と構造体、ランタイムを使わないプログラム）。幅の検査（`size_of_test`、`llvm_size_of_test`）と GC（`collect_without_cons_test`）にも RISC-V を足した。
 
-### Cortex-M0+（未着手）
+### Cortex-M0+（済、2026-11-27）
 
-`thumbv6m-none-eabi` はコアに比較交換のアトミック命令が無く、Rust の `alloc::sync`（`Arc`）と `compare_exchange` が無い。ランタイムをビルドすると `typelisp-mem` で 40 件ほどのエラー（2026-11-23）。`typelisp_mem::sync` を、割り込みを止めて代わりにする実装（`portable-atomic` と `critical-section` など）に差し替えれば通る見込み。QEMU のボードは `microbit`（Cortex-M0）。
+`thumbv6m-none-eabi`（`Target::Thumbv6m`）。コアに比較交換のアトミック命令が無いので、Rust の `alloc::sync`（`Arc`）と `compare_exchange` が無い。
+
+- **Arc とアトミックの入口を `typelisp_mem::sync` 1 つにした。** `sync::{Arc, Weak, atomic}` は、ポインタの比較交換があるターゲット（`cfg(target_has_atomic = "ptr")`）では `alloc::sync` と `core::sync::atomic`、無いターゲットでは `portable-atomic-util` と `portable-atomic`（feature `critical-section`、実装は `cortex-m` の `critical-section-single-core`）。ランタイムのクレートはどれもこれを通す（番人 `tests/sync_door_test.rs`）。`portable-atomic-util` の `Arc` は stable では unsized への強制変換ができないので、`Arc<dyn Trait>` は `Arc::from(Box::new(x) as Box<dyn Trait>)` で作る（今のところそういう箇所はボード向けのコードに無い）。直したのは名前の付け替えだけで、`typelisp-mem` の約 50 件のエラーはすべてこれだった。
+- **コアの違いはボードのデータ。** 割り込みは 32 本（`Board::interrupts`、ランタイムの NVIC の数は `typelisp-rt-embedded` の build.rs が三つ組から `cfg(armv6m)` を立てて選ぶ）。例外は NonMaskableInt・SVCall・PendSV・SysTick だけ（`Board::exceptions` を「例外があるか」から「どの例外があるか」に広げた。名前は `typelisp_front::EXCEPTIONS` の部分集合であることを単体テストで確かめる）。
+- **QEMU のボード。** QEMU に Cortex-M0+ のボードは無く、Cortex-M0 の `microbit` は RAM が 16 KiB で、ランタイムが動かない（ヒープの箱の表 `Slab` が最初に 1 塊 1024 スロット＝32 ビットで 16 KiB を取る。デバッグ版ランタイムの hello はフラッシュにも収まらない、リリース版は約 245 KiB）。既定の QEMU ボードは ARMv6-M の命令をそのまま実行する Cortex-M3 の `mps2-an385`（4 MiB/4 MiB）にした。実際の M0 のコアでは、ランタイムを使わないプログラムを `microbit` で動かして確かめる。ボード向けではループの安全地点・変数での割り算・`int` がランタイムを呼ぶので、そのテストはどれも使わない。
+- 残り: `riscv32imc`（A 拡張なし）も同じ `sync` の仕組みで通る見込み（未着手）。小さい RAM は次の節。
+
+テスト: `tests/aot_cortex_m0plus_test.rs`（ネイティブとの比較、語の幅、panic、NVIC の保留レジスタの割り込み、cons を作り続ける間の SysTick、範囲外の割り込みと無い例外の拒否、C のボードの関数、`microbit` での実行）、`size_of_test` と `llvm_size_of_test` の M0+。
+
+### 小さい RAM と `--ram`（済、2026-11-27）
+
+ユーザー指示「コマンドライン引数で RAM 容量を指定できるように」。
+
+- **`--ram SIZE`**: ボード向けで `--linker-script` を使わないとき、データ・ヒープ・スタックに使う RAM の大きさ。既定の配置（`Board::qemu_memory`、`Layout` というデータにした。`memory.x` は `Layout::memory_x` が作る）の RAM をその大きさにし、スタックは QEMU 用の 1 MiB とその 4 分の 1 の小さい方。フラッシュの無い配置（RISC-V の `virt`）では、ボードの RAM の終わりの SIZE バイトを RAM にし、残りをコードの領域（FLASH）にする。`--linker-script` と一緒ならエラー（RAM はスクリプトが決める）。
+- **ランタイムが最初に取る量はヒープに合わせる**（`--ram` でもスクリプトでも効くように、起動時に分かる実際のヒープ `memory::capacity` から）。`Heap::fitting_cells` が「分かっているヒープの 8 分の 1 まで、ただし 16 セル以上」の 1 か所の規則で、アリーナの初期量（`rt_heap_init`）と伸ばすときの最小の塊（`grow` の `MIN_CHUNK`）の両方に使う。アリーナを伸ばす確保は失敗してよい（`try_alloc_chunk`、伸ばせなければ集めた分で続けるか HeapExhausted）。
+- **`Slab`（箱などの表）の塊**: 1024 スロット固定（32 ビットで 16 KiB）だったのを、16 スロットから倍々に 1024 まで、その先は 1024 ずつにした。倍々を際限なく続けると、箱が数万あるプログラムが 512 KiB の連続領域を求め、断片化したボードのヒープで確保に失敗した（`collect_without_cons_test` の再帰）。
+- 測った結果（Cortex-M0+、QEMU）: リリース版ランタイムで hello は RAM 16 KiB で動く（`microbit` 実機相当でも動いた。フラッシュ約 245 KiB）。cons と GC を繰り返すプログラムは 32 KiB で動き 16 KiB では確保に失敗する。デバッグ版ランタイムはスタックを多く使う（4 KiB では足りないことがある）。
+- **スタックのあふれ（2026-11-27 対処）。** スタックは RAM の上端にあり、あふれるとその下のヒープを黙って壊していた（RAM 16 KiB・スタック 4 KiB のデバッグ版で、箱の表の空きスロットにゴミが入り `Vec` の drop で落ちた）。他の言語の組み込みでの対策は、スタックを RAM の下端に置く（flip-link）、MPU/PMP の見張り領域、ARMv8-M の MSPLIM、GCC の `-fstack-limit-symbol`（全関数の入口で SP を比べる）、FreeRTOS の見張りの値。核や配置を選ばない後の 2 つを組み合わせた。
+  - 生成するモジュールの定義する関数すべての入口に `typelisp_stack_check` の呼び出しを入れる（`embedded.rs` の `stack_checked`、`busy_around_runtime_calls` の前）。比較を IR に書かず呼び出しにしたのは、入口のブロックを分けると alloca が入口のブロックから外れるため。`--no-stack-check` で入れない（ボードのうちランタイムのあるものだけ。AVR では「ランタイムが無い」エラー）。
+  - ランタイム（`start.rs`）: `run` が `typelisp_main` の前にスタックの下端（`_stack_start - _typelisp_stack_size`、語に揃える）に見張りの 4 語を書く。`typelisp_stack_check` は SP が下端から 512 バイト（`STACK_RESERVE`）未満か、見張りが書き換わっていれば終える。ランタイムの関数そのものは入口で調べられない（Rust に `-fstack-limit` は無い）ので、ランタイムの中のあふれは、次の検査か、panic・HardFault・例外の報告（`die`、panic ハンドラが見張りを見て一行足す）で分かる。`run` は `typelisp_main` が戻った後にも見張りを見て、書き換わっていれば報告して終了コード 1 で終える（`--no-stack-check` でスタック 1 KiB だと、はみ出したまま hello を出して 0 で終わっていた）。見張りは `--no-stack-check` でも書くので、あふれたことは報告に出る。
+  - 前の 16 KiB のテストは、デバッグ版ランタイムで実は約 1 KiB ヒープにはみ出して通っていた。デバッグ版はそのプログラムに 5〜6 KiB のスタックを使い、リリース版は 1.5 KiB 未満。テストは 24 KiB にした。
+  - **再帰はネイティブのスタックを使わない。** 再帰する関数はコルーチンで、呼び出しの記録はヒープ（`FrameArena` と `FrameStack`）にある。スタックを深く使うのはランタイムの決まった深さの処理（デバッグ版の `rt_heap_init` の確保だけで 4 KiB を使い切る）で、印字器も深い入れ子をスタックで辿らない。最初の版のテストは「深い再帰がスタックを使い切る」としていたが、実際に止めていたのはデバッグ版の起動処理だった（見張りへのウォッチポイントで分かった）。テストは利用者の配置でスタックを 1 KiB にする形に直した。
+  - 深い再帰の限界（調査結果）: 1 段ごとに、フレームの語 15 語（見出し 3 語）、根の表の仮の根 1 つ（`Value` は 32bit でも 16 バイト）、`FrameArena.open` の 1 語、`FrameStack.frames` の `Entry`（20 バイト）で、32bit で約 100 バイト。後ろの 3 つは連続した `Vec` で倍々に作り直すので、伸ばす瞬間は古い領域と新しい領域が両方要り、空いた古い領域は大きくなった次の確保に使えない。RISC-V `virt` の `int` の再帰で、届く深さは RAM 64 KiB で約 240 段、256 KiB で約 980 段、1 MiB で約 4050 段（1 段あたり RAM 約 190〜250 バイト）。1 MiB では深さ 4096 で、`Entry` の表を 4096 から 8192 へ伸ばす 160 KiB の確保が失敗した（そのときフレームの塊 8 個で約 255 KiB、根の表が容量 8192 で 128 KiB、`open` が 32 KiB）。フレームの塊は上限 65536 語（32bit で 256 KiB）まで倍々で、小さいボードには大きすぎる。
+  - 対処（2026-11-27、案 A。ユーザーが選んだ）: 動かない塊の列 `typelisp_mem::chunked::ChunkStack`（箱の表の `Slab` を一般にしたもの。`Slab` はその `Option<T>` の別名になった。塊は 16 件から倍々で 1024 件まで、以後 1024 件ずつ）を作り、根の表・`FrameArena.open`・`FrameStack.frames` をそれにした。フレームの塊の上限は、ヒープの大きさが分かるとき（ボード）その 8 分の 1 に収まる語数。測り直すと 1 MiB で 4052 段から 5077 段に伸び、次は GC が印を付けるときの作業用 `Vec<Value>`（全部の根を最初に積み、倍々で伸びる）で落ちた。作業用も `ChunkStack` にし、辿るもの（cons・文字列・箱）だけを積むようにした（型 `MarkStack` の `push` が捨てる。フレームごとの仮の根は整数なので積まれない）。結果は 64 KiB で約 195 段、256 KiB で約 1320 段、1 MiB で約 7030 段。1 MiB は 1 段約 100 バイトから見積もった上限（約 7500 段）に近い。64 KiB はヒープ 47 KiB のうち 42 KiB が使用中で、本当に尽きている。
+  - **`--frame-memory SIZE`**（ユーザーの指示: 組み込みは容量を指定してそれ以上使わせない）: タスクごとの実行中の呼び出しの記録の上限。`FrameArena` が開いているフレームの分（`frame_cost`: 見出しと語、仮の根、open の 1 語、ドライバの `Entry`）を数え、超える `open_frame` は `FrameMemoryExceeded` を返し、`rt_frame_open` が理由を書いて panic と同じ終了コードで終える（確保の失敗と同じく `catch` は見ない。捕まえるはずの呼び出しの記録が置けないため）。直接の関数のフレームもドライバの分を数える（多めに数える）。予約ではなく上限で、塊の確保は使う分だけ。全ターゲット（ランタイムのあるもの）で使える。`rt_heap_init` の 4 つ目の引数で渡す（ABI 0.3.91）。
 
 ### 段階 7: AVR の判断
 

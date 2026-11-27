@@ -2,7 +2,7 @@
 
 use crate::prelude::*;
 use core::ptr;
-use core::sync::atomic::Ordering;
+use crate::sync::atomic::Ordering;
 use crate::Error;
 use crate::value::{ConsRef, LocId, Value};
 use super::{HEADROOM_DIVISOR, Heap};
@@ -74,14 +74,19 @@ impl Heap {
         }
         // Doubling keeps the amortized cost of growth constant. `MIN_CHUNK`
         // stops a heap created with a tiny (or zero) capacity from growing one
-        // cell at a time.
+        // cell at a time, as far as the memory there is allows.
         const MIN_CHUNK: usize = 1024;
-        let want = arena.cap.max(MIN_CHUNK);
+        let want = arena.cap.max(Self::fitting_cells(MIN_CHUNK));
         let len = want.min(arena.growth_limit - arena.cap);
         if len == 0 {
             return false;
         }
-        let (chunk, free) = Self::alloc_chunk(len, arena.free);
+        // Without the memory for it the arena stays as it is, and the
+        // caller goes on with what a collection freed, or reports the heap
+        // exhausted.
+        let Some((chunk, free)) = Self::try_alloc_chunk(len, arena.free) else {
+            return false;
+        };
         arena.chunks.push(chunk);
         arena.cap += len;
         arena.free = free;
