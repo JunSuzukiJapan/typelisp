@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ 8c1712373ea704e08417e1fe1eafb4ea4a7f41a2 -->
+<!-- translated-from: docs/ja/guide/compile.md @ 794bc1c3cb98e547458f7b07a6a476cc10cae3ad -->
 # Biên dịch
 
 Nếu bạn không làm gì thêm, chương trình typelisp chạy trong trình thông dịch. Ngoài ra còn có hai
@@ -268,6 +268,8 @@ $ qemu-system-riscv32 -M virt -bios none -nographic \
   REGION_ALIAS("REGION_STACK", RAM);
   _typelisp_stack_size = 4K;
   ```
+
+- Trên bo mạch ít RAM, thay cho `--linker-script`, `--ram SIZE` (`16K` v.v.) chỉ cho biết dữ liệu, heap và ngăn xếp có bao nhiêu RAM. RAM của bố cục mặc định có kích thước đó, và ngăn xếp dùng tối đa một phần tư. Trên bo mạch cũng đặt mã trong RAM, như `virt` của RISC-V, mã nằm ở phần RAM còn lại của bo mạch. Những gì runtime cấp phát lúc đầu được thu nhỏ cho vừa heap. Không dùng chung được với `--linker-script`.
 
 - `--board-functions` chọn ai cung cấp đầu ra, đầu vào, kết thúc và đồng hồ (các hàm của bo mạch).
   - `semihosting` (mặc định): qua semihosting, để chạy trong QEMU (`-semihosting-config enable=on`) hoặc trình gỡ lỗi.

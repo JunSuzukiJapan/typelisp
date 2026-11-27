@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ 8c1712373ea704e08417e1fe1eafb4ea4a7f41a2 -->
+<!-- translated-from: docs/ja/guide/compile.md @ 794bc1c3cb98e547458f7b07a6a476cc10cae3ad -->
 # Compileren
 
 Tenzij je iets anders doet, draaien typelisp-programma's in de interpreter. Daarnaast zijn er twee
@@ -279,6 +279,8 @@ $ qemu-system-riscv32 -M virt -bios none -nographic \
   REGION_ALIAS("REGION_STACK", RAM);
   _typelisp_stack_size = 4K;
   ```
+
+- Op een bord met weinig RAM geeft `--ram SIZE` (`16K` enzovoort) in plaats van `--linker-script` alleen op hoeveel RAM de data, de heap en de stack hebben. Het RAM van de standaardindeling krijgt die grootte, en de stack neemt er hoogstens een kwart van in. Op een bord dat ook de code in het RAM houdt, zoals `virt` bij RISC-V, komt de code in de rest van het RAM van het bord. Wat de runtime eerst toewijst, wordt klein gehouden zodat het in de heap past. Het kan niet samen met `--linker-script` worden gebruikt.
 
 - `--board-functions` kiest wie uitvoer, invoer, afsluiten en de klok (de functies van het bord) levert.
   - `semihosting` (standaard): via semihosting, om onder QEMU (`-semihosting-config enable=on`) of een debugger te draaien.

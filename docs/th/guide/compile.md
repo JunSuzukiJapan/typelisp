@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ 8c1712373ea704e08417e1fe1eafb4ea4a7f41a2 -->
+<!-- translated-from: docs/ja/guide/compile.md @ 794bc1c3cb98e547458f7b07a6a476cc10cae3ad -->
 # การคอมไพล์
 
 หากไม่ทำอะไรเพิ่ม โปรแกรม typelisp จะรันในอินเทอร์พรีเตอร์ นอกจากนี้ยังมีวิธีคอมไพล์เป็นโค้ดเนทีฟ
@@ -270,6 +270,8 @@ $ qemu-system-riscv32 -M virt -bios none -nographic \
   REGION_ALIAS("REGION_STACK", RAM);
   _typelisp_stack_size = 4K;
   ```
+
+- บนบอร์ดที่มี RAM น้อย ใช้ `--ram SIZE` (เช่น `16K`) แทน `--linker-script` เพื่อระบุเพียงขนาด RAM สำหรับข้อมูล ฮีป และสแตก RAM ของการจัดวางเริ่มต้นจะมีขนาดนั้น และสแตกใช้ไม่เกินหนึ่งในสี่ บนบอร์ดที่เก็บโค้ดไว้ใน RAM ด้วย เช่น `virt` ของ RISC-V โค้ดจะอยู่ใน RAM ส่วนที่เหลือของบอร์ด สิ่งที่รันไทม์จัดสรรตอนเริ่มจะถูกทำให้เล็กพอที่จะอยู่ในฮีป ใช้ร่วมกับ `--linker-script` ไม่ได้
 
 - `--board-functions` เลือกว่าใครให้เอาต์พุต อินพุต การจบโปรแกรม และนาฬิกา (ฟังก์ชันของบอร์ด)
   - `semihosting` (ค่าเริ่มต้น): ให้ผ่าน semihosting สำหรับรันใน QEMU (`-semihosting-config enable=on`) หรือดีบักเกอร์

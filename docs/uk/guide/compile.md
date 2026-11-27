@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ 8c1712373ea704e08417e1fe1eafb4ea4a7f41a2 -->
+<!-- translated-from: docs/ja/guide/compile.md @ 794bc1c3cb98e547458f7b07a6a476cc10cae3ad -->
 # Компіляція
 
 Якщо ви нічого більше не робите, програми typelisp виконуються в інтерпретаторі. Крім того, є два
@@ -272,6 +272,8 @@ $ qemu-system-riscv32 -M virt -bios none -nographic \
   REGION_ALIAS("REGION_STACK", RAM);
   _typelisp_stack_size = 4K;
   ```
+
+- На платі з невеликою RAM замість `--linker-script` можна задати `--ram SIZE` (`16K` тощо) — лише обсяг RAM для даних, купи й стека. RAM типової розкладки отримує цей розмір, а стек займає не більше чверті. На платі, де й код лежить у RAM, як `virt` для RISC-V, код іде в залишок RAM плати. Те, що середовище виконання виділяє спочатку, зменшується під розмір купи. Разом із `--linker-script` використовувати не можна.
 
 - `--board-functions` вибирає, хто надає вивід, ввід, завершення й годинник (функції плати).
   - `semihosting` (типово): через semihosting, для запуску в QEMU (`-semihosting-config enable=on`) або під налагоджувачем.

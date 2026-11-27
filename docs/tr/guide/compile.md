@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ 8c1712373ea704e08417e1fe1eafb4ea4a7f41a2 -->
+<!-- translated-from: docs/ja/guide/compile.md @ 794bc1c3cb98e547458f7b07a6a476cc10cae3ad -->
 # Derleme
 
 Başka bir şey yapmazsanız typelisp programları yorumlayıcıda çalışır. Buna ek olarak yerel koda
@@ -271,6 +271,8 @@ $ qemu-system-riscv32 -M virt -bios none -nographic \
   REGION_ALIAS("REGION_STACK", RAM);
   _typelisp_stack_size = 4K;
   ```
+
+- RAM'i az olan bir kartta `--linker-script` yerine `--ram SIZE` (`16K` vb.) ile yalnızca verilerin, yığın belleğin (heap) ve yığının (stack) kullanacağı RAM miktarı verilebilir. Varsayılan düzenin RAM'i bu boyutu alır ve yığın en fazla dörtte birini kullanır. RISC-V'nin `virt`'i gibi kodu da RAM'de tutan bir kartta kod, kartın RAM'inin geri kalanına konur. Çalışma zamanının başta ayırdığı miktar, yığın belleğe sığacak kadar küçültülür. `--linker-script` ile birlikte kullanılamaz.
 
 - `--board-functions`, çıktıyı, girdiyi, bitirmeyi ve saati (kartın işlevlerini) kimin sağlayacağını seçer.
   - `semihosting` (varsayılan): semihosting ile; QEMU (`-semihosting-config enable=on`) veya bir hata ayıklayıcı altında çalıştırmak için.

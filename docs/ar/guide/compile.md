@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ 8c1712373ea704e08417e1fe1eafb4ea4a7f41a2 -->
+<!-- translated-from: docs/ja/guide/compile.md @ 794bc1c3cb98e547458f7b07a6a476cc10cae3ad -->
 # الترجمة
 
 إذا لم تفعل شيئًا آخر فإن برامج typelisp تعمل في المفسِّر (interpreter). وإضافة إلى ذلك توجد طريقتان
@@ -268,6 +268,8 @@ $ qemu-system-riscv32 -M virt -bios none -nographic \
   REGION_ALIAS("REGION_STACK", RAM);
   _typelisp_stack_size = 4K;
   ```
+
+- على لوحة ذات RAM قليلة يمكن بدل `--linker-script` تمرير `--ram SIZE` (مثل `16K`) لتحديد مقدار RAM للبيانات والكومة والمكدس فقط. تصبح RAM في التخطيط الافتراضي بهذا الحجم، ولا يأخذ المكدس أكثر من ربعها. وعلى لوحة تضع الشيفرة أيضًا في RAM مثل `virt` في RISC-V تذهب الشيفرة إلى بقية RAM اللوحة. ويُصغَّر ما تخصّصه بيئة التشغيل في البداية ليناسب الكومة. ولا يُستخدم مع `--linker-script`.
 
 - يختار `--board-functions` من يوفّر الإخراج والإدخال والإنهاء والساعة (دوال اللوحة).
   - `semihosting` (الافتراضي): عبر semihosting، للتشغيل تحت QEMU (`-semihosting-config enable=on`) أو مصحّح.

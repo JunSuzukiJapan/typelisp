@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ 8c1712373ea704e08417e1fe1eafb4ea4a7f41a2 -->
+<!-- translated-from: docs/ja/guide/compile.md @ 794bc1c3cb98e547458f7b07a6a476cc10cae3ad -->
 # Kompilacja
 
 O ile nie zrobisz nic więcej, programy typelisp działają w interpreterze. Ponadto istnieją dwa
@@ -269,6 +269,8 @@ $ qemu-system-riscv32 -M virt -bios none -nographic \
   REGION_ALIAS("REGION_STACK", RAM);
   _typelisp_stack_size = 4K;
   ```
+
+- Na płytce z małą ilością RAM zamiast `--linker-script` można podać `--ram SIZE` (`16K` itp.), czyli tylko ilość RAM dla danych, sterty i stosu. RAM domyślnego układu ma wtedy ten rozmiar, a stos zajmuje co najwyżej jego ćwierć. Na płytce, która trzyma w RAM także kod, jak `virt` dla RISC-V, kod trafia do reszty RAM płytki. To, co środowisko uruchomieniowe przydziela na początku, jest zmniejszane tak, by zmieściło się w stercie. Nie można go używać razem z `--linker-script`.
 
 - `--board-functions` wybiera, kto dostarcza wyjście, wejście, zakończenie i zegar (funkcje płytki).
   - `semihosting` (domyślnie): przez semihosting, do uruchamiania w QEMU (`-semihosting-config enable=on`) lub z debugerem.

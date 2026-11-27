@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ 8c1712373ea704e08417e1fe1eafb4ea4a7f41a2 -->
+<!-- translated-from: docs/ja/guide/compile.md @ 794bc1c3cb98e547458f7b07a6a476cc10cae3ad -->
 # 컴파일
 
 아무것도 하지 않으면 typelisp 프로그램은 인터프리터에서 실행된다. 그 밖에 네이티브 코드로 컴파일하는 방법이 두 가지,
@@ -263,6 +263,8 @@ $ qemu-system-riscv32 -M virt -bios none -nographic \
   REGION_ALIAS("REGION_STACK", RAM);
   _typelisp_stack_size = 4K;
   ```
+
+- RAM이 작은 보드에서는 `--linker-script` 대신 `--ram SIZE`(`16K` 등)로 데이터・힙・스택에 쓰는 RAM의 크기만 지정할 수 있습니다. 기본 배치의 RAM이 그 크기가 되고, 스택은 그 4분의 1까지가 됩니다. RISC-V의 `virt`처럼 코드도 RAM에 두는 보드에서는 보드 RAM의 나머지가 코드의 영역이 됩니다. 런타임이 처음에 확보하는 양은 힙 크기에 맞춰 작아집니다. `--linker-script`와 함께는 쓸 수 없습니다.
 
 - 출력・입력・종료・시각(보드의 함수)을 누가 제공할지는 `--board-functions`로 고릅니다.
   - `semihosting`(기본값): semihosting으로 제공합니다. QEMU(`-semihosting-config enable=on`)나 디버거로 실행할 때 씁니다.

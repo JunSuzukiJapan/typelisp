@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ 8c1712373ea704e08417e1fe1eafb4ea4a7f41a2 -->
+<!-- translated-from: docs/ja/guide/compile.md @ 794bc1c3cb98e547458f7b07a6a476cc10cae3ad -->
 # Compiling
 
 Unless you do anything else, typelisp programs run in the interpreter. In addition there are two
@@ -278,6 +278,8 @@ $ qemu-system-riscv32 -M virt -bios none -nographic \
   REGION_ALIAS("REGION_STACK", RAM);
   _typelisp_stack_size = 4K;
   ```
+
+- On a board with little RAM, instead of `--linker-script`, `--ram SIZE` (`16K` and so on) gives only how much RAM the data, the heap and the stack have. The default layout's RAM becomes that size, and the stack takes at most a quarter of it. On a board that keeps code in RAM too, such as RISC-V's `virt`, the rest of the board's RAM is where the code goes. What the runtime allocates at first is made small to fit the heap. It cannot be used with `--linker-script`.
 
 - `--board-functions` chooses who gives output, input, exiting and the clock (the board's functions).
   - `semihosting` (the default): given over semihosting, for running under QEMU (`-semihosting-config enable=on`) or a debugger.

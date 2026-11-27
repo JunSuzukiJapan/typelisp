@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ 8c1712373ea704e08417e1fe1eafb4ea4a7f41a2 -->
+<!-- translated-from: docs/ja/guide/compile.md @ 794bc1c3cb98e547458f7b07a6a476cc10cae3ad -->
 # Kompilering
 
 Om du inte gör något annat körs typelisp-program i tolken. Dessutom finns två sätt att kompilera till
@@ -272,6 +272,8 @@ $ qemu-system-riscv32 -M virt -bios none -nographic \
   REGION_ALIAS("REGION_STACK", RAM);
   _typelisp_stack_size = 4K;
   ```
+
+- På ett kort med lite RAM anger `--ram SIZE` (`16K` och så vidare) i stället för `--linker-script` bara hur mycket RAM data, heapen och stacken har. Standardlayoutens RAM får den storleken, och stacken tar högst en fjärdedel av det. På ett kort som också har koden i RAM, som `virt` för RISC-V, hamnar koden i resten av kortets RAM. Det som körmiljön allokerar först görs litet så att det ryms i heapen. Det kan inte användas tillsammans med `--linker-script`.
 
 - `--board-functions` väljer vem som ger utdata, indata, avslut och klockan (kortets funktioner).
   - `semihosting` (standard): via semihosting, för körning under QEMU (`-semihosting-config enable=on`) eller en debugger.

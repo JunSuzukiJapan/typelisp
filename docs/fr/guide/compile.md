@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ 8c1712373ea704e08417e1fe1eafb4ea4a7f41a2 -->
+<!-- translated-from: docs/ja/guide/compile.md @ 794bc1c3cb98e547458f7b07a6a476cc10cae3ad -->
 # Compilation
 
 Sauf indication contraire, les programmes typelisp s'exécutent dans l'interpréteur. Il existe en outre deux façons
@@ -273,6 +273,8 @@ $ qemu-system-riscv32 -M virt -bios none -nographic \
   REGION_ALIAS("REGION_STACK", RAM);
   _typelisp_stack_size = 4K;
   ```
+
+- Sur une carte avec peu de RAM, au lieu de `--linker-script`, `--ram SIZE` (`16K`, etc.) donne seulement la quantité de RAM des données, du tas et de la pile. La RAM de la disposition par défaut prend cette taille, et la pile en prend au plus un quart. Sur une carte qui garde aussi le code en RAM, comme `virt` pour RISC-V, le code va dans le reste de la RAM de la carte. Ce que le runtime alloue au départ est réduit pour tenir dans le tas. Il ne s'utilise pas avec `--linker-script`.
 
 - `--board-functions` choisit qui fournit la sortie, l'entrée, la fin du programme et l'horloge (les fonctions de la carte).
   - `semihosting` (par défaut) : par semihosting, pour exécuter sous QEMU (`-semihosting-config enable=on`) ou un débogueur.

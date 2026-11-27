@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ 8c1712373ea704e08417e1fe1eafb4ea4a7f41a2 -->
+<!-- translated-from: docs/ja/guide/compile.md @ 794bc1c3cb98e547458f7b07a6a476cc10cae3ad -->
 # 编译
 
 如果不做任何处理，typelisp 程序由解释器执行。除此之外，还有两种编译为本机代码的方法，以及一种保存环境的方法。
@@ -258,6 +258,8 @@ $ qemu-system-riscv32 -M virt -bios none -nographic \
   REGION_ALIAS("REGION_STACK", RAM);
   _typelisp_stack_size = 4K;
   ```
+
+- 在 RAM 较小的开发板上，可以用 `--ram SIZE`（如 `16K`）代替 `--linker-script`，只指定数据、堆和栈所用 RAM 的大小。默认布局的 RAM 变为这个大小，栈最多占其四分之一。在像 RISC-V 的 `virt` 这样代码也放在 RAM 中的开发板上，开发板 RAM 的其余部分成为代码的区域。运行时最初分配的量会配合堆的大小而变小。不能与 `--linker-script` 一起使用。
 
 - 由谁提供输出、输入、结束和时钟（开发板的函数），用 `--board-functions` 选择。
   - `semihosting`（默认）：通过 semihosting 提供。在 QEMU（`-semihosting-config enable=on`）或调试器下运行时使用。

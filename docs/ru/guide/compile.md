@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ 8c1712373ea704e08417e1fe1eafb4ea4a7f41a2 -->
+<!-- translated-from: docs/ja/guide/compile.md @ 794bc1c3cb98e547458f7b07a6a476cc10cae3ad -->
 # Компиляция
 
 Если ничего специально не делать, программы typelisp выполняются интерпретатором. Кроме того, есть два способа
@@ -268,6 +268,8 @@ $ qemu-system-riscv32 -M virt -bios none -nographic \
   REGION_ALIAS("REGION_STACK", RAM);
   _typelisp_stack_size = 4K;
   ```
+
+- На плате с небольшой RAM вместо `--linker-script` можно задать `--ram SIZE` (`16K` и т. п.) — только объём RAM для данных, кучи и стека. RAM раскладки по умолчанию получает этот размер, а стек занимает не больше четверти. На плате, где и код лежит в RAM, как `virt` для RISC-V, код идёт в остаток RAM платы. То, что среда выполнения выделяет вначале, уменьшается под размер кучи. Вместе с `--linker-script` использовать нельзя.
 
 - `--board-functions` выбирает, кто предоставляет вывод, ввод, завершение и часы (функции платы).
   - `semihosting` (по умолчанию): через semihosting, для запуска в QEMU (`-semihosting-config enable=on`) или под отладчиком.

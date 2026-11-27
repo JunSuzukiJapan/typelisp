@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ 8c1712373ea704e08417e1fe1eafb4ea4a7f41a2 -->
+<!-- translated-from: docs/ja/guide/compile.md @ 794bc1c3cb98e547458f7b07a6a476cc10cae3ad -->
 # Compilazione
 
 Se non fai altro, i programmi typelisp vengono eseguiti nell'interprete. Inoltre esistono due modi per
@@ -273,6 +273,8 @@ $ qemu-system-riscv32 -M virt -bios none -nographic \
   REGION_ALIAS("REGION_STACK", RAM);
   _typelisp_stack_size = 4K;
   ```
+
+- Su una scheda con poca RAM, al posto di `--linker-script`, `--ram SIZE` (`16K` ecc.) indica solo quanta RAM hanno i dati, l'heap e lo stack. La RAM della disposizione predefinita prende quella dimensione, e lo stack ne occupa al massimo un quarto. Su una scheda che tiene anche il codice in RAM, come `virt` per RISC-V, il codice va nel resto della RAM della scheda. Ciò che il runtime alloca all'inizio viene ridotto per stare nell'heap. Non si può usare insieme a `--linker-script`.
 
 - `--board-functions` sceglie chi fornisce output, input, terminazione e orologio (le funzioni della scheda).
   - `semihosting` (predefinito): tramite semihosting, per eseguire sotto QEMU (`-semihosting-config enable=on`) o un debugger.

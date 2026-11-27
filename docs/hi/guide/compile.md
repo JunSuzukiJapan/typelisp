@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ 8c1712373ea704e08417e1fe1eafb4ea4a7f41a2 -->
+<!-- translated-from: docs/ja/guide/compile.md @ 794bc1c3cb98e547458f7b07a6a476cc10cae3ad -->
 # कंपाइल करना
 
 यदि आप और कुछ न करें, तो typelisp प्रोग्राम इंटरप्रेटर में चलते हैं। इसके अलावा नेटिव कोड में कंपाइल करने के दो तरीके हैं, और एक पर्यावरण को सहेजने का तरीका है। विनिर्देश का विवरण [सिंटैक्स संदर्भ अध्याय 10](../reference/syntax.md#10-कंपाइलेशन) में है।
@@ -244,6 +244,8 @@ $ qemu-system-riscv32 -M virt -bios none -nographic \
   REGION_ALIAS("REGION_STACK", RAM);
   _typelisp_stack_size = 4K;
   ```
+
+- कम RAM वाले बोर्ड पर `--linker-script` के बजाय `--ram SIZE` (`16K` आदि) से केवल यह बताया जा सकता है कि डेटा, हीप और स्टैक के लिए कितनी RAM है। डिफ़ॉल्ट लेआउट की RAM उतनी हो जाती है, और स्टैक उसका अधिकतम एक चौथाई लेता है। RISC-V के `virt` जैसे बोर्ड पर, जो कोड भी RAM में रखता है, कोड बोर्ड की बाकी RAM में जाता है। रनटाइम शुरू में जितना आवंटित करता है, वह हीप में समाने लायक छोटा कर दिया जाता है। इसे `--linker-script` के साथ नहीं इस्तेमाल किया जा सकता।
 
 - `--board-functions` चुनता है कि आउटपुट, इनपुट, समाप्ति और घड़ी (बोर्ड के फ़ंक्शन) कौन देगा।
   - `semihosting` (डिफ़ॉल्ट): semihosting से, QEMU (`-semihosting-config enable=on`) या डीबगर के तहत चलाने के लिए।

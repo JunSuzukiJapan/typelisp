@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ 8c1712373ea704e08417e1fe1eafb4ea4a7f41a2 -->
+<!-- translated-from: docs/ja/guide/compile.md @ 794bc1c3cb98e547458f7b07a6a476cc10cae3ad -->
 # Kompilasi
 
 Jika Anda tidak melakukan apa-apa lagi, program typelisp berjalan di interpreter. Selain itu ada dua
@@ -274,6 +274,8 @@ $ qemu-system-riscv32 -M virt -bios none -nographic \
   REGION_ALIAS("REGION_STACK", RAM);
   _typelisp_stack_size = 4K;
   ```
+
+- Pada papan dengan RAM kecil, sebagai ganti `--linker-script`, `--ram SIZE` (`16K` dan sebagainya) hanya memberi besar RAM untuk data, heap, dan stack. RAM tata letak bawaan menjadi sebesar itu, dan stack memakai paling banyak seperempatnya. Pada papan yang juga menaruh kode di RAM, seperti `virt` pada RISC-V, kode ditaruh di sisa RAM papan. Yang dialokasikan runtime di awal dibuat kecil agar muat di heap. Tidak dapat dipakai bersama `--linker-script`.
 
 - `--board-functions` memilih siapa yang memberikan keluaran, masukan, penghentian, dan jam (fungsi papan).
   - `semihosting` (bawaan): lewat semihosting, untuk menjalankan di QEMU (`-semihosting-config enable=on`) atau debugger.
