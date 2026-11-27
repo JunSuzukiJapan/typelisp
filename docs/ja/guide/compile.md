@@ -328,7 +328,9 @@ $ qemu-system-riscv32 -M virt -bios none -nographic \
   終了コード 1 で終わります。スタックを大きくするには、`--linker-script` のファイルの `_typelisp_stack_size` か `--ram` を
   大きくします。`--no-stack-check` を付けると、この検査を入れません（少し小さく速くなりますが、あふれたスタックはヒープを黙って
   壊すことがあります）。どちらの場合も、ランタイムの中であふれてスタックの下端を越えたときは、その後の panic や HardFault の
-  報告の前に `stack overflow: the stack has run past its bottom into the heap` と書きます。
+  報告の前に `stack overflow: the stack has run past its bottom into the heap` と書きます。プログラムが最後まで動いたときも
+  同じことを書き、終了コード 1 で終わります。なお、再帰の深さはスタックを使いません（呼び出しの記録はヒープに置かれ、
+  深すぎる再帰はメモリ不足になります）。スタックを深く使うのはランタイムの処理です。
 
 - 出力・入力・終了・時刻（ボードの関数）を誰が与えるかは `--board-functions` で選びます。
   - `semihosting`（既定）: semihosting で与えます。QEMU（`-semihosting-config enable=on`）やデバッガで動かすときに使います。
