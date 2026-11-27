@@ -174,6 +174,7 @@ $ typl --lib-dir ~/lib/typelisp build.typl
 ```sh
 $ typl --heap-cells 100000 -c hello.typl    # cons アリーナを 100000 セルに固定する
 $ typl -c hello.typl --max-memory 64M       # 確保するメモリを 64 MiB までにする
+$ typl -c hello.typl --frame-memory 1M      # 実行中の呼び出しの記録を、タスクごとに 1 MiB までにする
 $ typl -c hello.typl --no-cons              # cons セルを使わない
 ```
 
@@ -185,6 +186,11 @@ $ typl -c hello.typl --no-cons              # cons セルを使わない
   `K` `M` `G`（それぞれ 1024 倍、1024² 倍、1024³ 倍）を付けて書けます。上限を超えて確保しようと
   すると、そのことを表示して終了コード 1 で終了します。この終了は `catch` では捕まえられません。
   指定しないときは上限はありません。
+- `--frame-memory SIZE` は、実行中の呼び出しの記録（呼び出しが終わるまで持っている、引数や局所変数など）に
+  使ってよいメモリの、タスクごとの上限です。記録はヒープに置かれ、再帰が深くなるほど増えます。`SIZE` の
+  書き方は `--max-memory` と同じです。上限を超える呼び出しをしようとすると、そのことを表示して終了コード 1 で
+  終了します。この終了も `catch` では捕まえられません。メモリの少ないボードで、深すぎる再帰がヒープを
+  使い切る前に止めるのに使えます。指定しないときは上限はありません。
 - `--no-cons` は、cons セルを使わない実行ファイルを作ります。cons アリーナを持たないので、
   cons セルが必要な操作をするプログラムは**コンパイルエラー**になります。エラーには、その操作と、
   `main` からそこへ届く関数の並びが表示されます。cons セルが必要になるのは、`Sexpr` のリスト
@@ -192,7 +198,7 @@ $ typl -c hello.typl --no-cons              # cons セルを使わない
   `macroexpand` を使うときです。数値・文字列・ベクタ・ハッシュ表・構造体・チャネルなどの操作と、
   `print`/`println`/`format` は cons セルを使いません。`--heap-cells` とは一緒に指定できません。
 
-`--max-memory` と `--no-cons` は `-c` の後ろに書きます。`--heap-cells` は `-c` の前にも後ろにも書けます。
+`--max-memory`、`--frame-memory`、`--no-cons` は `-c` の後ろに書きます。`--heap-cells` は `-c` の前にも後ろにも書けます。
 cons アリーナもメモリの上限に数えられるので、アリーナがそのまま入らない上限を指定すると、
 プログラムが始まる前に止まります。
 
@@ -226,7 +232,7 @@ fib(25) = 75025
 - WASI には時間帯を知る手段がないので、地方時は分かりません。`zone` を省いた
   `decode-universal-time`・`encode-universal-time` と `get-decoded-time` は、実行時に panic します。
   `zone` を渡せば使えます。
-- `--heap-cells`、`--max-memory`、`--no-cons`、`-O<N>`、`--release` はそのまま使えます。
+- `--heap-cells`、`--max-memory`、`--frame-memory`、`--no-cons`、`-O<N>`、`--release` はそのまま使えます。
 
 ### 3.7 ブラウザや Node.js で動かす
 
@@ -330,7 +336,7 @@ $ qemu-system-riscv32 -M virt -bios none -nographic \
   壊すことがあります）。どちらの場合も、ランタイムの中であふれてスタックの下端を越えたときは、その後の panic や HardFault の
   報告の前に `stack overflow: the stack has run past its bottom into the heap` と書きます。プログラムが最後まで動いたときも
   同じことを書き、終了コード 1 で終わります。なお、再帰の深さはスタックを使いません（呼び出しの記録はヒープに置かれ、
-  深すぎる再帰はメモリ不足になります）。スタックを深く使うのはランタイムの処理です。
+  深すぎる再帰はメモリ不足になります。その前に止めるには、3.5 節の `--frame-memory` を使います）。スタックを深く使うのはランタイムの処理です。
 
 - 出力・入力・終了・時刻（ボードの関数）を誰が与えるかは `--board-functions` で選びます。
   - `semihosting`（既定）: semihosting で与えます。QEMU（`-semihosting-config enable=on`）やデバッガで動かすときに使います。
@@ -391,8 +397,8 @@ $ qemu-system-riscv32 -M virt -bios none -nographic \
   振る舞います。タスクは 1 つのコアで順に実行されます。C の関数（`defffi`）も使えます。
 - ボードにないものを使うプログラムは**コンパイルエラー**になります。3.7 節で使えないものに加えて、
   `eval`・`macroexpand` が使えません。地方時は分かりません（3.6 節と同じ）。
-- cons アリーナは 1024 セルから始まり、足りなければ伸びます。`--heap-cells`、`--max-memory`、`--no-cons`、
-  `-O<N>`、`--release` はそのまま使えます。
+- cons アリーナは 1024 セルから始まり、足りなければ伸びます。`--heap-cells`、`--max-memory`、
+  `--frame-memory`、`--no-cons`、`-O<N>`、`--release` はそのまま使えます。
 
 ### 3.9 Arduino Uno（AVR）向けにコンパイルする
 
