@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ 1b5dc6ac828d8e4a95800a91218b5e9dffe83f98 -->
+<!-- translated-from: docs/ja/guide/compile.md @ be56bb8a477929497064b8f807acfd1755f2b35b -->
 # Compilação
 
 Se você não fizer nada além disso, os programas typelisp são executados no interpretador. Além disso há duas
@@ -223,9 +223,9 @@ const code = await run({ write: (fd, text) => { /* mostrar na página, por exemp
 - A hora local (`decode-universal-time` sem `zone` etc.) é calculada com o fuso horário que o `Date` do JavaScript informa.
 - Além do que não pode ser usado na seção 3.6, operações com arquivos e diretórios, variáveis de ambiente, `(command-line-args)`, o diretório pessoal e `dribble` são um **erro de compilação**. A entrada padrão é lida como vazia.
 
-### 3.8 Compilar para um microcontrolador (Cortex-M)
+### 3.8 Compilar para um microcontrolador (Cortex-M, RISC-V)
 
-Com `--target thumbv7em-none-eabihf`, `typl -c` cria um executável (ELF) para uma placa Cortex-M4F ou M7 sem sistema operacional. Sem `-o`, ele recebe o nome do fonte com `.typl` trocado por `.elf`. Com `--target thumbv8m.main-none-eabihf`, é para uma placa Cortex-M33.
+Com `--target thumbv7em-none-eabihf`, `typl -c` cria um executável (ELF) para uma placa Cortex-M4F ou M7 sem sistema operacional. Sem `-o`, ele recebe o nome do fonte com `.typl` trocado por `.elf`. Com `--target thumbv8m.main-none-eabihf`, é para uma placa Cortex-M33. Com `--target riscv32imac-unknown-none-elf`, é para uma placa com um núcleo RISC-V de 32 bits (extensões M, A e C).
 
 ```sh
 $ typl -c hello.typl --target thumbv7em-none-eabihf          # cria hello.elf
@@ -234,9 +234,12 @@ $ qemu-system-arm -M mps2-an386 -nographic \
 $ typl -c hello.typl --target thumbv8m.main-none-eabihf
 $ qemu-system-arm -M mps2-an505 -nographic \
     -semihosting-config enable=on,target=native -kernel hello.elf   # executar no Cortex-M33 do QEMU
+$ typl -c hello.typl --target riscv32imac-unknown-none-elf
+$ qemu-system-riscv32 -M virt -bios none -nographic \
+    -semihosting-config enable=on,target=native -kernel hello.elf   # executar no RISC-V do QEMU
 ```
 
-- Um `typl` instalado com `install.sh` pode ser usado como está. Para instalar com `cargo install`, rode `rustup target add thumbv7em-none-eabihf thumbv8m.main-none-eabihf` e então instale com `--features embedded` (`--features wasm,embedded` para os dois). Com um build de depuração do `typl` no repositório, rode `scripts/build-embedded-runtime.sh`. A ligação usa o linker da toolchain do rustup.
+- Um `typl` instalado com `install.sh` pode ser usado como está. Para instalar com `cargo install`, rode `rustup target add thumbv7em-none-eabihf thumbv8m.main-none-eabihf riscv32imac-unknown-none-elf` e então instale com `--features embedded` (`--features wasm,embedded` para os dois). Com um build de depuração do `typl` no repositório, rode `scripts/build-embedded-runtime.sh`. A ligação usa o linker da toolchain do rustup.
 - Informe a memória da placa com `--linker-script FILE`. Ele é escrito como o `memory.x` do `cortex-m-rt`: endereços e tamanhos de FLASH e RAM. Uma linha como `_typelisp_stack_size = 32K;` define quanto da RAM a pilha ocupa (64KiB se não for dada); o resto da RAM é o heap. Sem a opção, o layout é o do `mps2-an386` (`mps2-an505` para um Cortex-M33) do QEMU.
 
   ```
@@ -246,6 +249,23 @@ $ qemu-system-arm -M mps2-an505 -nographic \
     RAM : ORIGIN = 0x20000000, LENGTH = 128K
   }
   _typelisp_stack_size = 16K;
+  ```
+
+  No RISC-V, sem a opção, vale o layout do `virt` do QEMU. Um arquivo informado também nomeia com `REGION_ALIAS`, como o `memory.x` do `riscv-rt`, a região onde vai cada tipo de seção.
+
+  ```
+  MEMORY
+  {
+    FLASH : ORIGIN = 0x20010000, LENGTH = 4M - 64K
+    RAM : ORIGIN = 0x80000000, LENGTH = 16K
+  }
+  REGION_ALIAS("REGION_TEXT", FLASH);
+  REGION_ALIAS("REGION_RODATA", FLASH);
+  REGION_ALIAS("REGION_DATA", RAM);
+  REGION_ALIAS("REGION_BSS", RAM);
+  REGION_ALIAS("REGION_HEAP", RAM);
+  REGION_ALIAS("REGION_STACK", RAM);
+  _typelisp_stack_size = 4K;
   ```
 
 - `--board-functions` escolhe quem fornece saída, entrada, término e relógio (as funções da placa).
@@ -275,7 +295,7 @@ $ qemu-system-arm -M mps2-an505 -nographic \
     (put-byte 104) (put-byte 105) (put-byte 10))                             ; "hi" e uma quebra de linha
   ```
 
-- Escreva a função chamada quando chega uma interrupção como um `defun` com o atributo `#[interrupt(N)]` (a interrupção de periférico `N`) ou um como `#[exception(SysTick)]`. Habilite uma interrupção com `(enable-interrupt N)`. Um tratador roda na hora; só quando chega no meio do trabalho do runtime ele roda depois que esse trabalho termina. Um tratador não pode esperar (`sleep` é um erro de compilação). Os detalhes estão na seção 3.17 da [referência de sintaxe](../reference/syntax.md).
+- Escreva a função chamada quando chega uma interrupção como um `defun` com o atributo `#[interrupt(N)]` (a interrupção de periférico `N`) ou um como `#[exception(SysTick)]`. Habilite uma interrupção com `(enable-interrupt N)`. Um tratador roda na hora; só quando chega no meio do trabalho do runtime ele roda depois que esse trabalho termina. Um tratador não pode esperar (`sleep` é um erro de compilação). Os detalhes estão na seção 3.17 da [referência de sintaxe](../reference/syntax.md). No RISC-V, `N` é o número da interrupção em `mcause` (de 0 a 31: 3 é a interrupção de software, 7 o temporizador, 11 as interrupções externas), e `#[exception(NAME)]` não pode ser usado.
 
   ```lisp
   (use std::board::enable-interrupt)
@@ -289,7 +309,7 @@ $ qemu-system-arm -M mps2-an505 -nographic \
     (unsafe (volatile-write-u32 #xE000E200 (as u32 32))))   ; gerar a interrupção 5 por conta própria (o registrador de pendentes do NVIC)
   ```
 
-- O runtime inicia o programa (a tabela de vetores e o preparo da RAM) e aloca a memória. Um HardFault ou uma interrupção não tratada encerra o programa com o código de saída de um panic (1).
+- O runtime inicia o programa (a tabela de vetores e o preparo da RAM) e aloca a memória. Um HardFault (uma exceção no RISC-V) ou uma interrupção não tratada encerra o programa com o código de saída de um panic (1).
 - `throw`/`catch`/`panic`, bignums, frações e números de ponto flutuante, e tarefas, canais e `sleep` se comportam como no executável. As tarefas rodam em turnos no único núcleo. Funções C (`defffi`) podem ser usadas.
 - Um programa que usa o que a placa não tem é um **erro de compilação**: além do que não pode ser usado na seção 3.7, `eval` e `macroexpand`. O horário local é desconhecido (como na seção 3.6).
 - A arena de cons começa com 1024 células e cresce quando precisa. `--heap-cells`, `--max-memory`, `--no-cons`, `-O<N>` e `--release` funcionam como estão.

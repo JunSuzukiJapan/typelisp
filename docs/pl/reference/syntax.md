@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 1b5dc6ac828d8e4a95800a91218b5e9dffe83f98 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ be56bb8a477929497064b8f807acfd1755f2b35b -->
 # Referencja składni typelisp
 
 typelisp to statycznie typowany Lisp zapisywany w S-wyrażeniach. Listę funkcji wbudowanych i
@@ -1337,6 +1337,7 @@ To, co test wypisuje przez `print`, trafia prosto na standardowe wyjście (nie j
 W programie skompilowanym na mikrokontroler (sekcja 3.8 w [Kompilacji](../guide/compile.md)) są to funkcje wywoływane, gdy nadchodzi przerwanie. `#[interrupt(N)]` czyni funkcję procedurą obsługi przerwania peryferyjnego `N` (od 0 do 239), a `#[exception(NAME)]` wyjątku rdzenia `NAME`, jednego z `NonMaskableInt`, `MemoryManagement`, `BusFault`, `UsageFault`, `SVCall`, `DebugMonitor`, `PendSV`, `SysTick` (`HardFault` należy do środowiska uruchomieniowego i kończy program).
 
 - Dla Arduino Uno numeracja i sposób włączania są inne, a `#[exception(NAME)]` i `enable-interrupt` nie można używać ([Kompilacja](../guide/compile.md), rozdział 3.9). To, co niżej dotyczy środowiska uruchomieniowego, odnosi się do Cortex-M.
+- Na RISC-V `N` to numer przerwania w `mcause` (od 0 do 31), a `#[exception(NAME)]` nie można używać. To, co niżej powiedziano o środowisku uruchomieniowym, dotyczy też RISC-V.
 - Umieszcza się je na `defun` najwyższego poziomu, które nic nie przyjmuje i zwraca `()` (bez parametrów typu). Jedno przerwanie ma jedną procedurę obsługi, a jedna funkcja obsługuje jedno przerwanie.
 - Przerwanie peryferyjne nie nadchodzi, dopóki `(enable-interrupt N)` go nie włączy (`(disable-interrupt N)` je zatrzymuje; zob. [System](functions/system.md)). Wyjątek taki jak SysTick nadchodzi, gdy rejestry zostaną ustawione tak, by go wywołać.
 - Procedura obsługi uruchamia się od razu, tam, gdzie nadeszło przerwanie. Jeśli przyjdzie w trakcie pracy środowiska uruchomieniowego (alokacji, odśmiecania, wyjścia, przełączania zadań itd.), procedura uruchamia się, gdy tylko ta praca się skończy. Procedury obsługi nie przerywają się nawzajem.

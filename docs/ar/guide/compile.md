@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ 1b5dc6ac828d8e4a95800a91218b5e9dffe83f98 -->
+<!-- translated-from: docs/ja/guide/compile.md @ be56bb8a477929497064b8f807acfd1755f2b35b -->
 # الترجمة
 
 إذا لم تفعل شيئًا آخر فإن برامج typelisp تعمل في المفسِّر (interpreter). وإضافة إلى ذلك توجد طريقتان
@@ -221,9 +221,9 @@ const code = await run({ write: (fd, text) => { /* اعرضه في الصفحة 
 - يُحسب التوقيت المحلي (`decode-universal-time` بدون `zone` ونحوها) بالمنطقة الزمنية التي يُبلغ عنها `Date` في JavaScript.
 - بالإضافة إلى ما لا يمكن استخدامه في القسم 3.6، تكون عمليات الملفات والمجلدات ومتغيرات البيئة و`(command-line-args)` والمجلد الرئيسي و`dribble` **خطأ ترجمة**. يُقرأ الإدخال القياسي فارغًا.
 
-### 3.8 الترجمة لمتحكم دقيق (Cortex-M)
+### 3.8 الترجمة لمتحكم دقيق (Cortex-M، RISC-V)
 
-مع `--target thumbv7em-none-eabihf` ينشئ `typl -c` ملفًا تنفيذيًا (ELF) للوحة Cortex-M4F أو M7 بلا نظام تشغيل. بدون `-o` يُسمّى باسم المصدر مع استبدال `.typl` بـ`.elf`. ومع `--target thumbv8m.main-none-eabihf` يكون للوحة Cortex-M33.
+مع `--target thumbv7em-none-eabihf` ينشئ `typl -c` ملفًا تنفيذيًا (ELF) للوحة Cortex-M4F أو M7 بلا نظام تشغيل. بدون `-o` يُسمّى باسم المصدر مع استبدال `.typl` بـ`.elf`. ومع `--target thumbv8m.main-none-eabihf` يكون للوحة Cortex-M33. ومع `--target riscv32imac-unknown-none-elf` يكون للوحة بنواة RISC-V بعرض 32 بت (الامتدادات M وA وC).
 
 ```sh
 $ typl -c hello.typl --target thumbv7em-none-eabihf          # ينشئ hello.elf
@@ -232,9 +232,12 @@ $ qemu-system-arm -M mps2-an386 -nographic \
 $ typl -c hello.typl --target thumbv8m.main-none-eabihf
 $ qemu-system-arm -M mps2-an505 -nographic \
     -semihosting-config enable=on,target=native -kernel hello.elf   # شغّله على Cortex-M33 في QEMU
+$ typl -c hello.typl --target riscv32imac-unknown-none-elf
+$ qemu-system-riscv32 -M virt -bios none -nographic \
+    -semihosting-config enable=on,target=native -kernel hello.elf   # شغّله على RISC-V في QEMU
 ```
 
-- يمكن استخدام `typl` المثبّت بـ`install.sh` كما هو. للتثبيت بـ`cargo install` شغّل `rustup target add thumbv7em-none-eabihf thumbv8m.main-none-eabihf` ثم ثبّت مع `--features embedded` (و`--features wasm,embedded` للاثنين). مع نسخة التصحيح من `typl` في المستودع شغّل `scripts/build-embedded-runtime.sh`. يستخدم الربط رابط سلسلة أدوات rustup.
+- يمكن استخدام `typl` المثبّت بـ`install.sh` كما هو. للتثبيت بـ`cargo install` شغّل `rustup target add thumbv7em-none-eabihf thumbv8m.main-none-eabihf riscv32imac-unknown-none-elf` ثم ثبّت مع `--features embedded` (و`--features wasm,embedded` للاثنين). مع نسخة التصحيح من `typl` في المستودع شغّل `scripts/build-embedded-runtime.sh`. يستخدم الربط رابط سلسلة أدوات rustup.
 - مرّر ذاكرة اللوحة بـ`--linker-script FILE`. يُكتب الملف مثل `memory.x` في `cortex-m-rt`: عناوين FLASH وRAM وأحجامها. سطر مثل `_typelisp_stack_size = 32K;` يحدد ما يأخذه المكدس من RAM (64KiB إن لم يُذكر)؛ وبقية RAM هي الكومة. بدون الخيار يُستخدم تخطيط `mps2-an386` (و`mps2-an505` لـ Cortex-M33) في QEMU.
 
   ```
@@ -244,6 +247,23 @@ $ qemu-system-arm -M mps2-an505 -nographic \
     RAM : ORIGIN = 0x20000000, LENGTH = 128K
   }
   _typelisp_stack_size = 16K;
+  ```
+
+  على RISC-V يكون الافتراضي تخطيط `virt` في QEMU. والملف الممرَّر يسمّي أيضًا بـ`REGION_ALIAS`، كما في `memory.x` الخاص بـ`riscv-rt`، المنطقة التي يذهب إليها كل نوع من الأقسام.
+
+  ```
+  MEMORY
+  {
+    FLASH : ORIGIN = 0x20010000, LENGTH = 4M - 64K
+    RAM : ORIGIN = 0x80000000, LENGTH = 16K
+  }
+  REGION_ALIAS("REGION_TEXT", FLASH);
+  REGION_ALIAS("REGION_RODATA", FLASH);
+  REGION_ALIAS("REGION_DATA", RAM);
+  REGION_ALIAS("REGION_BSS", RAM);
+  REGION_ALIAS("REGION_HEAP", RAM);
+  REGION_ALIAS("REGION_STACK", RAM);
+  _typelisp_stack_size = 4K;
   ```
 
 - يختار `--board-functions` من يوفّر الإخراج والإدخال والإنهاء والساعة (دوال اللوحة).
@@ -273,7 +293,7 @@ $ qemu-system-arm -M mps2-an505 -nographic \
     (put-byte 104) (put-byte 105) (put-byte 10))                             ; "hi" وسطر جديد
   ```
 
-- اكتب الدالة التي تُستدعى عند وصول مقاطعة على هيئة `defun` بالسمة `#[interrupt(N)]` (مقاطعة الطرفية `N`) أو سمة مثل `#[exception(SysTick)]`. فعّل المقاطعة بـ `(enable-interrupt N)`. يعمل المعالج فورًا، ولا يعمل بعد انتهاء العمل إلا إذا وصل في منتصف عمل بيئة التشغيل. لا يستطيع المعالج الانتظار (`sleep` خطأ ترجمة). التفاصيل في القسم 3.17 من [مرجع الصياغة](../reference/syntax.md).
+- اكتب الدالة التي تُستدعى عند وصول مقاطعة على هيئة `defun` بالسمة `#[interrupt(N)]` (مقاطعة الطرفية `N`) أو سمة مثل `#[exception(SysTick)]`. فعّل المقاطعة بـ `(enable-interrupt N)`. يعمل المعالج فورًا، ولا يعمل بعد انتهاء العمل إلا إذا وصل في منتصف عمل بيئة التشغيل. لا يستطيع المعالج الانتظار (`sleep` خطأ ترجمة). التفاصيل في القسم 3.17 من [مرجع الصياغة](../reference/syntax.md). على RISC-V يكون `N` رقم المقاطعة في `mcause` (من 0 إلى 31: 3 مقاطعة البرمجيات، و7 المؤقت، و11 المقاطعات الخارجية)، ولا يمكن استخدام `#[exception(NAME)]`.
 
   ```lisp
   (use std::board::enable-interrupt)
@@ -287,7 +307,7 @@ $ qemu-system-arm -M mps2-an505 -nographic \
     (unsafe (volatile-write-u32 #xE000E200 (as u32 32))))   ; أحدث المقاطعة 5 بنفسك (سجل المقاطعات المعلقة في NVIC)
   ```
 
-- تبدأ بيئة التشغيل البرنامج (جدول المتجهات وتهيئة RAM) وتخصّص الذاكرة. HardFault أو مقاطعة بلا معالج ينهي البرنامج برمز خروج panic (1).
+- تبدأ بيئة التشغيل البرنامج (جدول المتجهات وتهيئة RAM) وتخصّص الذاكرة. HardFault (استثناء على RISC-V) أو مقاطعة بلا معالج ينهي البرنامج برمز خروج panic (1).
 - يعمل `throw`/`catch`/`panic` والأعداد الكبيرة والكسور والأعداد العشرية والمهام والقنوات و`sleep` كما في الملف التنفيذي. تعمل المهام بالتناوب على النواة الوحيدة. يمكن استخدام دوال C (`defffi`).
 - البرنامج الذي يستخدم ما ليس في اللوحة **خطأ ترجمة**: بالإضافة إلى ما لا يمكن استخدامه في القسم 3.7، `eval` و`macroexpand`. الوقت المحلي غير معروف (كما في القسم 3.6).
 - تبدأ ساحة cons بـ1024 خلية وتكبر عند الحاجة. تعمل `--heap-cells` و`--max-memory` و`--no-cons` و`-O<N>` و`--release` كما هي.

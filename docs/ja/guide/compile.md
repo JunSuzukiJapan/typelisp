@@ -259,10 +259,11 @@ const code = await run({ write: (fd, text) => { /* 画面に出すなど */ } })
 - 3.6 節で使えないものに加えて、ファイルとディレクトリの操作、環境変数、`(command-line-args)`、
   ホームディレクトリ、`dribble` が**コンパイルエラー**になります。標準入力は空として読まれます。
 
-### 3.8 マイコン（Cortex-M）向けにコンパイルする
+### 3.8 マイコン（Cortex-M・RISC-V）向けにコンパイルする
 
 `--target thumbv7em-none-eabihf` を付けると、OS の無い Cortex-M4F・M7 のボード向けの実行ファイル
-（ELF）を作ります。`--target thumbv8m.main-none-eabihf` なら Cortex-M33 のボード向けです。`-o` を
+（ELF）を作ります。`--target thumbv8m.main-none-eabihf` なら Cortex-M33 のボード向け、
+`--target riscv32imac-unknown-none-elf` なら 32 ビットの RISC-V（M・A・C 拡張）のボード向けです。`-o` を
 省くと、ソースの `.typl` を `.elf` に変えた名前になります。
 
 ```sh
@@ -272,10 +273,13 @@ $ qemu-system-arm -M mps2-an386 -nographic \
 $ typl -c hello.typl --target thumbv8m.main-none-eabihf
 $ qemu-system-arm -M mps2-an505 -nographic \
     -semihosting-config enable=on,target=native -kernel hello.elf   # QEMU の Cortex-M33 で実行する
+$ typl -c hello.typl --target riscv32imac-unknown-none-elf
+$ qemu-system-riscv32 -M virt -bios none -nographic \
+    -semihosting-config enable=on,target=native -kernel hello.elf   # QEMU の RISC-V で実行する
 ```
 
 - `install.sh` で入れた `typl` はそのまま使えます。`cargo install` で入れるときは、
-  `rustup target add thumbv7em-none-eabihf thumbv8m.main-none-eabihf` を実行してから `--features embedded` を付けてインストールします
+  `rustup target add thumbv7em-none-eabihf thumbv8m.main-none-eabihf riscv32imac-unknown-none-elf` を実行してから `--features embedded` を付けてインストールします
   （wasm と両方なら `--features wasm,embedded`）。リポジトリのデバッグビルドの `typl` では
   `scripts/build-embedded-runtime.sh` を実行します。リンクには rustup の toolchain のリンカを使います。
 - ボードのメモリの配置は `--linker-script FILE` で渡します。書き方は `cortex-m-rt` の `memory.x` と同じで、
@@ -290,6 +294,23 @@ $ qemu-system-arm -M mps2-an505 -nographic \
     RAM : ORIGIN = 0x20000000, LENGTH = 128K
   }
   _typelisp_stack_size = 16K;
+  ```
+
+  RISC-V では、省いたときは QEMU の `virt` の配置になります。書くときは `riscv-rt` の `memory.x` と同じく、各セクションを置く領域も `REGION_ALIAS` で書きます。
+
+  ```
+  MEMORY
+  {
+    FLASH : ORIGIN = 0x20010000, LENGTH = 4M - 64K
+    RAM : ORIGIN = 0x80000000, LENGTH = 16K
+  }
+  REGION_ALIAS("REGION_TEXT", FLASH);
+  REGION_ALIAS("REGION_RODATA", FLASH);
+  REGION_ALIAS("REGION_DATA", RAM);
+  REGION_ALIAS("REGION_BSS", RAM);
+  REGION_ALIAS("REGION_HEAP", RAM);
+  REGION_ALIAS("REGION_STACK", RAM);
+  _typelisp_stack_size = 4K;
   ```
 
 - 出力・入力・終了・時刻（ボードの関数）を誰が与えるかは `--board-functions` で選びます。
@@ -329,6 +350,8 @@ $ qemu-system-arm -M mps2-an505 -nographic \
   ハンドラはその場で実行され、ランタイムの処理の途中に来たときだけ、その処理が終わってから実行されます。
   ハンドラの中では待てません（`sleep` はコンパイルエラーです）。詳しくは
   [構文リファレンス](../reference/syntax.md) の 3.17 節にあります。
+  RISC-V では `N` は `mcause` の割り込みの番号（0〜31。3 がソフトウェア割り込み、7 がタイマー、11 が外部割り込み）で、
+  `#[exception(NAME)]` は使えません。
 
   ```lisp
   (use std::board::enable-interrupt)
@@ -342,7 +365,7 @@ $ qemu-system-arm -M mps2-an505 -nographic \
     (unsafe (volatile-write-u32 #xE000E200 (as u32 32))))   ; 割り込み 5 を自分で起こす（NVIC の保留レジスタ）
   ```
 
-- 起動（ベクタテーブルと、RAM の準備）とメモリの確保はランタイムが行います。HardFault や処理されない
+- 起動（ベクタテーブルと、RAM の準備）とメモリの確保はランタイムが行います。HardFault（RISC-V では例外）や処理されない
   割り込みが起きると、panic と同じ終了コード（1）で終わります。
 - `throw`/`catch`/`panic`、bignum・ratio・浮動小数、タスク・チャネル・`sleep` は実行ファイルと同じに
   振る舞います。タスクは 1 つのコアで順に実行されます。C の関数（`defffi`）も使えます。

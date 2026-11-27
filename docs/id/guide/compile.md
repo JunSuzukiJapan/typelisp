@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ 1b5dc6ac828d8e4a95800a91218b5e9dffe83f98 -->
+<!-- translated-from: docs/ja/guide/compile.md @ be56bb8a477929497064b8f807acfd1755f2b35b -->
 # Kompilasi
 
 Jika Anda tidak melakukan apa-apa lagi, program typelisp berjalan di interpreter. Selain itu ada dua
@@ -227,9 +227,9 @@ const code = await run({ write: (fd, text) => { /* misalnya tampilkan di halaman
 - Waktu lokal (`decode-universal-time` tanpa `zone`, dan seterusnya) dihitung dengan zona waktu yang dilaporkan `Date` milik JavaScript.
 - Selain yang tidak dapat dipakai di bagian 3.6, operasi berkas dan direktori, variabel lingkungan, `(command-line-args)`, direktori home, dan `dribble` adalah **galat kompilasi**. Masukan standar dibaca sebagai kosong.
 
-### 3.8 Mengompilasi untuk mikrokontroler (Cortex-M)
+### 3.8 Mengompilasi untuk mikrokontroler (Cortex-M, RISC-V)
 
-Dengan `--target thumbv7em-none-eabihf`, `typl -c` membuat berkas eksekusi (ELF) untuk papan Cortex-M4F atau M7 tanpa sistem operasi. Tanpa `-o`, namanya mengikuti sumber dengan `.typl` diganti `.elf`. Dengan `--target thumbv8m.main-none-eabihf`, untuk papan Cortex-M33.
+Dengan `--target thumbv7em-none-eabihf`, `typl -c` membuat berkas eksekusi (ELF) untuk papan Cortex-M4F atau M7 tanpa sistem operasi. Tanpa `-o`, namanya mengikuti sumber dengan `.typl` diganti `.elf`. Dengan `--target thumbv8m.main-none-eabihf`, untuk papan Cortex-M33. Dengan `--target riscv32imac-unknown-none-elf`, untuk papan dengan inti RISC-V 32-bit (ekstensi M, A, dan C).
 
 ```sh
 $ typl -c hello.typl --target thumbv7em-none-eabihf          # membuat hello.elf
@@ -238,9 +238,12 @@ $ qemu-system-arm -M mps2-an386 -nographic \
 $ typl -c hello.typl --target thumbv8m.main-none-eabihf
 $ qemu-system-arm -M mps2-an505 -nographic \
     -semihosting-config enable=on,target=native -kernel hello.elf   # jalankan di Cortex-M33 milik QEMU
+$ typl -c hello.typl --target riscv32imac-unknown-none-elf
+$ qemu-system-riscv32 -M virt -bios none -nographic \
+    -semihosting-config enable=on,target=native -kernel hello.elf   # jalankan di RISC-V milik QEMU
 ```
 
-- `typl` yang dipasang dengan `install.sh` dapat langsung dipakai. Untuk memasang dengan `cargo install`, jalankan `rustup target add thumbv7em-none-eabihf thumbv8m.main-none-eabihf`, lalu pasang dengan `--features embedded` (`--features wasm,embedded` untuk keduanya). Dengan build debug `typl` di repositori, jalankan `scripts/build-embedded-runtime.sh`. Penautan memakai linker toolchain rustup.
+- `typl` yang dipasang dengan `install.sh` dapat langsung dipakai. Untuk memasang dengan `cargo install`, jalankan `rustup target add thumbv7em-none-eabihf thumbv8m.main-none-eabihf riscv32imac-unknown-none-elf`, lalu pasang dengan `--features embedded` (`--features wasm,embedded` untuk keduanya). Dengan build debug `typl` di repositori, jalankan `scripts/build-embedded-runtime.sh`. Penautan memakai linker toolchain rustup.
 - Berikan memori papan dengan `--linker-script FILE`. Ditulis seperti `memory.x` milik `cortex-m-rt`: alamat dan ukuran FLASH dan RAM. Baris seperti `_typelisp_stack_size = 32K;` menentukan berapa banyak RAM yang dipakai stack (64KiB jika tidak diberikan); sisa RAM adalah heap. Tanpa opsi ini, tata letaknya milik `mps2-an386` (`mps2-an505` untuk Cortex-M33) di QEMU.
 
   ```
@@ -250,6 +253,23 @@ $ qemu-system-arm -M mps2-an505 -nographic \
     RAM : ORIGIN = 0x20000000, LENGTH = 128K
   }
   _typelisp_stack_size = 16K;
+  ```
+
+  Pada RISC-V, tanpa opsi ini dipakai tata letak `virt` milik QEMU. Berkas yang diberikan juga menamai dengan `REGION_ALIAS`, seperti `memory.x` milik `riscv-rt`, wilayah tempat setiap jenis bagian ditaruh.
+
+  ```
+  MEMORY
+  {
+    FLASH : ORIGIN = 0x20010000, LENGTH = 4M - 64K
+    RAM : ORIGIN = 0x80000000, LENGTH = 16K
+  }
+  REGION_ALIAS("REGION_TEXT", FLASH);
+  REGION_ALIAS("REGION_RODATA", FLASH);
+  REGION_ALIAS("REGION_DATA", RAM);
+  REGION_ALIAS("REGION_BSS", RAM);
+  REGION_ALIAS("REGION_HEAP", RAM);
+  REGION_ALIAS("REGION_STACK", RAM);
+  _typelisp_stack_size = 4K;
   ```
 
 - `--board-functions` memilih siapa yang memberikan keluaran, masukan, penghentian, dan jam (fungsi papan).
@@ -279,7 +299,7 @@ $ qemu-system-arm -M mps2-an505 -nographic \
     (put-byte 104) (put-byte 105) (put-byte 10))                             ; "hi" dan baris baru
   ```
 
-- Tulis fungsi yang dipanggil saat interupsi datang sebagai `defun` dengan atribut `#[interrupt(N)]` (interupsi periferal `N`) atau seperti `#[exception(SysTick)]`. Aktifkan interupsi dengan `(enable-interrupt N)`. Penangan berjalan saat itu juga; hanya jika datang di tengah pekerjaan runtime ia berjalan setelah pekerjaan itu selesai. Penangan tidak dapat menunggu (`sleep` adalah galat kompilasi). Rinciannya ada di bagian 3.17 [referensi sintaks](../reference/syntax.md).
+- Tulis fungsi yang dipanggil saat interupsi datang sebagai `defun` dengan atribut `#[interrupt(N)]` (interupsi periferal `N`) atau seperti `#[exception(SysTick)]`. Aktifkan interupsi dengan `(enable-interrupt N)`. Penangan berjalan saat itu juga; hanya jika datang di tengah pekerjaan runtime ia berjalan setelah pekerjaan itu selesai. Penangan tidak dapat menunggu (`sleep` adalah galat kompilasi). Rinciannya ada di bagian 3.17 [referensi sintaks](../reference/syntax.md). Pada RISC-V, `N` adalah nomor interupsi di `mcause` (0 sampai 31: 3 interupsi perangkat lunak, 7 pewaktu, 11 interupsi eksternal), dan `#[exception(NAME)]` tidak dapat dipakai.
 
   ```lisp
   (use std::board::enable-interrupt)
@@ -293,7 +313,7 @@ $ qemu-system-arm -M mps2-an505 -nographic \
     (unsafe (volatile-write-u32 #xE000E200 (as u32 32))))   ; picu sendiri interupsi 5 (register pending milik NVIC)
   ```
 
-- Runtime memulai program (tabel vektor dan menyiapkan RAM) dan mengalokasikan memori. HardFault atau interupsi tanpa penangan mengakhiri program dengan kode keluar panic (1).
+- Runtime memulai program (tabel vektor dan menyiapkan RAM) dan mengalokasikan memori. HardFault (pada RISC-V sebuah eksepsi) atau interupsi tanpa penangan mengakhiri program dengan kode keluar panic (1).
 - `throw`/`catch`/`panic`, bilangan besar, pecahan, dan bilangan titik mengambang, serta tugas, kanal, dan `sleep` berperilaku seperti pada berkas eksekusi. Tugas berjalan bergiliran di satu inti. Fungsi C (`defffi`) dapat dipakai.
 - Program yang memakai sesuatu yang tidak dimiliki papan adalah **galat kompilasi**: selain yang tidak dapat dipakai di bagian 3.7, `eval` dan `macroexpand`. Waktu lokal tidak diketahui (seperti di bagian 3.6).
 - Arena cons dimulai dengan 1024 sel dan tumbuh saat diperlukan. `--heap-cells`, `--max-memory`, `--no-cons`, `-O<N>`, dan `--release` bekerja seperti biasa.

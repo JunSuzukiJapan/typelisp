@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ 1b5dc6ac828d8e4a95800a91218b5e9dffe83f98 -->
+<!-- translated-from: docs/ja/guide/compile.md @ be56bb8a477929497064b8f807acfd1755f2b35b -->
 # 컴파일
 
 아무것도 하지 않으면 typelisp 프로그램은 인터프리터에서 실행된다. 그 밖에 네이티브 코드로 컴파일하는 방법이 두 가지,
@@ -216,9 +216,9 @@ const code = await run({ write: (fd, text) => { /* 예를 들어 화면에 표�
 - 지역 시간(`zone`을 생략한 `decode-universal-time` 등)은 JavaScript의 `Date`가 알려 주는 시간대로 구합니다.
 - 3.6절에서 쓸 수 없는 것에 더해, 파일과 디렉터리 조작, 환경 변수, `(command-line-args)`, 홈 디렉터리, `dribble`이 **컴파일 오류**가 됩니다. 표준 입력은 빈 것으로 읽힙니다.
 
-### 3.8 마이크로컨트롤러(Cortex-M)용으로 컴파일하기
+### 3.8 마이크로컨트롤러(Cortex-M・RISC-V)용으로 컴파일하기
 
-`--target thumbv7em-none-eabihf`를 붙이면 OS가 없는 Cortex-M4F・M7 보드용 실행 파일(ELF)을 만듭니다. `-o`를 생략하면 소스의 `.typl`을 `.elf`로 바꾼 이름이 됩니다. `--target thumbv8m.main-none-eabihf`이면 Cortex-M33 보드용입니다.
+`--target thumbv7em-none-eabihf`를 붙이면 OS가 없는 Cortex-M4F・M7 보드용 실행 파일(ELF)을 만듭니다. `-o`를 생략하면 소스의 `.typl`을 `.elf`로 바꾼 이름이 됩니다. `--target thumbv8m.main-none-eabihf`이면 Cortex-M33 보드용입니다. `--target riscv32imac-unknown-none-elf`이면 32비트 RISC-V(M・A・C 확장) 보드용입니다.
 
 ```sh
 $ typl -c hello.typl --target thumbv7em-none-eabihf          # hello.elf가 생긴다
@@ -227,9 +227,12 @@ $ qemu-system-arm -M mps2-an386 -nographic \
 $ typl -c hello.typl --target thumbv8m.main-none-eabihf
 $ qemu-system-arm -M mps2-an505 -nographic \
     -semihosting-config enable=on,target=native -kernel hello.elf   # QEMU의 Cortex-M33에서 실행한다
+$ typl -c hello.typl --target riscv32imac-unknown-none-elf
+$ qemu-system-riscv32 -M virt -bios none -nographic \
+    -semihosting-config enable=on,target=native -kernel hello.elf   # QEMU의 RISC-V에서 실행한다
 ```
 
-- `install.sh`로 설치한 `typl`은 그대로 쓸 수 있습니다. `cargo install`로 설치할 때는 `rustup target add thumbv7em-none-eabihf thumbv8m.main-none-eabihf`를 실행한 뒤 `--features embedded`를 붙여 설치합니다(wasm과 둘 다라면 `--features wasm,embedded`). 저장소의 디버그 빌드 `typl`에서는 `scripts/build-embedded-runtime.sh`를 실행합니다. 링크에는 rustup 툴체인의 링커를 씁니다.
+- `install.sh`로 설치한 `typl`은 그대로 쓸 수 있습니다. `cargo install`로 설치할 때는 `rustup target add thumbv7em-none-eabihf thumbv8m.main-none-eabihf riscv32imac-unknown-none-elf`를 실행한 뒤 `--features embedded`를 붙여 설치합니다(wasm과 둘 다라면 `--features wasm,embedded`). 저장소의 디버그 빌드 `typl`에서는 `scripts/build-embedded-runtime.sh`를 실행합니다. 링크에는 rustup 툴체인의 링커를 씁니다.
 - 보드의 메모리 배치는 `--linker-script FILE`로 넘깁니다. 쓰는 법은 `cortex-m-rt`의 `memory.x`와 같고, FLASH와 RAM의 주소와 크기를 씁니다. `_typelisp_stack_size = 32K;`처럼 쓰면 RAM 중 스택이 쓰는 크기가 됩니다(쓰지 않으면 64KiB). RAM의 나머지가 힙입니다. 생략하면 QEMU의 `mps2-an386`(Cortex-M33에서는 `mps2-an505`) 배치가 됩니다.
 
   ```
@@ -239,6 +242,23 @@ $ qemu-system-arm -M mps2-an505 -nographic \
     RAM : ORIGIN = 0x20000000, LENGTH = 128K
   }
   _typelisp_stack_size = 16K;
+  ```
+
+  RISC-V에서는 생략하면 QEMU의 `virt` 배치가 됩니다. 쓸 때는 `riscv-rt`의 `memory.x`와 마찬가지로 각 섹션을 둘 영역도 `REGION_ALIAS`로 씁니다.
+
+  ```
+  MEMORY
+  {
+    FLASH : ORIGIN = 0x20010000, LENGTH = 4M - 64K
+    RAM : ORIGIN = 0x80000000, LENGTH = 16K
+  }
+  REGION_ALIAS("REGION_TEXT", FLASH);
+  REGION_ALIAS("REGION_RODATA", FLASH);
+  REGION_ALIAS("REGION_DATA", RAM);
+  REGION_ALIAS("REGION_BSS", RAM);
+  REGION_ALIAS("REGION_HEAP", RAM);
+  REGION_ALIAS("REGION_STACK", RAM);
+  _typelisp_stack_size = 4K;
   ```
 
 - 출력・입력・종료・시각(보드의 함수)을 누가 제공할지는 `--board-functions`로 고릅니다.
@@ -268,7 +288,7 @@ $ qemu-system-arm -M mps2-an505 -nographic \
     (put-byte 104) (put-byte 105) (put-byte 10))                             ; "hi"와 줄바꿈
   ```
 
-- 인터럽트가 올 때 호출되는 함수는 `defun`에 `#[interrupt(N)]`(주변 장치 인터럽트 `N`)이나 `#[exception(SysTick)]` 같은 속성을 붙여 씁니다. 인터럽트는 `(enable-interrupt N)`으로 켭니다. 핸들러는 그 자리에서 실행되며, 런타임의 처리 도중에 왔을 때만 그 처리가 끝난 뒤 실행됩니다. 핸들러 안에서는 기다릴 수 없습니다(`sleep`은 컴파일 오류입니다). 자세한 내용은 [구문 레퍼런스](../reference/syntax.md)의 3.17절에 있습니다.
+- 인터럽트가 올 때 호출되는 함수는 `defun`에 `#[interrupt(N)]`(주변 장치 인터럽트 `N`)이나 `#[exception(SysTick)]` 같은 속성을 붙여 씁니다. 인터럽트는 `(enable-interrupt N)`으로 켭니다. 핸들러는 그 자리에서 실행되며, 런타임의 처리 도중에 왔을 때만 그 처리가 끝난 뒤 실행됩니다. 핸들러 안에서는 기다릴 수 없습니다(`sleep`은 컴파일 오류입니다). 자세한 내용은 [구문 레퍼런스](../reference/syntax.md)의 3.17절에 있습니다. RISC-V에서는 `N`이 `mcause`의 인터럽트 번호(0〜31. 3이 소프트웨어 인터럽트, 7이 타이머, 11이 외부 인터럽트)이며, `#[exception(NAME)]`은 쓸 수 없습니다.
 
   ```lisp
   (use std::board::enable-interrupt)
@@ -282,7 +302,7 @@ $ qemu-system-arm -M mps2-an505 -nographic \
     (unsafe (volatile-write-u32 #xE000E200 (as u32 32))))   ; 인터럽트 5를 스스로 일으킨다(NVIC의 보류 레지스터)
   ```
 
-- 기동(벡터 테이블과 RAM 준비)과 메모리 확보는 런타임이 합니다. HardFault나 처리되지 않는 인터럽트가 일어나면 panic과 같은 종료 코드(1)로 끝납니다.
+- 기동(벡터 테이블과 RAM 준비)과 메모리 확보는 런타임이 합니다. HardFault(RISC-V에서는 예외)나 처리되지 않는 인터럽트가 일어나면 panic과 같은 종료 코드(1)로 끝납니다.
 - `throw`/`catch`/`panic`, bignum・ratio・부동소수, 태스크・채널・`sleep`은 실행 파일과 똑같이 동작합니다. 태스크는 하나의 코어에서 차례로 실행됩니다. C 함수(`defffi`)도 쓸 수 있습니다.
 - 보드에 없는 것을 쓰는 프로그램은 **컴파일 오류**가 됩니다. 3.7절에서 쓸 수 없는 것에 더해 `eval`・`macroexpand`를 쓸 수 없습니다. 지방시는 알 수 없습니다(3.6절과 같음).
 - cons 아레나는 1024셀에서 시작해 모자라면 늘어납니다. `--heap-cells`, `--max-memory`, `--no-cons`, `-O<N>`, `--release`는 그대로 쓸 수 있습니다.

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ 1b5dc6ac828d8e4a95800a91218b5e9dffe83f98 -->
+<!-- translated-from: docs/ja/guide/compile.md @ be56bb8a477929497064b8f807acfd1755f2b35b -->
 # Compileren
 
 Tenzij je iets anders doet, draaien typelisp-programma's in de interpreter. Daarnaast zijn er twee
@@ -232,9 +232,9 @@ const code = await run({ write: (fd, text) => { /* bijvoorbeeld op de pagina ton
 - De lokale tijd (`decode-universal-time` zonder `zone` enzovoort) wordt berekend met de tijdzone die `Date` van JavaScript meldt.
 - Naast wat in paragraaf 3.6 niet kan, zijn bestands- en mapbewerkingen, omgevingsvariabelen, `(command-line-args)`, de thuismap en `dribble` een **compileerfout**. Standaardinvoer wordt als leeg gelezen.
 
-### 3.8 Compileren voor een microcontroller (Cortex-M)
+### 3.8 Compileren voor een microcontroller (Cortex-M, RISC-V)
 
-Met `--target thumbv7em-none-eabihf` maakt `typl -c` een uitvoerbaar bestand (ELF) voor een Cortex-M4F- of M7-bord zonder besturingssysteem. Zonder `-o` krijgt het de naam van de bron met `.typl` vervangen door `.elf`. Met `--target thumbv8m.main-none-eabihf` is het voor een Cortex-M33-bord.
+Met `--target thumbv7em-none-eabihf` maakt `typl -c` een uitvoerbaar bestand (ELF) voor een Cortex-M4F- of M7-bord zonder besturingssysteem. Zonder `-o` krijgt het de naam van de bron met `.typl` vervangen door `.elf`. Met `--target thumbv8m.main-none-eabihf` is het voor een Cortex-M33-bord. Met `--target riscv32imac-unknown-none-elf` is het voor een bord met een 32-bits RISC-V-kern (de uitbreidingen M, A en C).
 
 ```sh
 $ typl -c hello.typl --target thumbv7em-none-eabihf          # maakt hello.elf
@@ -243,9 +243,12 @@ $ qemu-system-arm -M mps2-an386 -nographic \
 $ typl -c hello.typl --target thumbv8m.main-none-eabihf
 $ qemu-system-arm -M mps2-an505 -nographic \
     -semihosting-config enable=on,target=native -kernel hello.elf   # uitvoeren op de Cortex-M33 van QEMU
+$ typl -c hello.typl --target riscv32imac-unknown-none-elf
+$ qemu-system-riscv32 -M virt -bios none -nographic \
+    -semihosting-config enable=on,target=native -kernel hello.elf   # uitvoeren op de RISC-V van QEMU
 ```
 
-- Een met `install.sh` geïnstalleerde `typl` kan direct worden gebruikt. Voor `cargo install` voer je eerst `rustup target add thumbv7em-none-eabihf thumbv8m.main-none-eabihf` uit en installeer je met `--features embedded` (`--features wasm,embedded` voor beide). Met een debugbuild van `typl` in de repository voer je `scripts/build-embedded-runtime.sh` uit. Het linken gebruikt de linker van de rustup-toolchain.
+- Een met `install.sh` geïnstalleerde `typl` kan direct worden gebruikt. Voor `cargo install` voer je eerst `rustup target add thumbv7em-none-eabihf thumbv8m.main-none-eabihf riscv32imac-unknown-none-elf` uit en installeer je met `--features embedded` (`--features wasm,embedded` voor beide). Met een debugbuild van `typl` in de repository voer je `scripts/build-embedded-runtime.sh` uit. Het linken gebruikt de linker van de rustup-toolchain.
 - Geef het geheugen van het bord op met `--linker-script FILE`. Het heeft de vorm van de `memory.x` van `cortex-m-rt`: de adressen en groottes van FLASH en RAM. Een regel als `_typelisp_stack_size = 32K;` bepaalt hoeveel RAM de stack inneemt (zonder opgave 64KiB); de rest van het RAM is de heap. Zonder de optie geldt de indeling van QEMU's `mps2-an386` (`mps2-an505` voor een Cortex-M33).
 
   ```
@@ -255,6 +258,23 @@ $ qemu-system-arm -M mps2-an505 -nographic \
     RAM : ORIGIN = 0x20000000, LENGTH = 128K
   }
   _typelisp_stack_size = 16K;
+  ```
+
+  Op RISC-V is zonder opgave de indeling van QEMU's `virt` de standaard. Een opgegeven bestand noemt ook met `REGION_ALIAS`, zoals de `memory.x` van `riscv-rt`, het gebied waar elk soort sectie komt.
+
+  ```
+  MEMORY
+  {
+    FLASH : ORIGIN = 0x20010000, LENGTH = 4M - 64K
+    RAM : ORIGIN = 0x80000000, LENGTH = 16K
+  }
+  REGION_ALIAS("REGION_TEXT", FLASH);
+  REGION_ALIAS("REGION_RODATA", FLASH);
+  REGION_ALIAS("REGION_DATA", RAM);
+  REGION_ALIAS("REGION_BSS", RAM);
+  REGION_ALIAS("REGION_HEAP", RAM);
+  REGION_ALIAS("REGION_STACK", RAM);
+  _typelisp_stack_size = 4K;
   ```
 
 - `--board-functions` kiest wie uitvoer, invoer, afsluiten en de klok (de functies van het bord) levert.
@@ -284,7 +304,7 @@ $ qemu-system-arm -M mps2-an505 -nographic \
     (put-byte 104) (put-byte 105) (put-byte 10))                             ; "hi" en een nieuwe regel
   ```
 
-- Schrijf de functie die wordt aangeroepen als er een interrupt komt als een `defun` met het attribuut `#[interrupt(N)]` (periferie-interrupt `N`) of een zoals `#[exception(SysTick)]`. Schakel een interrupt in met `(enable-interrupt N)`. Een handler draait meteen; alleen als hij midden in werk van de runtime komt, draait hij nadat dat werk klaar is. Een handler kan niet wachten (`sleep` is een compileerfout). De details staan in paragraaf 3.17 van de [syntaxreferentie](../reference/syntax.md).
+- Schrijf de functie die wordt aangeroepen als er een interrupt komt als een `defun` met het attribuut `#[interrupt(N)]` (periferie-interrupt `N`) of een zoals `#[exception(SysTick)]`. Schakel een interrupt in met `(enable-interrupt N)`. Een handler draait meteen; alleen als hij midden in werk van de runtime komt, draait hij nadat dat werk klaar is. Een handler kan niet wachten (`sleep` is een compileerfout). De details staan in paragraaf 3.17 van de [syntaxreferentie](../reference/syntax.md). Op RISC-V is `N` het nummer van de interrupt in `mcause` (0 tot en met 31: 3 is de software-interrupt, 7 de timer, 11 de externe interrupts), en `#[exception(NAME)]` kan niet worden gebruikt.
 
   ```lisp
   (use std::board::enable-interrupt)
@@ -298,7 +318,7 @@ $ qemu-system-arm -M mps2-an505 -nographic \
     (unsafe (volatile-write-u32 #xE000E200 (as u32 32))))   ; interrupt 5 zelf veroorzaken (het pending-register van de NVIC)
   ```
 
-- De runtime start het programma (de vectortabel en het klaarmaken van het RAM) en wijst geheugen toe. Een HardFault of een onafgehandelde interrupt beëindigt het programma met de exitcode van een panic (1).
+- De runtime start het programma (de vectortabel en het klaarmaken van het RAM) en wijst geheugen toe. Een HardFault (op RISC-V een exceptie) of een onafgehandelde interrupt beëindigt het programma met de exitcode van een panic (1).
 - `throw`/`catch`/`panic`, bignums, breuken en drijvende-kommagetallen, en taken, kanalen en `sleep` gedragen zich zoals in het uitvoerbare bestand. Taken draaien om de beurt op de ene kern. C-functies (`defffi`) kunnen worden gebruikt.
 - Een programma dat iets gebruikt wat het bord niet heeft, is een **compileerfout**: naast wat in paragraaf 3.7 niet kan, `eval` en `macroexpand`. De lokale tijd is onbekend (zoals in paragraaf 3.6).
 - De cons-arena begint met 1024 cellen en groeit wanneer nodig. `--heap-cells`, `--max-memory`, `--no-cons`, `-O<N>` en `--release` werken zoals ze zijn.

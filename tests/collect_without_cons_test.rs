@@ -12,7 +12,8 @@ mod common;
 mod garbage;
 
 use std::path::PathBuf;
-use std::process::{Command, Output, Stdio};
+use std::process::{Command, Output};
+use common::board::on_board;
 use common::{Load, Session};
 use typelisp::Value;
 
@@ -49,14 +50,10 @@ fn an_executable_s_memory_is_bounded() {
 #[test]
 fn a_board_s_memory_is_enough() {
     for (name, defs, call) in garbage::PROGRAMS {
-        let elf = built(&format!("garbage-board-{}", name), &program(defs, call, 100_000), &["--target", "thumbv7em-none-eabihf", "-O2"]);
-        let out = Command::new("qemu-system-arm")
-            .args(["-M", "mps2-an386", "-nographic", "-semihosting-config", "enable=on,target=native", "-kernel"])
-            .arg(elf)
-            .stdin(Stdio::null())
-            .output()
-            .expect("failed to start qemu-system-arm");
-        succeeded(name, out);
+        for triple in ["thumbv7em-none-eabihf", "riscv32imac-unknown-none-elf"] {
+            let elf = built(&format!("garbage-board-{}-{}", triple, name), &program(defs, call, 100_000), &["--target", triple, "-O2"]);
+            succeeded(name, on_board(triple, &elf).output().expect("failed to start QEMU"));
+        }
     }
 }
 

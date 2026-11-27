@@ -62,7 +62,7 @@ pub(super) fn write_module(
     let (llvm_triple, entry_name) = match target {
         super::Target::Wasip1 => ("wasm32-unknown-wasip1", WASI_MAIN),
         super::Target::Wasm32Unknown => ("wasm32-unknown-unknown", JS_MAIN),
-        super::Target::Host | super::Target::Thumbv7em | super::Target::Thumbv8mMain | super::Target::AvrAtmega328p => {
+        super::Target::Host | super::Target::Thumbv7em | super::Target::Thumbv8mMain | super::Target::Riscv32imac | super::Target::AvrAtmega328p => {
             return Err(format!("internal error: write_module called for {}", target.name()))
         }
     };

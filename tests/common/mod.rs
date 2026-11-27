@@ -34,6 +34,7 @@
 // property of how Cargo builds `tests/`, not of the code.
 #![allow(dead_code)]
 
+pub mod board;
 mod process;
 mod project;
 mod whole;

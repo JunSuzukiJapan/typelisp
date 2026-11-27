@@ -10,6 +10,7 @@ mod common;
 #[path = "common/widths.rs"]
 mod widths;
 
+use common::board::on_board;
 use common::{check_err, eval_ok, eval_string, eval_string_compiled, Load, Session};
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
@@ -68,9 +69,15 @@ fn every_width_in_an_executable() {
 fn every_width_on_a_cortex_m() {
     for level in ["-O0", "-O2"] {
         let elf = built(&format!("widths_board{}", level), &[level, "--target", "thumbv7em-none-eabihf"], ".elf");
-        let mut qemu = Command::new("qemu-system-arm");
-        qemu.args(["-M", "mps2-an386", "-nographic", "-semihosting-config", "enable=on,target=native", "-kernel"]).arg(elf);
-        all_passed(level, &output(&mut qemu));
+        all_passed(level, &output(&mut on_board("thumbv7em-none-eabihf", &elf)));
+    }
+}
+
+#[test]
+fn every_width_on_a_riscv32() {
+    for level in ["-O0", "-O2"] {
+        let elf = built(&format!("widths_riscv32{}", level), &[level, "--target", "riscv32imac-unknown-none-elf"], ".elf");
+        all_passed(level, &output(&mut on_board("riscv32imac-unknown-none-elf", &elf)));
     }
 }
 

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 1b5dc6ac828d8e4a95800a91218b5e9dffe83f98 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ be56bb8a477929497064b8f807acfd1755f2b35b -->
 # Referencia de sintaxis de typelisp
 
 typelisp es un Lisp con tipado estático que se escribe en expresiones S. Para la lista de funciones y métodos
@@ -1362,6 +1362,7 @@ Lo que una prueba imprime con `print` va directamente a la salida estándar (no 
 En un programa compilado para un microcontrolador (sección 3.8 de [Compilar](../guide/compile.md)), son las funciones que se llaman cuando llega una interrupción. `#[interrupt(N)]` hace de una función el manejador de la interrupción de periférico `N` (de 0 a 239), y `#[exception(NAME)]` de la excepción del núcleo `NAME`, una de `NonMaskableInt`, `MemoryManagement`, `BusFault`, `UsageFault`, `SVCall`, `DebugMonitor`, `PendSV`, `SysTick` (`HardFault` es del entorno de ejecución y termina el programa).
 
 - Para el Arduino Uno la numeración y la forma de habilitar son distintas, y no se pueden usar `#[exception(NAME)]` ni `enable-interrupt` ([Compilar](../guide/compile.md), sección 3.9). Lo que se dice abajo del runtime se refiere al Cortex-M.
+- En RISC-V, `N` es el número de la interrupción en `mcause` (de 0 a 31), y `#[exception(NAME)]` no se puede usar. Lo que se dice abajo del runtime vale también para RISC-V.
 - Van en un `defun` de nivel superior que no toma nada y devuelve `()` (tampoco parámetros de tipo). Una interrupción tiene un manejador, y una función maneja una interrupción.
 - Una interrupción de periférico no llega hasta que `(enable-interrupt N)` la habilita (`(disable-interrupt N)` la detiene; véase [Sistema](functions/system.md)). Una excepción como SysTick llega en cuanto los registros se configuran para provocarla.
 - Un manejador se ejecuta en el acto, donde llegó la interrupción. Si llega en medio del trabajo del entorno de ejecución (asignar memoria, recolectar basura, escribir la salida, cambiar de tarea, etc.), el manejador se ejecuta en cuanto ese trabajo termina. Los manejadores no se interrumpen entre sí.

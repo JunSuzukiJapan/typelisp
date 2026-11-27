@@ -14,23 +14,28 @@
 //! spaces of their own, and that is how an ELF file tells them apart.
 
 use std::fs;
-use std::process::Command;
 
 use inkwell::module::Module;
-use inkwell::targets::{CodeModel, FileType, RelocMode, Target, TargetMachine, TargetTriple};
+use inkwell::targets::{FileType, TargetMachine};
 use inkwell::builder::Builder;
 use inkwell::OptimizationLevel;
 use inkwell::values::{FunctionValue, IntValue, PointerValue};
 
-use super::embedded::{sections_of_their_own, Board, BOARD_MAIN};
-use super::{board_linker, reach, BuildOptions, ENTRY_POINT_NAME};
+use super::embedded::{beside_output, board_memory, for_board, run_linker, sections_of_their_own, write_object, Board, Core, BOARD_MAIN};
+use super::{board_linker, reach, BuildOptions};
 use crate::CompileTarget;
 
 /// The ATmega328P: 32 KiB of flash, of which the last 512 bytes are the
 /// Uno's boot loader, and 2 KiB of RAM after the registers.
 pub const ATMEGA328P: Board = Board {
+    core: Core::Avr,
+    llvm_triple: "avr-unknown-none",
     cpu: "atmega328p",
-    qemu_machine: "uno",
+    features: "",
+    // The vector table's entries after reset's.
+    interrupts: (1, VECTORS - 1),
+    exceptions: false,
+    qemu: ("qemu-system-avr", &["-M", "uno"]),
     qemu_memory: "\
 MEMORY
 {
@@ -82,24 +87,9 @@ pub(super) const FAULT: &str = "__typelisp_stop";
 /// How many entries the vector table has, the first of them reset's.
 const VECTORS: u16 = 26;
 
-/// The vector-table entry of an interrupt `0` as a handler's attribute has it
-/// (`typeck::attribute`): a Cortex-M's exceptions come before it.
-const FIRST_INTERRUPT: u16 = 16;
-
 /// The status register's address, and its bit that lets interrupts come.
 const SREG: u64 = 0x5f;
 const INTERRUPTS: u64 = 0x80;
-
-/// The interrupt the handler `path` is for, its attribute having named the
-/// entry `vector`: the number the chip's tables count from reset's 0.
-pub(super) fn interrupt_number(target: super::Target, vector: u16, path: &crate::types::Path) -> Result<u16, String> {
-    let last = VECTORS - 1;
-    match vector.checked_sub(FIRST_INTERRUPT) {
-        None => Err(format!("`{}` handles a core exception, and --target {} has none", path, target.name())),
-        Some(n) if (1..=last).contains(&n) => Ok(n),
-        Some(n) => Err(format!("`{}` handles interrupt {}: the interrupts of --target {} are 1 to {}", path, n, target.name(), last)),
-    }
-}
 
 /// The function the vector `n` jumps to.
 fn vector_symbol(n: u16) -> String {
@@ -195,7 +185,7 @@ unsafe extern "C" {
 }
 
 /// Registers the back end with LLVM. Again does nothing.
-fn initialize() {
+pub(super) fn initialize() {
     // SAFETY: each registers a static of LLVM's own, under `COMPILE_LOCK`.
     unsafe {
         LLVMInitializeAVRTargetInfo();
@@ -456,15 +446,6 @@ __typelisp_negate_low:
     ret
 ";
 
-fn target_machine(cpu: &str, level: OptimizationLevel) -> Result<TargetMachine, String> {
-    initialize();
-    let triple = TargetTriple::create("avr-unknown-none");
-    let target = Target::from_triple(&triple).map_err(|e| e.to_string())?;
-    target
-        .create_target_machine(&triple, cpu, "", level, RelocMode::Static, CodeModel::Default)
-        .ok_or_else(|| format!("failed to create a target machine for {}", cpu))
-}
-
 /// The error a build for `target` stops with when the program needs the
 /// runtime, for each of `whys`.
 pub(super) fn needs_runtime(target: super::Target, whys: &[String]) -> String {
@@ -525,29 +506,15 @@ pub(super) fn write_executable(
 ) -> Result<(), String> {
     let board = options.target.board().ok_or("internal error: an AVR target is a board")?;
     let linker = board_linker()?;
-    for file in &options.link {
-        if !file.is_file() {
-            return Err(format!("--link: {}: no such file", file.display()));
-        }
-    }
-    let memory = match options.linker_script.as_deref() {
-        Some(path) => fs::read_to_string(path).map_err(|e| format!("--linker-script: {}: {}", path.display(), e))?,
-        None => board.qemu_memory.to_string(),
-    };
+    let memory = board_memory(board, options)?;
     // Never unoptimized: LLVM's AVR code generator then extends a sign into
     // the wrong register (`ashr i32 %x, 31` and what is made of it).
     let level = match crate::compile::optimize::codegen_level() {
         OptimizationLevel::None => OptimizationLevel::Less,
         level => level,
     };
-    let tm = target_machine(board.cpu, level)?;
-    module.set_triple(&tm.get_triple());
-    module.set_data_layout(&tm.get_target_data().get_data_layout());
-    module
-        .get_function(ENTRY_POINT_NAME)
-        .ok_or("internal error: the module has no `main`")?
-        .as_global_value()
-        .set_name(BOARD_MAIN);
+    let tm = board.target_machine(level)?;
+    for_board(module, &tm)?;
     keep_only_entered(module, handled, &tm)?;
     crate::compile::codegen_prep::prepare(module)?;
     crate::compile::optimize::run_llvm_passes(module, &tm)?;
@@ -556,17 +523,11 @@ pub(super) fn write_executable(
     let data = if module.get_first_global().is_some() || !options.link.is_empty() { DATA } else { "" };
     module.set_inline_assembly(&format!("{}{}{}{}", vector_table(handled), START, data, HELPERS));
 
-    // The object and the script, beside the executable while it links.
-    let scratch = std::path::PathBuf::from(format!("{}.ld", output_path));
-    fs::create_dir_all(&scratch).map_err(|e| format!("failed to create {}: {}", scratch.display(), e))?;
-    let linked = (|| {
+    beside_output(output_path, |scratch| {
         let script = scratch.join("typelisp.x");
         fs::write(&script, format!("{}{}", memory, SECTIONS)).map_err(|e| format!("failed to write {}: {}", script.display(), e))?;
         let object_path = scratch.join("program.o");
-        tm.write_to_file(module, FileType::Object, &object_path).map_err(|e| format!("failed to emit object file: {}", e))?;
-        for warning in crate::compile::codegen_prep::take_frame_warnings(items) {
-            eprintln!("{}", warning);
-        }
+        write_object(&tm, module, &object_path, items)?;
         let floats = super::soft_float::module(crate::compile::llvm_context())?;
         floats.set_triple(&module.get_triple());
         floats.set_data_layout(&module.get_data_layout());
@@ -574,23 +535,10 @@ pub(super) fn write_executable(
         let floats_path = scratch.join("floats.o");
         // A library, whatever the program is built for: unoptimized it would
         // take most of the flash.
-        let tm = target_machine(board.cpu, OptimizationLevel::Default)?;
+        let tm = board.target_machine(OptimizationLevel::Default)?;
         tm.write_to_file(&floats, FileType::Object, &floats_path).map_err(|e| format!("failed to emit object file: {}", e))?;
-        let status = Command::new(&linker)
-            .args(["-flavor", "gnu", "--gc-sections", "-T"])
-            .arg(&script)
-            .arg(&object_path)
-            .arg(&floats_path)
-            .args(&options.link)
-            .arg("-o")
-            .arg(output_path)
-            .status()
-            .map_err(|e| format!("failed to invoke {}: {}", linker.display(), e))?;
-        if !status.success() {
-            return Err(format!("ld.lld failed with status {}", status));
-        }
-        Ok(())
-    })();
-    let _ = fs::remove_dir_all(&scratch);
-    linked
+        run_linker(&linker, |c| {
+            c.arg("-T").arg(&script).arg(&object_path).arg(&floats_path).args(&options.link).arg("-o").arg(output_path)
+        })
+    })
 }

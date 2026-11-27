@@ -367,6 +367,9 @@ pub enum Target {
     Thumbv7em,
     /// `thumbv8m.main-none-eabihf`: the same for a Cortex-M33 board.
     Thumbv8mMain,
+    /// `riscv32imac-unknown-none-elf`: the same for a board with a 32-bit
+    /// RISC-V core that has the M, A and C extensions.
+    Riscv32imac,
     /// `avr-atmega328p`: an ELF executable for the ATmega328P (Arduino Uno),
     /// which has no runtime ([`avr`]).
     AvrAtmega328p,
@@ -380,6 +383,7 @@ impl Target {
             "wasm32-unknown-unknown" => Ok(Target::Wasm32Unknown),
             "thumbv7em-none-eabihf" => Ok(Target::Thumbv7em),
             "thumbv8m.main-none-eabihf" => Ok(Target::Thumbv8mMain),
+            "riscv32imac-unknown-none-elf" => Ok(Target::Riscv32imac),
             "avr-atmega328p" => Ok(Target::AvrAtmega328p),
             _ => Err(format!(
                 "--target: unknown target `{}` (the ones there are: wasm32-wasip1, wasm32-unknown-unknown, {})",
@@ -390,13 +394,14 @@ impl Target {
     }
 
     /// The targets that are boards without an operating system.
-    pub const BOARDS: [Target; 3] = [Target::Thumbv7em, Target::Thumbv8mMain, Target::AvrAtmega328p];
+    pub const BOARDS: [Target; 4] = [Target::Thumbv7em, Target::Thumbv8mMain, Target::Riscv32imac, Target::AvrAtmega328p];
 
     /// The board the target is, if it is one.
     pub fn board(self) -> Option<&'static embedded::Board> {
         match self {
             Target::Thumbv7em => Some(&embedded::CORTEX_M4),
             Target::Thumbv8mMain => Some(&embedded::CORTEX_M33),
+            Target::Riscv32imac => Some(&embedded::RISCV32_VIRT),
             Target::AvrAtmega328p => Some(&avr::ATMEGA328P),
             Target::Host | Target::Wasip1 | Target::Wasm32Unknown => None,
         }
@@ -421,7 +426,9 @@ impl Target {
             Target::Host => &[],
             Target::Wasip1 => &[RuntimeCrate::Posix],
             Target::Wasm32Unknown => &[RuntimeCrate::Sys, RuntimeCrate::Posix],
-            Target::Thumbv7em | Target::Thumbv8mMain | Target::AvrAtmega328p => &[RuntimeCrate::Sys, RuntimeCrate::Posix, RuntimeCrate::Front],
+            Target::Thumbv7em | Target::Thumbv8mMain | Target::Riscv32imac | Target::AvrAtmega328p => {
+                &[RuntimeCrate::Sys, RuntimeCrate::Posix, RuntimeCrate::Front]
+            }
         }
     }
 
@@ -430,7 +437,7 @@ impl Target {
         use typelisp_mem::target::DataModel;
         match self {
             Target::Host => DataModel::HOST,
-            Target::Wasip1 | Target::Wasm32Unknown | Target::Thumbv7em | Target::Thumbv8mMain => DataModel::ILP32,
+            Target::Wasip1 | Target::Wasm32Unknown | Target::Thumbv7em | Target::Thumbv8mMain | Target::Riscv32imac => DataModel::ILP32,
             Target::AvrAtmega328p => DataModel::AVR,
         }
     }
@@ -443,7 +450,19 @@ impl Target {
             Target::Wasm32Unknown => "wasm32-unknown-unknown",
             Target::Thumbv7em => "thumbv7em-none-eabihf",
             Target::Thumbv8mMain => "thumbv8m.main-none-eabihf",
+            Target::Riscv32imac => "riscv32imac-unknown-none-elf",
             Target::AvrAtmega328p => "avr-atmega328p",
+        }
+    }
+
+    /// The extension of the executable `typl -c` writes when it is not
+    /// given a name (`-o`): none for the host, `wasm` for a WebAssembly
+    /// module, `elf` for a board's.
+    pub fn output_extension(self) -> &'static str {
+        match self {
+            Target::Host => "",
+            Target::Wasip1 | Target::Wasm32Unknown => "wasm",
+            Target::Thumbv7em | Target::Thumbv8mMain | Target::Riscv32imac | Target::AvrAtmega328p => "elf",
         }
     }
 }
@@ -695,7 +714,8 @@ pub fn compile_file_with(source_path: &str, output_path: &str, options: &BuildOp
         pinned.extend(handlers.iter().map(|(_, symbol)| symbol.clone()));
     } else {
         for ((vector, path), (_, symbol)) in chk.interrupt_handlers().iter().zip(&handlers) {
-            vectors.push((avr::interrupt_number(options.target, *vector, path)?, symbol.clone()));
+            let board = options.target.board().ok_or("internal error: a target without a runtime is a board")?;
+            vectors.push((board.handled(options.target, *vector, path)?, symbol.clone()));
         }
     }
     let entered: Vec<String> = vectors.iter().map(|(_, symbol)| symbol.clone()).collect();
@@ -1080,13 +1100,14 @@ pub fn compile_file_with(source_path: &str, output_path: &str, options: &BuildOp
         // The functions a board runs when an interrupt comes.
         let mut interrupt_handlers = Vec::new();
         for (vector, path) in chk.interrupt_handlers() {
-            if options.target.board().is_none() {
+            let Some(board) = options.target.board() else {
                 return Err(format!(
                     "`{}` is an interrupt handler, and only a board has interrupts: compile it with --target for one ({})",
                     path,
                     Target::board_names()
                 ));
-            }
+            };
+            board.handled(options.target, vector, &path)?;
             let symbol = target_symbol_name(&CompileTarget::Fn(path));
             let handler = m
                 .get_function(&symbol)
@@ -1175,7 +1196,7 @@ pub fn compile_file_with(source_path: &str, output_path: &str, options: &BuildOp
             .and_then(|()| match options.target {
                 Target::Host => write_executable(&m, output_path, &link_libraries, &items),
                 Target::AvrAtmega328p => Err("internal error: a target without a runtime is built without a driver".to_string()),
-                Target::Wasip1 | Target::Wasm32Unknown | Target::Thumbv7em | Target::Thumbv8mMain => {
+                Target::Wasip1 | Target::Wasm32Unknown | Target::Thumbv7em | Target::Thumbv8mMain | Target::Riscv32imac => {
                     let missing = options.target.missing_runtimes();
                     // A board calls its vendor's C functions; a WebAssembly
                     // module has no C library to find them in.
