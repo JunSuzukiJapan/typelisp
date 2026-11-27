@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ e26625a7799b8b032c3d524896a6b548c7c107af -->
+<!-- translated-from: docs/ja/guide/compile.md @ f5fad21e6962ea3c90d803827468d58aaae4ceaa -->
 # Kompilacja
 
 O ile nie zrobisz nic więcej, programy typelisp działają w interpreterze. Ponadto istnieją dwa
@@ -164,14 +164,16 @@ z `typl` zbudowanym razem z nim. Po przebudowaniu `typl` skopiuj go ponownie.
 ```sh
 $ typl --heap-cells 100000 -c hello.typl    # ustala arenę cons na 100000 komórek
 $ typl -c hello.typl --max-memory 64M       # przydziela najwyżej 64 MiB
+$ typl -c hello.typl --frame-memory 1M      # najwyżej 1 MiB trwających wywołań na zadanie
 $ typl -c hello.typl --no-cons              # nie używa komórek cons
 ```
 
 - `--heap-cells N` ustala pojemność areny komórek cons na `N` komórek. Arena ponad to nie rośnie: jeśli odśmiecanie nie zwolni żadnej komórki, program zatrzymuje się z błędem wykonania. Bez tej opcji arena zaczyna od 65536 komórek i rośnie w miarę potrzeby.
 - `--max-memory SIZE` ogranicza całkowitą pamięć przydzielaną przez plik wykonywalny. Liczy się wszystko: arena cons, napisy, wartości takie jak wektory i tablice haszujące oraz pamięć samego środowiska uruchomieniowego. `SIZE` to liczba bajtów, po której może stać `K`, `M` lub `G` (1024, 1024² i 1024³ razy). Przydział, który przekroczyłby granicę, jest zgłaszany, a program kończy się z kodem wyjścia 1. Tego zakończenia nie da się przechwycić przez `catch`. Bez tej opcji nie ma granicy.
+- `--frame-memory SIZE` ogranicza dla każdego zadania pamięć zajmowaną przez zapisy trwających wywołań (to, co wywołanie przechowuje do swojego końca, np. argumenty i zmienne lokalne). Zapisy leżą na stercie i rosną wraz z głębokością rekurencji. `SIZE` zapisuje się jak w `--max-memory`. Wywołanie, które przekroczyłoby limit, nie następuje: plik wykonywalny to zgłasza i kończy się kodem wyjścia 1, którego również `catch` nie przechwyci. Na płytce z małą pamięcią zatrzymuje to zbyt głęboką rekurencję, zanim wyczerpie stertę. Bez tej opcji limitu nie ma.
 - `--no-cons` tworzy plik wykonywalny, który nie używa komórek cons. Nie ma areny cons, więc program robiący coś, co wymaga komórek cons, jest **błędem kompilacji**, który pokazuje tę operację i łańcuch funkcji od `main`, który do niej prowadzi. Komórki cons są potrzebne do zbudowania listy `Sexpr` (także listy cytowanej i zbudowanej przez quasi-cytowanie) lub argumentu `&rest`, a także przez `read`, `eval` i `macroexpand`. Operacje na liczbach, napisach, wektorach, tablicach haszujących, strukturach, kanałach itp. oraz `print`/`println`/`format` ich nie używają. Nie można podać razem z `--heap-cells`; pisze się po `-c`.
 
-`--max-memory` pisze się po `-c`. `--heap-cells` można napisać przed `-c` lub po nim i jest wtedy pojemnością areny cons pliku wykonywalnego. Arena cons wlicza się do granicy pamięci, więc przy granicy, w której arena się nie mieści, program zatrzymuje się, zanim się zacznie.
+`--max-memory` i `--frame-memory` pisze się po `-c`. `--heap-cells` można napisać przed `-c` lub po nim i jest wtedy pojemnością areny cons pliku wykonywalnego. Arena cons wlicza się do granicy pamięci, więc przy granicy, w której arena się nie mieści, program zatrzymuje się, zanim się zacznie.
 
 ### 3.6 Kompilowanie do WebAssembly
 
@@ -196,7 +198,7 @@ fib(25) = 75025
   TLS, rozwiązywanie nazw), wątków systemowych (`Thread`), funkcji C (`defffi`), `get-internal-run-time`, `machine-instance`, `software-version`, `file-author`
   ani `ed`.
 - WASI nie ma sposobu, by poznać strefę czasową, więc czas lokalny jest nieznany. `decode-universal-time` i `encode-universal-time` bez `zone` oraz `get-decoded-time` kończą się panic w czasie wykonania. Działają, gdy poda się `zone`.
-- `--heap-cells`, `--max-memory`, `--no-cons`, `-O<N>` i `--release` działają tak samo jak dla pliku wykonywalnego.
+- `--heap-cells`, `--max-memory`, `--frame-memory`, `--no-cons`, `-O<N>` i `--release` działają tak samo jak dla pliku wykonywalnego.
 
 ### 3.7 Uruchamianie w przeglądarce lub w Node.js
 
@@ -272,7 +274,7 @@ $ qemu-system-riscv32 -M virt -bios none -nographic \
 
 - Na płytce z małą ilością RAM zamiast `--linker-script` można podać `--ram SIZE` (`16K` itp.), czyli tylko ilość RAM dla danych, sterty i stosu. RAM domyślnego układu ma wtedy ten rozmiar, a stos zajmuje co najwyżej jego ćwierć. Na płytce, która trzyma w RAM także kod, jak `virt` dla RISC-V, kod trafia do reszty RAM płytki. To, co środowisko uruchomieniowe przydziela na początku, jest zmniejszane tak, by zmieściło się w stercie. Nie można go używać razem z `--linker-script`.
 
-- Płytka nie ma systemu operacyjnego, więc nic nie zatrzyma przepełnionego stosu. Dlatego plik wykonywalny przy wejściu do każdej funkcji programu sprawdza, ile stosu zostało; gdy za mało, wypisuje `stack overflow: the program needs more than the ... bytes of the stack` i kończy się kodem wyjścia 1. Aby powiększyć stos, zwiększ `_typelisp_stack_size` w pliku `--linker-script` albo `--ram`. `--no-stack-check` pomija to sprawdzanie (plik jest nieco mniejszy i szybszy, ale przepełniony stos może po cichu uszkodzić stertę). W obu przypadkach, gdy stos przepełni się wewnątrz środowiska uruchomieniowego i przekroczy swój spód, raport następującego potem panic lub HardFault poprzedza `stack overflow: the stack has run past its bottom into the heap`. To samo jest wypisywane, z kodem wyjścia 1, gdy program dobiegnie końca. Głębokość rekurencji nie zużywa stosu (wywołania są zapisywane na stercie, a zbyt głęboka rekurencja wyczerpuje pamięć); głęboko na stosie pracuje środowisko uruchomieniowe.
+- Płytka nie ma systemu operacyjnego, więc nic nie zatrzyma przepełnionego stosu. Dlatego plik wykonywalny przy wejściu do każdej funkcji programu sprawdza, ile stosu zostało; gdy za mało, wypisuje `stack overflow: the program needs more than the ... bytes of the stack` i kończy się kodem wyjścia 1. Aby powiększyć stos, zwiększ `_typelisp_stack_size` w pliku `--linker-script` albo `--ram`. `--no-stack-check` pomija to sprawdzanie (plik jest nieco mniejszy i szybszy, ale przepełniony stos może po cichu uszkodzić stertę). W obu przypadkach, gdy stos przepełni się wewnątrz środowiska uruchomieniowego i przekroczy swój spód, raport następującego potem panic lub HardFault poprzedza `stack overflow: the stack has run past its bottom into the heap`. To samo jest wypisywane, z kodem wyjścia 1, gdy program dobiegnie końca. Głębokość rekurencji nie zużywa stosu (wywołania są zapisywane na stercie, a zbyt głęboka rekurencja wyczerpuje pamięć); głęboko na stosie pracuje środowisko uruchomieniowe. Aby zatrzymać ją wcześniej, użyj `--frame-memory` (rozdział 3.5).
 
 - `--board-functions` wybiera, kto dostarcza wyjście, wejście, zakończenie i zegar (funkcje płytki).
   - `semihosting` (domyślnie): przez semihosting, do uruchamiania w QEMU (`-semihosting-config enable=on`) lub z debugerem.
@@ -318,7 +320,7 @@ $ qemu-system-riscv32 -M virt -bios none -nographic \
 - Środowisko uruchomieniowe uruchamia program (tablica wektorów i przygotowanie RAM) i przydziela pamięć. HardFault (na RISC-V wyjątek) lub nieobsłużone przerwanie kończy program kodem wyjścia panic (1).
 - `throw`/`catch`/`panic`, bignumy, ułamki i liczby zmiennoprzecinkowe oraz zadania, kanały i `sleep` działają jak w pliku wykonywalnym. Zadania wykonują się po kolei na jedynym rdzeniu. Można używać funkcji C (`defffi`).
 - Program, który używa czegoś, czego płytka nie ma, jest **błędem kompilacji**: oprócz tego, czego nie można użyć w sekcji 3.7, `eval` i `macroexpand`. Czas lokalny jest nieznany (jak w sekcji 3.6).
-- Arena cons zaczyna od 1024 komórek i rośnie w razie potrzeby. `--heap-cells`, `--max-memory`, `--no-cons`, `-O<N>` i `--release` działają bez zmian.
+- Arena cons zaczyna od 1024 komórek i rośnie w razie potrzeby. `--heap-cells`, `--max-memory`, `--frame-memory`, `--no-cons`, `-O<N>` i `--release` działają bez zmian.
 
 ### 3.9 Kompilacja dla Arduino Uno (AVR)
 

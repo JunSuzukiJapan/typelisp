@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ e26625a7799b8b032c3d524896a6b548c7c107af -->
+<!-- translated-from: docs/ja/guide/compile.md @ f5fad21e6962ea3c90d803827468d58aaae4ceaa -->
 # Compilación
 
 Si no se hace nada más, los programas de typelisp se ejecutan en el intérprete. Además hay dos formas de
@@ -165,14 +165,16 @@ funciona con el `typl` compilado junto con él. Tras recompilar `typl`, vuelve a
 ```sh
 $ typl --heap-cells 100000 -c hello.typl    # fija la arena de cons en 100000 celdas
 $ typl -c hello.typl --max-memory 64M       # reserva como mucho 64 MiB
+$ typl -c hello.typl --frame-memory 1M      # como mucho 1 MiB de llamadas en curso por tarea
 $ typl -c hello.typl --no-cons              # no usa celdas cons
 ```
 
 - `--heap-cells N` fija la capacidad de la arena de celdas cons en `N` celdas. La arena no crece más allá: si la recolección de basura no puede liberar una celda, el programa se detiene con un error de ejecución. Sin la opción, la arena empieza con 65536 celdas y crece según haga falta.
 - `--max-memory SIZE` limita la memoria total que reserva el ejecutable. Todo cuenta: la arena de cons, las cadenas, valores como vectores y tablas hash, y la memoria que usa el propio runtime. `SIZE` es un número de bytes y puede ir seguido de `K`, `M` o `G` (1024, 1024² y 1024³ veces). Una reserva que superaría el límite se informa y el programa termina con el código de salida 1. Esta salida no se puede capturar con `catch`. Sin la opción no hay límite.
+- `--frame-memory SIZE` limita, para cada tarea, la memoria que ocupan los registros de las llamadas en curso (lo que una llamada guarda hasta terminar, como sus argumentos y variables locales). Los registros están en el heap y crecen a medida que una recursión se hace más profunda. `SIZE` se escribe como en `--max-memory`. Una llamada que superaría el límite no se hace: el ejecutable lo indica y termina con el código de salida 1, que `catch` tampoco puede capturar. En una placa con poca memoria, detiene una recursión demasiado profunda antes de que agote el heap. Sin ella no hay límite.
 - `--no-cons` crea un ejecutable que no usa celdas cons. No tiene arena de cons, así que un programa que haga algo que necesite celdas cons es un **error de compilación**, que muestra esa operación y la cadena de funciones desde `main` que llega a ella. Se necesitan celdas cons para construir una lista `Sexpr` (incluidas una lista citada y una construida con cuasicita) o un argumento `&rest`, y para `read`, `eval` y `macroexpand`. Las operaciones con números, cadenas, vectores, tablas hash, estructuras, canales y similares, y `print`/`println`/`format`, no usan ninguna. No se puede dar junto con `--heap-cells` y se escribe después de `-c`.
 
-`--max-memory` se escribe después de `-c`. `--heap-cells` puede escribirse antes o después de `-c`, y entonces es la capacidad de la arena de cons del ejecutable. La arena de cons cuenta para el límite de memoria, así que con un límite en el que no cabe la arena el programa se detiene antes de empezar.
+`--max-memory` y `--frame-memory` se escriben después de `-c`. `--heap-cells` puede escribirse antes o después de `-c`, y entonces es la capacidad de la arena de cons del ejecutable. La arena de cons cuenta para el límite de memoria, así que con un límite en el que no cabe la arena el programa se detiene antes de empezar.
 
 ### 3.6 Compilar para WebAssembly
 
@@ -197,7 +199,7 @@ fib(25) = 75025
   TLS, resolución de nombres), hilos del sistema (`Thread`), funciones de C (`defffi`), `get-internal-run-time`, `machine-instance`, `software-version`, `file-author`
   ni `ed`.
 - WASI no tiene forma de conocer la zona horaria, así que la hora local es desconocida. `decode-universal-time` y `encode-universal-time` sin `zone`, y `get-decoded-time`, hacen panic en tiempo de ejecución. Funcionan si se pasa `zone`.
-- `--heap-cells`, `--max-memory`, `--no-cons`, `-O<N>` y `--release` funcionan igual que para un ejecutable.
+- `--heap-cells`, `--max-memory`, `--frame-memory`, `--no-cons`, `-O<N>` y `--release` funcionan igual que para un ejecutable.
 
 ### 3.7 Ejecutar en un navegador o en Node.js
 
@@ -273,7 +275,7 @@ $ qemu-system-riscv32 -M virt -bios none -nographic \
 
 - En una placa con poca RAM, en lugar de `--linker-script`, `--ram SIZE` (`16K`, etc.) indica solo cuánta RAM tienen los datos, el heap y la pila. La RAM de la disposición por defecto pasa a tener ese tamaño, y la pila ocupa como mucho una cuarta parte. En una placa que también guarda el código en la RAM, como `virt` en RISC-V, el código va en el resto de la RAM de la placa. Lo que el runtime reserva al principio se hace pequeño para caber en el heap. No se puede usar junto con `--linker-script`.
 
-- Una placa no tiene sistema operativo, así que nada detiene una pila que se desborda. Por eso el ejecutable comprueba, al entrar en cada función del programa, cuánta pila queda; si queda muy poca, escribe `stack overflow: the program needs more than the ... bytes of the stack` y termina con el código de salida 1. Para dar más espacio a la pila, aumente `_typelisp_stack_size` en el archivo de `--linker-script`, o `--ram`. `--no-stack-check` omite la comprobación (el ejecutable es algo más pequeño y rápido, pero una pila desbordada puede corromper el heap en silencio). En ambos casos, cuando la pila se desborda dentro del runtime y pasa de su fondo, el informe del panic o del HardFault que sigue va precedido de `stack overflow: the stack has run past its bottom into the heap`. Lo mismo se escribe, con el código de salida 1, cuando el programa llega hasta el final. La profundidad de una recursión no usa la pila (las llamadas se registran en el heap, y una recursión demasiado profunda agota la memoria); lo que usa la pila a fondo es el trabajo del runtime.
+- Una placa no tiene sistema operativo, así que nada detiene una pila que se desborda. Por eso el ejecutable comprueba, al entrar en cada función del programa, cuánta pila queda; si queda muy poca, escribe `stack overflow: the program needs more than the ... bytes of the stack` y termina con el código de salida 1. Para dar más espacio a la pila, aumente `_typelisp_stack_size` en el archivo de `--linker-script`, o `--ram`. `--no-stack-check` omite la comprobación (el ejecutable es algo más pequeño y rápido, pero una pila desbordada puede corromper el heap en silencio). En ambos casos, cuando la pila se desborda dentro del runtime y pasa de su fondo, el informe del panic o del HardFault que sigue va precedido de `stack overflow: the stack has run past its bottom into the heap`. Lo mismo se escribe, con el código de salida 1, cuando el programa llega hasta el final. La profundidad de una recursión no usa la pila (las llamadas se registran en el heap, y una recursión demasiado profunda agota la memoria); lo que usa la pila a fondo es el trabajo del runtime. Para detenerla antes, use `--frame-memory` (sección 3.5).
 
 - `--board-functions` elige quién proporciona la salida, la entrada, la terminación y el reloj (las funciones de la placa).
   - `semihosting` (predeterminado): mediante semihosting, para ejecutar en QEMU (`-semihosting-config enable=on`) o con un depurador.
@@ -319,7 +321,7 @@ $ qemu-system-riscv32 -M virt -bios none -nographic \
 - El runtime inicia el programa (la tabla de vectores y la preparación de la RAM) y reserva la memoria. Un HardFault (una excepción en RISC-V) o una interrupción sin manejar termina el programa con el código de salida de un panic (1).
 - `throw`/`catch`/`panic`, los bignums, las fracciones y los números de coma flotante, y las tareas, los canales y `sleep` se comportan como en el ejecutable. Las tareas se ejecutan por turnos en el único núcleo. Se pueden usar funciones de C (`defffi`).
 - Un programa que usa algo que la placa no tiene es un **error de compilación**: además de lo que no se puede usar en la sección 3.7, `eval` y `macroexpand`. La hora local es desconocida (como en la sección 3.6).
-- La arena de cons empieza con 1024 celdas y crece cuando hace falta. `--heap-cells`, `--max-memory`, `--no-cons`, `-O<N>` y `--release` funcionan igual.
+- La arena de cons empieza con 1024 celdas y crece cuando hace falta. `--heap-cells`, `--max-memory`, `--frame-memory`, `--no-cons`, `-O<N>` y `--release` funcionan igual.
 
 ### 3.9 Compilar para Arduino Uno (AVR)
 

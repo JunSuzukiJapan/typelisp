@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ e26625a7799b8b032c3d524896a6b548c7c107af -->
+<!-- translated-from: docs/ja/guide/compile.md @ f5fad21e6962ea3c90d803827468d58aaae4ceaa -->
 # Kompilering
 
 Om du inte gör något annat körs typelisp-program i tolken. Dessutom finns två sätt att kompilera till
@@ -167,14 +167,16 @@ bara med den `typl` som byggdes tillsammans med den. Efter att ha byggt om `typl
 ```sh
 $ typl --heap-cells 100000 -c hello.typl    # lås cons-arenan vid 100000 celler
 $ typl -c hello.typl --max-memory 64M       # allokera högst 64 MiB
+$ typl -c hello.typl --frame-memory 1M      # högst 1 MiB pågående anrop per uppgift
 $ typl -c hello.typl --no-cons              # använd inga cons-celler
 ```
 
 - `--heap-cells N` låser kapaciteten för arenan av cons-celler vid `N` celler. Arenan växer inte förbi den: kan skräpsamlingen inte frigöra någon cell stannar programmet med ett körtidsfel. Utan flaggan börjar arenan med 65536 celler och växer efter behov.
 - `--max-memory SIZE` begränsar det totala minne den körbara filen allokerar. Allt räknas: cons-arenan, strängar, värden som vektorer och hashtabeller, och minnet som körtidsmiljön själv använder. `SIZE` är ett antal byte och kan följas av `K`, `M` eller `G` (1024, 1024² och 1024³ gånger). En allokering som skulle gå över gränsen rapporteras, och programmet avslutas med slutkod 1. Detta avslut kan inte fångas med `catch`. Utan flaggan finns ingen gräns.
+- `--frame-memory SIZE` begränsar för varje uppgift det minne som posterna för pågående anrop tar (det ett anrop behåller tills det är klart, som dess argument och lokala variabler). Posterna ligger på heapen och växer när en rekursion går djupare. `SIZE` skrivs som för `--max-memory`. Ett anrop som skulle gå över gränsen görs inte: programmet säger det och avslutas med slutkoden 1, som inte heller `catch` fångar. På ett kort med lite minne stoppar det en för djup rekursion innan den gör slut på heapen. Utan flaggan finns ingen gräns.
 - `--no-cons` bygger en körbar fil som inte använder några cons-celler. Den har ingen cons-arena, så ett program som gör något som kräver cons-celler är ett **kompileringsfel**, som visar operationen och kedjan av funktioner från `main` som når den. Cons-celler behövs för att bygga en `Sexpr`-lista (även en citerad lista och en som byggs med kvasicitering) eller ett `&rest`-argument, och av `read`, `eval` och `macroexpand`. Operationer på tal, strängar, vektorer, hashtabeller, structar, kanaler och liknande, och `print`/`println`/`format`, använder inga. Kan inte anges tillsammans med `--heap-cells` och skrivs efter `-c`.
 
-`--max-memory` skrivs efter `-c`. `--heap-cells` kan skrivas före eller efter `-c` och är då kapaciteten för den körbara filens cons-arena. Cons-arenan räknas in i minnesgränsen, så med en gräns som arenan inte ryms i stannar programmet innan det börjar.
+`--max-memory` och `--frame-memory` skrivs efter `-c`. `--heap-cells` kan skrivas före eller efter `-c` och är då kapaciteten för den körbara filens cons-arena. Cons-arenan räknas in i minnesgränsen, så med en gräns som arenan inte ryms i stannar programmet innan det börjar.
 
 ### 3.6 Kompilera för WebAssembly
 
@@ -199,7 +201,7 @@ fib(25) = 75025
   TLS, namnuppslagning), OS-trådar (`Thread`), C-funktioner (`defffi`), `get-internal-run-time`, `machine-instance`, `software-version`, `file-author`
   och `ed`.
 - WASI har inget sätt att ta reda på tidszonen, så den lokala tiden är okänd. `decode-universal-time` och `encode-universal-time` utan `zone`, samt `get-decoded-time`, ger panic vid körning. De fungerar när `zone` anges.
-- `--heap-cells`, `--max-memory`, `--no-cons`, `-O<N>` och `--release` fungerar som för en körbar fil.
+- `--heap-cells`, `--max-memory`, `--frame-memory`, `--no-cons`, `-O<N>` och `--release` fungerar som för en körbar fil.
 
 ### 3.7 Köra i en webbläsare eller i Node.js
 
@@ -275,7 +277,7 @@ $ qemu-system-riscv32 -M virt -bios none -nographic \
 
 - På ett kort med lite RAM anger `--ram SIZE` (`16K` och så vidare) i stället för `--linker-script` bara hur mycket RAM data, heapen och stacken har. Standardlayoutens RAM får den storleken, och stacken tar högst en fjärdedel av det. På ett kort som också har koden i RAM, som `virt` för RISC-V, hamnar koden i resten av kortets RAM. Det som körmiljön allokerar först görs litet så att det ryms i heapen. Det kan inte användas tillsammans med `--linker-script`.
 
-- Ett kort har inget operativsystem, så inget stoppar en stack som flödar över. Programmet kontrollerar därför, vid inträdet i var och en av sina funktioner, hur mycket stack som är kvar; är det för lite skriver det `stack overflow: the program needs more than the ... bytes of the stack` och avslutas med slutkoden 1. För en större stack ökar man `_typelisp_stack_size` i filen till `--linker-script`, eller `--ram`. `--no-stack-check` utelämnar kontrollen (programmet blir lite mindre och snabbare, men en stack som flödar över kan i tysthet förstöra heapen). I båda fallen föregås, när stacken flödar över inne i körtidsmiljön och passerar sin botten, rapporten om den panic eller HardFault som följer av `stack overflow: the stack has run past its bottom into the heap`. Detsamma skrivs, med slutkoden 1, när programmet körs till slutet. Djupet hos en rekursion använder för övrigt ingen stack (anropen hålls på heapen, och en för djup rekursion får slut på minne); det som använder stacken djupt är körtidsmiljöns arbete.
+- Ett kort har inget operativsystem, så inget stoppar en stack som flödar över. Programmet kontrollerar därför, vid inträdet i var och en av sina funktioner, hur mycket stack som är kvar; är det för lite skriver det `stack overflow: the program needs more than the ... bytes of the stack` och avslutas med slutkoden 1. För en större stack ökar man `_typelisp_stack_size` i filen till `--linker-script`, eller `--ram`. `--no-stack-check` utelämnar kontrollen (programmet blir lite mindre och snabbare, men en stack som flödar över kan i tysthet förstöra heapen). I båda fallen föregås, när stacken flödar över inne i körtidsmiljön och passerar sin botten, rapporten om den panic eller HardFault som följer av `stack overflow: the stack has run past its bottom into the heap`. Detsamma skrivs, med slutkoden 1, när programmet körs till slutet. Djupet hos en rekursion använder för övrigt ingen stack (anropen hålls på heapen, och en för djup rekursion får slut på minne); det som använder stacken djupt är körtidsmiljöns arbete. För att stoppa den innan dess används `--frame-memory` (avsnitt 3.5).
 
 - `--board-functions` väljer vem som ger utdata, indata, avslut och klockan (kortets funktioner).
   - `semihosting` (standard): via semihosting, för körning under QEMU (`-semihosting-config enable=on`) eller en debugger.
@@ -321,7 +323,7 @@ $ qemu-system-riscv32 -M virt -bios none -nographic \
 - Körmiljön startar programmet (vektortabellen och förberedelsen av RAM) och allokerar minne. Ett HardFault (på RISC-V ett undantag) eller ett obehandlat avbrott avslutar programmet med en panics slutkod (1).
 - `throw`/`catch`/`panic`, bignums, bråk och flyttal samt uppgifter, kanaler och `sleep` beter sig som i den körbara filen. Uppgifter körs i tur och ordning på den enda kärnan. C-funktioner (`defffi`) kan användas.
 - Ett program som använder det kortet inte har är ett **kompileringsfel**: utöver det som inte kan användas i avsnitt 3.7, `eval` och `macroexpand`. Lokal tid är okänd (som i avsnitt 3.6).
-- Cons-arenan börjar med 1024 celler och växer vid behov. `--heap-cells`, `--max-memory`, `--no-cons`, `-O<N>` och `--release` fungerar som de är.
+- Cons-arenan börjar med 1024 celler och växer vid behov. `--heap-cells`, `--max-memory`, `--frame-memory`, `--no-cons`, `-O<N>` och `--release` fungerar som de är.
 
 ### 3.9 Kompilera för Arduino Uno (AVR)
 

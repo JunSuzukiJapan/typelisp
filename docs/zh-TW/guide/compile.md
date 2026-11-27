@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ e26625a7799b8b032c3d524896a6b548c7c107af -->
+<!-- translated-from: docs/ja/guide/compile.md @ f5fad21e6962ea3c90d803827468d58aaae4ceaa -->
 # 編譯
 
 不做任何處理的話，typelisp 程式由直譯器執行。此外還有兩種編譯為原生碼的方法，以及一種保存環境的方法。規格的詳情見
@@ -150,14 +150,16 @@ $ typl --lib-dir ~/lib/typelisp build.typl
 ```sh
 $ typl --heap-cells 100000 -c hello.typl    # 把 cons 區域固定為 100000 個單元
 $ typl -c hello.typl --max-memory 64M       # 最多配置 64 MiB 記憶體
+$ typl -c hello.typl --frame-memory 1M      # 每個任務進行中的呼叫最多佔用 1 MiB
 $ typl -c hello.typl --no-cons              # 不使用 cons 單元
 ```
 
 - `--heap-cells N` 把 cons 單元區域的容量固定為 `N` 個單元。區域不會再變大。垃圾回收後仍無法騰出空單元時，以執行期錯誤停止。不指定時從 65536 個單元開始，視需要變大。
 - `--max-memory SIZE` 是執行檔配置的記憶體總量的上限。cons 區域、字串、向量與雜湊表等值、執行環境本身使用的記憶體全部計算在內。`SIZE` 是位元組數，可以加上 `K` `M` `G`（分別為 1024 倍、1024² 倍、1024³ 倍）。試圖超過上限配置時，會顯示這件事並以結束碼 1 結束。這種結束無法用 `catch` 捕捉。不指定時沒有上限。
+- `--frame-memory SIZE` 是每個任務進行中的呼叫的紀錄（呼叫結束前一直持有的參數、區域變數等）可使用的記憶體的上限。紀錄放在堆積上，遞迴越深越多。`SIZE` 的寫法與 `--max-memory` 相同。若要進行超過上限的呼叫，會顯示這一情況並以結束碼 1 結束，這種結束同樣無法用 `catch` 捕捉。在記憶體較少的開發板上，可用它在過深的遞迴耗盡堆積之前將其停止。不指定時沒有上限。
 - `--no-cons` 產生不使用 cons 單元的執行檔。它沒有 cons 區域，因此進行需要 cons 單元之操作的程式會成為**編譯錯誤**。錯誤中會顯示該操作，以及從 `main` 到達那裡的函式序列。需要 cons 單元的情況是：建構 `Sexpr` 串列（包括引用的串列與用準引用建構的串列）或 `&rest` 引數時，以及使用 `read`、`eval`、`macroexpand` 時。數值、字串、向量、雜湊表、結構、通道等的操作，以及 `print`/`println`/`format` 都不使用 cons 單元。不能與 `--heap-cells` 一起指定，寫在 `-c` 之後。
 
-`--max-memory` 寫在 `-c` 之後。`--heap-cells` 寫在 `-c` 之前或之後都可以，這時它是執行檔的 cons 區域的容量。cons 區域也計入記憶體上限，所以指定了放不下區域的上限時，程式會在開始之前停止。
+`--max-memory` 和 `--frame-memory` 寫在 `-c` 之後。`--heap-cells` 寫在 `-c` 之前或之後都可以，這時它是執行檔的 cons 區域的容量。cons 區域也計入記憶體上限，所以指定了放不下區域的上限時，程式會在開始之前停止。
 
 ### 3.6 編譯為 WebAssembly
 
@@ -182,7 +184,7 @@ fib(25) = 75025
   TLS、名稱解析）、作業系統執行緒（`Thread`）、C 函式（`defffi`）、`get-internal-run-time`, `machine-instance`, `software-version`, `file-author`
   以及 `ed`。
 - WASI 沒有得知時區的手段，因此本地時間未知。省略 `zone` 的 `decode-universal-time`、`encode-universal-time` 以及 `get-decoded-time` 會在執行時 panic。傳入 `zone` 即可使用。
-- `--heap-cells`、`--max-memory`、`--no-cons`、`-O<N>`、`--release` 照常可用。
+- `--heap-cells`、`--max-memory`、`--frame-memory`、`--no-cons`、`-O<N>`、`--release` 照常可用。
 
 ### 3.7 在瀏覽器或 Node.js 中執行
 
@@ -258,7 +260,7 @@ $ qemu-system-riscv32 -M virt -bios none -nographic \
 
 - 在 RAM 較小的開發板上，可以用 `--ram SIZE`（如 `16K`）代替 `--linker-script`，只指定資料、堆積和堆疊所用 RAM 的大小。預設配置的 RAM 變為這個大小，堆疊最多佔其四分之一。在像 RISC-V 的 `virt` 這樣程式碼也放在 RAM 中的開發板上，開發板 RAM 的其餘部分成為程式碼的區域。執行環境最初配置的量會配合堆積的大小而變小。不能與 `--linker-script` 一起使用。
 
-- 開發板沒有作業系統，堆疊溢位時沒有任何東西能阻止它。因此可執行檔在進入程式的每個函式時檢查堆疊還剩多少；不夠時寫出 `stack overflow: the program needs more than the ... bytes of the stack` 並以結束碼 1 結束。要讓堆疊更大，請增大 `--linker-script` 檔案中的 `_typelisp_stack_size`，或增大 `--ram`。加上 `--no-stack-check` 則不插入此檢查（可執行檔會稍小、稍快，但溢位的堆疊可能無聲無息地破壞堆積）。無論哪種情況，當堆疊在執行環境內部溢位並越過堆疊底部時，隨後的 panic 或 HardFault 報告之前都會寫出 `stack overflow: the stack has run past its bottom into the heap`。 程式執行到結束時也會寫出同樣的內容，並以結束碼 1 結束。另外，遞迴的深度不佔用堆疊（呼叫紀錄放在堆積上，過深的遞迴會導致記憶體不足）；深度使用堆疊的是執行環境的處理。
+- 開發板沒有作業系統，堆疊溢位時沒有任何東西能阻止它。因此可執行檔在進入程式的每個函式時檢查堆疊還剩多少；不夠時寫出 `stack overflow: the program needs more than the ... bytes of the stack` 並以結束碼 1 結束。要讓堆疊更大，請增大 `--linker-script` 檔案中的 `_typelisp_stack_size`，或增大 `--ram`。加上 `--no-stack-check` 則不插入此檢查（可執行檔會稍小、稍快，但溢位的堆疊可能無聲無息地破壞堆積）。無論哪種情況，當堆疊在執行環境內部溢位並越過堆疊底部時，隨後的 panic 或 HardFault 報告之前都會寫出 `stack overflow: the stack has run past its bottom into the heap`。 程式執行到結束時也會寫出同樣的內容，並以結束碼 1 結束。另外，遞迴的深度不佔用堆疊（呼叫紀錄放在堆積上，過深的遞迴會導致記憶體不足）；深度使用堆疊的是執行環境的處理。要在此之前停止，請使用 3.5 節的 `--frame-memory`。
 
 - 由誰提供輸出、輸入、結束和時鐘（開發板的函式），用 `--board-functions` 選擇。
   - `semihosting`（預設）：透過 semihosting 提供。在 QEMU（`-semihosting-config enable=on`）或除錯器下執行時使用。
@@ -304,7 +306,7 @@ $ qemu-system-riscv32 -M virt -bios none -nographic \
 - 啟動（向量表和 RAM 的準備）和記憶體配置由執行環境完成。發生 HardFault（在 RISC-V 上為例外） 或未處理的中斷時，以與 panic 相同的結束碼（1）結束。
 - `throw`/`catch`/`panic`、bignum、ratio、浮點數，以及任務、通道和 `sleep` 的行為與可執行檔相同。任務在唯一的核心上依序執行。也可以使用 C 函式（`defffi`）。
 - 使用開發板沒有的東西的程式是**編譯錯誤**。除了 3.7 節中不能使用的東西，還不能使用 `eval` 和 `macroexpand`。本地時間未知（與 3.6 節相同）。
-- cons 區域從 1024 個單元開始，不夠時會成長。`--heap-cells`、`--max-memory`、`--no-cons`、`-O<N>`、`--release` 可以照常使用。
+- cons 區域從 1024 個單元開始，不夠時會成長。`--heap-cells`、`--max-memory`、`--frame-memory`、`--no-cons`、`-O<N>`、`--release` 可以照常使用。
 
 ### 3.9 為 Arduino Uno（AVR）編譯
 

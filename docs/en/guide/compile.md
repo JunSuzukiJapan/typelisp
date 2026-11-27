@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ e26625a7799b8b032c3d524896a6b548c7c107af -->
+<!-- translated-from: docs/ja/guide/compile.md @ f5fad21e6962ea3c90d803827468d58aaae4ceaa -->
 # Compiling
 
 Unless you do anything else, typelisp programs run in the interpreter. In addition there are two
@@ -165,6 +165,7 @@ with the `typl` built together with it. After rebuilding `typl`, copy it again.
 ```sh
 $ typl --heap-cells 100000 -c hello.typl    # fix the cons arena at 100000 cells
 $ typl -c hello.typl --max-memory 64M       # allocate at most 64 MiB
+$ typl -c hello.typl --frame-memory 1M      # at most 1 MiB of calls in progress per task
 $ typl -c hello.typl --no-cons              # use no cons cells
 ```
 
@@ -176,9 +177,10 @@ $ typl -c hello.typl --no-cons              # use no cons cells
   `SIZE` is a number of bytes and may be followed by `K`, `M` or `G` (1024, 1024² and 1024³ times).
   An allocation that would go past the bound is reported, and the program exits with exit code 1.
   This exit cannot be caught with `catch`. Without it, there is no bound.
+- `--frame-memory SIZE` bounds, for each task, the memory the records of the calls in progress take (what a call keeps until it ends, such as its arguments and local variables). The records are on the heap and grow as a recursion goes deeper. `SIZE` is written as for `--max-memory`. A call that would go past the bound is not made: the executable says so and exits with code 1, which `catch` cannot catch either. On a board with little memory it stops a recursion that is too deep before it uses up the heap. Without it there is no bound.
 - `--no-cons` builds an executable that uses no cons cells. It has no cons arena, so a program that does something needing cons cells is a **compile error**, which shows that operation and the chain of functions from `main` that reaches it. Cons cells are needed to build a `Sexpr` list (including a quoted list and one built by quasiquote) or a `&rest` argument, and by `read`, `eval` and `macroexpand`. Operations on numbers, strings, vectors, hash tables, structs, channels and the like, and `print`/`println`/`format`, use none. It cannot be given with `--heap-cells`, and is written after `-c`.
 
-`--max-memory` is written after `-c`. `--heap-cells` may be written before or after `-c`. The cons
+`--max-memory` and `--frame-memory` are written after `-c`. `--heap-cells` may be written before or after `-c`. The cons
 arena counts toward the memory bound, so a bound the arena does not fit in stops the program before
 it starts.
 
@@ -205,7 +207,7 @@ fib(25) = 75025
   TLS, name resolution), OS threads (`Thread`), C functions (`defffi`), `get-internal-run-time`, `machine-instance`, `software-version`, `file-author`,
   and `ed`.
 - WASI has no way to learn the time zone, so local time is unknown. `decode-universal-time` and `encode-universal-time` without `zone`, and `get-decoded-time`, panic at run time. They work when `zone` is given.
-- `--heap-cells`, `--max-memory`, `--no-cons`, `-O<N>` and `--release` work as they do for an executable.
+- `--heap-cells`, `--max-memory`, `--frame-memory`, `--no-cons`, `-O<N>` and `--release` work as they do for an executable.
 
 ### 3.7 Running in a browser or Node.js
 
@@ -281,7 +283,7 @@ $ qemu-system-riscv32 -M virt -bios none -nographic \
 
 - On a board with little RAM, instead of `--linker-script`, `--ram SIZE` (`16K` and so on) gives only how much RAM the data, the heap and the stack have. The default layout's RAM becomes that size, and the stack takes at most a quarter of it. On a board that keeps code in RAM too, such as RISC-V's `virt`, the rest of the board's RAM is where the code goes. What the runtime allocates at first is made small to fit the heap. It cannot be used with `--linker-script`.
 
-- A board has no operating system, so nothing stops a stack that overflows. The executable therefore checks, on entering each of the program's functions, how much stack is left; when too little is, it writes `stack overflow: the program needs more than the ... bytes of the stack` and ends with exit code 1. To give the stack more room, make `_typelisp_stack_size` in the `--linker-script` file, or `--ram`, larger. `--no-stack-check` leaves the check out (the executable is a little smaller and faster, but an overflowing stack may silently corrupt the heap). Either way, when the stack overflows inside the runtime and runs past its bottom, the report of the panic or HardFault that follows is preceded by `stack overflow: the stack has run past its bottom into the heap`. The same is written, and the exit code is 1, when the program runs to its end. Note that the depth of a recursion does not use the stack (the record of calls is kept on the heap, and a recursion that is too deep runs out of memory); what uses the stack deeply is the runtime's work.
+- A board has no operating system, so nothing stops a stack that overflows. The executable therefore checks, on entering each of the program's functions, how much stack is left; when too little is, it writes `stack overflow: the program needs more than the ... bytes of the stack` and ends with exit code 1. To give the stack more room, make `_typelisp_stack_size` in the `--linker-script` file, or `--ram`, larger. `--no-stack-check` leaves the check out (the executable is a little smaller and faster, but an overflowing stack may silently corrupt the heap). Either way, when the stack overflows inside the runtime and runs past its bottom, the report of the panic or HardFault that follows is preceded by `stack overflow: the stack has run past its bottom into the heap`. The same is written, and the exit code is 1, when the program runs to its end. Note that the depth of a recursion does not use the stack (the record of calls is kept on the heap, and a recursion that is too deep runs out of memory); what uses the stack deeply is the runtime's work. To stop it before that, use `--frame-memory` (section 3.5).
 
 - `--board-functions` chooses who gives output, input, exiting and the clock (the board's functions).
   - `semihosting` (the default): given over semihosting, for running under QEMU (`-semihosting-config enable=on`) or a debugger.
@@ -327,7 +329,7 @@ $ qemu-system-riscv32 -M virt -bios none -nographic \
 - The runtime starts the program (the vector table and getting RAM ready) and allocates memory. A HardFault (an exception on RISC-V) or an interrupt nothing handles ends the program with the exit code of a panic (1).
 - `throw`/`catch`/`panic`, bignums, ratios and floats, and tasks, channels and `sleep` behave as in the executable. Tasks run in turn on the one core. C functions (`defffi`) can be used.
 - A program that uses what the board does not have is a **compile error**: besides what section 3.7 cannot use, `eval` and `macroexpand`. Local time is unknown (as in section 3.6).
-- The cons arena starts at 1024 cells and grows when it needs more. `--heap-cells`, `--max-memory`, `--no-cons`, `-O<N>` and `--release` work as they are.
+- The cons arena starts at 1024 cells and grows when it needs more. `--heap-cells`, `--max-memory`, `--frame-memory`, `--no-cons`, `-O<N>` and `--release` work as they are.
 
 ### 3.9 Compiling for an Arduino Uno (AVR)
 

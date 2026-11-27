@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ e26625a7799b8b032c3d524896a6b548c7c107af -->
+<!-- translated-from: docs/ja/guide/compile.md @ f5fad21e6962ea3c90d803827468d58aaae4ceaa -->
 # 컴파일
 
 아무것도 하지 않으면 typelisp 프로그램은 인터프리터에서 실행된다. 그 밖에 네이티브 코드로 컴파일하는 방법이 두 가지,
@@ -158,14 +158,16 @@ $ typl --lib-dir ~/lib/typelisp build.typl
 ```sh
 $ typl --heap-cells 100000 -c hello.typl    # cons 영역을 100000 셀로 고정한다
 $ typl -c hello.typl --max-memory 64M       # 메모리를 최대 64 MiB까지 확보한다
+$ typl -c hello.typl --frame-memory 1M      # 실행 중인 호출의 기록을 태스크마다 1 MiB까지로
 $ typl -c hello.typl --no-cons              # cons 셀을 쓰지 않는다
 ```
 
 - `--heap-cells N`은 cons 셀 영역의 용량을 `N` 셀로 고정한다. 영역은 그 이상 커지지 않는다. 가비지 컬렉션으로도 빈 셀을 만들 수 없으면 실행 시간 오류로 멈춘다. 지정하지 않으면 65536 셀로 시작해 필요에 따라 커진다.
 - `--max-memory SIZE`는 실행 파일이 확보하는 메모리 합계의 상한이다. cons 영역, 문자열, 벡터나 해시 표 같은 값, 런타임 자신이 쓰는 메모리를 모두 센다. `SIZE`는 바이트 수이며 `K` `M` `G`(각각 1024배, 1024²배, 1024³배)를 붙여 쓸 수 있다. 상한을 넘겨 확보하려 하면 그 사실을 표시하고 종료 코드 1로 끝난다. 이 종료는 `catch`로 잡을 수 없다. 지정하지 않으면 상한은 없다.
+- `--frame-memory SIZE`는 실행 중인 호출의 기록(호출이 끝날 때까지 가지고 있는 인수나 지역 변수 등)에 쓸 수 있는 메모리의, 태스크마다의 상한입니다. 기록은 힙에 놓이며 재귀가 깊어질수록 늘어납니다. `SIZE`는 `--max-memory`와 같이 씁니다. 상한을 넘는 호출을 하려고 하면 그 사실을 표시하고 종료 코드 1로 끝납니다. 이 종료도 `catch`로 잡을 수 없습니다. 메모리가 적은 보드에서, 너무 깊은 재귀가 힙을 다 쓰기 전에 멈추는 데 쓸 수 있습니다. 지정하지 않으면 상한이 없습니다.
 - `--no-cons`는 cons 셀을 쓰지 않는 실행 파일을 만든다. cons 영역이 없으므로, cons 셀이 필요한 조작을 하는 프로그램은 **컴파일 오류**가 된다. 오류에는 그 조작과, `main`에서 거기까지 닿는 함수의 연쇄가 표시된다. cons 셀이 필요한 것은 `Sexpr` 리스트(인용한 리스트나 준인용으로 만드는 것 포함)나 `&rest` 인수를 만들 때, `read`, `eval`, `macroexpand`를 쓸 때다. 수, 문자열, 벡터, 해시 표, 구조체, 채널 등의 조작과 `print`/`println`/`format`은 cons 셀을 쓰지 않는다. `--heap-cells`와 함께 지정할 수 없으며, `-c` 뒤에 쓴다.
 
-`--max-memory`는 `-c` 뒤에 쓴다. `--heap-cells`는 `-c` 앞에도 뒤에도 쓸 수 있으며, 이때 실행 파일의 cons 영역의 용량이 된다. cons 영역도 메모리 상한에 포함되므로, 영역이 들어가지 않는 상한을 지정하면 프로그램이 시작되기 전에 멈춘다.
+`--max-memory`와 `--frame-memory`는 `-c` 뒤에 쓴다. `--heap-cells`는 `-c` 앞에도 뒤에도 쓸 수 있으며, 이때 실행 파일의 cons 영역의 용량이 된다. cons 영역도 메모리 상한에 포함되므로, 영역이 들어가지 않는 상한을 지정하면 프로그램이 시작되기 전에 멈춘다.
 
 ### 3.6 WebAssembly용으로 컴파일하기
 
@@ -190,7 +192,7 @@ fib(25) = 75025
   TLS, 이름 해석), OS 스레드(`Thread`), C 함수(`defffi`), `get-internal-run-time`, `machine-instance`, `software-version`, `file-author`,
   `ed`입니다.
 - WASI에는 시간대를 알아낼 방법이 없으므로 지역 시간을 알 수 없습니다. `zone`을 생략한 `decode-universal-time`·`encode-universal-time`과 `get-decoded-time`은 실행 시 panic합니다. `zone`을 주면 쓸 수 있습니다.
-- `--heap-cells`, `--max-memory`, `--no-cons`, `-O<N>`, `--release`는 그대로 쓸 수 있습니다.
+- `--heap-cells`, `--max-memory`, `--frame-memory`, `--no-cons`, `-O<N>`, `--release`는 그대로 쓸 수 있습니다.
 
 ### 3.7 브라우저나 Node.js에서 실행하기
 
@@ -266,7 +268,7 @@ $ qemu-system-riscv32 -M virt -bios none -nographic \
 
 - RAM이 작은 보드에서는 `--linker-script` 대신 `--ram SIZE`(`16K` 등)로 데이터・힙・스택에 쓰는 RAM의 크기만 지정할 수 있습니다. 기본 배치의 RAM이 그 크기가 되고, 스택은 그 4분의 1까지가 됩니다. RISC-V의 `virt`처럼 코드도 RAM에 두는 보드에서는 보드 RAM의 나머지가 코드의 영역이 됩니다. 런타임이 처음에 확보하는 양은 힙 크기에 맞춰 작아집니다. `--linker-script`와 함께는 쓸 수 없습니다.
 
-- 보드에는 운영체제가 없으므로 넘치는 스택을 막아 주는 것이 없습니다. 그래서 실행 파일은 프로그램의 각 함수에 들어갈 때마다 스택이 얼마나 남았는지 확인하고, 너무 적으면 `stack overflow: the program needs more than the ... bytes of the stack`를 쓰고 종료 코드 1로 끝납니다. 스택을 늘리려면 `--linker-script` 파일의 `_typelisp_stack_size`나 `--ram`을 크게 합니다. `--no-stack-check`를 붙이면 이 확인을 넣지 않습니다(조금 작고 빨라지지만, 넘친 스택이 힙을 조용히 망가뜨릴 수 있습니다). 어느 경우든 런타임 안에서 스택이 넘쳐 바닥을 넘어서면, 그 뒤의 panic이나 HardFault 보고 앞에 `stack overflow: the stack has run past its bottom into the heap`를 씁니다. 프로그램이 끝까지 실행된 때에도 같은 내용을 쓰고 종료 코드 1로 끝납니다. 참고로 재귀의 깊이는 스택을 쓰지 않습니다(호출 기록은 힙에 두며, 너무 깊은 재귀는 메모리 부족이 됩니다). 스택을 깊이 쓰는 것은 런타임의 처리입니다.
+- 보드에는 운영체제가 없으므로 넘치는 스택을 막아 주는 것이 없습니다. 그래서 실행 파일은 프로그램의 각 함수에 들어갈 때마다 스택이 얼마나 남았는지 확인하고, 너무 적으면 `stack overflow: the program needs more than the ... bytes of the stack`를 쓰고 종료 코드 1로 끝납니다. 스택을 늘리려면 `--linker-script` 파일의 `_typelisp_stack_size`나 `--ram`을 크게 합니다. `--no-stack-check`를 붙이면 이 확인을 넣지 않습니다(조금 작고 빨라지지만, 넘친 스택이 힙을 조용히 망가뜨릴 수 있습니다). 어느 경우든 런타임 안에서 스택이 넘쳐 바닥을 넘어서면, 그 뒤의 panic이나 HardFault 보고 앞에 `stack overflow: the stack has run past its bottom into the heap`를 씁니다. 프로그램이 끝까지 실행된 때에도 같은 내용을 쓰고 종료 코드 1로 끝납니다. 참고로 재귀의 깊이는 스택을 쓰지 않습니다(호출 기록은 힙에 두며, 너무 깊은 재귀는 메모리 부족이 됩니다). 스택을 깊이 쓰는 것은 런타임의 처리입니다. 그 전에 멈추려면 3.5절의 `--frame-memory`를 씁니다.
 
 - 출력・입력・종료・시각(보드의 함수)을 누가 제공할지는 `--board-functions`로 고릅니다.
   - `semihosting`(기본값): semihosting으로 제공합니다. QEMU(`-semihosting-config enable=on`)나 디버거로 실행할 때 씁니다.
@@ -312,7 +314,7 @@ $ qemu-system-riscv32 -M virt -bios none -nographic \
 - 기동(벡터 테이블과 RAM 준비)과 메모리 확보는 런타임이 합니다. HardFault(RISC-V에서는 예외)나 처리되지 않는 인터럽트가 일어나면 panic과 같은 종료 코드(1)로 끝납니다.
 - `throw`/`catch`/`panic`, bignum・ratio・부동소수, 태스크・채널・`sleep`은 실행 파일과 똑같이 동작합니다. 태스크는 하나의 코어에서 차례로 실행됩니다. C 함수(`defffi`)도 쓸 수 있습니다.
 - 보드에 없는 것을 쓰는 프로그램은 **컴파일 오류**가 됩니다. 3.7절에서 쓸 수 없는 것에 더해 `eval`・`macroexpand`를 쓸 수 없습니다. 지방시는 알 수 없습니다(3.6절과 같음).
-- cons 아레나는 1024셀에서 시작해 모자라면 늘어납니다. `--heap-cells`, `--max-memory`, `--no-cons`, `-O<N>`, `--release`는 그대로 쓸 수 있습니다.
+- cons 아레나는 1024셀에서 시작해 모자라면 늘어납니다. `--heap-cells`, `--max-memory`, `--frame-memory`, `--no-cons`, `-O<N>`, `--release`는 그대로 쓸 수 있습니다.
 
 ### 3.9 Arduino Uno(AVR)용으로 컴파일하기
 

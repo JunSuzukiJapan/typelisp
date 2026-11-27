@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ e26625a7799b8b032c3d524896a6b548c7c107af -->
+<!-- translated-from: docs/ja/guide/compile.md @ f5fad21e6962ea3c90d803827468d58aaae4ceaa -->
 # Derleme
 
 Başka bir şey yapmazsanız typelisp programları yorumlayıcıda çalışır. Buna ek olarak yerel koda
@@ -166,14 +166,16 @@ derlenmiş `typl` ile çalışır. `typl`'yi yeniden derledikten sonra onu yenid
 ```sh
 $ typl --heap-cells 100000 -c hello.typl    # cons alanını 100000 hücrede sabitle
 $ typl -c hello.typl --max-memory 64M       # en çok 64 MiB ayır
+$ typl -c hello.typl --frame-memory 1M      # görev başına en çok 1 MiB süren çağrı
 $ typl -c hello.typl --no-cons              # cons hücresi kullanma
 ```
 
 - `--heap-cells N`, cons hücre alanının kapasitesini `N` hücrede sabitler. Alan bunun ötesine büyümez: çöp toplama tek bir hücre bile boşaltamazsa program bir çalışma zamanı hatasıyla durur. Seçenek verilmezse alan 65536 hücreyle başlar ve gerektikçe büyür.
 - `--max-memory SIZE`, çalıştırılabilir dosyanın ayırdığı toplam belleği sınırlar. Her şey sayılır: cons alanı, dizgeler, vektörler ve karma tablolar gibi değerler ve çalışma zamanının kendisinin kullandığı bellek. `SIZE` bir bayt sayısıdır ve ardından `K`, `M` veya `G` (1024, 1024² ve 1024³ katı) gelebilir. Sınırı aşacak bir ayırma bildirilir ve program 1 çıkış koduyla sonlanır. Bu sonlanma `catch` ile yakalanamaz. Seçenek verilmezse sınır yoktur.
+- `--frame-memory SIZE`, her görev için süren çağrıların kayıtlarının (bir çağrının bitene kadar tuttuğu, argümanları ve yerel değişkenleri gibi şeyler) kullanabileceği belleği sınırlar. Kayıtlar heap'tedir ve özyineleme derinleştikçe büyür. `SIZE`, `--max-memory`'deki gibi yazılır. Sınırı aşacak bir çağrı yapılmaz: çalıştırılabilir dosya bunu bildirir ve 1 çıkış koduyla biter; bunu da `catch` yakalayamaz. Belleği az bir kartta, fazla derin bir özyinelemeyi heap'i bitirmeden durdurur. Verilmezse sınır yoktur.
 - `--no-cons`, cons hücresi kullanmayan bir çalıştırılabilir dosya oluşturur. Cons alanı yoktur; bu yüzden cons hücresi gerektiren bir şey yapan program bir **derleme hatasıdır** ve bu işlemi ve `main`'den ona ulaşan fonksiyon zincirini gösterir. Cons hücreleri bir `Sexpr` listesi (alıntılanmış liste ve quasiquote ile kurulan liste dahil) veya bir `&rest` argümanı kurmak için, ayrıca `read`, `eval` ve `macroexpand` için gerekir. Sayılar, dizgeler, vektörler, karma tablolar, yapılar, kanallar ve benzerleri üzerindeki işlemler ile `print`/`println`/`format` hiç kullanmaz. `--heap-cells` ile birlikte verilemez ve `-c`'den sonra yazılır.
 
-`--max-memory`, `-c`'den sonra yazılır. `--heap-cells`, `-c`'den önce veya sonra yazılabilir ve o zaman çalıştırılabilir dosyanın cons alanının kapasitesidir. Cons alanı bellek sınırına dahildir; alanın sığmadığı bir sınırla program başlamadan durur.
+`--max-memory` ve `--frame-memory`, `-c`'den sonra yazılır. `--heap-cells`, `-c`'den önce veya sonra yazılabilir ve o zaman çalıştırılabilir dosyanın cons alanının kapasitesidir. Cons alanı bellek sınırına dahildir; alanın sığmadığı bir sınırla program başlamadan durur.
 
 ### 3.6 WebAssembly için derlemek
 
@@ -198,7 +200,7 @@ fib(25) = 75025
   TLS, ad çözümleme), işletim sistemi iş parçacıkları (`Thread`), C fonksiyonları (`defffi`), `get-internal-run-time`, `machine-instance`, `software-version`, `file-author`
   ve `ed`.
 - WASI'nin saat dilimini öğrenme yolu yoktur, bu yüzden yerel saat bilinmez. `zone` verilmeden `decode-universal-time` ve `encode-universal-time` ile `get-decoded-time` çalışma zamanında panic olur. `zone` verilirse kullanılabilirler.
-- `--heap-cells`, `--max-memory`, `--no-cons`, `-O<N>` ve `--release` çalıştırılabilir dosyada olduğu gibi çalışır.
+- `--heap-cells`, `--max-memory`, `--frame-memory`, `--no-cons`, `-O<N>` ve `--release` çalıştırılabilir dosyada olduğu gibi çalışır.
 
 ### 3.7 Tarayıcıda veya Node.js'te çalıştırmak
 
@@ -274,7 +276,7 @@ $ qemu-system-riscv32 -M virt -bios none -nographic \
 
 - RAM'i az olan bir kartta `--linker-script` yerine `--ram SIZE` (`16K` vb.) ile yalnızca verilerin, yığın belleğin (heap) ve yığının (stack) kullanacağı RAM miktarı verilebilir. Varsayılan düzenin RAM'i bu boyutu alır ve yığın en fazla dörtte birini kullanır. RISC-V'nin `virt`'i gibi kodu da RAM'de tutan bir kartta kod, kartın RAM'inin geri kalanına konur. Çalışma zamanının başta ayırdığı miktar, yığın belleğe sığacak kadar küçültülür. `--linker-script` ile birlikte kullanılamaz.
 
-- Bir kartta işletim sistemi yoktur, bu yüzden taşan bir yığını hiçbir şey durdurmaz. Çalıştırılabilir dosya bu nedenle programın her fonksiyonuna girerken ne kadar yığın kaldığını denetler; çok az kaldıysa `stack overflow: the program needs more than the ... bytes of the stack` yazar ve 1 çıkış koduyla biter. Yığını büyütmek için `--linker-script` dosyasındaki `_typelisp_stack_size` değerini ya da `--ram` değerini büyütün. `--no-stack-check` bu denetimi koymaz (dosya biraz daha küçük ve hızlı olur, ama taşan yığın heap'i sessizce bozabilir). Her iki durumda da yığın çalışma zamanının içinde taşıp tabanını geçtiğinde, ardından gelen panic veya HardFault raporundan önce `stack overflow: the stack has run past its bottom into the heap` yazılır. Program sonuna kadar çalıştığında da aynısı yazılır ve çıkış kodu 1 olur. Bu arada özyinelemenin derinliği yığını kullanmaz (çağrıların kaydı heap'te tutulur ve fazla derin bir özyineleme belleği tüketir); yığını derin kullanan, çalışma zamanının işidir.
+- Bir kartta işletim sistemi yoktur, bu yüzden taşan bir yığını hiçbir şey durdurmaz. Çalıştırılabilir dosya bu nedenle programın her fonksiyonuna girerken ne kadar yığın kaldığını denetler; çok az kaldıysa `stack overflow: the program needs more than the ... bytes of the stack` yazar ve 1 çıkış koduyla biter. Yığını büyütmek için `--linker-script` dosyasındaki `_typelisp_stack_size` değerini ya da `--ram` değerini büyütün. `--no-stack-check` bu denetimi koymaz (dosya biraz daha küçük ve hızlı olur, ama taşan yığın heap'i sessizce bozabilir). Her iki durumda da yığın çalışma zamanının içinde taşıp tabanını geçtiğinde, ardından gelen panic veya HardFault raporundan önce `stack overflow: the stack has run past its bottom into the heap` yazılır. Program sonuna kadar çalıştığında da aynısı yazılır ve çıkış kodu 1 olur. Bu arada özyinelemenin derinliği yığını kullanmaz (çağrıların kaydı heap'te tutulur ve fazla derin bir özyineleme belleği tüketir); yığını derin kullanan, çalışma zamanının işidir. Ondan önce durdurmak için `--frame-memory` kullanılır (bölüm 3.5).
 
 - `--board-functions`, çıktıyı, girdiyi, bitirmeyi ve saati (kartın işlevlerini) kimin sağlayacağını seçer.
   - `semihosting` (varsayılan): semihosting ile; QEMU (`-semihosting-config enable=on`) veya bir hata ayıklayıcı altında çalıştırmak için.
@@ -320,7 +322,7 @@ $ qemu-system-riscv32 -M virt -bios none -nographic \
 - Çalışma zamanı programı başlatır (vektör tablosu ve RAM'in hazırlanması) ve belleği ayırır. Bir HardFault (RISC-V'de bir istisna) veya işlenmeyen bir kesme, programı bir panic'in çıkış koduyla (1) bitirir.
 - `throw`/`catch`/`panic`, büyük sayılar, kesirler ve kayan noktalı sayılar ile görevler, kanallar ve `sleep` çalıştırılabilir dosyadaki gibi davranır. Görevler tek çekirdekte sırayla çalışır. C işlevleri (`defffi`) kullanılabilir.
 - Kartta olmayan bir şeyi kullanan program bir **derleme hatasıdır**: Bölüm 3.7'de kullanılamayanlara ek olarak `eval` ve `macroexpand`. Yerel saat bilinmez (Bölüm 3.6'daki gibi).
-- Cons arenası 1024 hücreyle başlar ve gerektiğinde büyür. `--heap-cells`, `--max-memory`, `--no-cons`, `-O<N>` ve `--release` olduğu gibi çalışır.
+- Cons arenası 1024 hücreyle başlar ve gerektiğinde büyür. `--heap-cells`, `--max-memory`, `--frame-memory`, `--no-cons`, `-O<N>` ve `--release` olduğu gibi çalışır.
 
 ### 3.9 Arduino Uno (AVR) için derlemek
 

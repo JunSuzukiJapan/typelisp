@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ e26625a7799b8b032c3d524896a6b548c7c107af -->
+<!-- translated-from: docs/ja/guide/compile.md @ f5fad21e6962ea3c90d803827468d58aaae4ceaa -->
 # Compilation
 
 Sauf indication contraire, les programmes typelisp s'exécutent dans l'interpréteur. Il existe en outre deux façons
@@ -168,14 +168,16 @@ nouveau.
 ```sh
 $ typl --heap-cells 100000 -c hello.typl    # fixe l'arène cons à 100000 cellules
 $ typl -c hello.typl --max-memory 64M       # alloue au plus 64 Mio
+$ typl -c hello.typl --frame-memory 1M      # au plus 1 Mio d'appels en cours par tâche
 $ typl -c hello.typl --no-cons              # n'utilise aucune cellule cons
 ```
 
 - `--heap-cells N` fixe la capacité de l'arène des cellules cons à `N` cellules. L'arène ne grandit pas au-delà : si le ramasse-miettes ne peut libérer aucune cellule, le programme s'arrête sur une erreur d'exécution. Sans l'option, l'arène commence à 65536 cellules et grandit selon les besoins.
 - `--max-memory SIZE` borne la mémoire totale que l'exécutable alloue. Tout compte : l'arène cons, les chaînes, les valeurs comme les vecteurs et les tables de hachage, et la mémoire du runtime lui-même. `SIZE` est un nombre d'octets, éventuellement suivi de `K`, `M` ou `G` (1024, 1024² et 1024³ fois). Une allocation qui dépasserait la borne est signalée, et le programme se termine avec le code de sortie 1. Cette sortie ne peut pas être interceptée par `catch`. Sans l'option, il n'y a pas de borne.
+- `--frame-memory SIZE` borne, pour chaque tâche, la mémoire que prennent les enregistrements des appels en cours (ce qu'un appel garde jusqu'à sa fin, comme ses arguments et ses variables locales). Les enregistrements sont dans le tas et grandissent avec la profondeur d'une récursion. `SIZE` s'écrit comme pour `--max-memory`. Un appel qui dépasserait la borne n'a pas lieu : l'exécutable le signale et se termine avec le code 1, que `catch` ne peut pas non plus attraper. Sur une carte avec peu de mémoire, cela arrête une récursion trop profonde avant qu'elle n'épuise le tas. Sans cette option, il n'y a pas de borne.
 - `--no-cons` produit un exécutable qui n'utilise aucune cellule cons. Il n'a pas d'arène cons : un programme qui fait quelque chose nécessitant des cellules cons est donc une **erreur de compilation**, qui montre cette opération et la chaîne de fonctions depuis `main` qui y mène. Les cellules cons sont nécessaires pour construire une liste `Sexpr` (y compris une liste quotée ou construite par quasi-quote) ou un argument `&rest`, ainsi que pour `read`, `eval` et `macroexpand`. Les opérations sur les nombres, chaînes, vecteurs, tables de hachage, structures, canaux, etc., et `print`/`println`/`format` n'en utilisent aucune. Ne peut pas être donné avec `--heap-cells`, et s'écrit après `-c`.
 
-`--max-memory` s'écrit après `-c`. `--heap-cells` peut s'écrire avant ou après `-c`, et donne alors la capacité de l'arène cons de l'exécutable. L'arène cons compte dans la borne de mémoire : avec une borne où l'arène ne tient pas, le programme s'arrête avant de commencer.
+`--max-memory` et `--frame-memory` s'écrivent après `-c`. `--heap-cells` peut s'écrire avant ou après `-c`, et donne alors la capacité de l'arène cons de l'exécutable. L'arène cons compte dans la borne de mémoire : avec une borne où l'arène ne tient pas, le programme s'arrête avant de commencer.
 
 ### 3.6 Compiler pour WebAssembly
 
@@ -200,7 +202,7 @@ fib(25) = 75025
   TLS, résolution de noms), les threads du système (`Thread`), les fonctions C (`defffi`), `get-internal-run-time`, `machine-instance`, `software-version`, `file-author`
   et `ed`.
 - WASI n'a aucun moyen de connaître le fuseau horaire, donc l'heure locale est inconnue. `decode-universal-time` et `encode-universal-time` sans `zone`, ainsi que `get-decoded-time`, font un panic à l'exécution. Ils fonctionnent si `zone` est donné.
-- `--heap-cells`, `--max-memory`, `--no-cons`, `-O<N>` et `--release` s'appliquent comme pour un exécutable.
+- `--heap-cells`, `--max-memory`, `--frame-memory`, `--no-cons`, `-O<N>` et `--release` s'appliquent comme pour un exécutable.
 
 ### 3.7 Exécuter dans un navigateur ou avec Node.js
 
@@ -276,7 +278,7 @@ $ qemu-system-riscv32 -M virt -bios none -nographic \
 
 - Sur une carte avec peu de RAM, au lieu de `--linker-script`, `--ram SIZE` (`16K`, etc.) donne seulement la quantité de RAM des données, du tas et de la pile. La RAM de la disposition par défaut prend cette taille, et la pile en prend au plus un quart. Sur une carte qui garde aussi le code en RAM, comme `virt` pour RISC-V, le code va dans le reste de la RAM de la carte. Ce que le runtime alloue au départ est réduit pour tenir dans le tas. Il ne s'utilise pas avec `--linker-script`.
 
-- Une carte n'a pas de système d'exploitation : rien n'arrête une pile qui déborde. L'exécutable vérifie donc, à l'entrée de chaque fonction du programme, la place qui reste sur la pile ; s'il en reste trop peu, il écrit `stack overflow: the program needs more than the ... bytes of the stack` et se termine avec le code de sortie 1. Pour agrandir la pile, augmentez `_typelisp_stack_size` dans le fichier de `--linker-script`, ou `--ram`. `--no-stack-check` omet cette vérification (l'exécutable est un peu plus petit et plus rapide, mais une pile qui déborde peut corrompre le tas sans rien dire). Dans les deux cas, quand la pile déborde dans le runtime et dépasse son bas, le rapport du panic ou du HardFault qui suit est précédé de `stack overflow: the stack has run past its bottom into the heap`. La même chose est écrite, avec le code de sortie 1, quand le programme va jusqu'au bout. Notez que la profondeur d'une récursion n'utilise pas la pile (les appels sont enregistrés dans le tas, et une récursion trop profonde épuise la mémoire) ; ce qui utilise la pile en profondeur, c'est le travail du runtime.
+- Une carte n'a pas de système d'exploitation : rien n'arrête une pile qui déborde. L'exécutable vérifie donc, à l'entrée de chaque fonction du programme, la place qui reste sur la pile ; s'il en reste trop peu, il écrit `stack overflow: the program needs more than the ... bytes of the stack` et se termine avec le code de sortie 1. Pour agrandir la pile, augmentez `_typelisp_stack_size` dans le fichier de `--linker-script`, ou `--ram`. `--no-stack-check` omet cette vérification (l'exécutable est un peu plus petit et plus rapide, mais une pile qui déborde peut corrompre le tas sans rien dire). Dans les deux cas, quand la pile déborde dans le runtime et dépasse son bas, le rapport du panic ou du HardFault qui suit est précédé de `stack overflow: the stack has run past its bottom into the heap`. La même chose est écrite, avec le code de sortie 1, quand le programme va jusqu'au bout. Notez que la profondeur d'une récursion n'utilise pas la pile (les appels sont enregistrés dans le tas, et une récursion trop profonde épuise la mémoire) ; ce qui utilise la pile en profondeur, c'est le travail du runtime. Pour l'arrêter avant, utilisez `--frame-memory` (section 3.5).
 
 - `--board-functions` choisit qui fournit la sortie, l'entrée, la fin du programme et l'horloge (les fonctions de la carte).
   - `semihosting` (par défaut) : par semihosting, pour exécuter sous QEMU (`-semihosting-config enable=on`) ou un débogueur.
@@ -322,7 +324,7 @@ $ qemu-system-riscv32 -M virt -bios none -nographic \
 - Le runtime démarre le programme (la table des vecteurs et la préparation de la RAM) et alloue la mémoire. Un HardFault (une exception sur RISC-V) ou une interruption non traitée termine le programme avec le code de sortie d'un panic (1).
 - `throw`/`catch`/`panic`, les bignums, les fractions et les flottants, ainsi que les tâches, les canaux et `sleep` se comportent comme dans l'exécutable. Les tâches s'exécutent à tour de rôle sur l'unique cœur. Les fonctions C (`defffi`) sont utilisables.
 - Un programme qui utilise ce que la carte n'a pas est une **erreur de compilation** : en plus de ce que la section 3.7 ne permet pas, `eval` et `macroexpand`. L'heure locale est inconnue (comme à la section 3.6).
-- L'arène de cons commence à 1024 cellules et grandit au besoin. `--heap-cells`, `--max-memory`, `--no-cons`, `-O<N>` et `--release` fonctionnent tels quels.
+- L'arène de cons commence à 1024 cellules et grandit au besoin. `--heap-cells`, `--max-memory`, `--frame-memory`, `--no-cons`, `-O<N>` et `--release` fonctionnent tels quels.
 
 ### 3.9 Compiler pour Arduino Uno (AVR)
 

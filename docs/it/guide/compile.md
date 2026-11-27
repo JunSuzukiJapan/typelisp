@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ e26625a7799b8b032c3d524896a6b548c7c107af -->
+<!-- translated-from: docs/ja/guide/compile.md @ f5fad21e6962ea3c90d803827468d58aaae4ceaa -->
 # Compilazione
 
 Se non fai altro, i programmi typelisp vengono eseguiti nell'interprete. Inoltre esistono due modi per
@@ -168,14 +168,16 @@ funziona solo con il `typl` compilato insieme ad esso. Dopo aver ricompilato `ty
 ```sh
 $ typl --heap-cells 100000 -c hello.typl    # fissa l'arena cons a 100000 celle
 $ typl -c hello.typl --max-memory 64M       # alloca al massimo 64 MiB
+$ typl -c hello.typl --frame-memory 1M      # al massimo 1 MiB di chiamate in corso per task
 $ typl -c hello.typl --no-cons              # non usa celle cons
 ```
 
 - `--heap-cells N` fissa la capacità dell'arena delle celle cons a `N` celle. L'arena non cresce oltre: se la garbage collection non riesce a liberare una cella, il programma si ferma con un errore di esecuzione. Senza l'opzione, l'arena parte da 65536 celle e cresce quando serve.
 - `--max-memory SIZE` limita la memoria totale che l'eseguibile alloca. Conta tutto: l'arena cons, le stringhe, valori come vettori e tabelle hash, e la memoria del runtime stesso. `SIZE` è un numero di byte e può essere seguito da `K`, `M` o `G` (1024, 1024² e 1024³ volte). Un'allocazione che supererebbe il limite viene segnalata e il programma termina con codice di uscita 1. Questa uscita non si può intercettare con `catch`. Senza l'opzione non c'è limite.
+- `--frame-memory SIZE` limita, per ogni task, la memoria che occupano i record delle chiamate in corso (ciò che una chiamata conserva finché non termina, come i suoi argomenti e le variabili locali). I record stanno nello heap e crescono con la profondità di una ricorsione. `SIZE` si scrive come per `--max-memory`. Una chiamata che supererebbe il limite non viene fatta: l'eseguibile lo segnala e termina con il codice di uscita 1, che nemmeno `catch` può catturare. Su una scheda con poca memoria ferma una ricorsione troppo profonda prima che esaurisca lo heap. Senza l'opzione non c'è limite.
 - `--no-cons` crea un eseguibile che non usa celle cons. Non ha un'arena cons, quindi un programma che fa qualcosa che richiede celle cons è un **errore di compilazione**, che mostra quell'operazione e la catena di funzioni da `main` che la raggiunge. Le celle cons servono per costruire una lista `Sexpr` (anche una lista quotata o costruita con il quasiquote) o un argomento `&rest`, e per `read`, `eval` e `macroexpand`. Le operazioni su numeri, stringhe, vettori, tabelle hash, struct, canali e simili, e `print`/`println`/`format`, non ne usano. Non si può indicare insieme a `--heap-cells` e si scrive dopo `-c`.
 
-`--max-memory` si scrive dopo `-c`. `--heap-cells` si può scrivere prima o dopo `-c`, e allora è la capacità dell'arena cons dell'eseguibile. L'arena cons conta nel limite di memoria, quindi con un limite in cui l'arena non entra il programma si ferma prima di iniziare.
+`--max-memory` e `--frame-memory` si scrivono dopo `-c`. `--heap-cells` si può scrivere prima o dopo `-c`, e allora è la capacità dell'arena cons dell'eseguibile. L'arena cons conta nel limite di memoria, quindi con un limite in cui l'arena non entra il programma si ferma prima di iniziare.
 
 ### 3.6 Compilare per WebAssembly
 
@@ -200,7 +202,7 @@ fib(25) = 75025
   TLS, risoluzione dei nomi), thread del sistema (`Thread`), funzioni C (`defffi`), `get-internal-run-time`, `machine-instance`, `software-version`, `file-author`
   ed `ed`.
 - WASI non ha modo di conoscere il fuso orario, quindi l'ora locale è sconosciuta. `decode-universal-time` ed `encode-universal-time` senza `zone`, e `get-decoded-time`, vanno in panic durante l'esecuzione. Funzionano se si passa `zone`.
-- `--heap-cells`, `--max-memory`, `--no-cons`, `-O<N>` e `--release` valgono come per un eseguibile.
+- `--heap-cells`, `--max-memory`, `--frame-memory`, `--no-cons`, `-O<N>` e `--release` valgono come per un eseguibile.
 
 ### 3.7 Eseguire in un browser o in Node.js
 
@@ -276,7 +278,7 @@ $ qemu-system-riscv32 -M virt -bios none -nographic \
 
 - Su una scheda con poca RAM, al posto di `--linker-script`, `--ram SIZE` (`16K` ecc.) indica solo quanta RAM hanno i dati, l'heap e lo stack. La RAM della disposizione predefinita prende quella dimensione, e lo stack ne occupa al massimo un quarto. Su una scheda che tiene anche il codice in RAM, come `virt` per RISC-V, il codice va nel resto della RAM della scheda. Ciò che il runtime alloca all'inizio viene ridotto per stare nell'heap. Non si può usare insieme a `--linker-script`.
 
-- Una scheda non ha sistema operativo, quindi nulla ferma uno stack che trabocca. L'eseguibile controlla perciò, all'ingresso di ogni funzione del programma, quanto stack resta; se ne resta troppo poco, scrive `stack overflow: the program needs more than the ... bytes of the stack` e termina con il codice di uscita 1. Per dare più spazio allo stack, aumentare `_typelisp_stack_size` nel file di `--linker-script`, oppure `--ram`. `--no-stack-check` omette il controllo (l'eseguibile è un po' più piccolo e veloce, ma uno stack che trabocca può corrompere lo heap senza avvisare). In entrambi i casi, quando lo stack trabocca dentro il runtime e supera il suo fondo, il rapporto del panic o dell'HardFault che segue è preceduto da `stack overflow: the stack has run past its bottom into the heap`. Lo stesso viene scritto, con il codice di uscita 1, quando il programma arriva alla fine. La profondità di una ricorsione non usa lo stack (le chiamate sono registrate nello heap, e una ricorsione troppo profonda esaurisce la memoria); a usare lo stack in profondità è il lavoro del runtime.
+- Una scheda non ha sistema operativo, quindi nulla ferma uno stack che trabocca. L'eseguibile controlla perciò, all'ingresso di ogni funzione del programma, quanto stack resta; se ne resta troppo poco, scrive `stack overflow: the program needs more than the ... bytes of the stack` e termina con il codice di uscita 1. Per dare più spazio allo stack, aumentare `_typelisp_stack_size` nel file di `--linker-script`, oppure `--ram`. `--no-stack-check` omette il controllo (l'eseguibile è un po' più piccolo e veloce, ma uno stack che trabocca può corrompere lo heap senza avvisare). In entrambi i casi, quando lo stack trabocca dentro il runtime e supera il suo fondo, il rapporto del panic o dell'HardFault che segue è preceduto da `stack overflow: the stack has run past its bottom into the heap`. Lo stesso viene scritto, con il codice di uscita 1, quando il programma arriva alla fine. La profondità di una ricorsione non usa lo stack (le chiamate sono registrate nello heap, e una ricorsione troppo profonda esaurisce la memoria); a usare lo stack in profondità è il lavoro del runtime. Per fermarla prima, si usa `--frame-memory` (sezione 3.5).
 
 - `--board-functions` sceglie chi fornisce output, input, terminazione e orologio (le funzioni della scheda).
   - `semihosting` (predefinito): tramite semihosting, per eseguire sotto QEMU (`-semihosting-config enable=on`) o un debugger.
@@ -322,7 +324,7 @@ $ qemu-system-riscv32 -M virt -bios none -nographic \
 - Il runtime avvia il programma (la tabella dei vettori e la preparazione della RAM) e alloca la memoria. Un HardFault (un'eccezione su RISC-V) o un interrupt non gestito termina il programma con il codice di uscita di un panic (1).
 - `throw`/`catch`/`panic`, bignum, frazioni e numeri in virgola mobile, e task, canali e `sleep` si comportano come nell'eseguibile. I task vengono eseguiti a turno sull'unico core. Si possono usare funzioni C (`defffi`).
 - Un programma che usa ciò che la scheda non ha è un **errore di compilazione**: oltre a ciò che non si può usare nella sezione 3.7, `eval` e `macroexpand`. L'ora locale è sconosciuta (come nella sezione 3.6).
-- L'arena dei cons parte da 1024 celle e cresce quando serve. `--heap-cells`, `--max-memory`, `--no-cons`, `-O<N>` e `--release` funzionano così come sono.
+- L'arena dei cons parte da 1024 celle e cresce quando serve. `--heap-cells`, `--max-memory`, `--frame-memory`, `--no-cons`, `-O<N>` e `--release` funzionano così come sono.
 
 ### 3.9 Compilare per Arduino Uno (AVR)
 
