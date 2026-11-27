@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ 1b5dc6ac828d8e4a95800a91218b5e9dffe83f98 -->
+<!-- translated-from: docs/ja/guide/compile.md @ be56bb8a477929497064b8f807acfd1755f2b35b -->
 # Kompilering
 
 Om du inte gör något annat körs typelisp-program i tolken. Dessutom finns två sätt att kompilera till
@@ -225,9 +225,9 @@ const code = await run({ write: (fd, text) => { /* visa den på sidan, till exem
 - Lokal tid (`decode-universal-time` utan `zone` och så vidare) beräknas med den tidszon som JavaScripts `Date` rapporterar.
 - Utöver det som inte kan användas i avsnitt 3.6 är fil- och katalogoperationer, miljövariabler, `(command-line-args)`, hemkatalogen och `dribble` ett **kompileringsfel**. Standardindata läses som tom.
 
-### 3.8 Kompilera för en mikrokontroller (Cortex-M)
+### 3.8 Kompilera för en mikrokontroller (Cortex-M, RISC-V)
 
-Med `--target thumbv7em-none-eabihf` skapar `typl -c` en körbar fil (ELF) för ett Cortex-M4F- eller M7-kort utan operativsystem. Utan `-o` får den källans namn med `.typl` utbytt mot `.elf`. Med `--target thumbv8m.main-none-eabihf` är den för ett Cortex-M33-kort.
+Med `--target thumbv7em-none-eabihf` skapar `typl -c` en körbar fil (ELF) för ett Cortex-M4F- eller M7-kort utan operativsystem. Utan `-o` får den källans namn med `.typl` utbytt mot `.elf`. Med `--target thumbv8m.main-none-eabihf` är den för ett Cortex-M33-kort. Med `--target riscv32imac-unknown-none-elf` är den för ett kort med en 32-bitars RISC-V-kärna (tilläggen M, A och C).
 
 ```sh
 $ typl -c hello.typl --target thumbv7em-none-eabihf          # skapar hello.elf
@@ -236,9 +236,12 @@ $ qemu-system-arm -M mps2-an386 -nographic \
 $ typl -c hello.typl --target thumbv8m.main-none-eabihf
 $ qemu-system-arm -M mps2-an505 -nographic \
     -semihosting-config enable=on,target=native -kernel hello.elf   # kör den på QEMU:s Cortex-M33
+$ typl -c hello.typl --target riscv32imac-unknown-none-elf
+$ qemu-system-riscv32 -M virt -bios none -nographic \
+    -semihosting-config enable=on,target=native -kernel hello.elf   # kör den på QEMU:s RISC-V
 ```
 
-- En `typl` installerad med `install.sh` kan användas som den är. För att installera med `cargo install`, kör `rustup target add thumbv7em-none-eabihf thumbv8m.main-none-eabihf` och installera sedan med `--features embedded` (`--features wasm,embedded` för båda). Med en debugbygge av `typl` i förrådet, kör `scripts/build-embedded-runtime.sh`. Länkningen använder länkaren i rustup-verktygskedjan.
+- En `typl` installerad med `install.sh` kan användas som den är. För att installera med `cargo install`, kör `rustup target add thumbv7em-none-eabihf thumbv8m.main-none-eabihf riscv32imac-unknown-none-elf` och installera sedan med `--features embedded` (`--features wasm,embedded` för båda). Med en debugbygge av `typl` i förrådet, kör `scripts/build-embedded-runtime.sh`. Länkningen använder länkaren i rustup-verktygskedjan.
 - Ange kortets minne med `--linker-script FILE`. Den skrivs som `cortex-m-rt`:s `memory.x`: adresser och storlekar för FLASH och RAM. En rad som `_typelisp_stack_size = 32K;` anger hur mycket av RAM som stacken tar (64KiB om inget anges); resten av RAM är heapen. Utan flaggan används layouten för QEMU:s `mps2-an386` (`mps2-an505` för en Cortex-M33).
 
   ```
@@ -248,6 +251,23 @@ $ qemu-system-arm -M mps2-an505 -nographic \
     RAM : ORIGIN = 0x20000000, LENGTH = 128K
   }
   _typelisp_stack_size = 16K;
+  ```
+
+  På RISC-V används utan flaggan layouten för QEMU:s `virt`. En fil som anges namnger också med `REGION_ALIAS`, som `riscv-rt`:s `memory.x`, det område varje sorts sektion hamnar i.
+
+  ```
+  MEMORY
+  {
+    FLASH : ORIGIN = 0x20010000, LENGTH = 4M - 64K
+    RAM : ORIGIN = 0x80000000, LENGTH = 16K
+  }
+  REGION_ALIAS("REGION_TEXT", FLASH);
+  REGION_ALIAS("REGION_RODATA", FLASH);
+  REGION_ALIAS("REGION_DATA", RAM);
+  REGION_ALIAS("REGION_BSS", RAM);
+  REGION_ALIAS("REGION_HEAP", RAM);
+  REGION_ALIAS("REGION_STACK", RAM);
+  _typelisp_stack_size = 4K;
   ```
 
 - `--board-functions` väljer vem som ger utdata, indata, avslut och klockan (kortets funktioner).
@@ -277,7 +297,7 @@ $ qemu-system-arm -M mps2-an505 -nographic \
     (put-byte 104) (put-byte 105) (put-byte 10))                             ; "hi" och en radbrytning
   ```
 
-- Skriv funktionen som anropas när ett avbrott kommer som en `defun` med attributet `#[interrupt(N)]` (kringutrustningsavbrottet `N`) eller ett som `#[exception(SysTick)]`. Slå på ett avbrott med `(enable-interrupt N)`. En hanterare körs genast; bara när den kommer mitt i körtidsmiljöns arbete körs den efter att arbetet är klart. En hanterare kan inte vänta (`sleep` är ett kompileringsfel). Detaljerna finns i avsnitt 3.17 i [syntaxreferensen](../reference/syntax.md).
+- Skriv funktionen som anropas när ett avbrott kommer som en `defun` med attributet `#[interrupt(N)]` (kringutrustningsavbrottet `N`) eller ett som `#[exception(SysTick)]`. Slå på ett avbrott med `(enable-interrupt N)`. En hanterare körs genast; bara när den kommer mitt i körtidsmiljöns arbete körs den efter att arbetet är klart. En hanterare kan inte vänta (`sleep` är ett kompileringsfel). Detaljerna finns i avsnitt 3.17 i [syntaxreferensen](../reference/syntax.md). På RISC-V är `N` avbrottets nummer i `mcause` (0 till 31: 3 är mjukvaruavbrottet, 7 timern, 11 de externa avbrotten), och `#[exception(NAME)]` kan inte användas.
 
   ```lisp
   (use std::board::enable-interrupt)
@@ -291,7 +311,7 @@ $ qemu-system-arm -M mps2-an505 -nographic \
     (unsafe (volatile-write-u32 #xE000E200 (as u32 32))))   ; utlös avbrott 5 själv (NVIC:s register för väntande avbrott)
   ```
 
-- Körmiljön startar programmet (vektortabellen och förberedelsen av RAM) och allokerar minne. Ett HardFault eller ett obehandlat avbrott avslutar programmet med en panics slutkod (1).
+- Körmiljön startar programmet (vektortabellen och förberedelsen av RAM) och allokerar minne. Ett HardFault (på RISC-V ett undantag) eller ett obehandlat avbrott avslutar programmet med en panics slutkod (1).
 - `throw`/`catch`/`panic`, bignums, bråk och flyttal samt uppgifter, kanaler och `sleep` beter sig som i den körbara filen. Uppgifter körs i tur och ordning på den enda kärnan. C-funktioner (`defffi`) kan användas.
 - Ett program som använder det kortet inte har är ett **kompileringsfel**: utöver det som inte kan användas i avsnitt 3.7, `eval` och `macroexpand`. Lokal tid är okänd (som i avsnitt 3.6).
 - Cons-arenan börjar med 1024 celler och växer vid behov. `--heap-cells`, `--max-memory`, `--no-cons`, `-O<N>` och `--release` fungerar som de är.

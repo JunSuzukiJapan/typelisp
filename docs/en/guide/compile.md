@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ 1b5dc6ac828d8e4a95800a91218b5e9dffe83f98 -->
+<!-- translated-from: docs/ja/guide/compile.md @ be56bb8a477929497064b8f807acfd1755f2b35b -->
 # Compiling
 
 Unless you do anything else, typelisp programs run in the interpreter. In addition there are two
@@ -231,9 +231,9 @@ const code = await run({ write: (fd, text) => { /* show it on the page, for exam
 - Local time (`decode-universal-time` without `zone`, and so on) uses the time zone JavaScript's `Date` reports.
 - Besides what section 3.6 cannot use, file and directory operations, environment variables, `(command-line-args)`, the home directory and `dribble` are a **compile error**. Standard input reads as empty.
 
-### 3.8 Compiling for a microcontroller (Cortex-M)
+### 3.8 Compiling for a microcontroller (Cortex-M, RISC-V)
 
-With `--target thumbv7em-none-eabihf`, `typl -c` makes an executable (ELF) for a Cortex-M4F or M7 board without an operating system. Without `-o`, it is named after the source with `.typl` replaced by `.elf`. With `--target thumbv8m.main-none-eabihf`, the executable is for a Cortex-M33 board.
+With `--target thumbv7em-none-eabihf`, `typl -c` makes an executable (ELF) for a Cortex-M4F or M7 board without an operating system. Without `-o`, it is named after the source with `.typl` replaced by `.elf`. With `--target thumbv8m.main-none-eabihf`, the executable is for a Cortex-M33 board. With `--target riscv32imac-unknown-none-elf`, it is for a board with a 32-bit RISC-V core (the M, A and C extensions).
 
 ```sh
 $ typl -c hello.typl --target thumbv7em-none-eabihf          # makes hello.elf
@@ -242,9 +242,12 @@ $ qemu-system-arm -M mps2-an386 -nographic \
 $ typl -c hello.typl --target thumbv8m.main-none-eabihf
 $ qemu-system-arm -M mps2-an505 -nographic \
     -semihosting-config enable=on,target=native -kernel hello.elf   # run it on QEMU's Cortex-M33
+$ typl -c hello.typl --target riscv32imac-unknown-none-elf
+$ qemu-system-riscv32 -M virt -bios none -nographic \
+    -semihosting-config enable=on,target=native -kernel hello.elf   # run it on QEMU's RISC-V
 ```
 
-- A `typl` installed with `install.sh` can be used as it is. To install with `cargo install`, run `rustup target add thumbv7em-none-eabihf thumbv8m.main-none-eabihf`, then install with `--features embedded` (`--features wasm,embedded` for both). With a debug build of `typl` in the repository, run `scripts/build-embedded-runtime.sh`. Linking uses the linker of the rustup toolchain.
+- A `typl` installed with `install.sh` can be used as it is. To install with `cargo install`, run `rustup target add thumbv7em-none-eabihf thumbv8m.main-none-eabihf riscv32imac-unknown-none-elf`, then install with `--features embedded` (`--features wasm,embedded` for both). With a debug build of `typl` in the repository, run `scripts/build-embedded-runtime.sh`. Linking uses the linker of the rustup toolchain.
 - Give the board's memory with `--linker-script FILE`. It is written as `cortex-m-rt`'s `memory.x` is: the addresses and sizes of FLASH and RAM. A line like `_typelisp_stack_size = 32K;` sets how much of the RAM the stack takes (64KiB if not given); the rest of the RAM is the heap. Without the option, the layout is that of QEMU's `mps2-an386` (`mps2-an505` for a Cortex-M33).
 
   ```
@@ -254,6 +257,23 @@ $ qemu-system-arm -M mps2-an505 -nographic \
     RAM : ORIGIN = 0x20000000, LENGTH = 128K
   }
   _typelisp_stack_size = 16K;
+  ```
+
+  On RISC-V, the default is the layout of QEMU's `virt`. A file you give also names, with `REGION_ALIAS` as in the `memory.x` of `riscv-rt`, the region each kind of section goes in.
+
+  ```
+  MEMORY
+  {
+    FLASH : ORIGIN = 0x20010000, LENGTH = 4M - 64K
+    RAM : ORIGIN = 0x80000000, LENGTH = 16K
+  }
+  REGION_ALIAS("REGION_TEXT", FLASH);
+  REGION_ALIAS("REGION_RODATA", FLASH);
+  REGION_ALIAS("REGION_DATA", RAM);
+  REGION_ALIAS("REGION_BSS", RAM);
+  REGION_ALIAS("REGION_HEAP", RAM);
+  REGION_ALIAS("REGION_STACK", RAM);
+  _typelisp_stack_size = 4K;
   ```
 
 - `--board-functions` chooses who gives output, input, exiting and the clock (the board's functions).
@@ -283,7 +303,7 @@ $ qemu-system-arm -M mps2-an505 -nographic \
     (put-byte 104) (put-byte 105) (put-byte 10))                             ; "hi" and a newline
   ```
 
-- Write the function called when an interrupt comes as a `defun` with the attribute `#[interrupt(N)]` (the peripheral interrupt `N`) or one like `#[exception(SysTick)]`. Enable an interrupt with `(enable-interrupt N)`. A handler runs at once, and only when it comes in the middle of the runtime's work does it run after that work is done. A handler cannot wait (`sleep` is a compile error). The details are in section 3.17 of the [syntax reference](../reference/syntax.md).
+- Write the function called when an interrupt comes as a `defun` with the attribute `#[interrupt(N)]` (the peripheral interrupt `N`) or one like `#[exception(SysTick)]`. Enable an interrupt with `(enable-interrupt N)`. A handler runs at once, and only when it comes in the middle of the runtime's work does it run after that work is done. A handler cannot wait (`sleep` is a compile error). The details are in section 3.17 of the [syntax reference](../reference/syntax.md). On RISC-V, `N` is the interrupt's number in `mcause` (0 to 31: 3 is the software interrupt, 7 the timer, 11 the external interrupts), and `#[exception(NAME)]` cannot be used.
 
   ```lisp
   (use std::board::enable-interrupt)
@@ -297,7 +317,7 @@ $ qemu-system-arm -M mps2-an505 -nographic \
     (unsafe (volatile-write-u32 #xE000E200 (as u32 32))))   ; raise interrupt 5 itself (the NVIC's pending register)
   ```
 
-- The runtime starts the program (the vector table and getting RAM ready) and allocates memory. A HardFault or an interrupt nothing handles ends the program with the exit code of a panic (1).
+- The runtime starts the program (the vector table and getting RAM ready) and allocates memory. A HardFault (an exception on RISC-V) or an interrupt nothing handles ends the program with the exit code of a panic (1).
 - `throw`/`catch`/`panic`, bignums, ratios and floats, and tasks, channels and `sleep` behave as in the executable. Tasks run in turn on the one core. C functions (`defffi`) can be used.
 - A program that uses what the board does not have is a **compile error**: besides what section 3.7 cannot use, `eval` and `macroexpand`. Local time is unknown (as in section 3.6).
 - The cons arena starts at 1024 cells and grows when it needs more. `--heap-cells`, `--max-memory`, `--no-cons`, `-O<N>` and `--release` work as they are.

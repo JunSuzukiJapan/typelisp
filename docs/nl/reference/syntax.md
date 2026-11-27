@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 1b5dc6ac828d8e4a95800a91218b5e9dffe83f98 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ be56bb8a477929497064b8f807acfd1755f2b35b -->
 # typelisp-syntaxisreferentie
 
 typelisp is een statisch getypeerde Lisp, geschreven in S-expressies. Voor de lijst met ingebouwde
@@ -1390,6 +1390,7 @@ Wat een test met `print` afdrukt, gaat direct naar standaarduitvoer (het wordt n
 In een programma dat voor een microcontroller is gecompileerd (paragraaf 3.8 van [Compileren](../guide/compile.md)) zijn dit de functies die worden aangeroepen als er een interrupt komt. `#[interrupt(N)]` maakt een functie de handler van periferie-interrupt `N` (0 tot en met 239), en `#[exception(NAME)]` van de core-exception `NAME`, een van `NonMaskableInt`, `MemoryManagement`, `BusFault`, `UsageFault`, `SVCall`, `DebugMonitor`, `PendSV`, `SysTick` (`HardFault` is van de runtime en beëindigt het programma).
 
 - Voor de Arduino Uno zijn de nummering en het inschakelen anders, en zijn `#[exception(NAME)]` en `enable-interrupt` niet bruikbaar ([Compileren](../guide/compile.md), paragraaf 3.9). Wat hieronder over de runtime staat, geldt voor de Cortex-M.
+- Voor RISC-V is `N` het nummer van de interrupt in `mcause` (0 tot en met 31), en `#[exception(NAME)]` kan niet worden gebruikt. Wat hieronder over de runtime staat, geldt ook voor RISC-V.
 - Ze staan op een `defun` op het hoogste niveau die niets neemt en `()` teruggeeft (ook geen typeparameters). Een interrupt heeft één handler, en een functie behandelt één interrupt.
 - Een periferie-interrupt komt pas als `(enable-interrupt N)` hem inschakelt (`(disable-interrupt N)` stopt hem; zie [Systeem](functions/system.md)). Een exception zoals SysTick komt zodra de registers zo zijn ingesteld dat hij optreedt.
 - Een handler draait meteen, waar de interrupt kwam. Komt die midden in werk van de runtime (toewijzen, garbage collection, uitvoer, van taak wisselen enzovoort), dan draait de handler zodra dat werk klaar is. Handlers onderbreken elkaar niet.

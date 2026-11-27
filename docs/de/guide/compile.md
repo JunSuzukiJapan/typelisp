@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ 1b5dc6ac828d8e4a95800a91218b5e9dffe83f98 -->
+<!-- translated-from: docs/ja/guide/compile.md @ be56bb8a477929497064b8f807acfd1755f2b35b -->
 # Kompilierung
 
 Ohne weiteres Zutun laufen typelisp-Programme im Interpreter. Darüber hinaus gibt es zwei Wege, in nativen
@@ -228,9 +228,9 @@ const code = await run({ write: (fd, text) => { /* zum Beispiel auf der Seite an
 - Die Ortszeit (`decode-universal-time` ohne `zone` usw.) wird mit der Zeitzone berechnet, die JavaScripts `Date` meldet.
 - Zusätzlich zu dem, was in Abschnitt 3.6 nicht nutzbar ist, sind Datei- und Verzeichnisoperationen, Umgebungsvariablen, `(command-line-args)`, das Home-Verzeichnis und `dribble` ein **Kompilierfehler**. Die Standardeingabe wird als leer gelesen.
 
-### 3.8 Für einen Mikrocontroller (Cortex-M) kompilieren
+### 3.8 Für einen Mikrocontroller (Cortex-M, RISC-V) kompilieren
 
-Mit `--target thumbv7em-none-eabihf` erzeugt `typl -c` eine ausführbare Datei (ELF) für eine Cortex-M4F- oder M7-Platine ohne Betriebssystem. Ohne `-o` wird sie nach der Quelle benannt, wobei `.typl` durch `.elf` ersetzt wird. Mit `--target thumbv8m.main-none-eabihf` ist sie für eine Cortex-M33-Platine.
+Mit `--target thumbv7em-none-eabihf` erzeugt `typl -c` eine ausführbare Datei (ELF) für eine Cortex-M4F- oder M7-Platine ohne Betriebssystem. Ohne `-o` wird sie nach der Quelle benannt, wobei `.typl` durch `.elf` ersetzt wird. Mit `--target thumbv8m.main-none-eabihf` ist sie für eine Cortex-M33-Platine. Mit `--target riscv32imac-unknown-none-elf` ist sie für eine Platine mit einem 32-Bit-RISC-V-Kern (Erweiterungen M, A und C).
 
 ```sh
 $ typl -c hello.typl --target thumbv7em-none-eabihf          # erzeugt hello.elf
@@ -239,9 +239,12 @@ $ qemu-system-arm -M mps2-an386 -nographic \
 $ typl -c hello.typl --target thumbv8m.main-none-eabihf
 $ qemu-system-arm -M mps2-an505 -nographic \
     -semihosting-config enable=on,target=native -kernel hello.elf   # auf dem Cortex-M33 von QEMU ausführen
+$ typl -c hello.typl --target riscv32imac-unknown-none-elf
+$ qemu-system-riscv32 -M virt -bios none -nographic \
+    -semihosting-config enable=on,target=native -kernel hello.elf   # auf dem RISC-V von QEMU ausführen
 ```
 
-- Ein mit `install.sh` installiertes `typl` kann direkt verwendet werden. Für `cargo install` zuerst `rustup target add thumbv7em-none-eabihf thumbv8m.main-none-eabihf` ausführen und dann mit `--features embedded` installieren (`--features wasm,embedded` für beides). Mit einem Debug-Build von `typl` im Repository `scripts/build-embedded-runtime.sh` ausführen. Gelinkt wird mit dem Linker der rustup-Toolchain.
+- Ein mit `install.sh` installiertes `typl` kann direkt verwendet werden. Für `cargo install` zuerst `rustup target add thumbv7em-none-eabihf thumbv8m.main-none-eabihf riscv32imac-unknown-none-elf` ausführen und dann mit `--features embedded` installieren (`--features wasm,embedded` für beides). Mit einem Debug-Build von `typl` im Repository `scripts/build-embedded-runtime.sh` ausführen. Gelinkt wird mit dem Linker der rustup-Toolchain.
 - Den Speicher der Platine mit `--linker-script FILE` angeben. Die Datei hat die Form von `memory.x` aus `cortex-m-rt`: Adressen und Größen von FLASH und RAM. Eine Zeile wie `_typelisp_stack_size = 32K;` legt fest, wie viel des RAM der Stack belegt (ohne Angabe 64KiB); der Rest des RAM ist der Heap. Ohne die Option gilt die Aufteilung von QEMUs `mps2-an386` (für einen Cortex-M33 `mps2-an505`).
 
   ```
@@ -251,6 +254,23 @@ $ qemu-system-arm -M mps2-an505 -nographic \
     RAM : ORIGIN = 0x20000000, LENGTH = 128K
   }
   _typelisp_stack_size = 16K;
+  ```
+
+  Unter RISC-V ist ohne Angabe die Aufteilung von QEMUs `virt` voreingestellt. Eine angegebene Datei nennt außerdem, wie im `memory.x` von `riscv-rt`, mit `REGION_ALIAS` den Bereich, in den jede Art von Abschnitt kommt.
+
+  ```
+  MEMORY
+  {
+    FLASH : ORIGIN = 0x20010000, LENGTH = 4M - 64K
+    RAM : ORIGIN = 0x80000000, LENGTH = 16K
+  }
+  REGION_ALIAS("REGION_TEXT", FLASH);
+  REGION_ALIAS("REGION_RODATA", FLASH);
+  REGION_ALIAS("REGION_DATA", RAM);
+  REGION_ALIAS("REGION_BSS", RAM);
+  REGION_ALIAS("REGION_HEAP", RAM);
+  REGION_ALIAS("REGION_STACK", RAM);
+  _typelisp_stack_size = 4K;
   ```
 
 - `--board-functions` wählt, wer Ausgabe, Eingabe, Beenden und die Uhr (die Funktionen der Platine) bereitstellt.
@@ -280,7 +300,7 @@ $ qemu-system-arm -M mps2-an505 -nographic \
     (put-byte 104) (put-byte 105) (put-byte 10))                             ; "hi" und ein Zeilenumbruch
   ```
 
-- Die Funktion, die bei einem Interrupt aufgerufen wird, schreibt man als `defun` mit dem Attribut `#[interrupt(N)]` (Peripherie-Interrupt `N`) oder einem wie `#[exception(SysTick)]`. Ein Interrupt wird mit `(enable-interrupt N)` eingeschaltet. Ein Handler läuft sofort; nur wenn er mitten in der Arbeit der Laufzeit kommt, läuft er, nachdem diese fertig ist. Ein Handler kann nicht warten (`sleep` ist ein Kompilierfehler). Details stehen in Abschnitt 3.17 der [Syntaxreferenz](../reference/syntax.md).
+- Die Funktion, die bei einem Interrupt aufgerufen wird, schreibt man als `defun` mit dem Attribut `#[interrupt(N)]` (Peripherie-Interrupt `N`) oder einem wie `#[exception(SysTick)]`. Ein Interrupt wird mit `(enable-interrupt N)` eingeschaltet. Ein Handler läuft sofort; nur wenn er mitten in der Arbeit der Laufzeit kommt, läuft er, nachdem diese fertig ist. Ein Handler kann nicht warten (`sleep` ist ein Kompilierfehler). Details stehen in Abschnitt 3.17 der [Syntaxreferenz](../reference/syntax.md). Unter RISC-V ist `N` die Nummer des Interrupts in `mcause` (0 bis 31: 3 ist der Software-Interrupt, 7 der Timer, 11 die externen Interrupts), und `#[exception(NAME)]` kann nicht verwendet werden.
 
   ```lisp
   (use std::board::enable-interrupt)
@@ -294,7 +314,7 @@ $ qemu-system-arm -M mps2-an505 -nographic \
     (unsafe (volatile-write-u32 #xE000E200 (as u32 32))))   ; Interrupt 5 selbst auslösen (das Pending-Register des NVIC)
   ```
 
-- Die Laufzeitumgebung startet das Programm (Vektortabelle und Vorbereitung des RAM) und verwaltet den Speicher. Ein HardFault oder ein unbehandelter Interrupt beendet das Programm mit dem Exit-Code eines Panic (1).
+- Die Laufzeitumgebung startet das Programm (Vektortabelle und Vorbereitung des RAM) und verwaltet den Speicher. Ein HardFault (unter RISC-V eine Exception) oder ein unbehandelter Interrupt beendet das Programm mit dem Exit-Code eines Panic (1).
 - `throw`/`catch`/`panic`, Bignums, Brüche und Gleitkommazahlen sowie Tasks, Kanäle und `sleep` verhalten sich wie in der ausführbaren Datei. Tasks laufen nacheinander auf dem einen Kern. C-Funktionen (`defffi`) können verwendet werden.
 - Ein Programm, das etwas verwendet, das die Platine nicht hat, ist ein **Kompilierfehler**: zusätzlich zu dem, was in Abschnitt 3.7 nicht nutzbar ist, `eval` und `macroexpand`. Die Ortszeit ist unbekannt (wie in Abschnitt 3.6).
 - Die Cons-Arena beginnt mit 1024 Zellen und wächst bei Bedarf. `--heap-cells`, `--max-memory`, `--no-cons`, `-O<N>` und `--release` funktionieren unverändert.

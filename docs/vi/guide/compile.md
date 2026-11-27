@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ 1b5dc6ac828d8e4a95800a91218b5e9dffe83f98 -->
+<!-- translated-from: docs/ja/guide/compile.md @ be56bb8a477929497064b8f807acfd1755f2b35b -->
 # Biên dịch
 
 Nếu bạn không làm gì thêm, chương trình typelisp chạy trong trình thông dịch. Ngoài ra còn có hai
@@ -221,9 +221,9 @@ const code = await run({ write: (fd, text) => { /* ví dụ hiển thị lên tr
 - Giờ địa phương (`decode-universal-time` khi bỏ `zone`, v.v.) được tính theo múi giờ mà `Date` của JavaScript báo.
 - Ngoài những gì không dùng được ở mục 3.6, các thao tác với tệp và thư mục, biến môi trường, `(command-line-args)`, thư mục home và `dribble` là **lỗi biên dịch**. Đầu vào chuẩn được đọc là rỗng.
 
-### 3.8 Biên dịch cho vi điều khiển (Cortex-M)
+### 3.8 Biên dịch cho vi điều khiển (Cortex-M, RISC-V)
 
-Với `--target thumbv7em-none-eabihf`, `typl -c` tạo tệp thực thi (ELF) cho bo mạch Cortex-M4F hoặc M7 không có hệ điều hành. Nếu không có `-o`, tên là tên mã nguồn với `.typl` đổi thành `.elf`. Với `--target thumbv8m.main-none-eabihf`, là cho bo mạch Cortex-M33.
+Với `--target thumbv7em-none-eabihf`, `typl -c` tạo tệp thực thi (ELF) cho bo mạch Cortex-M4F hoặc M7 không có hệ điều hành. Nếu không có `-o`, tên là tên mã nguồn với `.typl` đổi thành `.elf`. Với `--target thumbv8m.main-none-eabihf`, là cho bo mạch Cortex-M33. Với `--target riscv32imac-unknown-none-elf`, là cho bo mạch có lõi RISC-V 32 bit (các phần mở rộng M, A và C).
 
 ```sh
 $ typl -c hello.typl --target thumbv7em-none-eabihf          # tạo hello.elf
@@ -232,9 +232,12 @@ $ qemu-system-arm -M mps2-an386 -nographic \
 $ typl -c hello.typl --target thumbv8m.main-none-eabihf
 $ qemu-system-arm -M mps2-an505 -nographic \
     -semihosting-config enable=on,target=native -kernel hello.elf   # chạy trên Cortex-M33 của QEMU
+$ typl -c hello.typl --target riscv32imac-unknown-none-elf
+$ qemu-system-riscv32 -M virt -bios none -nographic \
+    -semihosting-config enable=on,target=native -kernel hello.elf   # chạy trên RISC-V của QEMU
 ```
 
-- `typl` cài bằng `install.sh` dùng được ngay. Để cài bằng `cargo install`, chạy `rustup target add thumbv7em-none-eabihf thumbv8m.main-none-eabihf` rồi cài với `--features embedded` (`--features wasm,embedded` cho cả hai). Với bản build gỡ lỗi của `typl` trong kho mã, chạy `scripts/build-embedded-runtime.sh`. Việc liên kết dùng trình liên kết của toolchain rustup.
+- `typl` cài bằng `install.sh` dùng được ngay. Để cài bằng `cargo install`, chạy `rustup target add thumbv7em-none-eabihf thumbv8m.main-none-eabihf riscv32imac-unknown-none-elf` rồi cài với `--features embedded` (`--features wasm,embedded` cho cả hai). Với bản build gỡ lỗi của `typl` trong kho mã, chạy `scripts/build-embedded-runtime.sh`. Việc liên kết dùng trình liên kết của toolchain rustup.
 - Cho biết bộ nhớ của bo mạch bằng `--linker-script FILE`. Tệp được viết như `memory.x` của `cortex-m-rt`: địa chỉ và kích thước của FLASH và RAM. Một dòng như `_typelisp_stack_size = 32K;` đặt phần RAM mà ngăn xếp dùng (mặc định 64KiB); phần RAM còn lại là heap. Không có tùy chọn này thì dùng bố trí của `mps2-an386` (`mps2-an505` cho Cortex-M33) trong QEMU.
 
   ```
@@ -244,6 +247,23 @@ $ qemu-system-arm -M mps2-an505 -nographic \
     RAM : ORIGIN = 0x20000000, LENGTH = 128K
   }
   _typelisp_stack_size = 16K;
+  ```
+
+  Trên RISC-V, nếu không chỉ định thì dùng bố cục của `virt` trong QEMU. Tệp được chỉ định còn gọi tên bằng `REGION_ALIAS`, như `memory.x` của `riscv-rt`, vùng mà mỗi loại section được đặt vào.
+
+  ```
+  MEMORY
+  {
+    FLASH : ORIGIN = 0x20010000, LENGTH = 4M - 64K
+    RAM : ORIGIN = 0x80000000, LENGTH = 16K
+  }
+  REGION_ALIAS("REGION_TEXT", FLASH);
+  REGION_ALIAS("REGION_RODATA", FLASH);
+  REGION_ALIAS("REGION_DATA", RAM);
+  REGION_ALIAS("REGION_BSS", RAM);
+  REGION_ALIAS("REGION_HEAP", RAM);
+  REGION_ALIAS("REGION_STACK", RAM);
+  _typelisp_stack_size = 4K;
   ```
 
 - `--board-functions` chọn ai cung cấp đầu ra, đầu vào, kết thúc và đồng hồ (các hàm của bo mạch).
@@ -273,7 +293,7 @@ $ qemu-system-arm -M mps2-an505 -nographic \
     (put-byte 104) (put-byte 105) (put-byte 10))                             ; "hi" và xuống dòng
   ```
 
-- Viết hàm được gọi khi có ngắt đến dưới dạng `defun` có thuộc tính `#[interrupt(N)]` (ngắt ngoại vi `N`) hoặc như `#[exception(SysTick)]`. Bật ngắt bằng `(enable-interrupt N)`. Trình xử lý chạy ngay; chỉ khi ngắt đến giữa lúc runtime đang làm việc thì nó chạy sau khi công việc đó xong. Trình xử lý không thể chờ (`sleep` là lỗi biên dịch). Chi tiết ở mục 3.17 của [tài liệu tham khảo cú pháp](../reference/syntax.md).
+- Viết hàm được gọi khi có ngắt đến dưới dạng `defun` có thuộc tính `#[interrupt(N)]` (ngắt ngoại vi `N`) hoặc như `#[exception(SysTick)]`. Bật ngắt bằng `(enable-interrupt N)`. Trình xử lý chạy ngay; chỉ khi ngắt đến giữa lúc runtime đang làm việc thì nó chạy sau khi công việc đó xong. Trình xử lý không thể chờ (`sleep` là lỗi biên dịch). Chi tiết ở mục 3.17 của [tài liệu tham khảo cú pháp](../reference/syntax.md). Trên RISC-V, `N` là số hiệu của ngắt trong `mcause` (0 đến 31: 3 là ngắt phần mềm, 7 là bộ định thời, 11 là ngắt ngoài), và không dùng được `#[exception(NAME)]`.
 
   ```lisp
   (use std::board::enable-interrupt)
@@ -287,7 +307,7 @@ $ qemu-system-arm -M mps2-an505 -nographic \
     (unsafe (volatile-write-u32 #xE000E200 (as u32 32))))   ; tự gây ra ngắt 5 (thanh ghi chờ xử lý của NVIC)
   ```
 
-- Runtime khởi động chương trình (bảng vector và chuẩn bị RAM) và cấp phát bộ nhớ. Một HardFault hoặc ngắt không được xử lý kết thúc chương trình với mã thoát của panic (1).
+- Runtime khởi động chương trình (bảng vector và chuẩn bị RAM) và cấp phát bộ nhớ. Một HardFault (trên RISC-V là một ngoại lệ) hoặc ngắt không được xử lý kết thúc chương trình với mã thoát của panic (1).
 - `throw`/`catch`/`panic`, số lớn, phân số và số thực dấu phẩy động, cùng tác vụ, kênh và `sleep` hoạt động như trong tệp thực thi. Các tác vụ chạy lần lượt trên lõi duy nhất. Có thể dùng hàm C (`defffi`).
 - Chương trình dùng thứ bo mạch không có là **lỗi biên dịch**: ngoài những gì không dùng được ở mục 3.7, còn `eval` và `macroexpand`. Giờ địa phương không xác định (như ở mục 3.6).
 - Vùng cons bắt đầu với 1024 ô và lớn lên khi cần. `--heap-cells`, `--max-memory`, `--no-cons`, `-O<N>` và `--release` dùng như bình thường.

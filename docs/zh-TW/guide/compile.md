@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ 1b5dc6ac828d8e4a95800a91218b5e9dffe83f98 -->
+<!-- translated-from: docs/ja/guide/compile.md @ be56bb8a477929497064b8f807acfd1755f2b35b -->
 # 編譯
 
 不做任何處理的話，typelisp 程式由直譯器執行。此外還有兩種編譯為原生碼的方法，以及一種保存環境的方法。規格的詳情見
@@ -208,9 +208,9 @@ const code = await run({ write: (fd, text) => { /* 例如顯示在頁面上 */ }
 - 本地時間（省略 `zone` 的 `decode-universal-time` 等）依 JavaScript 的 `Date` 回報的時區求得。
 - 除了 3.6 節中不能使用的東西，檔案和目錄操作、環境變數、`(command-line-args)`、家目錄和 `dribble` 也是**編譯錯誤**。標準輸入讀作空。
 
-### 3.8 為微控制器（Cortex-M）編譯
+### 3.8 為微控制器（Cortex-M、RISC-V）編譯
 
-加上 `--target thumbv7em-none-eabihf`，`typl -c` 會為沒有作業系統的 Cortex-M4F、M7 開發板產生可執行檔（ELF）。省略 `-o` 時，名稱是把原始檔的 `.typl` 換成 `.elf`。加上 `--target thumbv8m.main-none-eabihf` 則是針對 Cortex-M33 開發板的。
+加上 `--target thumbv7em-none-eabihf`，`typl -c` 會為沒有作業系統的 Cortex-M4F、M7 開發板產生可執行檔（ELF）。省略 `-o` 時，名稱是把原始檔的 `.typl` 換成 `.elf`。加上 `--target thumbv8m.main-none-eabihf` 則是針對 Cortex-M33 開發板的。加上 `--target riscv32imac-unknown-none-elf` 則是給 32 位元 RISC-V（M、A、C 擴充）的開發板。
 
 ```sh
 $ typl -c hello.typl --target thumbv7em-none-eabihf          # 產生 hello.elf
@@ -219,9 +219,12 @@ $ qemu-system-arm -M mps2-an386 -nographic \
 $ typl -c hello.typl --target thumbv8m.main-none-eabihf
 $ qemu-system-arm -M mps2-an505 -nographic \
     -semihosting-config enable=on,target=native -kernel hello.elf   # 在 QEMU 的 Cortex-M33 上執行
+$ typl -c hello.typl --target riscv32imac-unknown-none-elf
+$ qemu-system-riscv32 -M virt -bios none -nographic \
+    -semihosting-config enable=on,target=native -kernel hello.elf   # 在 QEMU 的 RISC-V 上執行
 ```
 
-- 用 `install.sh` 安裝的 `typl` 可以直接使用。用 `cargo install` 安裝時，先執行 `rustup target add thumbv7em-none-eabihf thumbv8m.main-none-eabihf`，再加上 `--features embedded` 安裝（與 wasm 兩者都要則用 `--features wasm,embedded`）。使用儲存庫的除錯建置 `typl` 時，執行 `scripts/build-embedded-runtime.sh`。連結使用 rustup 工具鏈的連結器。
+- 用 `install.sh` 安裝的 `typl` 可以直接使用。用 `cargo install` 安裝時，先執行 `rustup target add thumbv7em-none-eabihf thumbv8m.main-none-eabihf riscv32imac-unknown-none-elf`，再加上 `--features embedded` 安裝（與 wasm 兩者都要則用 `--features wasm,embedded`）。使用儲存庫的除錯建置 `typl` 時，執行 `scripts/build-embedded-runtime.sh`。連結使用 rustup 工具鏈的連結器。
 - 用 `--linker-script FILE` 給出開發板的記憶體配置。寫法與 `cortex-m-rt` 的 `memory.x` 相同，寫 FLASH 和 RAM 的位址與大小。寫 `_typelisp_stack_size = 32K;` 這樣的一行，就是 RAM 中堆疊佔用的大小（不寫則為 64KiB）。RAM 的其餘部分是堆積。省略時使用 QEMU 的 `mps2-an386`（Cortex-M33 為 `mps2-an505`） 的配置。
 
   ```
@@ -231,6 +234,23 @@ $ qemu-system-arm -M mps2-an505 -nographic \
     RAM : ORIGIN = 0x20000000, LENGTH = 128K
   }
   _typelisp_stack_size = 16K;
+  ```
+
+  在 RISC-V 上，省略時使用 QEMU 的 `virt` 的配置。撰寫時與 `riscv-rt` 的 `memory.x` 相同，還要用 `REGION_ALIAS` 寫出各類區段所放的區域。
+
+  ```
+  MEMORY
+  {
+    FLASH : ORIGIN = 0x20010000, LENGTH = 4M - 64K
+    RAM : ORIGIN = 0x80000000, LENGTH = 16K
+  }
+  REGION_ALIAS("REGION_TEXT", FLASH);
+  REGION_ALIAS("REGION_RODATA", FLASH);
+  REGION_ALIAS("REGION_DATA", RAM);
+  REGION_ALIAS("REGION_BSS", RAM);
+  REGION_ALIAS("REGION_HEAP", RAM);
+  REGION_ALIAS("REGION_STACK", RAM);
+  _typelisp_stack_size = 4K;
   ```
 
 - 由誰提供輸出、輸入、結束和時鐘（開發板的函式），用 `--board-functions` 選擇。
@@ -260,7 +280,7 @@ $ qemu-system-arm -M mps2-an505 -nographic \
     (put-byte 104) (put-byte 105) (put-byte 10))                             ; "hi" 與換行
   ```
 
-- 中斷到來時被呼叫的函式，寫成帶有 `#[interrupt(N)]`（周邊中斷 `N`）或 `#[exception(SysTick)]` 這類屬性的 `defun`。中斷用 `(enable-interrupt N)` 啟用。處理程式當場執行，只有在執行時期處理途中到來時，才會在該處理結束後執行。處理程式中不能等待（`sleep` 是編譯錯誤）。詳見 [語法參考](../reference/syntax.md) 的 3.17 節。
+- 中斷到來時被呼叫的函式，寫成帶有 `#[interrupt(N)]`（周邊中斷 `N`）或 `#[exception(SysTick)]` 這類屬性的 `defun`。中斷用 `(enable-interrupt N)` 啟用。處理程式當場執行，只有在執行時期處理途中到來時，才會在該處理結束後執行。處理程式中不能等待（`sleep` 是編譯錯誤）。詳見 [語法參考](../reference/syntax.md) 的 3.17 節。在 RISC-V 上，`N` 是 `mcause` 中的中斷編號（0～31。3 是軟體中斷，7 是計時器，11 是外部中斷），不能使用 `#[exception(NAME)]`。
 
   ```lisp
   (use std::board::enable-interrupt)
@@ -274,7 +294,7 @@ $ qemu-system-arm -M mps2-an505 -nographic \
     (unsafe (volatile-write-u32 #xE000E200 (as u32 32))))   ; 自己引發中斷 5（NVIC 的擱置暫存器）
   ```
 
-- 啟動（向量表和 RAM 的準備）和記憶體配置由執行環境完成。發生 HardFault 或未處理的中斷時，以與 panic 相同的結束碼（1）結束。
+- 啟動（向量表和 RAM 的準備）和記憶體配置由執行環境完成。發生 HardFault（在 RISC-V 上為例外） 或未處理的中斷時，以與 panic 相同的結束碼（1）結束。
 - `throw`/`catch`/`panic`、bignum、ratio、浮點數，以及任務、通道和 `sleep` 的行為與可執行檔相同。任務在唯一的核心上依序執行。也可以使用 C 函式（`defffi`）。
 - 使用開發板沒有的東西的程式是**編譯錯誤**。除了 3.7 節中不能使用的東西，還不能使用 `eval` 和 `macroexpand`。本地時間未知（與 3.6 節相同）。
 - cons 區域從 1024 個單元開始，不夠時會成長。`--heap-cells`、`--max-memory`、`--no-cons`、`-O<N>`、`--release` 可以照常使用。

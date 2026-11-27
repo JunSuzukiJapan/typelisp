@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 1b5dc6ac828d8e4a95800a91218b5e9dffe83f98 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ be56bb8a477929497064b8f807acfd1755f2b35b -->
 # Référence de la syntaxe de typelisp
 
 typelisp est un Lisp à typage statique, écrit en S-expressions. Pour la liste des fonctions et méthodes intégrées,
@@ -1356,6 +1356,7 @@ Ce qu'un test affiche avec `print` va directement sur la sortie standard (ce n'e
 Dans un programme compilé pour un microcontrôleur (section 3.8 de [Compiler](../guide/compile.md)), ce sont les fonctions appelées quand une interruption arrive. `#[interrupt(N)]` fait d'une fonction le gestionnaire de l'interruption de périphérique `N` (de 0 à 239), et `#[exception(NAME)]` celui de l'exception du cœur `NAME`, parmi `NonMaskableInt`, `MemoryManagement`, `BusFault`, `UsageFault`, `SVCall`, `DebugMonitor`, `PendSV`, `SysTick` (`HardFault` appartient au runtime, qui termine le programme).
 
 - Pour l'Arduino Uno, la numérotation et l'activation diffèrent, et `#[exception(NAME)]` et `enable-interrupt` ne sont pas utilisables ([Compiler](../guide/compile.md), section 3.9). Ce qui est dit du runtime ci-dessous concerne le Cortex-M.
+- Sur RISC-V, `N` est le numéro de l'interruption dans `mcause` (de 0 à 31), et `#[exception(NAME)]` ne peut pas être utilisé. Ce qui est dit du runtime ci-dessous vaut aussi pour RISC-V.
 - Ils se posent sur un `defun` de premier niveau qui ne prend rien et renvoie `()` (pas de paramètres de type non plus). Une interruption a un gestionnaire, et une fonction gère une interruption.
 - Une interruption de périphérique n'arrive pas tant que `(enable-interrupt N)` ne l'a pas activée (`(disable-interrupt N)` l'arrête ; voir [Système](functions/system.md)). Une exception comme SysTick arrive dès que les registres sont réglés pour la lever.
 - Un gestionnaire s'exécute aussitôt, là où l'interruption est arrivée. Si elle arrive au milieu du travail du runtime (allocation, ramasse-miettes, sortie, changement de tâche, etc.), le gestionnaire s'exécute dès que ce travail est fini. Les gestionnaires ne s'interrompent pas entre eux.

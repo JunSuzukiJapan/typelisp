@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 1b5dc6ac828d8e4a95800a91218b5e9dffe83f98 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ be56bb8a477929497064b8f807acfd1755f2b35b -->
 # Referensi Sintaks typelisp
 
 typelisp adalah Lisp dengan tipe statis, ditulis dalam S-expression. Untuk daftar fungsi bawaan dan
@@ -1384,6 +1384,7 @@ Apa yang dicetak pengujian dengan `print` langsung masuk ke keluaran standar (ti
 Dalam program yang dikompilasi untuk mikrokontroler (bagian 3.8 dari [Kompilasi](../guide/compile.md)), inilah fungsi yang dipanggil saat interupsi datang. `#[interrupt(N)]` menjadikan fungsi penangan interupsi periferal `N` (0 sampai 239), dan `#[exception(NAME)]` penangan eksepsi inti `NAME`, salah satu dari `NonMaskableInt`, `MemoryManagement`, `BusFault`, `UsageFault`, `SVCall`, `DebugMonitor`, `PendSV`, `SysTick` (`HardFault` milik runtime, dan mengakhiri program).
 
 - Untuk Arduino Uno penomoran dan cara mengaktifkannya berbeda, dan `#[exception(NAME)]` serta `enable-interrupt` tidak dapat dipakai ([Kompilasi](../guide/compile.md), bagian 3.9). Yang disebut tentang runtime di bawah berlaku untuk Cortex-M.
+- Pada RISC-V, `N` adalah nomor interupsi di `mcause` (0 sampai 31), dan `#[exception(NAME)]` tidak dapat dipakai. Yang dikatakan di bawah tentang runtime berlaku juga untuk RISC-V.
 - Dipasang pada `defun` tingkat atas yang tidak menerima apa pun dan mengembalikan `()` (tanpa parameter tipe juga). Satu interupsi punya satu penangan, dan satu fungsi menangani satu interupsi.
 - Interupsi periferal tidak datang sampai `(enable-interrupt N)` mengaktifkannya (`(disable-interrupt N)` menghentikannya; lihat [Sistem](functions/system.md)). Eksepsi seperti SysTick datang begitu register diatur untuk memicunya.
 - Penangan berjalan saat itu juga, di tempat interupsi datang. Jika datang di tengah pekerjaan runtime (alokasi, pengumpulan sampah, keluaran, pergantian tugas, dan sebagainya), penangan berjalan begitu pekerjaan itu selesai. Penangan tidak saling menginterupsi.

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 1b5dc6ac828d8e4a95800a91218b5e9dffe83f98 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ be56bb8a477929497064b8f807acfd1755f2b35b -->
 # typelisp 語法參考
 
 typelisp 是一種靜態型別的 Lisp，語法採用 S 運算式。內建函式與方法的一覽見[內建函式](functions/README.md)，型別一覽見 [types.md](types.md)，
@@ -1057,6 +1057,7 @@ test result: FAILED. 1 passed; 1 failed; 0 filtered out
 在為微控制器編譯的程式中（[編譯](../guide/compile.md) 的 3.8 節），這裡寫的是中斷到來時被呼叫的函式。`#[interrupt(N)]` 使函式成為周邊中斷 `N`（0～239）的處理程式，`#[exception(NAME)]` 使其成為核心例外 `NAME` 的處理程式，`NAME` 是 `NonMaskableInt`, `MemoryManagement`, `BusFault`, `UsageFault`, `SVCall`, `DebugMonitor`, `PendSV`, `SysTick` 之一（`HardFault` 由執行時期負責，會結束程式）。
 
 - 面向 Arduino Uno 時，編號方式和啟用方法不同，且不能使用 `#[exception(NAME)]` 和 `enable-interrupt`（[編譯](../guide/compile.md) 3.9 節）。下面說明中涉及執行階段的內容是針對 Cortex-M 的。
+- 給 RISC-V 時，`N` 是 `mcause` 中的中斷編號（0～31），不能使用 `#[exception(NAME)]`。下面關於執行環境的說明對 RISC-V 同樣適用。
 - 附在不接受引數並回傳 `()` 的頂層 `defun` 上（也不能有型別參數）。一個中斷只有一個處理程式，一個函式也只處理一個中斷。
 - 周邊中斷在用 `(enable-interrupt N)` 啟用之前不會到來（用 `(disable-interrupt N)` 停止。參見 [系統](functions/system.md)）。SysTick 等例外只要把暫存器設為引發它就會到來。
 - 處理程式在中斷到來的地方立即執行。但若在執行時期的處理（配置、GC、輸出、工作切換等）途中到來，則等該處理結束後再執行。處理程式之間不會互相打斷。

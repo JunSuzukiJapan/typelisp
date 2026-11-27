@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ 1b5dc6ac828d8e4a95800a91218b5e9dffe83f98 -->
+<!-- translated-from: docs/ja/guide/compile.md @ be56bb8a477929497064b8f807acfd1755f2b35b -->
 # การคอมไพล์
 
 หากไม่ทำอะไรเพิ่ม โปรแกรม typelisp จะรันในอินเทอร์พรีเตอร์ นอกจากนี้ยังมีวิธีคอมไพล์เป็นโค้ดเนทีฟ
@@ -223,9 +223,9 @@ const code = await run({ write: (fd, text) => { /* เช่น แสดงบ�
 - เวลาท้องถิ่น (`decode-universal-time` ที่ละ `zone` เป็นต้น) คำนวณจากเขตเวลาที่ `Date` ของ JavaScript รายงาน
 - นอกจากสิ่งที่ใช้ไม่ได้ในหัวข้อ 3.6 แล้ว การจัดการไฟล์และไดเรกทอรี ตัวแปรสภาพแวดล้อม `(command-line-args)` ไดเรกทอรีหลัก และ `dribble` เป็น**ข้อผิดพลาดตอนคอมไพล์** อินพุตมาตรฐานถูกอ่านเป็นว่าง
 
-### 3.8 คอมไพล์สำหรับไมโครคอนโทรลเลอร์ (Cortex-M)
+### 3.8 คอมไพล์สำหรับไมโครคอนโทรลเลอร์ (Cortex-M, RISC-V)
 
-เมื่อใส่ `--target thumbv7em-none-eabihf` คำสั่ง `typl -c` จะสร้างไฟล์ปฏิบัติการ (ELF) สำหรับบอร์ด Cortex-M4F หรือ M7 ที่ไม่มีระบบปฏิบัติการ ถ้าไม่ใส่ `-o` ชื่อจะเป็นชื่อซอร์สที่เปลี่ยน `.typl` เป็น `.elf` ถ้าใช้ `--target thumbv8m.main-none-eabihf` จะเป็นสำหรับบอร์ด Cortex-M33
+เมื่อใส่ `--target thumbv7em-none-eabihf` คำสั่ง `typl -c` จะสร้างไฟล์ปฏิบัติการ (ELF) สำหรับบอร์ด Cortex-M4F หรือ M7 ที่ไม่มีระบบปฏิบัติการ ถ้าไม่ใส่ `-o` ชื่อจะเป็นชื่อซอร์สที่เปลี่ยน `.typl` เป็น `.elf` ถ้าใช้ `--target thumbv8m.main-none-eabihf` จะเป็นสำหรับบอร์ด Cortex-M33 ถ้าใส่ `--target riscv32imac-unknown-none-elf` จะเป็นสำหรับบอร์ดที่มีคอร์ RISC-V 32 บิต (ส่วนขยาย M, A และ C)
 
 ```sh
 $ typl -c hello.typl --target thumbv7em-none-eabihf          # สร้าง hello.elf
@@ -234,9 +234,12 @@ $ qemu-system-arm -M mps2-an386 -nographic \
 $ typl -c hello.typl --target thumbv8m.main-none-eabihf
 $ qemu-system-arm -M mps2-an505 -nographic \
     -semihosting-config enable=on,target=native -kernel hello.elf   # รันบน Cortex-M33 ของ QEMU
+$ typl -c hello.typl --target riscv32imac-unknown-none-elf
+$ qemu-system-riscv32 -M virt -bios none -nographic \
+    -semihosting-config enable=on,target=native -kernel hello.elf   # รันบน RISC-V ของ QEMU
 ```
 
-- `typl` ที่ติดตั้งด้วย `install.sh` ใช้ได้ทันที ถ้าติดตั้งด้วย `cargo install` ให้รัน `rustup target add thumbv7em-none-eabihf thumbv8m.main-none-eabihf` แล้วติดตั้งพร้อม `--features embedded` (ทั้งสองอย่างใช้ `--features wasm,embedded`) ถ้าใช้ `typl` ที่เป็นบิลด์ดีบักในรีโพสิทอรี ให้รัน `scripts/build-embedded-runtime.sh` การลิงก์ใช้ลิงเกอร์ของ toolchain ของ rustup
+- `typl` ที่ติดตั้งด้วย `install.sh` ใช้ได้ทันที ถ้าติดตั้งด้วย `cargo install` ให้รัน `rustup target add thumbv7em-none-eabihf thumbv8m.main-none-eabihf riscv32imac-unknown-none-elf` แล้วติดตั้งพร้อม `--features embedded` (ทั้งสองอย่างใช้ `--features wasm,embedded`) ถ้าใช้ `typl` ที่เป็นบิลด์ดีบักในรีโพสิทอรี ให้รัน `scripts/build-embedded-runtime.sh` การลิงก์ใช้ลิงเกอร์ของ toolchain ของ rustup
 - ระบุหน่วยความจำของบอร์ดด้วย `--linker-script FILE` เขียนแบบเดียวกับ `memory.x` ของ `cortex-m-rt` คือที่อยู่และขนาดของ FLASH และ RAM บรรทัดอย่าง `_typelisp_stack_size = 32K;` กำหนดว่าสแตกใช้ RAM เท่าใด (ถ้าไม่เขียนคือ 64KiB) ส่วนที่เหลือของ RAM คือฮีป ถ้าไม่ใส่ตัวเลือกนี้จะใช้การจัดวางของ `mps2-an386` (สำหรับ Cortex-M33 คือ `mps2-an505`) ใน QEMU
 
   ```
@@ -246,6 +249,23 @@ $ qemu-system-arm -M mps2-an505 -nographic \
     RAM : ORIGIN = 0x20000000, LENGTH = 128K
   }
   _typelisp_stack_size = 16K;
+  ```
+
+  บน RISC-V ถ้าไม่ระบุจะใช้การจัดวางของ `virt` ใน QEMU ไฟล์ที่ระบุยังต้องบอกด้วย `REGION_ALIAS` เหมือน `memory.x` ของ `riscv-rt` ว่าเซกชันแต่ละชนิดไปอยู่ในพื้นที่ใด
+
+  ```
+  MEMORY
+  {
+    FLASH : ORIGIN = 0x20010000, LENGTH = 4M - 64K
+    RAM : ORIGIN = 0x80000000, LENGTH = 16K
+  }
+  REGION_ALIAS("REGION_TEXT", FLASH);
+  REGION_ALIAS("REGION_RODATA", FLASH);
+  REGION_ALIAS("REGION_DATA", RAM);
+  REGION_ALIAS("REGION_BSS", RAM);
+  REGION_ALIAS("REGION_HEAP", RAM);
+  REGION_ALIAS("REGION_STACK", RAM);
+  _typelisp_stack_size = 4K;
   ```
 
 - `--board-functions` เลือกว่าใครให้เอาต์พุต อินพุต การจบโปรแกรม และนาฬิกา (ฟังก์ชันของบอร์ด)
@@ -275,7 +295,7 @@ $ qemu-system-arm -M mps2-an505 -nographic \
     (put-byte 104) (put-byte 105) (put-byte 10))                             ; "hi" และขึ้นบรรทัดใหม่
   ```
 
-- เขียนฟังก์ชันที่ถูกเรียกเมื่ออินเทอร์รัปต์มาถึงเป็น `defun` ที่มีแอตทริบิวต์ `#[interrupt(N)]` (อินเทอร์รัปต์ของอุปกรณ์ต่อพ่วง `N`) หรือแบบ `#[exception(SysTick)]` เปิดอินเทอร์รัปต์ด้วย `(enable-interrupt N)` ตัวจัดการทำงานทันที เฉพาะเมื่อมาระหว่างงานของรันไทม์เท่านั้นจึงทำงานหลังงานนั้นเสร็จ ตัวจัดการรอไม่ได้ (`sleep` เป็นข้อผิดพลาดตอนคอมไพล์) รายละเอียดอยู่ในหัวข้อ 3.17 ของ [ข้อมูลอ้างอิงไวยากรณ์](../reference/syntax.md)
+- เขียนฟังก์ชันที่ถูกเรียกเมื่ออินเทอร์รัปต์มาถึงเป็น `defun` ที่มีแอตทริบิวต์ `#[interrupt(N)]` (อินเทอร์รัปต์ของอุปกรณ์ต่อพ่วง `N`) หรือแบบ `#[exception(SysTick)]` เปิดอินเทอร์รัปต์ด้วย `(enable-interrupt N)` ตัวจัดการทำงานทันที เฉพาะเมื่อมาระหว่างงานของรันไทม์เท่านั้นจึงทำงานหลังงานนั้นเสร็จ ตัวจัดการรอไม่ได้ (`sleep` เป็นข้อผิดพลาดตอนคอมไพล์) รายละเอียดอยู่ในหัวข้อ 3.17 ของ [ข้อมูลอ้างอิงไวยากรณ์](../reference/syntax.md) บน RISC-V `N` คือหมายเลขของอินเทอร์รัปต์ใน `mcause` (0 ถึง 31: 3 คืออินเทอร์รัปต์ซอฟต์แวร์ 7 คือไทเมอร์ 11 คืออินเทอร์รัปต์ภายนอก) และใช้ `#[exception(NAME)]` ไม่ได้
 
   ```lisp
   (use std::board::enable-interrupt)
@@ -289,7 +309,7 @@ $ qemu-system-arm -M mps2-an505 -nographic \
     (unsafe (volatile-write-u32 #xE000E200 (as u32 32))))   ; ก่ออินเทอร์รัปต์ 5 เอง (รีจิสเตอร์ pending ของ NVIC)
   ```
 
-- รันไทม์เริ่มโปรแกรม (ตารางเวกเตอร์และการเตรียม RAM) และจัดสรรหน่วยความจำ เมื่อเกิด HardFault หรืออินเทอร์รัปต์ที่ไม่มีตัวจัดการ โปรแกรมจะจบด้วยรหัสออกเดียวกับ panic (1)
+- รันไทม์เริ่มโปรแกรม (ตารางเวกเตอร์และการเตรียม RAM) และจัดสรรหน่วยความจำ เมื่อเกิด HardFault (บน RISC-V คือเอกซ์เซปชัน) หรืออินเทอร์รัปต์ที่ไม่มีตัวจัดการ โปรแกรมจะจบด้วยรหัสออกเดียวกับ panic (1)
 - `throw`/`catch`/`panic` จำนวนเต็มขนาดใหญ่ เศษส่วน และทศนิยม รวมถึงงาน แชนเนล และ `sleep` ทำงานเหมือนในไฟล์ปฏิบัติการ งานรันสลับกันบนคอร์เดียว ใช้ฟังก์ชัน C (`defffi`) ได้
 - โปรแกรมที่ใช้สิ่งที่บอร์ดไม่มีเป็น**ข้อผิดพลาดตอนคอมไพล์** นอกจากสิ่งที่ใช้ไม่ได้ในหัวข้อ 3.7 แล้วยังมี `eval` และ `macroexpand` เวลาท้องถิ่นไม่ทราบ (เหมือนหัวข้อ 3.6)
 - อารีนาของ cons เริ่มที่ 1024 เซลล์และขยายเมื่อไม่พอ `--heap-cells`, `--max-memory`, `--no-cons`, `-O<N>` และ `--release` ใช้ได้ตามเดิม

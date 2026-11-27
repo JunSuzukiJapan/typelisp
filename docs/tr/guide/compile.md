@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ 1b5dc6ac828d8e4a95800a91218b5e9dffe83f98 -->
+<!-- translated-from: docs/ja/guide/compile.md @ be56bb8a477929497064b8f807acfd1755f2b35b -->
 # Derleme
 
 Başka bir şey yapmazsanız typelisp programları yorumlayıcıda çalışır. Buna ek olarak yerel koda
@@ -224,9 +224,9 @@ const code = await run({ write: (fd, text) => { /* örneğin sayfada göstermek 
 - Yerel saat (`zone` verilmeden `decode-universal-time` vb.), JavaScript'in `Date` nesnesinin bildirdiği saat dilimiyle hesaplanır.
 - Bölüm 3.6'da kullanılamayanlara ek olarak dosya ve dizin işlemleri, ortam değişkenleri, `(command-line-args)`, ev dizini ve `dribble` bir **derleme hatasıdır**. Standart girdi boş olarak okunur.
 
-### 3.8 Bir mikrodenetleyici (Cortex-M) için derlemek
+### 3.8 Bir mikrodenetleyici (Cortex-M, RISC-V) için derlemek
 
-`--target thumbv7em-none-eabihf` ile `typl -c`, işletim sistemi olmayan bir Cortex-M4F veya M7 kartı için çalıştırılabilir dosya (ELF) üretir. `-o` verilmezse adı, kaynağın `.typl` uzantısı `.elf` yapılarak verilir. `--target thumbv8m.main-none-eabihf` ile Cortex-M33 kartı içindir.
+`--target thumbv7em-none-eabihf` ile `typl -c`, işletim sistemi olmayan bir Cortex-M4F veya M7 kartı için çalıştırılabilir dosya (ELF) üretir. `-o` verilmezse adı, kaynağın `.typl` uzantısı `.elf` yapılarak verilir. `--target thumbv8m.main-none-eabihf` ile Cortex-M33 kartı içindir. `--target riscv32imac-unknown-none-elf` ile 32 bit RISC-V çekirdekli (M, A ve C uzantıları) bir kart içindir.
 
 ```sh
 $ typl -c hello.typl --target thumbv7em-none-eabihf          # hello.elf üretir
@@ -235,9 +235,12 @@ $ qemu-system-arm -M mps2-an386 -nographic \
 $ typl -c hello.typl --target thumbv8m.main-none-eabihf
 $ qemu-system-arm -M mps2-an505 -nographic \
     -semihosting-config enable=on,target=native -kernel hello.elf   # QEMU'nun Cortex-M33'ünde çalıştır
+$ typl -c hello.typl --target riscv32imac-unknown-none-elf
+$ qemu-system-riscv32 -M virt -bios none -nographic \
+    -semihosting-config enable=on,target=native -kernel hello.elf   # QEMU'nun RISC-V'ünde çalıştır
 ```
 
-- `install.sh` ile kurulan `typl` olduğu gibi kullanılabilir. `cargo install` ile kurmak için önce `rustup target add thumbv7em-none-eabihf thumbv8m.main-none-eabihf` çalıştırın, sonra `--features embedded` ile kurun (ikisi için `--features wasm,embedded`). Depodaki hata ayıklama derlemesi `typl` ile `scripts/build-embedded-runtime.sh` çalıştırın. Bağlama rustup araç zincirinin bağlayıcısını kullanır.
+- `install.sh` ile kurulan `typl` olduğu gibi kullanılabilir. `cargo install` ile kurmak için önce `rustup target add thumbv7em-none-eabihf thumbv8m.main-none-eabihf riscv32imac-unknown-none-elf` çalıştırın, sonra `--features embedded` ile kurun (ikisi için `--features wasm,embedded`). Depodaki hata ayıklama derlemesi `typl` ile `scripts/build-embedded-runtime.sh` çalıştırın. Bağlama rustup araç zincirinin bağlayıcısını kullanır.
 - Kartın belleğini `--linker-script FILE` ile verin. Dosya `cortex-m-rt`'nin `memory.x`'i gibi yazılır: FLASH ve RAM'in adresleri ve boyutları. `_typelisp_stack_size = 32K;` gibi bir satır RAM'in ne kadarını yığının (stack) alacağını belirler (verilmezse 64KiB); RAM'in geri kalanı heap'tir. Seçenek yoksa düzen QEMU'nun `mps2-an386` (Cortex-M33 için `mps2-an505`)'sınınkidir.
 
   ```
@@ -247,6 +250,23 @@ $ qemu-system-arm -M mps2-an505 -nographic \
     RAM : ORIGIN = 0x20000000, LENGTH = 128K
   }
   _typelisp_stack_size = 16K;
+  ```
+
+  RISC-V'de seçenek verilmezse QEMU'nun `virt` düzeni kullanılır. Verilen dosya ayrıca, `riscv-rt`'nin `memory.x`'inde olduğu gibi, her tür bölümün gideceği alanı `REGION_ALIAS` ile adlandırır.
+
+  ```
+  MEMORY
+  {
+    FLASH : ORIGIN = 0x20010000, LENGTH = 4M - 64K
+    RAM : ORIGIN = 0x80000000, LENGTH = 16K
+  }
+  REGION_ALIAS("REGION_TEXT", FLASH);
+  REGION_ALIAS("REGION_RODATA", FLASH);
+  REGION_ALIAS("REGION_DATA", RAM);
+  REGION_ALIAS("REGION_BSS", RAM);
+  REGION_ALIAS("REGION_HEAP", RAM);
+  REGION_ALIAS("REGION_STACK", RAM);
+  _typelisp_stack_size = 4K;
   ```
 
 - `--board-functions`, çıktıyı, girdiyi, bitirmeyi ve saati (kartın işlevlerini) kimin sağlayacağını seçer.
@@ -276,7 +296,7 @@ $ qemu-system-arm -M mps2-an505 -nographic \
     (put-byte 104) (put-byte 105) (put-byte 10))                             ; "hi" ve yeni satır
   ```
 
-- Bir kesme geldiğinde çağrılan fonksiyonu, `#[interrupt(N)]` (çevre birimi kesmesi `N`) ya da `#[exception(SysTick)]` gibi bir özniteliği olan bir `defun` olarak yazın. Bir kesmeyi `(enable-interrupt N)` ile etkinleştirin. İşleyici hemen çalışır; yalnızca çalışma zamanının işinin ortasında geldiğinde o iş bittikten sonra çalışır. Bir işleyici bekleyemez (`sleep` bir derleme hatasıdır). Ayrıntılar [sözdizimi başvurusu](../reference/syntax.md) bölüm 3.17'dedir.
+- Bir kesme geldiğinde çağrılan fonksiyonu, `#[interrupt(N)]` (çevre birimi kesmesi `N`) ya da `#[exception(SysTick)]` gibi bir özniteliği olan bir `defun` olarak yazın. Bir kesmeyi `(enable-interrupt N)` ile etkinleştirin. İşleyici hemen çalışır; yalnızca çalışma zamanının işinin ortasında geldiğinde o iş bittikten sonra çalışır. Bir işleyici bekleyemez (`sleep` bir derleme hatasıdır). Ayrıntılar [sözdizimi başvurusu](../reference/syntax.md) bölüm 3.17'dedir. RISC-V'de `N`, kesmenin `mcause` içindeki numarasıdır (0'dan 31'e: 3 yazılım kesmesi, 7 zamanlayıcı, 11 harici kesmeler) ve `#[exception(NAME)]` kullanılamaz.
 
   ```lisp
   (use std::board::enable-interrupt)
@@ -290,7 +310,7 @@ $ qemu-system-arm -M mps2-an505 -nographic \
     (unsafe (volatile-write-u32 #xE000E200 (as u32 32))))   ; kesme 5'i kendin tetikle (NVIC'nin bekleyen kesmeler yazmacı)
   ```
 
-- Çalışma zamanı programı başlatır (vektör tablosu ve RAM'in hazırlanması) ve belleği ayırır. Bir HardFault veya işlenmeyen bir kesme, programı bir panic'in çıkış koduyla (1) bitirir.
+- Çalışma zamanı programı başlatır (vektör tablosu ve RAM'in hazırlanması) ve belleği ayırır. Bir HardFault (RISC-V'de bir istisna) veya işlenmeyen bir kesme, programı bir panic'in çıkış koduyla (1) bitirir.
 - `throw`/`catch`/`panic`, büyük sayılar, kesirler ve kayan noktalı sayılar ile görevler, kanallar ve `sleep` çalıştırılabilir dosyadaki gibi davranır. Görevler tek çekirdekte sırayla çalışır. C işlevleri (`defffi`) kullanılabilir.
 - Kartta olmayan bir şeyi kullanan program bir **derleme hatasıdır**: Bölüm 3.7'de kullanılamayanlara ek olarak `eval` ve `macroexpand`. Yerel saat bilinmez (Bölüm 3.6'daki gibi).
 - Cons arenası 1024 hücreyle başlar ve gerektiğinde büyür. `--heap-cells`, `--max-memory`, `--no-cons`, `-O<N>` ve `--release` olduğu gibi çalışır.

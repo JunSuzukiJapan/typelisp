@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 1b5dc6ac828d8e4a95800a91218b5e9dffe83f98 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ be56bb8a477929497064b8f807acfd1755f2b35b -->
 # Syntaxreferenz von typelisp
 
 typelisp ist ein statisch typisiertes Lisp, geschrieben in S-Ausdrücken. Die Liste der eingebauten Funktionen
@@ -1378,6 +1378,7 @@ Was ein Test mit `print` ausgibt, geht direkt auf die Standardausgabe (es wird n
 In einem für einen Mikrocontroller kompilierten Programm (Abschnitt 3.8 von [Kompilieren](../guide/compile.md)) sind das die Funktionen, die aufgerufen werden, wenn ein Interrupt kommt. `#[interrupt(N)]` macht eine Funktion zum Handler des Peripherie-Interrupts `N` (0 bis 239), `#[exception(NAME)]` zum Handler der Core-Exception `NAME`, einer von `NonMaskableInt`, `MemoryManagement`, `BusFault`, `UsageFault`, `SVCall`, `DebugMonitor`, `PendSV`, `SysTick` (`HardFault` gehört der Laufzeit und beendet das Programm).
 
 - Für den Arduino Uno sind Nummerierung und Einschalten anders, und `#[exception(NAME)]` und `enable-interrupt` sind nicht verwendbar ([Kompilieren](../guide/compile.md), Abschnitt 3.9). Was unten über die Laufzeit steht, gilt für den Cortex-M.
+- Für RISC-V ist `N` die Nummer des Interrupts in `mcause` (0 bis 31), und `#[exception(NAME)]` kann nicht verwendet werden. Was unten über die Laufzeitumgebung gesagt wird, gilt auch für RISC-V.
 - Sie gehören an ein `defun` auf oberster Ebene, das nichts nimmt und `()` zurückgibt (auch keine Typparameter). Ein Interrupt hat einen Handler, und eine Funktion behandelt einen Interrupt.
 - Ein Peripherie-Interrupt kommt erst, wenn `(enable-interrupt N)` ihn einschaltet (`(disable-interrupt N)` stoppt ihn; siehe [System](functions/system.md)). Eine Exception wie SysTick kommt, sobald die Register so gesetzt sind, dass sie ausgelöst wird.
 - Ein Handler läuft sofort, dort, wo der Interrupt kam. Kommt er mitten in der Arbeit der Laufzeit (Allokation, Garbage Collection, Ausgabe, Taskwechsel usw.), läuft der Handler, sobald diese Arbeit fertig ist. Handler unterbrechen einander nicht.
