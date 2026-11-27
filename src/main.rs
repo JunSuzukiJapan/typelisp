@@ -33,7 +33,7 @@ Usage:
   typl [OPTIONS] FILE [ARGS...]                  run FILE; ARGS are its (command-line-args)
   typl [--lib-dir DIR] [-O<N>] -c SOURCE [-o OUTPUT] [--heap-cells N]
        [--max-memory SIZE] [--no-cons] [--target TARGET] [--linker-script FILE]
-       [--board-functions WHO] [--link FILE]
+       [--ram SIZE] [--board-functions WHO] [--link FILE]
                                                  compile SOURCE to an executable
   typl [OPTIONS] test [FILE.typl] [FILTER]       run the #[test] functions of the
                                                  project here (or of FILE) whose
@@ -71,6 +71,10 @@ Options:
                          RAM, as a memory.x (default: those of QEMU's
                          mps2-an386 for a Cortex-M4, mps2-an505 for an M33,
                          mps2-an385 for an M0+, virt for RISC-V)
+  --ram SIZE             after --target for a board, without --linker-script:
+                         the RAM for the data, the heap and the stack, in
+                         bytes (K, M or G may follow), in place of the default
+                         layout's; the stack takes at most a quarter of it
   --board-functions WHO  after --target for a board: who gives the board's
                          output, input, exit and clock: semihosting (QEMU or
                          a debugger; the default) or c (the board's
@@ -375,6 +379,19 @@ fn compile_command(flag: &str, args: &[String], heap_cells: Option<usize>) -> i3
             };
             options.linker_script = Some(PathBuf::from(v));
             board_only = Some("--linker-script");
+        } else if let Some(v) = flag_value(a, "--ram", &mut it) {
+            let Some(v) = v else {
+                eprintln!("--ram: needs the board's RAM in bytes (K, M or G may follow)");
+                return 1;
+            };
+            match parse_memory_size(v) {
+                Ok(bytes) => options.ram = Some(bytes),
+                Err(e) => {
+                    eprintln!("--ram: {}", e);
+                    return 1;
+                }
+            }
+            board_only = Some("--ram");
         } else if let Some(v) = flag_value(a, "--max-memory", &mut it) {
             let Some(v) = v else {
                 eprintln!("--max-memory: needs a size in bytes (K, M or G may follow)");
@@ -408,12 +425,16 @@ fn compile_command(flag: &str, args: &[String], heap_cells: Option<usize>) -> i3
         } else if source.is_none() && !a.starts_with('-') {
             source = Some(PathBuf::from(a));
         } else {
-            eprintln!("{}: unexpected argument `{}` (usage: typl {} SOURCE [-o OUTPUT] [--release] [-O<N>] [--max-memory SIZE] [--no-cons] [--target TARGET] [--linker-script FILE] [--board-functions WHO] [--link FILE])", flag, a, flag);
+            eprintln!("{}: unexpected argument `{}` (usage: typl {} SOURCE [-o OUTPUT] [--release] [-O<N>] [--max-memory SIZE] [--no-cons] [--target TARGET] [--linker-script FILE | --ram SIZE] [--board-functions WHO] [--link FILE])", flag, a, flag);
             return 1;
         }
     }
     if let Some(flag) = board_only.filter(|_| options.target.board().is_none()) {
         eprintln!("{}: only for a board (--target {})", flag, typelisp::compile::aot::Target::board_names());
+        return 1;
+    }
+    if options.ram.is_some() && options.linker_script.is_some() {
+        eprintln!("--ram: the linker script given with --linker-script says how much RAM the board has");
         return 1;
     }
     if !options.target.has_runtime() {
@@ -425,7 +446,7 @@ fn compile_command(flag: &str, args: &[String], heap_cells: Option<usize>) -> i3
         }
     }
     let Some(source) = source else {
-        eprintln!("{}: needs a source file (usage: typl {} SOURCE [-o OUTPUT] [--release] [-O<N>] [--max-memory SIZE] [--no-cons] [--target TARGET] [--linker-script FILE] [--board-functions WHO] [--link FILE])", flag, flag);
+        eprintln!("{}: needs a source file (usage: typl {} SOURCE [-o OUTPUT] [--release] [-O<N>] [--max-memory SIZE] [--no-cons] [--target TARGET] [--linker-script FILE | --ram SIZE] [--board-functions WHO] [--link FILE])", flag, flag);
         return 1;
     };
     let output = match output {

@@ -21,7 +21,7 @@ use inkwell::builder::Builder;
 use inkwell::OptimizationLevel;
 use inkwell::values::{FunctionValue, IntValue, PointerValue};
 
-use super::embedded::{beside_output, board_memory, for_board, run_linker, sections_of_their_own, write_object, Board, Core, BOARD_MAIN};
+use super::embedded::{beside_output, board_memory, for_board, run_linker, sections_of_their_own, write_object, Board, Core, Layout, BOARD_MAIN};
 use super::{board_linker, reach, BuildOptions};
 use crate::CompileTarget;
 
@@ -36,13 +36,7 @@ pub const ATMEGA328P: Board = Board {
     interrupts: (1, VECTORS - 1),
     exceptions: &[],
     qemu: ("qemu-system-avr", &["-M", "uno"]),
-    qemu_memory: "\
-MEMORY
-{
-  FLASH : ORIGIN = 0, LENGTH = 32K - 512
-  RAM : ORIGIN = 0x800100, LENGTH = 2K
-}
-",
+    qemu_memory: Layout { flash: Some((0x0, (32 << 10) - 512)), ram: (0x800100, 2 << 10), stack: None },
 };
 
 /// Where the sections go. The start-up code's parts run one into the next in

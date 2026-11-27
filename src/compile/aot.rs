@@ -311,6 +311,10 @@ pub struct BuildOptions {
     /// `memory.x`. `None` is the QEMU board that stands for the target's
     /// core ([`embedded::Board::qemu_memory`]).
     pub linker_script: Option<std::path::PathBuf>,
+    /// For a board without [`Self::linker_script`]: how many bytes of RAM
+    /// the data, the heap and the stack have (`--ram`), in place of the QEMU
+    /// board's ([`embedded::Layout::memory_x`]).
+    pub ram: Option<usize>,
     /// For a board: who gives the board's functions (`--board-functions`).
     pub board_functions: BoardFunctions,
     /// For a board: objects and static libraries to link the program with

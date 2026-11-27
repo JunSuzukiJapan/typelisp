@@ -48,6 +48,12 @@ pub fn limit() -> usize {
     LIMIT.load(Ordering::Relaxed)
 }
 
+/// The most there is to allocate, where that is known (a board's heap);
+/// `usize::MAX` where it is not.
+pub fn capacity() -> usize {
+    CAPACITY.load(Ordering::Relaxed)
+}
+
 /// Says there are `bytes` bytes to allocate from in all.
 pub fn set_capacity(bytes: usize) {
     CAPACITY.store(bytes, Ordering::Relaxed);

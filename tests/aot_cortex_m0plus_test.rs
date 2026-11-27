@@ -217,3 +217,42 @@ fn a_cortex_m0_runs_the_code() {
     assert_eq!(text(&out.stdout), "83810205\n", "stderr: {}", text(&out.stderr));
     assert_eq!(out.status.code(), Some(0));
 }
+
+/// `--ram`: the board's RAM is 16 KiB (a micro:bit's), at the default
+/// layout's address. The runtime starts its tables and its arena as small as
+/// that asks, and a program that prints and collects runs in it.
+#[test]
+fn a_board_with_little_ram_runs_a_program() {
+    let elf = built(
+        "m0_ram_16k",
+        r#"
+(defun build ((n int) (acc Option<Sexpr>)) Option<Sexpr>
+  (if (= n 0) acc (build (- n 1) (Some (Sexpr::Cons (Sexpr::Int n) acc)))))
+(defun main () int
+  (let ((k 0))
+    (dotimes (i 50) (when (is-some (build 10 ())) (setf k (+ k 1))))
+    (println "hello ~a" k))
+  3)
+"#,
+        "prog.elf",
+        &target_flags(TARGET, &["--ram", "16K"]),
+    );
+    let out = run_on(TARGET, &elf);
+    assert_eq!(text(&out.stdout), "hello 50\n", "stderr: {}", text(&out.stderr));
+    assert_eq!(out.status.code(), Some(3));
+}
+
+/// `--ram` is the size of the default layout's RAM: a linker script says its
+/// own, and a target that is not a board has no layout.
+#[test]
+fn ram_is_for_the_default_layout_of_a_board() {
+    let (out, _) = build("m0_ram_and_script", "(defun main () int 0)", "prog.elf", &target_flags(TARGET, &["--ram", "16K", "--linker-script", "memory.x"]));
+    assert_eq!(out.status.code(), Some(1));
+    assert!(text(&out.stderr).contains("--ram: the linker script given with --linker-script says how much RAM the board has"), "{}", text(&out.stderr));
+    let (out, _) = build("m0_ram_host", "(defun main () int 0)", "prog", &["--ram", "16K"]);
+    assert_eq!(out.status.code(), Some(1));
+    assert!(text(&out.stderr).contains("--ram: only for a board"), "{}", text(&out.stderr));
+    let (out, _) = build("m0_ram_bad", "(defun main () int 0)", "prog.elf", &target_flags(TARGET, &["--ram", "lots"]));
+    assert_eq!(out.status.code(), Some(1));
+    assert!(text(&out.stderr).contains("--ram: `lots` is not a positive size"), "{}", text(&out.stderr));
+}

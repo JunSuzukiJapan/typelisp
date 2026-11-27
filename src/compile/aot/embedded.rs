@@ -19,7 +19,8 @@
 //! gives the heap its memory and calls the module's `main` under the name
 //! [`BOARD_MAIN`]. Where flash and RAM are is the linker script `memory.x`,
 //! which that crate's `link.x` includes: the user's
-//! (`--linker-script`), or the QEMU board's ([`Board::qemu_memory`]). The rest of what the runtime asks
+//! (`--linker-script`), or the QEMU board's ([`Board::qemu_memory`], its RAM
+//! the size `--ram` gives). The rest of what the runtime asks
 //! of the board (`typelisp_host_*`) the runtime gives over semihosting, or
 //! the board as C functions in the objects and libraries the link is given
 //! (`--board-functions`, `--link`).
@@ -90,10 +91,54 @@ pub struct Board {
     /// The QEMU that emulates the core, and the arguments that pick the
     /// board (`-M ...`) before `-kernel`.
     pub qemu: (&'static str, &'static [&'static str]),
-    /// The QEMU board's memory, as a `memory.x`. The stack takes 1 MiB of
-    /// the RAM, so that recursion goes deep in the tests; the rest above
-    /// `.bss` is the heap.
-    pub qemu_memory: &'static str,
+    /// The QEMU board's memory, which a program is linked for when the user
+    /// gives no linker script.
+    pub qemu_memory: Layout,
+}
+
+/// Where a board's memory is: what its `memory.x` says ([`Layout::memory_x`]).
+pub struct Layout {
+    /// Where code goes, its origin and length, if not in RAM.
+    pub flash: Option<(u64, u64)>,
+    /// RAM, its origin and length.
+    pub ram: (u64, u64),
+    /// How much of the RAM the stack takes (`_typelisp_stack_size`), where the
+    /// runtime places it; the rest above `.bss` is the heap. On the QEMU
+    /// boards 1 MiB, so that recursion goes deep in the tests.
+    pub stack: Option<u64>,
+}
+
+impl Layout {
+    /// The layout as a `memory.x` for `core`, with `ram` bytes of RAM for
+    /// the data, the heap and the stack in place of the board's (`--ram`),
+    /// and then a stack of at most a quarter of it. On a board whose code is
+    /// in RAM too (no flash), the code keeps the rest of the board's RAM,
+    /// below the `ram` bytes at its end.
+    pub(super) fn memory_x(&self, core: Core, ram: Option<u64>) -> String {
+        let (board_origin, board_ram) = self.ram;
+        let (flash, ram_origin, ram_length) = match (self.flash, ram) {
+            (None, Some(ram)) if ram < board_ram => (Some((board_origin, board_ram - ram)), board_origin + board_ram - ram, ram),
+            (flash, ram) => (flash, board_origin, ram.unwrap_or(board_ram)),
+        };
+        let mut text = String::from("MEMORY\n{\n");
+        if let Some((origin, length)) = flash {
+            text.push_str(&format!("  FLASH : ORIGIN = {:#x}, LENGTH = {}\n", origin, length));
+        }
+        text.push_str(&format!("  RAM : ORIGIN = {:#x}, LENGTH = {}\n}}\n", ram_origin, ram_length));
+        // `riscv-rt` places each kind of section in the region its alias
+        // names: code and constants in flash where there is one.
+        if core == Core::Riscv32 {
+            let code = if flash.is_some() { "FLASH" } else { "RAM" };
+            for (region, memory) in [("TEXT", code), ("RODATA", code), ("DATA", "RAM"), ("BSS", "RAM"), ("HEAP", "RAM"), ("STACK", "RAM")] {
+                text.push_str(&format!("REGION_ALIAS(\"REGION_{}\", {});\n", region, memory));
+            }
+        }
+        if let Some(stack) = self.stack {
+            let stack = if ram.is_some() { stack.min(ram_length / 4) } else { stack };
+            text.push_str(&format!("_typelisp_stack_size = {};\n", stack));
+        }
+        text
+    }
 }
 
 impl Board {
@@ -178,14 +223,7 @@ pub const CORTEX_M0PLUS: Board = Board {
     interrupts: (0, 31),
     exceptions: &ARMV6M_EXCEPTIONS,
     qemu: ("qemu-system-arm", &["-M", "mps2-an385"]),
-    qemu_memory: "\
-MEMORY
-{
-  FLASH : ORIGIN = 0x00000000, LENGTH = 4M
-  RAM : ORIGIN = 0x20000000, LENGTH = 4M
-}
-_typelisp_stack_size = 1M;
-",
+    qemu_memory: Layout { flash: Some((0x0, 4 << 20)), ram: (0x20000000, 4 << 20), stack: Some(1 << 20) },
 };
 
 /// `thumbv7em-none-eabihf`, on QEMU's `mps2-an386` (Arm's AN386, a
@@ -199,14 +237,7 @@ pub const CORTEX_M4: Board = Board {
     interrupts: (0, 239),
     exceptions: &ARMV7M_EXCEPTIONS,
     qemu: ("qemu-system-arm", &["-M", "mps2-an386"]),
-    qemu_memory: "\
-MEMORY
-{
-  FLASH : ORIGIN = 0x00000000, LENGTH = 4M
-  RAM : ORIGIN = 0x20000000, LENGTH = 4M
-}
-_typelisp_stack_size = 1M;
-",
+    qemu_memory: Layout { flash: Some((0x0, 4 << 20)), ram: (0x20000000, 4 << 20), stack: Some(1 << 20) },
 };
 
 /// `thumbv8m.main-none-eabihf`, on QEMU's `mps2-an505` (Arm's AN505, a
@@ -221,14 +252,7 @@ pub const CORTEX_M33: Board = Board {
     interrupts: (0, 239),
     exceptions: &ARMV7M_EXCEPTIONS,
     qemu: ("qemu-system-arm", &["-M", "mps2-an505"]),
-    qemu_memory: "\
-MEMORY
-{
-  FLASH : ORIGIN = 0x10000000, LENGTH = 4M
-  RAM : ORIGIN = 0x38000000, LENGTH = 4M
-}
-_typelisp_stack_size = 1M;
-",
+    qemu_memory: Layout { flash: Some((0x10000000, 4 << 20)), ram: (0x38000000, 4 << 20), stack: Some(1 << 20) },
 };
 
 /// `riscv32imac-unknown-none-elf`, on QEMU's `virt` board with a 32-bit
@@ -244,19 +268,7 @@ pub const RISCV32_VIRT: Board = Board {
     interrupts: (0, 31),
     exceptions: &[],
     qemu: ("qemu-system-riscv32", &["-M", "virt", "-bios", "none"]),
-    qemu_memory: "\
-MEMORY
-{
-  RAM : ORIGIN = 0x80000000, LENGTH = 16M
-}
-REGION_ALIAS(\"REGION_TEXT\", RAM);
-REGION_ALIAS(\"REGION_RODATA\", RAM);
-REGION_ALIAS(\"REGION_DATA\", RAM);
-REGION_ALIAS(\"REGION_BSS\", RAM);
-REGION_ALIAS(\"REGION_HEAP\", RAM);
-REGION_ALIAS(\"REGION_STACK\", RAM);
-_typelisp_stack_size = 1M;
-",
+    qemu_memory: Layout { flash: None, ram: (0x80000000, 16 << 20), stack: Some(1 << 20) },
 };
 
 /// How much of RAM the stack takes when the user's `memory.x` does not say
@@ -264,7 +276,7 @@ _typelisp_stack_size = 1M;
 const DEFAULT_STACK: &str = "PROVIDE(_typelisp_stack_size = 64K);\n";
 
 /// What says where the board's flash and RAM are: the user's linker script
-/// (`--linker-script`), or the QEMU board's. Refuses a `--link` file that is
+/// (`--linker-script`), or the QEMU board's, with the RAM `--ram` gives. Refuses a `--link` file that is
 /// not there, before anything is emitted.
 pub(super) fn board_memory(board: &Board, options: &BuildOptions) -> Result<String, String> {
     for file in &options.link {
@@ -274,7 +286,7 @@ pub(super) fn board_memory(board: &Board, options: &BuildOptions) -> Result<Stri
     }
     match options.linker_script.as_deref() {
         Some(path) => fs::read_to_string(path).map_err(|e| format!("--linker-script: {}: {}", path.display(), e)),
-        None => Ok(board.qemu_memory.to_string()),
+        None => Ok(board.qemu_memory.memory_x(board.core, options.ram.map(|r| r as u64))),
     }
 }
 
@@ -448,6 +460,24 @@ pub(super) fn write_executable(
 
 #[cfg(test)]
 mod tests {
+    use super::{Core, CORTEX_M0PLUS, RISCV32_VIRT};
+
+    /// `--ram` gives the RAM's length, at the board's address, and a stack
+    /// of at most a quarter of it.
+    #[test]
+    fn ram_replaces_the_board_s_and_bounds_the_stack() {
+        let x = CORTEX_M0PLUS.qemu_memory.memory_x(Core::CortexM, Some(16 << 10));
+        assert!(x.contains("RAM : ORIGIN = 0x20000000, LENGTH = 16384\n"), "{}", x);
+        assert!(x.contains("_typelisp_stack_size = 4096;"), "{}", x);
+        let x = CORTEX_M0PLUS.qemu_memory.memory_x(Core::CortexM, None);
+        assert!(x.contains("LENGTH = 4194304\n") && x.contains("_typelisp_stack_size = 1048576;"), "{}", x);
+        let x = RISCV32_VIRT.qemu_memory.memory_x(Core::Riscv32, Some(64 << 10));
+        assert!(x.contains("FLASH : ORIGIN = 0x80000000, LENGTH = 16711680\n"), "{}", x);
+        assert!(x.contains("RAM : ORIGIN = 0x80ff0000, LENGTH = 65536\n") && x.contains("REGION_ALIAS(\"REGION_TEXT\", FLASH);"), "{}", x);
+        let x = RISCV32_VIRT.qemu_memory.memory_x(Core::Riscv32, None);
+        assert!(!x.contains("FLASH") && x.contains("REGION_ALIAS(\"REGION_TEXT\", RAM);"), "{}", x);
+    }
+
     /// Every exception a board lists is one an attribute can name.
     #[test]
     fn a_board_s_exceptions_are_named_by_the_attribute() {

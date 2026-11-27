@@ -405,3 +405,20 @@ _typelisp_stack_size = 256K;
     assert_eq!(text(&out.stdout), "from the data 2432902008176640000\n", "stderr: {}", text(&out.stderr));
     assert_eq!(out.status.code(), Some(9));
 }
+
+/// `--ram` for RISC-V: 64 KiB of the board's RAM, code and data alike.
+#[test]
+fn a_board_with_little_ram_runs_a_program() {
+    let elf = built(
+        "riscv_ram_64k",
+        r#"
+(defun fact ((n int)) int (if (= n 0) 1 (* n (fact (- n 1)))))
+(defun main () int (println "~a" (fact 20)) 5)
+"#,
+        "prog.elf",
+        &target_flags(TARGET, &["--ram", "64K"]),
+    );
+    let out = run_on(TARGET, &elf);
+    assert_eq!(text(&out.stdout), "2432902008176640000\n", "stderr: {}", text(&out.stderr));
+    assert_eq!(out.status.code(), Some(5));
+}

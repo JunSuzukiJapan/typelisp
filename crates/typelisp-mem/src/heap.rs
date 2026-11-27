@@ -422,7 +422,17 @@ impl Heap {
     /// list ending in `tail`. Returns the chunk and the new free-list head
     /// (`tail` itself when `len` is 0).
     fn alloc_chunk(len: usize, tail: *mut Cell) -> (Chunk, *mut Cell) {
-        let mut v: Vec<Cell> = Vec::with_capacity(len);
+        Self::try_alloc_chunk(len, tail).unwrap_or_else(|| {
+            let layout = core::alloc::Layout::array::<Cell>(len).expect("a chunk the address space holds");
+            alloc::alloc::handle_alloc_error(layout)
+        })
+    }
+
+    /// [`Self::alloc_chunk`], or `None` when there is not the memory for it:
+    /// what growing an arena asks, which can go on without growing.
+    fn try_alloc_chunk(len: usize, tail: *mut Cell) -> Option<(Chunk, *mut Cell)> {
+        let mut v: Vec<Cell> = Vec::new();
+        v.try_reserve_exact(len).ok()?;
         for _ in 0..len {
             v.push(Cell::blank());
         }
@@ -436,7 +446,20 @@ impl Heap {
             }
         }
 
-        (Chunk { base, len }, if len > 0 { base } else { tail })
+        Some((Chunk { base, len }, if len > 0 { base } else { tail }))
+    }
+
+    /// How many cells an arena that asks for `cells` starts or grows by:
+    /// where the memory there is to allocate from is known (a board's heap,
+    /// `memory::capacity`), no more than an eighth of it, so that a board
+    /// with little RAM has room for the rest — but at least a few.
+    pub fn fitting_cells(cells: usize) -> usize {
+        /// The fewest cells an arena starts or grows by.
+        const FEWEST: usize = 16;
+        match crate::memory::capacity() {
+            usize::MAX => cells,
+            room => cells.min((room / 8 / Self::cell_size()).max(FEWEST)),
+        }
     }
 
     /// Create a heap with `capacity` cons cells pre-allocated, growing by
@@ -448,6 +471,11 @@ impl Heap {
     /// allocation is at most `isize::MAX` bytes. A request past this is not
     /// memory the machine lacks but an arena no address space can hold, so a
     /// driver can refuse it by name instead of letting the allocation panic.
+    /// The bytes one cons cell of the arena takes.
+    pub const fn cell_size() -> usize {
+        core::mem::size_of::<Cell>()
+    }
+
     pub const fn max_capacity() -> usize {
         isize::MAX as usize / core::mem::size_of::<Cell>()
     }

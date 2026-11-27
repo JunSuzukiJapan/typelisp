@@ -181,9 +181,19 @@ Cortex-M と共通にしたもの:
 - **Arc とアトミックの入口を `typelisp_mem::sync` 1 つにした。** `sync::{Arc, Weak, atomic}` は、ポインタの比較交換があるターゲット（`cfg(target_has_atomic = "ptr")`）では `alloc::sync` と `core::sync::atomic`、無いターゲットでは `portable-atomic-util` と `portable-atomic`（feature `critical-section`、実装は `cortex-m` の `critical-section-single-core`）。ランタイムのクレートはどれもこれを通す（番人 `tests/sync_door_test.rs`）。`portable-atomic-util` の `Arc` は stable では unsized への強制変換ができないので、`Arc<dyn Trait>` は `Arc::from(Box::new(x) as Box<dyn Trait>)` で作る（今のところそういう箇所はボード向けのコードに無い）。直したのは名前の付け替えだけで、`typelisp-mem` の約 50 件のエラーはすべてこれだった。
 - **コアの違いはボードのデータ。** 割り込みは 32 本（`Board::interrupts`、ランタイムの NVIC の数は `typelisp-rt-embedded` の build.rs が三つ組から `cfg(armv6m)` を立てて選ぶ）。例外は NonMaskableInt・SVCall・PendSV・SysTick だけ（`Board::exceptions` を「例外があるか」から「どの例外があるか」に広げた。名前は `typelisp_front::EXCEPTIONS` の部分集合であることを単体テストで確かめる）。
 - **QEMU のボード。** QEMU に Cortex-M0+ のボードは無く、Cortex-M0 の `microbit` は RAM が 16 KiB で、ランタイムが動かない（ヒープの箱の表 `Slab` が最初に 1 塊 1024 スロット＝32 ビットで 16 KiB を取る。デバッグ版ランタイムの hello はフラッシュにも収まらない、リリース版は約 245 KiB）。既定の QEMU ボードは ARMv6-M の命令をそのまま実行する Cortex-M3 の `mps2-an385`（4 MiB/4 MiB）にした。実際の M0 のコアでは、ランタイムを使わないプログラムを `microbit` で動かして確かめる。ボード向けではループの安全地点・変数での割り算・`int` がランタイムを呼ぶので、そのテストはどれも使わない。
-- 残り: RAM が 16 KiB 程度のボードでランタイムを使うには、`Slab` の最初の塊を小さくする（塊を倍々にするなど）必要がある。`riscv32imc`（A 拡張なし）も同じ `sync` の仕組みで通る見込み（未着手）。
+- 残り: `riscv32imc`（A 拡張なし）も同じ `sync` の仕組みで通る見込み（未着手）。小さい RAM は次の節。
 
 テスト: `tests/aot_cortex_m0plus_test.rs`（ネイティブとの比較、語の幅、panic、NVIC の保留レジスタの割り込み、cons を作り続ける間の SysTick、範囲外の割り込みと無い例外の拒否、C のボードの関数、`microbit` での実行）、`size_of_test` と `llvm_size_of_test` の M0+。
+
+### 小さい RAM と `--ram`（済、2026-11-27）
+
+ユーザー指示「コマンドライン引数で RAM 容量を指定できるように」。
+
+- **`--ram SIZE`**: ボード向けで `--linker-script` を使わないとき、データ・ヒープ・スタックに使う RAM の大きさ。既定の配置（`Board::qemu_memory`、`Layout` というデータにした。`memory.x` は `Layout::memory_x` が作る）の RAM をその大きさにし、スタックは QEMU 用の 1 MiB とその 4 分の 1 の小さい方。フラッシュの無い配置（RISC-V の `virt`）では、ボードの RAM の終わりの SIZE バイトを RAM にし、残りをコードの領域（FLASH）にする。`--linker-script` と一緒ならエラー（RAM はスクリプトが決める）。
+- **ランタイムが最初に取る量はヒープに合わせる**（`--ram` でもスクリプトでも効くように、起動時に分かる実際のヒープ `memory::capacity` から）。`Heap::fitting_cells` が「分かっているヒープの 8 分の 1 まで、ただし 16 セル以上」の 1 か所の規則で、アリーナの初期量（`rt_heap_init`）と伸ばすときの最小の塊（`grow` の `MIN_CHUNK`）の両方に使う。アリーナを伸ばす確保は失敗してよい（`try_alloc_chunk`、伸ばせなければ集めた分で続けるか HeapExhausted）。
+- **`Slab`（箱などの表）の塊**: 1024 スロット固定（32 ビットで 16 KiB）だったのを、16 スロットから倍々に 1024 まで、その先は 1024 ずつにした。倍々を際限なく続けると、箱が数万あるプログラムが 512 KiB の連続領域を求め、断片化したボードのヒープで確保に失敗した（`collect_without_cons_test` の再帰）。
+- 測った結果（Cortex-M0+、QEMU）: リリース版ランタイムで hello は RAM 16 KiB で動く（`microbit` 実機相当でも動いた。フラッシュ約 245 KiB）。cons と GC を繰り返すプログラムは 32 KiB で動き 16 KiB では確保に失敗する。デバッグ版ランタイムはスタックを多く使う（4 KiB では足りないことがある）。
+- **見つけた穴（未修正）: スタックのあふれが検出されない。** スタックは RAM の上端にあり、あふれるとその下のヒープを黙って壊す（RAM 16 KiB・スタック 4 KiB のデバッグ版で、箱の表の空きスロットにゴミが入り `Vec` の drop で落ちた）。ヒープに余裕がある間は上の方が空いているので表に出ない。直し方の候補は、生成する配置でスタックを RAM の下端に置いてあふれたら fault にする（flip-link と同じ考え。RISC-V の `virt` は下が PCIe の窓で fault にならない）か、ランタイムの入口で SP を確かめるか。
 
 ### 段階 7: AVR の判断
 
