@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ 9d79920895a73472f673dcf2ab2711b73f666967 -->
+<!-- translated-from: docs/ja/guide/compile.md @ e26625a7799b8b032c3d524896a6b548c7c107af -->
 # Compiling
 
 Unless you do anything else, typelisp programs run in the interpreter. In addition there are two
@@ -281,7 +281,7 @@ $ qemu-system-riscv32 -M virt -bios none -nographic \
 
 - On a board with little RAM, instead of `--linker-script`, `--ram SIZE` (`16K` and so on) gives only how much RAM the data, the heap and the stack have. The default layout's RAM becomes that size, and the stack takes at most a quarter of it. On a board that keeps code in RAM too, such as RISC-V's `virt`, the rest of the board's RAM is where the code goes. What the runtime allocates at first is made small to fit the heap. It cannot be used with `--linker-script`.
 
-- A board has no operating system, so nothing stops a stack that overflows. The executable therefore checks, on entering each of the program's functions, how much stack is left; when too little is, it writes `stack overflow: the program needs more than the ... bytes of the stack` and ends with exit code 1. To give the stack more room, make `_typelisp_stack_size` in the `--linker-script` file, or `--ram`, larger. `--no-stack-check` leaves the check out (the executable is a little smaller and faster, but an overflowing stack may silently corrupt the heap). Either way, when the stack overflows inside the runtime and runs past its bottom, the report of the panic or HardFault that follows is preceded by `stack overflow: the stack has run past its bottom into the heap`.
+- A board has no operating system, so nothing stops a stack that overflows. The executable therefore checks, on entering each of the program's functions, how much stack is left; when too little is, it writes `stack overflow: the program needs more than the ... bytes of the stack` and ends with exit code 1. To give the stack more room, make `_typelisp_stack_size` in the `--linker-script` file, or `--ram`, larger. `--no-stack-check` leaves the check out (the executable is a little smaller and faster, but an overflowing stack may silently corrupt the heap). Either way, when the stack overflows inside the runtime and runs past its bottom, the report of the panic or HardFault that follows is preceded by `stack overflow: the stack has run past its bottom into the heap`. The same is written, and the exit code is 1, when the program runs to its end. Note that the depth of a recursion does not use the stack (the record of calls is kept on the heap, and a recursion that is too deep runs out of memory); what uses the stack deeply is the runtime's work.
 
 - `--board-functions` chooses who gives output, input, exiting and the clock (the board's functions).
   - `semihosting` (the default): given over semihosting, for running under QEMU (`-semihosting-config enable=on`) or a debugger.

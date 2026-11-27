@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ 9d79920895a73472f673dcf2ab2711b73f666967 -->
+<!-- translated-from: docs/ja/guide/compile.md @ e26625a7799b8b032c3d524896a6b548c7c107af -->
 # Biên dịch
 
 Nếu bạn không làm gì thêm, chương trình typelisp chạy trong trình thông dịch. Ngoài ra còn có hai
@@ -271,7 +271,7 @@ $ qemu-system-riscv32 -M virt -bios none -nographic \
 
 - Trên bo mạch ít RAM, thay cho `--linker-script`, `--ram SIZE` (`16K` v.v.) chỉ cho biết dữ liệu, heap và ngăn xếp có bao nhiêu RAM. RAM của bố cục mặc định có kích thước đó, và ngăn xếp dùng tối đa một phần tư. Trên bo mạch cũng đặt mã trong RAM, như `virt` của RISC-V, mã nằm ở phần RAM còn lại của bo mạch. Những gì runtime cấp phát lúc đầu được thu nhỏ cho vừa heap. Không dùng chung được với `--linker-script`.
 
-- Bo mạch không có hệ điều hành nên không gì chặn được stack bị tràn. Vì vậy tệp thực thi kiểm tra, khi vào mỗi hàm của chương trình, còn bao nhiêu stack; nếu còn quá ít, nó ghi `stack overflow: the program needs more than the ... bytes of the stack` và kết thúc với mã thoát 1. Muốn stack lớn hơn, hãy tăng `_typelisp_stack_size` trong tệp của `--linker-script`, hoặc `--ram`. `--no-stack-check` bỏ việc kiểm tra này (tệp nhỏ và nhanh hơn một chút, nhưng stack bị tràn có thể âm thầm làm hỏng heap). Trong cả hai trường hợp, khi stack tràn bên trong runtime và vượt qua đáy của nó, báo cáo panic hoặc HardFault theo sau sẽ được ghi sau dòng `stack overflow: the stack has run past its bottom into the heap`.
+- Bo mạch không có hệ điều hành nên không gì chặn được stack bị tràn. Vì vậy tệp thực thi kiểm tra, khi vào mỗi hàm của chương trình, còn bao nhiêu stack; nếu còn quá ít, nó ghi `stack overflow: the program needs more than the ... bytes of the stack` và kết thúc với mã thoát 1. Muốn stack lớn hơn, hãy tăng `_typelisp_stack_size` trong tệp của `--linker-script`, hoặc `--ram`. `--no-stack-check` bỏ việc kiểm tra này (tệp nhỏ và nhanh hơn một chút, nhưng stack bị tràn có thể âm thầm làm hỏng heap). Trong cả hai trường hợp, khi stack tràn bên trong runtime và vượt qua đáy của nó, báo cáo panic hoặc HardFault theo sau sẽ được ghi sau dòng `stack overflow: the stack has run past its bottom into the heap`. Điều tương tự cũng được ghi, với mã thoát 1, khi chương trình chạy đến cuối. Lưu ý rằng độ sâu của đệ quy không dùng stack (bản ghi các lời gọi nằm trên heap, và đệ quy quá sâu sẽ hết bộ nhớ); thứ dùng stack sâu là công việc của runtime.
 
 - `--board-functions` chọn ai cung cấp đầu ra, đầu vào, kết thúc và đồng hồ (các hàm của bo mạch).
   - `semihosting` (mặc định): qua semihosting, để chạy trong QEMU (`-semihosting-config enable=on`) hoặc trình gỡ lỗi.

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ 9d79920895a73472f673dcf2ab2711b73f666967 -->
+<!-- translated-from: docs/ja/guide/compile.md @ e26625a7799b8b032c3d524896a6b548c7c107af -->
 # 컴파일
 
 아무것도 하지 않으면 typelisp 프로그램은 인터프리터에서 실행된다. 그 밖에 네이티브 코드로 컴파일하는 방법이 두 가지,
@@ -266,7 +266,7 @@ $ qemu-system-riscv32 -M virt -bios none -nographic \
 
 - RAM이 작은 보드에서는 `--linker-script` 대신 `--ram SIZE`(`16K` 등)로 데이터・힙・스택에 쓰는 RAM의 크기만 지정할 수 있습니다. 기본 배치의 RAM이 그 크기가 되고, 스택은 그 4분의 1까지가 됩니다. RISC-V의 `virt`처럼 코드도 RAM에 두는 보드에서는 보드 RAM의 나머지가 코드의 영역이 됩니다. 런타임이 처음에 확보하는 양은 힙 크기에 맞춰 작아집니다. `--linker-script`와 함께는 쓸 수 없습니다.
 
-- 보드에는 운영체제가 없으므로 넘치는 스택을 막아 주는 것이 없습니다. 그래서 실행 파일은 프로그램의 각 함수에 들어갈 때마다 스택이 얼마나 남았는지 확인하고, 너무 적으면 `stack overflow: the program needs more than the ... bytes of the stack`를 쓰고 종료 코드 1로 끝납니다. 스택을 늘리려면 `--linker-script` 파일의 `_typelisp_stack_size`나 `--ram`을 크게 합니다. `--no-stack-check`를 붙이면 이 확인을 넣지 않습니다(조금 작고 빨라지지만, 넘친 스택이 힙을 조용히 망가뜨릴 수 있습니다). 어느 경우든 런타임 안에서 스택이 넘쳐 바닥을 넘어서면, 그 뒤의 panic이나 HardFault 보고 앞에 `stack overflow: the stack has run past its bottom into the heap`를 씁니다.
+- 보드에는 운영체제가 없으므로 넘치는 스택을 막아 주는 것이 없습니다. 그래서 실행 파일은 프로그램의 각 함수에 들어갈 때마다 스택이 얼마나 남았는지 확인하고, 너무 적으면 `stack overflow: the program needs more than the ... bytes of the stack`를 쓰고 종료 코드 1로 끝납니다. 스택을 늘리려면 `--linker-script` 파일의 `_typelisp_stack_size`나 `--ram`을 크게 합니다. `--no-stack-check`를 붙이면 이 확인을 넣지 않습니다(조금 작고 빨라지지만, 넘친 스택이 힙을 조용히 망가뜨릴 수 있습니다). 어느 경우든 런타임 안에서 스택이 넘쳐 바닥을 넘어서면, 그 뒤의 panic이나 HardFault 보고 앞에 `stack overflow: the stack has run past its bottom into the heap`를 씁니다. 프로그램이 끝까지 실행된 때에도 같은 내용을 쓰고 종료 코드 1로 끝납니다. 참고로 재귀의 깊이는 스택을 쓰지 않습니다(호출 기록은 힙에 두며, 너무 깊은 재귀는 메모리 부족이 됩니다). 스택을 깊이 쓰는 것은 런타임의 처리입니다.
 
 - 출력・입력・종료・시각(보드의 함수)을 누가 제공할지는 `--board-functions`로 고릅니다.
   - `semihosting`(기본값): semihosting으로 제공합니다. QEMU(`-semihosting-config enable=on`)나 디버거로 실행할 때 씁니다.
