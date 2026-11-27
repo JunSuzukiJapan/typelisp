@@ -9,130 +9,42 @@
 //! Needs the runtime for a board built (`scripts/build-embedded-runtime.sh`,
 //! which the test scripts run) and `qemu-system-arm` on `PATH`.
 //!
-//! Scratch files go under `target/aot-test-tmp/`, one name per test, for the
-//! reason `tests/compile_file_test.rs`'s module doc comment gives.
+//! The building and running is shared with the other boards' tests
+//! (`common::board`).
+
+mod common;
 
 use std::path::{Path, PathBuf};
-use std::process::{Command, Output, Stdio};
-use std::time::{Duration, Instant};
+use std::process::{Command, Output};
 
-const TYPL: &str = env!("CARGO_BIN_EXE_typl");
+use common::board::{build, built, run_on, same_as_native_on, scratch, target_flags, text};
 
 const TARGET: &str = "thumbv7em-none-eabihf";
 
-/// The Cortex-M33 board, and the QEMU board that stands for it.
-const M33: (&str, &str) = ("thumbv8m.main-none-eabihf", "mps2-an505");
-
-/// How long a program may run under QEMU before the test calls it hung: a
-/// board's program that faults or never ends would otherwise hold the test
-/// forever.
-const RUN_LIMIT: Duration = Duration::from_secs(120);
-
-fn scratch(name: &str) -> PathBuf {
-    let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("target").join("aot-test-tmp").join(name);
-    std::fs::create_dir_all(&dir).expect("failed to create the test scratch dir");
-    dir
-}
-
-/// Compiles `source` with `flags` after `-c`: `typl`'s own output, and the
-/// output's path.
-fn build(name: &str, source: &str, output: &str, flags: &[&str]) -> (Output, PathBuf) {
-    let dir = scratch(name);
-    let src = dir.join("prog.typl");
-    let out_path = dir.join(output);
-    std::fs::write(&src, source).unwrap();
-    let out = Command::new(TYPL)
-        .args(["-c", src.to_str().unwrap(), "-o", out_path.to_str().unwrap()])
-        .args(flags)
-        .output()
-        .expect("failed to start the typl binary");
-    (out, out_path)
-}
-
-fn built(name: &str, source: &str, output: &str, flags: &[&str]) -> PathBuf {
-    let (out, path) = build(name, source, output, flags);
-    assert!(out.status.success(), "typl -c {:?} failed: {}", flags, String::from_utf8_lossy(&out.stderr));
-    path
-}
+/// The Cortex-M33 board.
+const M33: &str = "thumbv8m.main-none-eabihf";
 
 /// The flags for the board, then `flags`.
 fn board_flags<'a>(flags: &[&'a str]) -> Vec<&'a str> {
     target_flags(TARGET, flags)
 }
 
-/// The flags for the board `target`, then `flags`.
-fn target_flags<'a>(target: &'a str, flags: &[&'a str]) -> Vec<&'a str> {
-    let mut all = vec!["--target", target];
-    all.extend_from_slice(flags);
-    all
-}
-
 /// Runs the executable at `elf` on QEMU's Cortex-M4 board, its standard
 /// output and error over semihosting.
 fn run_board(elf: &Path) -> Output {
-    run_on("mps2-an386", elf)
-}
-
-/// Runs the executable at `elf` on the QEMU board `machine`.
-fn run_on(machine: &str, elf: &Path) -> Output {
-    let child = Command::new("qemu-system-arm")
-        .args(["-M", machine, "-nographic", "-semihosting-config", "enable=on,target=native", "-kernel"])
-        .arg(elf)
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .expect("failed to start qemu-system-arm (the board's executables run under QEMU)");
-    let started = Instant::now();
-    let mut child = child;
-    loop {
-        if child.try_wait().expect("failed to wait for qemu-system-arm").is_some() {
-            return child.wait_with_output().expect("failed to read qemu-system-arm's output");
-        }
-        if started.elapsed() > RUN_LIMIT {
-            let _ = child.kill();
-            let out = child.wait_with_output().expect("failed to read qemu-system-arm's output");
-            panic!(
-                "{} still ran after {:?}; it printed: {}{}",
-                elf.display(),
-                RUN_LIMIT,
-                String::from_utf8_lossy(&out.stdout),
-                String::from_utf8_lossy(&out.stderr)
-            );
-        }
-        std::thread::sleep(Duration::from_millis(20));
-    }
-}
-
-fn text(b: &[u8]) -> String {
-    String::from_utf8_lossy(b).into_owned()
+    run_on(TARGET, elf)
 }
 
 /// What `source` prints and exits with on the board, after checking that
 /// the native executable prints and exits the same.
 fn same_as_native(name: &str, source: &str, flags: &[&str]) -> (String, String, Option<i32>) {
-    same_as_native_on((TARGET, "mps2-an386"), name, source, flags)
-}
-
-/// [`same_as_native`] on the board `target`, run on the QEMU board
-/// `machine`.
-fn same_as_native_on((target, machine): (&str, &str), name: &str, source: &str, flags: &[&str]) -> (String, String, Option<i32>) {
-    let elf = built(name, source, "prog.elf", &target_flags(target, flags));
-    let native = built(name, source, "prog", flags);
-    let b = run_on(machine, &elf);
-    let n = Command::new(&native).output().expect("failed to run the native executable");
-    assert_eq!(text(&b.stdout), text(&n.stdout), "stdout differs from the native executable's");
-    assert_eq!(text(&b.stderr), text(&n.stderr), "stderr differs from the native executable's");
-    assert_eq!(b.status.code(), n.status.code(), "exit code differs from the native executable's");
-    (text(&b.stdout), text(&b.stderr), b.status.code())
+    same_as_native_on(TARGET, name, source, flags)
 }
 
 /// What `typl -c --target thumbv7em-none-eabihf` said when it refused
 /// `source`.
 fn refused(name: &str, source: &str) -> String {
-    let (out, _) = build(name, source, "prog.elf", &board_flags(&[]));
-    assert_eq!(out.status.code(), Some(1), "typl -c built it: {}", text(&out.stdout));
-    text(&out.stderr)
+    common::board::refused_on(TARGET, name, source)
 }
 
 #[test]
@@ -453,9 +365,9 @@ fn a_cortex_m33_handles_an_interrupt() {
   (println "after"))
 "#,
         "prog.elf",
-        &target_flags(M33.0, &[]),
+        &target_flags(M33, &[]),
     );
-    let out = run_on(M33.1, &elf);
+    let out = run_on(M33, &elf);
     assert_eq!(text(&out.stdout), "handled\nafter\n", "stderr: {}", text(&out.stderr));
     assert_eq!(out.status.code(), Some(0));
 }
@@ -680,27 +592,14 @@ define void @typelisp_host_sleep_us(i64 %us) {
 }
 "#;
 
-/// The object [`BOARD_FUNCTIONS_IR`] compiles to, by the `llc` of the LLVM
-/// typl is built with.
+/// The object [`BOARD_FUNCTIONS_IR`] compiles to.
 fn board_functions_object(dir: &Path) -> PathBuf {
     board_object(dir, BOARD_FUNCTIONS_IR)
 }
 
-/// The Cortex-M4 object the LLVM IR `ir` compiles to, by the `llc` of the
-/// LLVM typl is built with.
+/// The Cortex-M4 object the LLVM IR `ir` compiles to.
 fn board_object(dir: &Path, ir_text: &str) -> PathBuf {
-    let prefix = std::env::var("LLVM_SYS_221_PREFIX").expect("LLVM_SYS_221_PREFIX names the LLVM typl is built with");
-    let ir = dir.join("board.ll");
-    let object = dir.join("board.o");
-    std::fs::write(&ir, ir_text).unwrap();
-    let out = Command::new(Path::new(&prefix).join("bin").join("llc"))
-        .args(["-mcpu=cortex-m4", "-filetype=obj", "-o"])
-        .arg(&object)
-        .arg(&ir)
-        .output()
-        .expect("failed to start llc");
-    assert!(out.status.success(), "llc failed: {}", text(&out.stderr));
-    object
+    common::board::board_object(dir, ir_text, &["-mcpu=cortex-m4"])
 }
 
 /// The board's functions given as C functions (`--board-functions c`,

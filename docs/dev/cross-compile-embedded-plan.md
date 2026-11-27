@@ -157,7 +157,22 @@ release のランタイムでの測定（上と同じ hello）: `__text` 1,040,3
 
 ### Cortex-M33（済、2026-11-23）
 
-`thumbv8m.main-none-eabihf`（`Target::Thumbv8mMain`）。ランタイムはそのまま通った。ボードごとの違い（LLVM の CPU 名、既定のメモリ配置、QEMU のボード）は `aot/embedded.rs` の `Board` にまとめ、`Target::board()` で引く。QEMU は `mps2-an505`。コアは secure で起動するので、既定の配置は secure 側の番地（コード 0x10000000、RAM 0x38000000、各 4 MiB）。同梱（`build.rs` の `BOARD_TRIPLES`、環境変数は三つ組ごと）、`scripts/build-embedded-runtime.sh`、CI、配布物の確認も両方に。
+`thumbv8m.main-none-eabihf`（`Target::Thumbv8mMain`）。ランタイムはそのまま通った。ボードごとの違い（LLVM の CPU 名、既定のメモリ配置、QEMU のボード）は `aot/embedded.rs` の `Board` にまとめ、`Target::board()` で引く。QEMU は `mps2-an505`。コアは secure で起動するので、既定の配置は secure 側の番地（コード 0x10000000、RAM 0x38000000、各 4 MiB）。同梱（今は `build.rs` の `BOARDS`、下の RISC-V の節を参照）、`scripts/build-embedded-runtime.sh`、CI、配布物の確認も両方に。
+
+### RISC-V 32bit（済、2026-11-27）
+
+`riscv32imac-unknown-none-elf`（`Target::Riscv32imac`）。A 拡張の無い `riscv32imc` は Cortex-M0+ と同じく比較交換のアトミックが無いので対象にしていない。QEMU は `qemu-system-riscv32 -M virt -bios none`（RAM 0x80000000 から 16 MiB、コードもデータもそこに置く）。浮動小数は F 拡張なしの ilp32（`compiler_builtins` のソフトウェア浮動小数）。
+
+Cortex-M と共通にしたもの:
+
+- **ボードはデータ。** `aot/embedded.rs` の `Board` に、コアの系統（`Core`：LLVM のバックエンドの登録）、LLVM の三つ組・CPU・拡張、`#[interrupt(N)]` で書ける番号の範囲、`#[exception(NAME)]` があるか、QEMU の起動（プログラムと `-M` などの引数）を持たせた。ターゲットマシンの作成（`Board::target_machine`）、割り込み番号の検査（`Board::handled`、AVR の `interrupt_number` を置き換えた）、メモリ配置の読み込み（`board_memory`）、モジュールの準備（`for_board`）、作業フォルダ（`beside_output`）、オブジェクトの書き出し（`write_object`）、リンカの起動（`run_linker`）は AVR も含めて全ボードで共通。
+- **ランタイムはコア共通部分とコアごとの部分に分けた。** `typelisp-rt-embedded` の `start.rs`（ヒープ、`typelisp_board_start`、処理されない割り込みでの終了、`die`）が共通で、`cortex_m.rs`（`cortex-m-rt` の入口、HardFault、`DefaultHandler`、NVIC）と `riscv.rs`（`riscv-rt` の入口、`_dispatch_core_interrupt`・`_dispatch_exception`、`mie`）がコアごと。依存は `cfg(target_arch)` で分ける。どちらの起動クレートも `.bss` の終わりを `__sheap`、スタックの上端を `_stack_start` と呼ぶので、共通部分はそのまま使える。
+- **割り込みの番号付けは Cortex-M のものに揃えた。** ランタイム（`typelisp_rt::interrupt`）の表は「例外 0〜15、割り込み `n` は 16 + `n`」のまま。RISC-V の割り込み `n` は `mcause` の割り込み番号（3 ソフトウェア、7 タイマー、11 外部）で、`riscv.rs` が `16 + n` で渡す。コアが持つ割り込みの数は `Controller::interrupts`（Cortex-M 240、RISC-V 32）で、`enable-interrupt` の範囲検査に使う。RISC-V には Cortex-M の名前の例外が無いので `#[exception(NAME)]` はコンパイル時に断る。RISC-V の例外（不正な番地・命令）は HardFault と同じく panic の終了コードで終わる。`typelisp_board_start` が `mstatus.MIE` を立てる（`mie` は 0 のままなので、`enable-interrupt` するまで何も来ない）。
+- **semihosting は命令だけがコアごと。** `typelisp-rt-semihosting` は `cortex-m-semihosting` をやめ、呼び出しの命令（Arm は `bkpt 0xab`、RISC-V は圧縮しない `slli x0,x0,0x1f; ebreak; srai x0,x0,7`）だけを `call` モジュールにコアごとに書いた。ロックは `critical-section`（実装は各コアのクレートが与える）。
+- **同梱は表を生成する。** `build.rs` の `BOARDS`（三つ組と、`link.x` を書く起動クレートの名前）から `$OUT_DIR/bundled_boards.rs` を作り、`aot/archive.rs` がそれを `include!` する。三つ組ごとに環境変数と `match` の腕を手で足す必要は無くなった。`scripts/build-embedded-runtime.sh` も三つ組から起動クレートを選ぶ。
+- **テストの QEMU の起動は 1 か所。** `tests/common/board.rs` の `on_board`/`run_on` が `Target::board()` の `qemu` から起動する。`aot_embedded_test`、`size_of_test`、`llvm_size_of_test`、`collect_without_cons_test` もこれを使う。
+
+テスト: `tests/aot_riscv32_test.rs`（ネイティブとの比較、語の幅、panic、CLINT のソフトウェア割り込みとタイマー割り込み（cons を作り続ける間）、範囲外の割り込み番号と例外の拒否、ファイル操作の拒否、16550 UART の volatile、C のボードの関数、ILP32 の `c-long` と構造体、ランタイムを使わないプログラム）。幅の検査（`size_of_test`、`llvm_size_of_test`）と GC（`collect_without_cons_test`）にも RISC-V を足した。
 
 ### Cortex-M0+（未着手）
 

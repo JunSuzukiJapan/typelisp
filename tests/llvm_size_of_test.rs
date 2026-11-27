@@ -12,6 +12,7 @@ mod common;
 #[allow(dead_code)]
 mod llvm_sizes;
 
+use common::board::on_board;
 use common::{eval_err, eval_ok_compiled, eval_string_compiled};
 use typelisp::Value;
 use llvm_sizes::{Machine, Program, HOST, THIRTY_TWO};
@@ -77,9 +78,14 @@ fn every_width_in_an_executable() {
 #[test]
 fn every_width_on_a_cortex_m() {
     each_level("llvm_sizes_board", &THIRTY_TWO, &["--target", "thumbv7em-none-eabihf"], ".elf", |elf| {
-        let mut qemu = Command::new("qemu-system-arm");
-        qemu.args(["-M", "mps2-an386", "-nographic", "-semihosting-config", "enable=on,target=native", "-kernel"]).arg(elf);
-        qemu
+        on_board("thumbv7em-none-eabihf", &elf)
+    });
+}
+
+#[test]
+fn every_width_on_a_riscv32() {
+    each_level("llvm_sizes_riscv32", &THIRTY_TWO, &["--target", "riscv32imac-unknown-none-elf"], ".elf", |elf| {
+        on_board("riscv32imac-unknown-none-elf", &elf)
     });
 }
 

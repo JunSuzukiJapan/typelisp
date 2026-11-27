@@ -7,6 +7,9 @@
 //! carries it; a board that gives the functions as C functions links that
 //! one instead.
 //!
+//! The calls are the same on every core ([`semihosting`]); only the
+//! instruction that makes one is the core's ([`call`]).
+//!
 //! Only for a target without an operating system (`target_os = "none"`)
 //! does the crate have anything in it; built for any other (the host, when
 //! the whole workspace is built), it is an empty library with std.
@@ -16,14 +19,101 @@
 #[cfg(target_os = "none")]
 extern crate typelisp_rt_embedded;
 
+/// The instruction that asks the host: what the semihosting specification
+/// gives each core, the operation in the first argument register and the
+/// address of its arguments (or the one argument) in the second, the answer
+/// in the first.
+#[cfg(target_os = "none")]
+mod call {
+    use core::arch::asm;
+
+    /// Asks the host for operation `op` with `arg`.
+    ///
+    /// # Safety
+    ///
+    /// `arg` must be what `op` reads: the address of the words it takes,
+    /// alive while the call lasts, or the one word.
+    #[cfg(target_arch = "arm")]
+    pub(crate) unsafe fn syscall1(op: usize, arg: usize) -> usize {
+        let mut r0 = op;
+        // SAFETY: the caller's; the host reads only what `op` names.
+        unsafe { asm!("bkpt #0xab", inout("r0") r0, in("r1") arg, options(nostack, preserves_flags)) };
+        r0
+    }
+
+    /// Asks the host for operation `op` with `arg`: the three instructions
+    /// in a row, uncompressed, that tell a semihosting call from a
+    /// breakpoint, aligned so that no page boundary falls between them.
+    ///
+    /// # Safety
+    ///
+    /// As for an Arm core.
+    #[cfg(target_arch = "riscv32")]
+    pub(crate) unsafe fn syscall1(op: usize, arg: usize) -> usize {
+        let mut a0 = op;
+        // SAFETY: the caller's; the host reads only what `op` names.
+        unsafe {
+            asm!(
+                ".balign 16",
+                ".option push",
+                ".option norvc",
+                "slli x0, x0, 0x1f",
+                "ebreak",
+                "srai x0, x0, 0x7",
+                ".option pop",
+                inout("a0") a0,
+                in("a1") arg,
+                options(nostack, preserves_flags),
+            )
+        };
+        a0
+    }
+
+    /// Asks the host for operation `op` with the words `args`.
+    ///
+    /// # Safety
+    ///
+    /// `args` must be the words `op` reads.
+    pub(crate) unsafe fn syscall(op: usize, args: &[usize]) -> usize {
+        // SAFETY: the caller's; `args` lives while the call lasts.
+        unsafe { syscall1(op, args.as_ptr() as usize) }
+    }
+
+    /// Waits for an interrupt, which a host that has ended the program never
+    /// gives.
+    pub(crate) fn wait() {
+        // SAFETY: stops the core until an interrupt.
+        unsafe { asm!("wfi", options(nomem, nostack, preserves_flags)) }
+    }
+}
+
+/// The operations, as the semihosting specification numbers them.
+#[cfg(target_os = "none")]
+mod nr {
+    pub(crate) const OPEN: usize = 0x01;
+    pub(crate) const WRITE: usize = 0x05;
+    pub(crate) const READ: usize = 0x06;
+    pub(crate) const TIME: usize = 0x11;
+    pub(crate) const ELAPSED: usize = 0x30;
+    pub(crate) const TICKFREQ: usize = 0x31;
+
+    /// `SYS_OPEN`'s modes.
+    pub(crate) mod open {
+        pub(crate) const R: usize = 0;
+        pub(crate) const W_TRUNC: usize = 4;
+        pub(crate) const W_APPEND: usize = 8;
+    }
+}
+
 #[cfg(target_os = "none")]
 mod semihosting {
     use core::cell::Cell;
     use core::sync::atomic::{AtomicUsize, Ordering};
 
-    use cortex_m::interrupt::{self, Mutex};
+    use critical_section::Mutex;
 
-    use cortex_m_semihosting::{nr, syscall, syscall1};
+    use crate::call::{syscall, syscall1};
+    use crate::nr;
 
     /// `SYS_EXIT_EXTENDED`: ends with an exit code, where `SYS_EXIT` on a
     /// 32-bit core can say only success or failure.
@@ -96,7 +186,7 @@ mod semihosting {
         unsafe { syscall(EXIT_EXTENDED, &[APPLICATION_EXIT, code as usize]) };
         // A host that answers semihosting does not come back from it.
         loop {
-            cortex_m::asm::wfi();
+            crate::call::wait();
         }
     }
 
@@ -124,7 +214,7 @@ mod semihosting {
     #[no_mangle]
     extern "C" fn typelisp_host_unix_us() -> i64 {
         let now = typelisp_host_now_us();
-        let (unix, clock) = interrupt::free(|cs| {
+        let (unix, clock) = critical_section::with(|cs| {
             let base = UNIX_BASE.borrow(cs);
             if let Some(known) = base.get() {
                 return known;

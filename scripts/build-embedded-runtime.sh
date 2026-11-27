@@ -11,9 +11,11 @@
 #                                QEMU and a debugger answer
 #                                (crates/typelisp-rt-semihosting,
 #                                `--board-functions semihosting`)
-#   link.x                     cortex-m-rt's linker script, which places the
-#                              vector table and the sections in the memory
-#                              that `memory.x` describes
+#   link.x                     the core's startup crate's linker script
+#                              (cortex-m-rt's, riscv-rt's), which places the
+#                              entry, the vector table or trap entry and the
+#                              sections in the memory that `memory.x`
+#                              describes
 #   ld.lld                     the linker (rust-lld) of the Rust toolchain
 #                              that built it
 #
@@ -24,7 +26,7 @@
 #   scripts/build-embedded-runtime.sh release    # the release profile
 #
 # Needs a rustup toolchain with the boards' targets (`rustup target add
-# thumbv7em-none-eabihf thumbv8m.main-none-eabihf`): $TYPELISP_EMBEDDED_TOOLCHAIN, or
+# thumbv7em-none-eabihf thumbv8m.main-none-eabihf riscv32imac-unknown-none-elf`): $TYPELISP_EMBEDDED_TOOLCHAIN, or
 # rustup's default one when that is not set. A Rust that is not rustup's (a
 # package manager's) has no such target to add, so the toolchain is asked of
 # rustup rather than taken from PATH.
@@ -59,7 +61,14 @@ build_dir="$target_dir/embedded"
 mkdir -p "$target_dir/embedded-runtime/$profile"
 ln -sf "$lld" "$target_dir/embedded-runtime/$profile/ld.lld"
 
-for target in thumbv7em-none-eabihf thumbv8m.main-none-eabihf; do
+for target in thumbv7em-none-eabihf thumbv8m.main-none-eabihf riscv32imac-unknown-none-elf; do
+  # The crate that starts the program on the core, whose build script writes
+  # `link.x`.
+  case "$target" in
+    thumb*) startup=cortex-m-rt ;;
+    riscv32*) startup=riscv-rt ;;
+    *) echo "build-embedded-runtime.sh: no startup crate known for $target" >&2; exit 1 ;;
+  esac
   if [ ! -d "$sysroot/lib/rustlib/$target" ]; then
     echo "build-embedded-runtime.sh: the toolchain at $sysroot has no $target target; run: rustup target add $target" >&2
     exit 1
@@ -71,15 +80,15 @@ for target in thumbv7em-none-eabihf thumbv8m.main-none-eabihf; do
     # itself (`-p`), so that no other member of the workspace turns on the
     # runtime crates' `std`; each in a target directory of its own, so that
     # the two do not rebuild each other. The messages on standard output say
-    # where each build script wrote (`out_dir`), which is where cortex-m-rt
-    # put `link.x`.
+    # where each build script wrote (`out_dir`), which is where the startup
+    # crate put `link.x`.
     messages="$(cd "$root" && PATH="$bin_dir:$PATH" CARGO_TARGET_DIR="$build_dir/$package" \
       "$cargo_bin" build -p "$package" --target "$target" \
       --message-format=json-render-diagnostics ${profile_flag[@]+"${profile_flag[@]}"})"
-    rt_out="$(printf '%s\n' "$messages" | grep '"reason":"build-script-executed"' | grep '#cortex-m-rt@' |
+    rt_out="$(printf '%s\n' "$messages" | grep '"reason":"build-script-executed"' | grep "#$startup@" |
       sed -n 's/.*"out_dir":"\([^"]*\)".*/\1/p' | tail -n 1)"
     if [ -z "$rt_out" ] || [ ! -f "$rt_out/link.x" ]; then
-      echo "build-embedded-runtime.sh: cortex-m-rt's build script did not say where it wrote link.x" >&2
+      echo "build-embedded-runtime.sh: $startup's build script did not say where it wrote link.x" >&2
       exit 1
     fi
     archive="lib$(printf '%s' "$package" | tr - _).a"

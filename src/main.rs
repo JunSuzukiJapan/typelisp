@@ -62,12 +62,14 @@ Options:
                          wasm32-wasip1 makes a WASI module, wasm32-unknown-unknown
                          a module and the JavaScript that runs it (default
                          OUTPUT: SOURCE with .wasm), thumbv7em-none-eabihf an
-                         ELF executable for a Cortex-M4F/M7 board and
+                         ELF executable for a Cortex-M4F/M7 board,
                          thumbv8m.main-none-eabihf one for a Cortex-M33 board
-                         (default OUTPUT: SOURCE with .elf)
+                         and riscv32imac-unknown-none-elf one for a 32-bit
+                         RISC-V board (default OUTPUT: SOURCE with .elf)
   --linker-script FILE   after --target for a board: the board's flash and
                          RAM, as a memory.x (default: those of QEMU's
-                         mps2-an386 for a Cortex-M4, mps2-an505 for an M33)
+                         mps2-an386 for a Cortex-M4, mps2-an505 for an M33,
+                         virt for RISC-V)
   --board-functions WHO  after --target for a board: who gives the board's
                          output, input, exit and clock: semihosting (QEMU or
                          a debugger; the default) or c (the board's
@@ -427,11 +429,7 @@ fn compile_command(flag: &str, args: &[String], heap_cells: Option<usize>) -> i3
     };
     let output = match output {
         Some(o) => o,
-        None if source.extension().is_some_and(|e| e == "typl") => match options.target {
-            typelisp::compile::aot::Target::Host => source.with_extension(""),
-            typelisp::compile::aot::Target::Wasip1 | typelisp::compile::aot::Target::Wasm32Unknown => source.with_extension("wasm"),
-            typelisp::compile::aot::Target::Thumbv7em | typelisp::compile::aot::Target::Thumbv8mMain | typelisp::compile::aot::Target::AvrAtmega328p => source.with_extension("elf"),
-        },
+        None if source.extension().is_some_and(|e| e == "typl") => source.with_extension(options.target.output_extension()),
         None => {
             eprintln!("{}: {} does not end in .typl, so give the executable's name with -o", flag, source.display());
             return 1;

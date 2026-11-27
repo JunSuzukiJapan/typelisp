@@ -33,9 +33,21 @@ typelisp-mem.workspace = true
 typelisp-print.workspace = true
 typelisp-read.workspace = true
 typelisp-rt.workspace = true
-# The start of the program (the vector table, `Reset`, the linker script
-# `link.x`), the memory the runtime allocates from, and the one core's
-# critical section the allocator takes.
+# The memory the runtime allocates from, on every core.
+embedded-alloc = { version = "0.7.0", default-features = false, features = ["llff"] }
+
+# An Arm Cortex-M core (src/cortex_m.rs): the start of the program (the
+# vector table, `Reset`, the linker script `link.x`), the NVIC, and the one
+# core's critical section the allocator takes.
+[target.'cfg(all(target_os = "none", target_arch = "arm"))'.dependencies]
 cortex-m-rt = "0.7.7"
 cortex-m = { version = "0.7.10", features = ["critical-section-single-core"] }
-embedded-alloc = { version = "0.7.0", default-features = false, features = ["llff"] }
+
+# A 32-bit RISC-V core (src/riscv.rs): the start of the program (`_start`,
+# the trap entry, the linker script `link.x`, which includes `memory.x`), and
+# the one hart's critical section the allocator takes. The traps are
+# dispatched here (`custom-interrupts`, `custom-exceptions`); one hart runs
+# the program.
+[target.'cfg(all(target_os = "none", target_arch = "riscv32"))'.dependencies]
+riscv-rt = { version = "0.18.0", features = ["memory", "custom-interrupts", "custom-exceptions", "single-hart"] }
+riscv = { version = "0.16.1", features = ["critical-section-single-hart"] }

@@ -51,7 +51,10 @@ unsafe impl core::alloc::GlobalAlloc for BoardAlloc {
 #[cfg(target_arch = "arm")]
 pub const ARCH: &str = "arm";
 
-#[cfg(not(target_arch = "arm"))]
+#[cfg(target_arch = "riscv32")]
+pub const ARCH: &str = "riscv32";
+
+#[cfg(not(any(target_arch = "arm", target_arch = "riscv32")))]
 compile_error!("typelisp_mem::host::ARCH does not name this architecture yet");
 
 /// The operating system this build is for, spelled as

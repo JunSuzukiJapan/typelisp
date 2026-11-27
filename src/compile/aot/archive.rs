@@ -296,8 +296,12 @@ pub(super) fn wasm_runtime_dir(triple: &str) -> Result<std::path::PathBuf, Strin
     }
 }
 
+// `bundled_board`, which build.rs writes from its table of boards.
+#[cfg(typelisp_bundled_embedded)]
+include!(concat!(env!("OUT_DIR"), "/bundled_boards.rs"));
+
 /// The folder `typl -c --target <triple>` links an executable for a board
-/// from: `cortex-m-rt`'s linker script (`link.x`) and the runtime built for
+/// from: the core's startup crate's linker script (`link.x`) and the runtime built for
 /// the triple, once for a board that gives its functions as C functions and
 /// once with them over semihosting (`BoardFunctions::archive`).
 ///
@@ -315,19 +319,8 @@ pub(super) fn embedded_runtime_dir(triple: &str) -> Result<std::path::PathBuf, S
     #[cfg(typelisp_bundled_embedded)]
     {
         let dir = bundled_archive_dir()?.join(triple);
-        let [link_x, c, semihosting]: [&[u8]; 3] = match triple {
-            "thumbv7em-none-eabihf" => [
-                include_bytes!(env!("TYPELISP_BUNDLED_EMBEDDED_THUMBV7EM_NONE_EABIHF_LINK_X")),
-                include_bytes!(env!("TYPELISP_BUNDLED_EMBEDDED_THUMBV7EM_NONE_EABIHF_C_STATICLIB")),
-                include_bytes!(env!("TYPELISP_BUNDLED_EMBEDDED_THUMBV7EM_NONE_EABIHF_SEMIHOSTING_STATICLIB")),
-            ],
-            "thumbv8m.main-none-eabihf" => [
-                include_bytes!(env!("TYPELISP_BUNDLED_EMBEDDED_THUMBV8M_MAIN_NONE_EABIHF_LINK_X")),
-                include_bytes!(env!("TYPELISP_BUNDLED_EMBEDDED_THUMBV8M_MAIN_NONE_EABIHF_C_STATICLIB")),
-                include_bytes!(env!("TYPELISP_BUNDLED_EMBEDDED_THUMBV8M_MAIN_NONE_EABIHF_SEMIHOSTING_STATICLIB")),
-            ],
-            _ => return Err(format!("internal error: no runtime for a board for {}", triple)),
-        };
+        let [link_x, c, semihosting] =
+            bundled_board(triple).ok_or_else(|| format!("internal error: no runtime for a board for {}", triple))?;
         write_file_once(&dir, "link.x", link_x)?;
         write_file_once(&dir, BoardFunctions::C.archive(), c)?;
         write_file_once(&dir, BoardFunctions::Semihosting.archive(), semihosting)?;

@@ -44,16 +44,22 @@ use core::sync::atomic::{AtomicBool, AtomicPtr, AtomicU32, AtomicUsize, Ordering
 
 use typelisp_abi::raise;
 
-/// How many entries a Cortex-M vector table has: the core's 16 exceptions
-/// and up to 240 interrupts.
+/// How many entries the vector table has: the core's 16 exceptions and up
+/// to 240 interrupts, as a Cortex-M numbers them. Every core's runtime
+/// numbers its entries so (`typelisp-rt-embedded`): a core with fewer
+/// interrupts says how many it has ([`Controller::interrupts`]).
 pub const VECTORS: usize = 256;
 
 /// The first entry that is an interrupt rather than a core exception.
 const FIRST_INTERRUPT: usize = 16;
 
-/// What the board's runtime gives this module: masking and unmasking one
-/// interrupt (by its number, not its vector-table entry).
+/// What the board's runtime gives this module: how many interrupts the core
+/// has, and masking and unmasking one (by its number, not its vector-table
+/// entry).
 pub struct Controller {
+    /// The interrupts are numbered from 0 to one less than this, at most
+    /// `VECTORS - 16`.
+    pub interrupts: u16,
     pub mask: fn(u16),
     pub unmask: fn(u16),
 }
@@ -230,18 +236,20 @@ fn run(vector: usize) {
     }
 }
 
-/// The number of the vector-table entry of interrupt `n`, if a core has one.
-fn interrupt_vector(n: i64) -> Result<usize, String> {
+/// The number of the vector-table entry of interrupt `n`, if the core `c`
+/// has one.
+fn interrupt_vector(c: &Controller, n: i64) -> Result<usize, String> {
+    let interrupts = usize::from(c.interrupts).min(VECTORS - FIRST_INTERRUPT);
     match usize::try_from(n) {
-        Ok(n) if n < VECTORS - FIRST_INTERRUPT => Ok(FIRST_INTERRUPT + n),
-        _ => Err(format!("interrupt {} does not exist: interrupts are numbered from 0 to {}", n, VECTORS - FIRST_INTERRUPT - 1)),
+        Ok(n) if n < interrupts => Ok(FIRST_INTERRUPT + n),
+        _ => Err(format!("interrupt {} does not exist: interrupts are numbered from 0 to {}", n, interrupts - 1)),
     }
 }
 
 /// `(enable-interrupt n)`: interrupt `n` comes from now on.
 pub fn enable(n: i64) -> Result<(), String> {
-    let vector = interrupt_vector(n)?;
     let c = controller().ok_or_else(|| "enable-interrupt: there are interrupts only on a board".to_string())?;
+    let vector = interrupt_vector(c, n)?;
     let (word, mask) = bit(vector);
     ENABLED[word].fetch_or(mask, SeqCst);
     // Still masked while its handler waits: running it unmasks it.
@@ -253,8 +261,8 @@ pub fn enable(n: i64) -> Result<(), String> {
 
 /// `(disable-interrupt n)`: interrupt `n` no longer comes.
 pub fn disable(n: i64) -> Result<(), String> {
-    let vector = interrupt_vector(n)?;
     let c = controller().ok_or_else(|| "disable-interrupt: there are interrupts only on a board".to_string())?;
+    let vector = interrupt_vector(c, n)?;
     let (word, mask) = bit(vector);
     ENABLED[word].fetch_and(!mask, SeqCst);
     (c.mask)(n as u16);
