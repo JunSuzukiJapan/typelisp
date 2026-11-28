@@ -1037,7 +1037,7 @@ dependencies = [
 
 [[package]]
 name = "typelisp"
-version = "0.3.7"
+version = "0.3.8"
 dependencies = [
  "inkwell",
  "libc",
@@ -1066,14 +1066,14 @@ dependencies = [
 
 [[package]]
 name = "typelisp-abi"
-version = "0.3.7"
+version = "0.3.8"
 dependencies = [
  "typelisp-mem",
 ]
 
 [[package]]
 name = "typelisp-front"
-version = "0.3.7"
+version = "0.3.8"
 dependencies = [
  "bincode",
  "num-bigint",
@@ -1093,7 +1093,7 @@ dependencies = [
 
 [[package]]
 name = "typelisp-mem"
-version = "0.3.7"
+version = "0.3.8"
 dependencies = [
  "foldhash",
  "hashbrown",
@@ -1110,7 +1110,7 @@ dependencies = [
 
 [[package]]
 name = "typelisp-print"
-version = "0.3.7"
+version = "0.3.8"
 dependencies = [
  "num-traits",
  "typelisp-abi",
@@ -1119,7 +1119,7 @@ dependencies = [
 
 [[package]]
 name = "typelisp-read"
-version = "0.3.7"
+version = "0.3.8"
 dependencies = [
  "num-bigint",
  "num-rational",
@@ -1129,7 +1129,7 @@ dependencies = [
 
 [[package]]
 name = "typelisp-rt"
-version = "0.3.7"
+version = "0.3.8"
 dependencies = [
  "num-bigint",
  "num-integer",
@@ -1143,7 +1143,7 @@ dependencies = [
 
 [[package]]
 name = "typelisp-rt-embedded"
-version = "0.3.7"
+version = "0.3.8"
 dependencies = [
  "cortex-m",
  "cortex-m-rt",
@@ -1159,7 +1159,7 @@ dependencies = [
 
 [[package]]
 name = "typelisp-rt-posix"
-version = "0.3.7"
+version = "0.3.8"
 dependencies = [
  "libc",
  "rcgen",
@@ -1173,7 +1173,7 @@ dependencies = [
 
 [[package]]
 name = "typelisp-rt-semihosting"
-version = "0.3.7"
+version = "0.3.8"
 dependencies = [
  "critical-section",
  "typelisp-rt-embedded",
@@ -1181,7 +1181,7 @@ dependencies = [
 
 [[package]]
 name = "typelisp-rt-sys"
-version = "0.3.7"
+version = "0.3.8"
 dependencies = [
  "typelisp-abi",
  "typelisp-mem",
