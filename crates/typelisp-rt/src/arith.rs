@@ -58,8 +58,8 @@ pub unsafe extern "C" fn rt_int_fits_char(n: i64) -> bool {
 ///
 /// # Safety
 ///
-/// The word must hold an
-/// `f64`'s bit pattern.
+/// None: every `f64` is an answerable argument. `unsafe` as every runtime
+/// export is, for the one function type `externs.rs` casts them to.
 #[no_mangle]
 pub unsafe extern "C" fn rt_f64_fits_f32(v: f64) -> bool {
     f64::from(v as f32).to_bits() == v.to_bits()
@@ -71,6 +71,11 @@ pub unsafe extern "C" fn rt_f64_fits_f32(v: f64) -> bool {
 /// `llvm_builder_build_float_unary_intrinsic`).
 macro_rules! rt_f64_unary_exports {
     ($($export:ident => $method:ident,)*) => {$(
+        /// # Safety
+        ///
+        /// None: every `f64` is an answerable argument. `unsafe` as every
+        /// runtime export is, for the one function type `externs.rs` casts
+        /// them to.
         #[no_mangle]
         pub unsafe extern "C" fn $export(x: f64) -> f64 {
             <f64 as num_traits::Float>::$method(x)
@@ -81,6 +86,11 @@ macro_rules! rt_f64_unary_exports {
 /// Their `f32` counterparts, computed in binary32.
 macro_rules! rt_f32_unary_exports {
     ($($export:ident => $method:ident,)*) => {$(
+        /// # Safety
+        ///
+        /// None: every `f32` is an answerable argument. `unsafe` as every
+        /// runtime export is, for the one function type `externs.rs` casts
+        /// them to.
         #[no_mangle]
         pub unsafe extern "C" fn $export(x: f32) -> f32 {
             <f32 as num_traits::Float>::$method(x)

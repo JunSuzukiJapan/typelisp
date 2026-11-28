@@ -173,8 +173,7 @@ impl Interp {
             wk::F_ED_OPEN => Some(posix!(match (&args[0], &args[1]) {
                 (Value::Str(id), Value::Int(line)) => {
                     let path = heap.string(*id).to_string();
-                    let line = *line;
-                    Ok(typelisp_rt_posix::sys::ed_open(heap, &path, line))
+                    Ok(typelisp_rt_posix::sys::ed_open(heap, &path, *line))
                 }
                 other => Err(EvalError::Panic(format!("ed: arguments are not a string and a line, got {:?}", other))),
             })),

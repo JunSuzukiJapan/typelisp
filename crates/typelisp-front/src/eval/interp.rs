@@ -319,7 +319,7 @@ pub struct Interp {
     /// the code stays alive while C may hold the entry, and compared on every
     /// lookup so a redefined function gets an entry of its own. Per session,
     /// not per process: an entry runs code this session compiled.
-    callback_entries: RefCell<HashMap<crate::ffi_callback::CallbackSig, (usize, Rc<dyn CompiledBody>)>>,
+    callback_entries: RefCell<HashMap<crate::ffi_callback::CallbackSig, crate::ffi_callback::CallbackEntry>>,
     /// The bodies of entries [`Self::callback_entries`] has replaced: C may
     /// still call an old entry, so what it runs must not be freed.
     retired_callback_bodies: RefCell<Vec<Rc<dyn CompiledBody>>>,

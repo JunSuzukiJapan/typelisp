@@ -810,7 +810,7 @@ pub fn callback_entry(
     interp: &Interp,
     heap: &mut typelisp_mem::Heap,
     sig: CallbackSig,
-) -> Result<(usize, Rc<dyn CompiledBody>), String> {
+) -> Result<typelisp_front::ffi_callback::CallbackEntry, String> {
     let (params, ret) = sig.signature();
     let (ctypes, cret) = callback_ctypes(&params, ret)?;
     let path = sig.function;

@@ -357,15 +357,24 @@ pub unsafe extern "C" fn rt_get_internal_real_time() -> Word {
 /// become a float here (`(sleep 1)` is a type error, `(sleep 1.0)` is not),
 /// the same rule Rust has.
 ///
-/// A negative or NaN wait is an error in CL. Here it is nothing at all —
-/// there is no duration to construct from it, and `Duration::from_secs_f64`
-/// panics on one. Zero is a real answer (yield-ish) and goes through.
+/// The refusals are [`wait_duration`]'s. Zero is a real answer (yield-ish)
+/// and goes through.
 pub fn sleep(heap: &mut Heap, secs: f64) -> Result<(), String> {
-    if !(secs >= 0.0) {
-        return Err(format!("sleep: {} is not a non-negative number of seconds", secs));
-    }
-    heap.native(|| typelisp_mem::host::sleep(core::time::Duration::from_secs_f64(secs)));
+    let d = wait_duration("sleep", secs)?;
+    heap.native(|| typelisp_mem::host::sleep(d));
     Ok(())
+}
+
+/// `secs` as a wait, for `who` (the operation, named in the message): a
+/// negative or NaN wait is an error, as in CL, and so is one longer than the
+/// clock can hold. Every operation that waits a number of seconds asks here,
+/// so a program cannot tell which side — the interpreter, a task, compiled
+/// code — its wait ran on.
+pub fn wait_duration(who: &str, secs: f64) -> Result<core::time::Duration, String> {
+    if secs.is_nan() || secs < 0.0 {
+        return Err(format!("{}: {} is not a non-negative number of seconds", who, secs));
+    }
+    core::time::Duration::try_from_secs_f64(secs).map_err(|_| format!("{}: {} is longer than this can wait", who, secs))
 }
 
 /// `(lisp-implementation-version)` for compiled code.

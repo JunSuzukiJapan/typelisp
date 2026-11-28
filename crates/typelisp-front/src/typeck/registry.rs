@@ -384,6 +384,10 @@ pub(crate) enum Since {
     Ever,
 }
 
+/// What changed in one table: each key written, with what it holds now
+/// (`None`: removed).
+pub(crate) type Changes<K, V> = Vec<(K, Option<V>)>;
+
 /// One table of the registry, keeping what each write replaced since the
 /// last commit.
 #[derive(Debug)]
@@ -431,7 +435,7 @@ impl<K: Hash + Eq + Clone, V> Table<K, V> {
     /// Every key written at the generation `since` or later, with what it
     /// holds now (`None`: removed). A write a rollback undid is among them,
     /// with what the key held before it, which writing again changes nothing.
-    pub(crate) fn changed_since(&self, since: u64) -> Vec<(K, Option<V>)>
+    pub(crate) fn changed_since(&self, since: u64) -> Changes<K, V>
     where
         V: Clone,
     {
@@ -875,13 +879,13 @@ impl Registry {
 
     /// The generic bodies written at the generation `since` or later
     /// (`None`: forgotten).
-    pub(crate) fn templates_since(&self, since: u64) -> Vec<(Base, Option<Rc<Template>>)> {
+    pub(crate) fn templates_since(&self, since: u64) -> Changes<Base, Rc<Template>> {
         self.templates.changed_since(since)
     }
 
     /// The methods an `impl` took from its trait's default body, recorded
     /// or forgotten at the generation `since` or later.
-    pub(crate) fn defaulted_since(&self, since: u64) -> Vec<((Path, SymRef), Option<(Path, Vec<Type>)>)> {
+    pub(crate) fn defaulted_since(&self, since: u64) -> Changes<(Path, SymRef), (Path, Vec<Type>)> {
         self.defaulted.changed_since(since)
     }
 

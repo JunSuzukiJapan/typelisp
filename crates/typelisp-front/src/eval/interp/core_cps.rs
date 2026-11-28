@@ -3190,6 +3190,16 @@ impl Interp {
     }
 }
 
+/// The parameter representations of a definition that was just compiled for
+/// a thread. Compiling one needs its signature, so a missing one is a broken
+/// invariant rather than a function of no parameters.
+fn compiled_params(f: &FnDef, name: &str) -> Result<Vec<Repr>, EvalError> {
+    f.sig
+        .as_ref()
+        .map(|s| s.0.clone())
+        .ok_or_else(|| EvalError::Internal(format!("thread: `{}` was compiled but has no signature", name)))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -4059,14 +4069,4 @@ mod tests {
         assert_eq!(eval_ok(&mut h, "(loop i32 (return (int-any-width 4)))"), Value::Int(4));
         assert_eq!(eval_ok(&mut h, "(catch (quote t) (throw (quote t) (int-any-width 5)))"), Value::Int(5));
     }
-}
-
-/// The parameter representations of a definition that was just compiled for
-/// a thread. Compiling one needs its signature, so a missing one is a broken
-/// invariant rather than a function of no parameters.
-fn compiled_params(f: &FnDef, name: &str) -> Result<Vec<Repr>, EvalError> {
-    f.sig
-        .as_ref()
-        .map(|s| s.0.clone())
-        .ok_or_else(|| EvalError::Internal(format!("thread: `{}` was compiled but has no signature", name)))
 }

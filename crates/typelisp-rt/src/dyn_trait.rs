@@ -207,12 +207,12 @@ pub(crate) unsafe fn resolve_closure(closure: Word) -> Callee {
         // SAFETY: `build-make-closure` only ever names a function it declared
         // under `coroutine_fn_type`, which is what `rt_coroutine_closure_new`
         // records by being the entry point that was called.
-        Callee::Coroutine { f: core::mem::transmute(fn_ptr), env }
+        Callee::Coroutine { f: core::mem::transmute::<usize, crate::coroutine::CoroutineFn>(fn_ptr), env }
     } else {
         // SAFETY: `rt_closure_new` is the only producer of a classic-ABI
         // `BoxedObj::CompiledClosure`, and `build-make-closure` only ever
         // hands it a function compiled under `compiled_fn_type_with_env`.
-        Callee::Classic { f: core::mem::transmute(fn_ptr), env }
+        Callee::Classic { f: core::mem::transmute::<usize, typelisp_abi::ClassicClosureFn>(fn_ptr), env }
     }
 }
 
