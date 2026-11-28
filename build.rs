@@ -280,7 +280,7 @@ fn bundled_board(
             .lines()
             .filter(|l| l.contains("\"reason\":\"build-script-executed\"") && l.contains(&startup_id))
             .filter_map(|l| l.split("\"out_dir\":\"").nth(1).and_then(|rest| rest.split('"').next()))
-            .last()
+            .next_back()
             .unwrap_or_else(|| panic!("build.rs: building {} did not say where {} wrote link.x", package, startup));
         link_x = Some(std::path::PathBuf::from(out_dir).join("link.x"));
         let archive = dir.join(triple).join("release").join(format!("lib{}.a", package.replace('-', "_")));

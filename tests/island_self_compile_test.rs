@@ -257,9 +257,9 @@ fn every_island_defun_compiles() {
     // compiled state can't mask a later one's independent compilability
     // (and so a failure names exactly one culprit).
     for name in ISLAND_DEFUNS {
-        let (mut h, mut chk, mut interp) = fresh();
+        let (mut h, mut chk, interp) = fresh();
         let src = format!("(compile {})", name);
-        if let Err(e) = eval_in(&mut h, &mut chk, &mut interp, &src) {
+        if let Err(e) = eval_in(&mut h, &mut chk, &interp, &src) {
             panic!("island defun `{}` failed to compile: {:?}", name, e);
         }
     }
@@ -270,8 +270,8 @@ fn compile_function_compiles_transitively() {
     // The central entry point pulls in every `compile-*` sibling (its own
     // `labels` block) and helper it calls — one `(compile ...)` exercising
     // the whole SCC transitive-compile path over the island at once.
-    let (mut h, mut chk, mut interp) = fresh();
-    eval_in(&mut h, &mut chk, &mut interp, "(compile compile-function)").expect("compile-function should compile");
+    let (mut h, mut chk, interp) = fresh();
+    eval_in(&mut h, &mut chk, &interp, "(compile compile-function)").expect("compile-function should compile");
 }
 
 #[test]

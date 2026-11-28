@@ -179,7 +179,7 @@ pub struct FnDef {
 /// holding the concrete type did.
 pub trait CompiledBody {
     /// The entry address of this body, under the shared compiled-function ABI
-    /// (`crate::compile::CompiledSignature`).
+    /// ([`typelisp_abi::ClassicFn`]).
     fn address(&self) -> usize;
 
     /// Which ABI that address answers to — `typelisp_abi::BODY_ABI_CLASSIC`

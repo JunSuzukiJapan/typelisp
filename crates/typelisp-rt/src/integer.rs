@@ -267,11 +267,10 @@ pub unsafe extern "C" fn rt_integer_integer_length(x: Word) -> Word {
 /// Same as [`integer_single`].
 #[no_mangle]
 pub unsafe extern "C" fn rt_integer_to_float(x: Word) -> f64 {
-    let f = match integer_arg(x, "rt_integer_to_float") {
+    match integer_arg(x, "rt_integer_to_float") {
         IntArg::Fix(n) => n as f64,
         IntArg::Big(n) => n.to_f64().unwrap_or(f64::INFINITY.copysign(if n.sign() == Sign::Minus { -1.0 } else { 1.0 })),
-    };
-    f
+    }
 }
 
 /// `int->ratio` — exact.

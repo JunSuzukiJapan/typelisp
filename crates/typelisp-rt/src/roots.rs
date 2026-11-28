@@ -26,7 +26,6 @@ use typelisp_abi::{active_heap, decode, encode, fatal};
 /// `Heap` must already be registered on this thread.
 #[no_mangle]
 pub unsafe extern "C" fn rt_push_sexpr_root(tagged: Word) -> Word {
-    let tagged = tagged;
     active_heap().push_root(decode(tagged));
     tagged
 }
@@ -111,7 +110,6 @@ pub unsafe extern "C" fn rt_root_count() -> Word {
 #[no_mangle]
 pub unsafe extern "C" fn rt_set_sexpr_root(idx: Word, tagged: Word) -> Word {
     let idx = idx as usize;
-    let tagged = tagged;
     active_heap().set_root(idx, decode(tagged));
     tagged
 }

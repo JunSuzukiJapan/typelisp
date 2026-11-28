@@ -36,11 +36,11 @@ fn assert_string(h: &Heap, v: &Value, expected: &str) {
 /// The global case: a `defvar`'s slot outlives every form that reads it.
 #[test]
 fn a_string_global_survives_constant_collection() {
-    let (mut h, mut chk, mut interp) = env();
-    eval_in(&mut h, &mut chk, &mut interp, r#"(defvar (*s* string) "hello")"#).expect("definition failed");
+    let (mut h, mut chk, interp) = env();
+    eval_in(&mut h, &mut chk, &interp, r#"(defvar (*s* string) "hello")"#).expect("definition failed");
     h.set_gc_stress(true);
     for _ in 0..3 {
-        let v = eval_in(&mut h, &mut chk, &mut interp, "*s*").expect("eval under gc stress failed");
+        let v = eval_in(&mut h, &mut chk, &interp, "*s*").expect("eval under gc stress failed");
         assert_string(&h, &v, "hello");
     }
 }
@@ -50,12 +50,12 @@ fn a_string_global_survives_constant_collection() {
 /// its `defvar` slot.
 #[test]
 fn a_string_global_survives_collection_mid_form() {
-    let (mut h, mut chk, mut interp) = env();
-    eval_in(&mut h, &mut chk, &mut interp, r#"(defvar (*s* string) "hello")"#).expect("definition failed");
+    let (mut h, mut chk, interp) = env();
+    eval_in(&mut h, &mut chk, &interp, r#"(defvar (*s* string) "hello")"#).expect("definition failed");
     eval_in(
         &mut h,
         &mut chk,
-        &mut interp,
+        &interp,
         "(defun churn () string \
            (let ((i 0)) \
              (while (< i 20) \
@@ -64,18 +64,18 @@ fn a_string_global_survives_collection_mid_form() {
     )
     .expect("definition failed");
     h.set_gc_stress(true);
-    let v = eval_in(&mut h, &mut chk, &mut interp, "(churn)").expect("eval under gc stress failed");
+    let v = eval_in(&mut h, &mut chk, &interp, "(churn)").expect("eval under gc stress failed");
     assert_string(&h, &v, "hello");
 }
 
 /// A local binding held live across collections while the loop allocates.
 #[test]
 fn a_string_local_survives_collection_across_appends() {
-    let (mut h, mut chk, mut interp) = env();
+    let (mut h, mut chk, interp) = env();
     eval_in(
         &mut h,
         &mut chk,
-        &mut interp,
+        &interp,
         "(defun build ((x string)) string \
            (let ((acc x) (i 0)) \
              (while (< i 5) \
@@ -85,7 +85,7 @@ fn a_string_local_survives_collection_across_appends() {
     )
     .expect("definition failed");
     h.set_gc_stress(true);
-    let v = eval_in(&mut h, &mut chk, &mut interp, r#"(build "ab")"#).expect("eval under gc stress failed");
+    let v = eval_in(&mut h, &mut chk, &interp, r#"(build "ab")"#).expect("eval under gc stress failed");
     assert_string(&h, &v, "abababababab");
 }
 
@@ -93,12 +93,12 @@ fn a_string_local_survives_collection_across_appends() {
 /// alive.
 #[test]
 fn a_string_struct_field_survives_collection() {
-    let (mut h, mut chk, mut interp) = env();
-    eval_in(&mut h, &mut chk, &mut interp, "(defstruct named (n string) (k int))").expect("definition failed");
+    let (mut h, mut chk, interp) = env();
+    eval_in(&mut h, &mut chk, &interp, "(defstruct named (n string) (k int))").expect("definition failed");
     eval_in(
         &mut h,
         &mut chk,
-        &mut interp,
+        &interp,
         "(defun churn ((p named)) string \
            (let ((i 0)) \
              (while (< i 20) \
@@ -107,7 +107,7 @@ fn a_string_struct_field_survives_collection() {
     )
     .expect("definition failed");
     h.set_gc_stress(true);
-    let v = eval_in(&mut h, &mut chk, &mut interp, r#"(churn (make-instance 'named :n "hello" :k 1))"#)
+    let v = eval_in(&mut h, &mut chk, &interp, r#"(churn (make-instance 'named :n "hello" :k 1))"#)
         .expect("eval under gc stress failed");
     assert_string(&h, &v, "hello");
 }

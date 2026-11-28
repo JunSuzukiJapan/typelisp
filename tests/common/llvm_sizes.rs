@@ -155,8 +155,8 @@ pub fn program(m: &Machine) -> Program {
                 ("generic answer", "(same v)".to_string()),
                 ("chosen", "(if (= local changed) v local)".to_string()),
                 ("from block", "(block out (return-from out v))".to_string()),
-                ("from let", format!("(let ((x v)) x)")),
-                ("from progn", format!("(progn v)")),
+                ("from let", "(let ((x v)) x)".to_string()),
+                ("from progn", "(progn v)".to_string()),
             ];
             if m.runtime {
                 places.extend([

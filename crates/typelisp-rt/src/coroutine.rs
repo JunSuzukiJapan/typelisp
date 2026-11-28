@@ -575,7 +575,7 @@ impl FrameStack {
                         } else {
                             // SAFETY: as above, under the plain
                             // `compiled_fn_type` signature.
-                            let f: crate::ClassicMethodFn = unsafe { core::mem::transmute(ptr) };
+                            let f: typelisp_abi::ClassicFn = unsafe { core::mem::transmute(ptr) };
                             let v = crate::interrupt::outside(self.interruptible, || unsafe { f(args.as_ptr(), args.len() as u32) });
                             status = match typelisp_abi::is_raised() {
                                 true => taken_raise(true, STATUS_UNWIND, "a classic-ABI method body"),

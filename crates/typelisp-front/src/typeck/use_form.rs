@@ -136,7 +136,7 @@ fn use_one(
 pub(crate) fn register_for_reading(reg: &Registry, heap: &Heap, site: Site, path: &[SymRef]) {
     let Some(last) = path.last() else { return };
     if let Some(target) = use_target(reg, heap, site, path) {
-        register(reg, heap, site.ns, &heap.symbol_spelling(*last), &target);
+        register(reg, heap, site.ns, heap.symbol_spelling(*last), &target);
     }
 }
 

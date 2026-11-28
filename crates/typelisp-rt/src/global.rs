@@ -135,7 +135,6 @@ pub unsafe extern "C" fn rt_global_get(id: Word) -> Word {
 #[no_mangle]
 pub unsafe extern "C" fn rt_global_set(id: Word, tagged: Word) -> Word {
     let id = id as usize;
-    let tagged = tagged;
     let perm_idx = global_perm_idx(id).unwrap_or_else(|| fatal("rt_global_set: unknown global id"));
     active_heap().set_permanent_root(perm_idx, decode(tagged));
     tagged

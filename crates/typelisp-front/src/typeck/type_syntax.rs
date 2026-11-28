@@ -334,7 +334,7 @@ pub(crate) fn type_path(heap: &Heap, cx: &TypeCx, v: Value) -> Result<Path, Erro
     match v {
         Value::Symbol(id) => match find_named(cx.reg, cx.ns, id, |ns, key| cx.reg.types.get(&Path::of_symbol(ns, key))) {
             Some((path, _)) => Ok(path),
-            None => Err(unknown_type(&heap.symbol_spelling(id))),
+            None => Err(unknown_type(heap.symbol_spelling(id))),
         },
         _ => written_path(heap, cx.ns, v),
     }
@@ -347,7 +347,7 @@ fn named(heap: &Heap, cx: &TypeCx, id: SymRef, args: Vec<Type>, at: Option<&Loc>
             note_use(cx, path, entry, at);
             entry_type(path, entry, args)
         }
-        None => Err(unknown_type(&heap.symbol_spelling(id))),
+        None => Err(unknown_type(heap.symbol_spelling(id))),
     }
 }
 

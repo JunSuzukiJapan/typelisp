@@ -163,19 +163,11 @@ pub(crate) enum Callee {
     Coroutine { f: crate::coroutine::CoroutineFn, env: Vec<Word> },
     /// A compiled body under the original ABI, with its captures. It runs to
     /// completion by construction, so calling it is enough.
-    Classic { f: ClassicClosureFn, env: Vec<Word> },
+    Classic { f: typelisp_abi::ClassicClosureFn, env: Vec<Word> },
     /// Not compiled. Only an interpreter can run it, and only whoever owns a
     /// continuation stack can let it suspend.
     Interpreted,
 }
-
-/// A classic-ABI closure body: arguments and captures as two arrays.
-pub(crate) type ClassicClosureFn = unsafe extern "C-unwind" fn(*const Word, u32, *const Word, u32) -> Word;
-
-/// A classic-ABI method body: one argument array. Every address in a vtable
-/// comes from `CompiledFn::address` for a method compiled under the plain
-/// `compiled_fn_type` signature.
-pub(crate) type ClassicMethodFn = unsafe extern "C-unwind" fn(*const Word, u32) -> Word;
 
 /// Reads a function value's captures and decides who can run its body.
 ///

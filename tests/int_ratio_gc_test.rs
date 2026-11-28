@@ -43,23 +43,23 @@ const BIG: &str = "99999999999999999999999999999";
 /// within one.
 #[test]
 fn a_bignum_global_survives_constant_collection() {
-    let (mut h, mut chk, mut interp) = env();
-    eval_in(&mut h, &mut chk, &mut interp, &format!("(defvar (*b* int) {})", BIG))
+    let (mut h, mut chk, interp) = env();
+    eval_in(&mut h, &mut chk, &interp, &format!("(defvar (*b* int) {})", BIG))
         .expect("definition failed");
     h.set_gc_stress(true);
     for _ in 0..3 {
-        let v = eval_in(&mut h, &mut chk, &mut interp, "*b*").expect("eval under gc stress failed");
+        let v = eval_in(&mut h, &mut chk, &interp, "*b*").expect("eval under gc stress failed");
         assert_bignum(&h, &v, BIG);
     }
 }
 
 #[test]
 fn a_ratio_global_survives_constant_collection() {
-    let (mut h, mut chk, mut interp) = env();
-    eval_in(&mut h, &mut chk, &mut interp, "(defvar (*r* ratio) 3/4)").expect("definition failed");
+    let (mut h, mut chk, interp) = env();
+    eval_in(&mut h, &mut chk, &interp, "(defvar (*r* ratio) 3/4)").expect("definition failed");
     h.set_gc_stress(true);
     for _ in 0..3 {
-        let v = eval_in(&mut h, &mut chk, &mut interp, "*r*").expect("eval under gc stress failed");
+        let v = eval_in(&mut h, &mut chk, &interp, "*r*").expect("eval under gc stress failed");
         match v {
             typelisp::Value::Boxed(id) if h.is_ratio(id) => {
                 let r = h.ratio_value(id);
@@ -77,11 +77,11 @@ fn a_ratio_global_survives_constant_collection() {
 /// iteration so that it does.
 #[test]
 fn a_bignum_local_survives_collection_across_arithmetic() {
-    let (mut h, mut chk, mut interp) = env();
+    let (mut h, mut chk, interp) = env();
     eval_in(
         &mut h,
         &mut chk,
-        &mut interp,
+        &interp,
         "(defun sum-up ((n int)) int \
            (let ((acc n) (i 0)) \
              (while (< i 20) \
@@ -91,7 +91,7 @@ fn a_bignum_local_survives_collection_across_arithmetic() {
     )
     .expect("definition failed");
     h.set_gc_stress(true);
-    let v = eval_in(&mut h, &mut chk, &mut interp, &format!("(sum-up {})", BIG))
+    let v = eval_in(&mut h, &mut chk, &interp, &format!("(sum-up {})", BIG))
         .expect("eval under gc stress failed");
     // 21 × the literal.
     assert_bignum(&h, &v, "2099999999999999999999999999979");
@@ -102,13 +102,13 @@ fn a_bignum_local_survives_collection_across_arithmetic() {
 /// collector run while `*b*` is only reachable through its `defvar` slot.
 #[test]
 fn a_bignum_global_survives_collection_mid_form() {
-    let (mut h, mut chk, mut interp) = env();
-    eval_in(&mut h, &mut chk, &mut interp, &format!("(defvar (*b* int) {})", BIG))
+    let (mut h, mut chk, interp) = env();
+    eval_in(&mut h, &mut chk, &interp, &format!("(defvar (*b* int) {})", BIG))
         .expect("definition failed");
     eval_in(
         &mut h,
         &mut chk,
-        &mut interp,
+        &interp,
         "(defun churn () int \
            (let ((i 0)) \
              (while (< i 20) \
@@ -117,6 +117,6 @@ fn a_bignum_global_survives_collection_mid_form() {
     )
     .expect("definition failed");
     h.set_gc_stress(true);
-    let v = eval_in(&mut h, &mut chk, &mut interp, "(churn)").expect("eval under gc stress failed");
+    let v = eval_in(&mut h, &mut chk, &interp, "(churn)").expect("eval under gc stress failed");
     assert_bignum(&h, &v, BIG);
 }

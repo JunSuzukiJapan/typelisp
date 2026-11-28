@@ -38,11 +38,6 @@ pub fn set_memory_limit(bytes: usize) {
     memory::set_limit(bytes);
 }
 
-/// Bytes the process has allocated and not freed.
-pub fn memory_in_use() -> usize {
-    memory::in_use()
-}
-
 /// Takes `size` more bytes into the count, or does not and reports why the
 /// bound refuses them.
 fn reserve(size: usize) {

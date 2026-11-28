@@ -31,7 +31,7 @@
 //! ## The `main` name problem
 //!
 //! Every compiled function uses the fixed ABI `i64 fn(i64* args, i32
-//! argc)` (see `crate::compile::CompiledSignature`'s doc comment) — but the
+//! argc)` (`typelisp_abi::ClassicFn`) — but the
 //! C runtime's startup code calls the executable's `main` expecting
 //! roughly `int main(void)` (Phase 2 doesn't thread argc/argv through to
 //! typelisp). Those two signatures aren't link-compatible, so the file's
