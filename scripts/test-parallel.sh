@@ -98,7 +98,12 @@ fi
 # Pin LLVM 22 even if .cargo/config.toml wasn't generated (see
 # scripts/setup-cargo-env.sh) and the shell points LLVM_SYS_221_PREFIX
 # elsewhere.
-if command -v brew >/dev/null 2>&1; then
+# The test executables are run by themselves, not through cargo, so
+# .cargo/config.toml's [env] does not reach them; the tests that run
+# `llvm-nm` or `llvm-size` find them here.
+if [ "$(uname -s)" = Linux ]; then
+    export LLVM_SYS_221_PREFIX="$("$repo_root/scripts/linux-llvm-prefix.sh")"
+elif command -v brew >/dev/null 2>&1; then
     prefix="$(brew --prefix llvm@22 2>/dev/null || true)"
     if [ -n "$prefix" ] && [ -x "$prefix/bin/llvm-config" ]; then
         export LLVM_SYS_221_PREFIX="$prefix"

@@ -7,7 +7,6 @@
 //! target's word and given the target's layout here, before the passes run.
 
 use std::fs;
-use std::process::Command;
 
 use inkwell::module::Module;
 use inkwell::targets::{CodeModel, FileType, InitializationConfig, RelocMode, Target, TargetMachine, TargetTriple};
@@ -90,7 +89,7 @@ pub(super) fn write_module(
         eprintln!("{}", warning);
     }
 
-    let mut link = Command::new(&linker);
+    let mut link = super::lld_command(&linker)?;
     link.args(["-flavor", "wasm"]);
     match target {
         super::Target::Wasip1 => {
