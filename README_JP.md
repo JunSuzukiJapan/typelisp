@@ -312,7 +312,7 @@ rustup の toolchain のリンカを使うので、`--target` を使うときは
 （指定しなければ最新のリリース）。
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/JunSuzukiJapan/typelisp/main/install.sh | TYPELISP_VERSION=0.3.7 sh
+curl -fsSL https://raw.githubusercontent.com/JunSuzukiJapan/typelisp/main/install.sh | TYPELISP_VERSION=0.3.8 sh
 ```
 
 アンインストールするときは、`typl` が書き出したライブラリを削除してから、インストール先を
