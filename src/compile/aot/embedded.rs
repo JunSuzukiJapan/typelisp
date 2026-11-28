@@ -332,7 +332,7 @@ pub(super) fn write_object(tm: &TargetMachine, module: &Module<'static>, path: &
 /// Runs `ld.lld` (`linker`, as the GNU linker), dropping the sections
 /// nothing uses, with `args`.
 pub(super) fn run_linker(linker: &Path, args: impl FnOnce(&mut Command) -> &mut Command) -> Result<(), String> {
-    let mut command = Command::new(linker);
+    let mut command = super::lld_command(linker)?;
     command.args(["-flavor", "gnu", "--gc-sections"]);
     let status = args(&mut command).status().map_err(|e| format!("failed to invoke {}: {}", linker.display(), e))?;
     if !status.success() {

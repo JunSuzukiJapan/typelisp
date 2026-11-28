@@ -409,6 +409,27 @@ pub(super) fn wasm_linker(runtime: &std::path::Path) -> Result<std::path::PathBu
     rustup_lld("WebAssembly")
 }
 
+/// The command that runs `linker` (a toolchain's `rust-lld`, or a link to
+/// one), told where its toolchain's `libLLVM` is.
+///
+/// On macOS `rust-lld` finds `libLLVM.dylib` through its rpaths, and the
+/// aarch64 toolchain's name none that holds it (`<sysroot>/lib`): run as it
+/// is, it stops in dyld before it starts. `<sysroot>/lib` is given as
+/// `DYLD_FALLBACK_LIBRARY_PATH`; on Linux the rpath (`$ORIGIN`) finds it.
+pub(super) fn lld_command(linker: &std::path::Path) -> Result<std::process::Command, String> {
+    let mut command = std::process::Command::new(linker);
+    if cfg!(target_os = "macos") {
+        let real = std::fs::canonicalize(linker).map_err(|e| format!("the linker {}: {}", linker.display(), e))?;
+        // <sysroot>/lib/rustlib/<host>/bin/rust-lld
+        let lib = real.ancestors().nth(4).filter(|dir| dir.file_name().is_some_and(|name| name == "lib") && dir.join("rustlib").is_dir());
+        let Some(lib) = lib else {
+            return Err(format!("the linker {} is not <sysroot>/lib/rustlib/<host>/bin/rust-lld of a Rust toolchain", real.display()));
+        };
+        command.env("DYLD_FALLBACK_LIBRARY_PATH", lib);
+    }
+    Ok(command)
+}
+
 /// The `rust-lld` of rustup's default toolchain, for a release build, which
 /// carries no linker; `what` names what it links, for the error.
 fn rustup_lld(what: &str) -> Result<std::path::PathBuf, String> {
