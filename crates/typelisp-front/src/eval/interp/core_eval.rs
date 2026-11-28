@@ -2490,9 +2490,11 @@ mod tests {
         let mut h = Heap::with_capacity(1 << 20);
         h.set_growth_limit(1 << 24);
 
-        // Built with stress off: it is `DEPTH` nodes of setup, and collecting
-        // at each of them would be quadratic for no added coverage. The
-        // *evaluation* below is what runs under stress.
+        // Without `gc_stress`, both to build and to evaluate: stress collects
+        // at every step's safepoint, and each collection walks the whole
+        // `DEPTH`-deep form, so it would be quadratic for no added coverage.
+        // What is checked here is the stack and the root count; a collection
+        // during `if` is the shallow `stress_heap` tests'.
         let mut form = core::tagged(&mut h, wk::INT_ANY_WIDTH, &[Value::Int(7)]).unwrap();
         h.push_root(form);
         for _ in 0..DEPTH {
@@ -2504,7 +2506,6 @@ mod tests {
             h.push_root(form);
         }
 
-        h.set_gc_stress(true);
         let before = h.root_count();
         let interp = Interp::new();
         let v = interp.eval_core(&mut h, form, Value::Empty).expect("deep chain failed");
@@ -2513,6 +2514,8 @@ mod tests {
     }
 
     /// The same property for a `let` body's last form, which is also a jump.
+    /// Without `gc_stress`, for the reason given in
+    /// `a_deep_else_chain_is_constant_stack`.
     #[test]
     fn a_deep_let_tail_is_constant_stack() {
         const DEPTH: usize = 20_000;
@@ -2527,7 +2530,6 @@ mod tests {
             h.push_root(form);
         }
 
-        h.set_gc_stress(true);
         let interp = Interp::new();
         let v = interp.eval_core(&mut h, form, Value::Empty).expect("deep let tail failed");
         assert_eq!(v, Value::Int(7));
