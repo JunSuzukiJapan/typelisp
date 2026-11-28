@@ -334,17 +334,6 @@ pub fn llvm_context() -> &'static Context {
     &LLVM_CONTEXT.get_or_init(|| ContextCell(Context::create())).0
 }
 
-/// The fixed C ABI every JIT-compiled function uses, regardless of its
-/// typelisp-level arity: an `i64` argument array (and its length) in, one
-/// `i64` out — see the doc comment of `llvm-module`'s definition (`typeck::builtins::llvm`) for why
-/// `compiler.rs`'s `compile-function` always builds LLVM functions under
-/// this exact signature.
-///
-/// `extern "C-unwind"`, not `extern "C"`: `typelisp_rt::rt_panic` unwinds, and
-/// an `extern "C"` pointer would promise Rust that the callee cannot — a
-/// promise broken the moment a `(panic ...)` fires.
-pub type CompiledSignature = unsafe extern "C-unwind" fn(*const typelisp_mem::Word, u32) -> typelisp_mem::Word;
-
 /// A JIT-compiled function: its entry address, and a share of the code that
 /// address is in.
 ///

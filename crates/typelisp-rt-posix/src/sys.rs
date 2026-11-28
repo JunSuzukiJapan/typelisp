@@ -185,7 +185,6 @@ pub unsafe extern "C" fn rt_ed_open(path: Word, line: Word) -> Word {
         Value::Str(id) => active_heap().string(id).to_string(),
         other => fatal(&format!("ed-open: argument is not a string, got {:?}", other)),
     };
-    let line = line;
     encode(ed_open(active_heap(), &path, line as i64))
 }
 

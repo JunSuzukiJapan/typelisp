@@ -108,13 +108,13 @@ pub const EXIT_CODE_SUCCESS: Word = 0;
 /// # Safety
 ///
 /// `entry` must be the address of a function compiled under the standard
-/// compiled-function ABI (`typelisp::compile::CompiledSignature`) that
+/// compiled-function ABI ([`typelisp_abi::ClassicFn`]) that
 /// tolerates being called with no arguments — which `tl_main` is, since the
 /// generated `main` already called it that way. A `Heap` must already be
 /// registered on this thread (`rt_heap_init` runs first).
 #[no_mangle]
 pub unsafe extern "C" fn rt_run_entry(entry: Word) -> Word {
-    let f: unsafe extern "C-unwind" fn(*const Word, u32) -> Word = core::mem::transmute(entry as usize);
+    let f: typelisp_abi::ClassicFn = core::mem::transmute(entry as usize);
     // Only a `()`-returning `main` reaches this shim (`compile::aot` refuses
     // an `int` one under this ABI), and a `main` that returns normally exits
     // 0 — whatever word its `()` happens to be.

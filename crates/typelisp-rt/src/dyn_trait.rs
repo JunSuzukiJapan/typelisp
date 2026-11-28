@@ -163,19 +163,11 @@ pub(crate) enum Callee {
     Coroutine { f: crate::coroutine::CoroutineFn, env: Vec<Word> },
     /// A compiled body under the original ABI, with its captures. It runs to
     /// completion by construction, so calling it is enough.
-    Classic { f: ClassicClosureFn, env: Vec<Word> },
+    Classic { f: typelisp_abi::ClassicClosureFn, env: Vec<Word> },
     /// Not compiled. Only an interpreter can run it, and only whoever owns a
     /// continuation stack can let it suspend.
     Interpreted,
 }
-
-/// A classic-ABI closure body: arguments and captures as two arrays.
-pub(crate) type ClassicClosureFn = unsafe extern "C-unwind" fn(*const Word, u32, *const Word, u32) -> Word;
-
-/// A classic-ABI method body: one argument array. Every address in a vtable
-/// comes from `CompiledFn::address` for a method compiled under the plain
-/// `compiled_fn_type` signature.
-pub(crate) type ClassicMethodFn = unsafe extern "C-unwind" fn(*const Word, u32) -> Word;
 
 /// Reads a function value's captures and decides who can run its body.
 ///
@@ -215,12 +207,12 @@ pub(crate) unsafe fn resolve_closure(closure: Word) -> Callee {
         // SAFETY: `build-make-closure` only ever names a function it declared
         // under `coroutine_fn_type`, which is what `rt_coroutine_closure_new`
         // records by being the entry point that was called.
-        Callee::Coroutine { f: core::mem::transmute(fn_ptr), env }
+        Callee::Coroutine { f: core::mem::transmute::<usize, crate::coroutine::CoroutineFn>(fn_ptr), env }
     } else {
         // SAFETY: `rt_closure_new` is the only producer of a classic-ABI
         // `BoxedObj::CompiledClosure`, and `build-make-closure` only ever
         // hands it a function compiled under `compiled_fn_type_with_env`.
-        Callee::Classic { f: core::mem::transmute(fn_ptr), env }
+        Callee::Classic { f: core::mem::transmute::<usize, typelisp_abi::ClassicClosureFn>(fn_ptr), env }
     }
 }
 

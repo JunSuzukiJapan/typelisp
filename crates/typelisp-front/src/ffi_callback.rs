@@ -27,6 +27,10 @@ use crate::types::{Path, Type};
 /// that a compiled call site would mistake for it.
 pub const ADDRESS_BUILTIN: u32 = typelisp_mem::wk::F_FFI_CALLBACK_ADDRESS;
 
+/// A callback entry made: the address C is handed, and a share of the code
+/// that address is in, which keeps it alive.
+pub type CallbackEntry = (usize, std::rc::Rc<dyn crate::eval::interp::CompiledBody>);
+
 /// One callback entry: the top-level function C is handed, and the function
 /// type C calls it at — a `(fn (T...) R)` with no `&rest`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]

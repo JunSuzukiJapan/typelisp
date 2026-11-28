@@ -190,7 +190,7 @@ fn aot_print_object(heap: &mut Heap, v: Value, escape: bool) -> Result<Option<St
     // the startup sequence `build_main_wrapper` generates, and the address it
     // passes is a `ptrtoint` of a function the same file compiled under the
     // shared compiled-function ABI.
-    let f: unsafe extern "C-unwind" fn(*const Word, u32) -> Word = unsafe { core::mem::transmute(addr) };
+    let f: typelisp_abi::ClassicFn = unsafe { core::mem::transmute(addr) };
     let args = [encode(v), Word::from(escape)];
     PRINTING.with(|p| p.borrow_mut().push(v));
     let result = unsafe { f(args.as_ptr(), 2) };

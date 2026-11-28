@@ -310,8 +310,8 @@ impl Session<'_> {
         }
         // The parameters' names are the body's, which the interpreter holds.
         let body = match &d.target {
-            Some(CompileTarget::Fn(path)) => self.interp.root.borrow().get_fn(&path),
-            Some(CompileTarget::Method(owner, m)) => self.interp.root.borrow().get_method(&owner, *m),
+            Some(CompileTarget::Fn(path)) => self.interp.root.borrow().get_fn(path),
+            Some(CompileTarget::Method(owner, m)) => self.interp.root.borrow().get_method(owner, *m),
             None => None,
         };
         if let Some(f) = body.filter(|f| !f.params.is_empty()) {

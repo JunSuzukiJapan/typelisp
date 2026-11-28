@@ -212,36 +212,6 @@ impl Heap {
         }
     }
 
-    /// The primitive type a numeric box *is*, spelled the way the checker
-    /// spells it (`typelisp_mem::ConcreteNames::type_key`) — `None` for
-    /// every other box (a struct, an enum, a closure, a cell, ...), which
-    /// carries an interned type key instead.
-    ///
-    /// The boxes below are the values whose type is written down nowhere but
-    /// in the box itself: a struct says what it is through its stored key, an
-    /// immediate `Value::Char` *is* a `char`, but a box holding the number
-    /// `200` is a `u8` or a `u16` only because it says so. Dispatchers that
-    /// need the receiver's type name (`format`'s `~/name/`) ask here.
-    pub fn primitive_box_type_name(&self, id: BoxId) -> Option<&'static str> {
-        match &self.shared.boxes.read_recursive().slots[id.0 as usize] {
-            Some(BoxedObj::Float32(_)) => Some("f32"),
-            Some(BoxedObj::Float64(_)) => Some("f64"),
-            Some(BoxedObj::Narrow(n)) => Some(match n {
-                NarrowInt::I8(_) => "i8",
-                NarrowInt::I16(_) => "i16",
-                NarrowInt::I32(_) => "i32",
-                NarrowInt::U8(_) => "u8",
-                NarrowInt::U16(_) => "u16",
-                NarrowInt::U32(_) => "u32",
-            }),
-            // A bignum box is an `int`: the `bignum` type was folded into it.
-            Some(BoxedObj::Bignum(_)) => Some("int"),
-            Some(BoxedObj::Ratio(_)) => Some("ratio"),
-            Some(BoxedObj::RandomState(_)) => Some("random-state"),
-            _ => None,
-        }
-    }
-
     /// Store a bignum box **whatever its value** — the raw allocation
     /// [`int_from_bigint`](Self::int_from_bigint) performs once it has
     /// decided the value does not fit a fixnum. Not a producer of `int`s:

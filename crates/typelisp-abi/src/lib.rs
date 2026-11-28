@@ -346,6 +346,16 @@ pub const STATUS_UNWIND: Word = 3;
 /// A compiled body under the original ABI: `i64 f(const i64 *args, u32 argc)`,
 /// running to completion and returning its value.
 pub const BODY_ABI_CLASSIC: u8 = 0;
+/// A body under [`BODY_ABI_CLASSIC`], whatever its typelisp-level arity: the
+/// arguments as one array.
+///
+/// `extern "C-unwind"`, not `extern "C"`: `rt_panic` unwinds, and an
+/// `extern "C"` pointer would promise Rust that the callee cannot — a promise
+/// broken the moment a `(panic ...)` fires.
+pub type ClassicFn = unsafe extern "C-unwind" fn(*const Word, u32) -> Word;
+/// A closure body under [`BODY_ABI_CLASSIC`]: arguments and captures as two
+/// arrays.
+pub type ClassicClosureFn = unsafe extern "C-unwind" fn(*const Word, u32, *const Word, u32) -> Word;
 /// A compiled body under the coroutine ABI: `i64 f(i64 frame)`, returning a
 /// status word.
 pub const BODY_ABI_COROUTINE: u8 = 1;
@@ -729,17 +739,11 @@ pub mod call_state {
     /// take, so the entries in that window are never taken: the compiled
     /// frame that raised, and every frame below it in the same driver. A
     /// catcher restores this the same way it restores the GC root stack —
-    /// without it, the next `take_current_frame` hands the caller a frame
+    /// without it, the next [`entered`](State::entered) hands the caller a frame
     /// belonging to a call that has already left, and the value read out of
     /// it is whatever that frame happened to hold.
     pub fn truncate_current_frames(depth: usize) {
         with(|s| s.current_frames.truncate(depth));
-    }
-
-    /// Takes the innermost published frame, for a caller driving an entry by
-    /// hand.
-    pub fn take_current_frame() -> Option<Word> {
-        with(|s| s.current_frames.pop())
     }
 
     /// What one `STATUS_CALL` is asking for.

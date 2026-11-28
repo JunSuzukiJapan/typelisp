@@ -180,7 +180,6 @@ pub unsafe extern "C" fn rt_symp(x: Word) -> bool {
 /// Same as [`rt_consp`].
 #[no_mangle]
 pub unsafe extern "C-unwind" fn rt_sexpr_int(w: Word) -> Word {
-    let w = w;
     match decode(w) {
         Value::Int(_) => w,
         Value::Boxed(id) if active_heap().is_bignum(id) => {

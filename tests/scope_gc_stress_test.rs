@@ -28,9 +28,9 @@ fn stressed() -> (Heap, Checker, Interp) {
 /// scope, so they exercise the session-rooted `LlvmRetK::Scope` path.
 #[test]
 fn compiling_the_islands_scope_constructors_survives_constant_collection() {
-    let (mut h, mut chk, mut interp) = stressed();
+    let (mut h, mut chk, interp) = stressed();
     for name in ["new-env", "new-fn-env", "new-acc-table"] {
-        eval_in(&mut h, &mut chk, &mut interp, &format!("(compile {})", name))
+        eval_in(&mut h, &mut chk, &interp, &format!("(compile {})", name))
             .unwrap_or_else(|e| panic!("(compile {}) failed under gc stress: {:?}", name, e));
     }
 }
@@ -44,7 +44,7 @@ fn compiling_the_islands_scope_constructors_survives_constant_collection() {
 /// but reproduced at `f4b2480`, before scopes moved to the heap. The real cause
 /// was a missing GC root in `ast_bridge::tagged_sym_list` — see that function.
 fn compiling_a_nested_binding_function_survives_constant_collection() {
-    let (mut h, mut chk, mut interp) = stressed();
+    let (mut h, mut chk, interp) = stressed();
     let src = "(defun deep ((a int) (b int)) int
                  (let ((x (+ a b)))
                    (let ((y (* x 2)))
@@ -52,7 +52,7 @@ fn compiling_a_nested_binding_function_survives_constant_collection() {
                        (if (< z 0) (- 0 z) z)))))
                (compile deep)
                (deep 3 4)";
-    let got = eval_in(&mut h, &mut chk, &mut interp, src).expect("compile+run failed under gc stress");
+    let got = eval_in(&mut h, &mut chk, &interp, src).expect("compile+run failed under gc stress");
     assert_eq!(got, Value::Int(11));
 }
 
@@ -65,14 +65,14 @@ fn compiling_a_nested_binding_function_survives_constant_collection() {
 /// but reproduced at `f4b2480`, before scopes moved to the heap. The real cause
 /// was a missing GC root in `ast_bridge::tagged_sym_list` — see that function.
 fn compiling_labels_survives_constant_collection() {
-    let (mut h, mut chk, mut interp) = stressed();
+    let (mut h, mut chk, interp) = stressed();
     let src = "(defun sum-to ((n int)) int
                  (labels ((rec ((i int) (acc int)) int
                             (if (> i n) acc (rec (+ i 1) (+ acc i)))))
                    (rec 1 0)))
                (compile sum-to)
                (sum-to 5)";
-    let got = eval_in(&mut h, &mut chk, &mut interp, src).expect("compile+run failed under gc stress");
+    let got = eval_in(&mut h, &mut chk, &interp, src).expect("compile+run failed under gc stress");
     assert_eq!(got, Value::Int(15));
 }
 
@@ -84,15 +84,15 @@ fn a_function_compiled_under_stress_agrees_with_the_interpreter() {
                  (let ((a (* n n)))
                    (if (> a 10) (- a 10) (+ a 1))))";
 
-    let (mut h, mut chk, mut interp) = stressed();
-    eval_in(&mut h, &mut chk, &mut interp, src).expect("define failed");
+    let (mut h, mut chk, interp) = stressed();
+    eval_in(&mut h, &mut chk, &interp, src).expect("define failed");
     let interpreted: Vec<Value> = (0..6)
-        .map(|n| eval_in(&mut h, &mut chk, &mut interp, &format!("(f {})", n)).expect("interpreted call failed"))
+        .map(|n| eval_in(&mut h, &mut chk, &interp, &format!("(f {})", n)).expect("interpreted call failed"))
         .collect();
 
-    eval_in(&mut h, &mut chk, &mut interp, "(compile f)").expect("compile failed under gc stress");
+    eval_in(&mut h, &mut chk, &interp, "(compile f)").expect("compile failed under gc stress");
     let compiled: Vec<Value> = (0..6)
-        .map(|n| eval_in(&mut h, &mut chk, &mut interp, &format!("(f {})", n)).expect("compiled call failed"))
+        .map(|n| eval_in(&mut h, &mut chk, &interp, &format!("(f {})", n)).expect("compiled call failed"))
         .collect();
 
     assert_eq!(compiled, interpreted);
@@ -103,7 +103,7 @@ fn a_function_compiled_under_stress_agrees_with_the_interpreter() {
 /// stress this checks that path independently of the compile session.
 #[test]
 fn interpreted_scopes_survive_constant_collection() {
-    let (mut h, mut chk, mut interp) = stressed();
+    let (mut h, mut chk, interp) = stressed();
     let src = "(defun make-s () Scope<Option<Sexpr>> (Scope::new))
                (defun f () int
                  (let ((s (make-s)))
@@ -115,6 +115,6 @@ fn interpreted_scopes_survive_constant_collection() {
                      ((Some v) (sexpr-int v))
                      ((None) -1))))
                (f)";
-    let got = eval_in(&mut h, &mut chk, &mut interp, src).expect("interpreted scope failed under gc stress");
+    let got = eval_in(&mut h, &mut chk, &interp, src).expect("interpreted scope failed under gc stress");
     assert_eq!(got, Value::Int(42));
 }

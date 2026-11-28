@@ -366,6 +366,18 @@ fn sleep_takes_seconds_as_a_float() {
     assert!(err.to_string().contains("`f64`"), "{}", err);
 }
 
+/// A wait no duration can hold is refused in the same words whichever way
+/// `sleep` is reached: called by name, it parks the task on the scheduler;
+/// called as a function value, it blocks the thread. Neither may bring the
+/// process down.
+#[test]
+fn sleep_refuses_a_wait_too_long_to_hold_however_it_is_called() {
+    for src in ["(sleep 1e30)", "(let ((f sleep)) (f 1e30))"] {
+        let err = common::eval_err(src);
+        assert!(err.contains("sleep: 1000000000000000000000000000000 is longer than this can wait"), "{}: {}", src, err);
+    }
+}
+
 // ----------------------------------------------------------------------
 // What only the operating system knows (the Phase 9c items held back until
 // 2026-09-05, when `libc` was taken as a dependency)

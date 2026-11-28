@@ -143,7 +143,6 @@ unsafe fn pending_word(i: Word, who: &str,
     a_what: &str,
     get: fn(&State, usize) -> Result<Word, usize>,
 ) -> Word {
-    let i = i;
     if i < 0 {
         fatal(&format!("{}: {} is not {} index", who, i, a_what));
     }

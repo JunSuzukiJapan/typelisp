@@ -80,7 +80,7 @@ fn attribute(heap: &Heap, a: Value) -> Result<Attribute, Error> {
         _ => return Err(Error::TypeError(format!("an attribute is a name, or a name with its arguments: {}", ATTRIBUTES))),
     };
     let spelling = heap.symbol_spelling(name);
-    match (&*spelling, args.as_deref()) {
+    match (spelling, args.as_deref()) {
         _ if name.is(wk::TEST) => match args {
             None => Ok(Attribute::Test),
             Some(_) => Err(Error::TypeError("`#[test]` takes no arguments".into())),

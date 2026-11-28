@@ -31,7 +31,7 @@
 //! ## The `main` name problem
 //!
 //! Every compiled function uses the fixed ABI `i64 fn(i64* args, i32
-//! argc)` (see `crate::compile::CompiledSignature`'s doc comment) — but the
+//! argc)` (`typelisp_abi::ClassicFn`) — but the
 //! C runtime's startup code calls the executable's `main` expecting
 //! roughly `int main(void)` (Phase 2 doesn't thread argc/argv through to
 //! typelisp). Those two signatures aren't link-compatible, so the file's
@@ -1139,11 +1139,13 @@ pub fn compile_file_with(source_path: &str, output_path: &str, options: &BuildOp
             &globals,
             &interp.vtable_descriptors(),
             &interp.upcast_descriptors(),
-            &interp.enum_variant_descriptors(),
-            &interp.field_template_descriptors(),
-            &interp.field_name_descriptors(),
-            &print_objects,
-            &printer_globals,
+            &PrintFacts {
+                enum_variants: &interp.enum_variant_descriptors(),
+                field_templates: &interp.field_template_descriptors(),
+                field_names: &interp.field_name_descriptors(),
+                print_objects: &print_objects,
+                printer_globals: &printer_globals,
+            },
             &callback_entries,
             &interrupt_handlers,
             eval_env.as_deref().map(|bytes| (bytes, eval_ns, crate::release::is_release())),
@@ -1260,6 +1262,19 @@ fn print_object_receiver(target: &CompileTarget) -> Option<typelisp_mem::TypeId>
     Some(typelisp_front::type_key::type_key_id(type_path, args))
 }
 
+/// What the executable's printer cannot look up the way the interpreter does,
+/// for the generated `main` to register ([`emit_print_registration`]): an
+/// enum's variant names, the fields' types and names, each type's
+/// `print-object`, and the printer control variables' compiled ids.
+#[derive(Clone, Copy, Default)]
+struct PrintFacts<'a> {
+    enum_variants: &'a [(Path, usize, String)],
+    field_templates: &'a [(Path, i64, i64, crate::TypeId)],
+    field_names: &'a [(Path, i64, String)],
+    print_objects: &'a [(typelisp_mem::TypeId, String)],
+    printer_globals: &'a [(&'a str, usize)],
+}
+
 /// Adds a real, C-ABI `main` to `module` that calls the compiled entry
 /// point (the symbol `entry_symbol`, `tl_p::main` for `p.typl` — called
 /// `tl_main` below) with no logical
@@ -1303,11 +1318,7 @@ fn build_main_wrapper(
     globals: &Globals,
     vtables: &[(u32, Vec<(Path, typelisp_mem::SymRef)>)],
     upcasts: &[(u32, u32, u32)],
-    enum_variants: &[(Path, usize, String)],
-    field_templates: &[(Path, i64, i64, crate::TypeId)],
-    field_names: &[(Path, i64, String)],
-    print_objects: &[(typelisp_mem::TypeId, String)],
-    printer_globals: &[(&str, usize)],
+    print: &PrintFacts,
     callback_entries: &[(typelisp_front::ffi_callback::CallbackSig, inkwell::values::FunctionValue<'static>)],
     interrupt_handlers: &[(u16, inkwell::values::FunctionValue<'static>)],
     eval_env: Option<(&[u8], typelisp_mem::NsId, bool)>,
@@ -1619,14 +1630,12 @@ fn build_main_wrapper(
             eval_env.is_some() || !reach::uses(module, main_fn, |name| shim(name).then(String::new)).is_empty()
         };
         let live = if reaches(|name| PRINT_SHIMS.contains(&name)) {
-            Some(live_types(module, main_fn, print_objects, eval_env.is_some())?)
+            Some(live_types(module, main_fn, print.print_objects, eval_env.is_some())?)
         } else {
             None
         };
         writes = reaches(writes_through_the_printer);
-        emit_print_registration(
-            ctx, module, register, enum_variants, field_templates, field_names, print_objects, live.as_ref(), writes, printer_globals,
-        )?;
+        emit_print_registration(ctx, module, register, print, live.as_ref(), writes)?;
     }
 
 
@@ -1635,7 +1644,7 @@ fn build_main_wrapper(
     // program's own `defvar`s all run, as `typl` runs them. Not for an
     // executable that calls `eval`, whose forms can read any global.
     if eval_env.is_none() {
-        leave_out_unread_globals(module, main_fn, globals, if writes { printer_globals } else { &[] })?;
+        leave_out_unread_globals(module, main_fn, globals, if writes { print.printer_globals } else { &[] })?;
     }
 
     // A program that nothing it can run makes wait — no task, thread,
@@ -2056,14 +2065,11 @@ fn emit_print_registration(
     ctx: &'static Context,
     module: &Module<'static>,
     register: inkwell::values::FunctionValue<'static>,
-    enum_variants: &[(Path, usize, String)],
-    field_templates: &[(Path, i64, i64, crate::TypeId)],
-    field_names: &[(Path, i64, String)],
-    print_objects: &[(typelisp_mem::TypeId, String)],
+    print: &PrintFacts,
     live: Option<&Live>,
     writes: bool,
-    printer_globals: &[(&str, usize)],
 ) -> Result<(), String> {
+    let PrintFacts { enum_variants, field_templates, field_names, print_objects, printer_globals } = *print;
     let builder = ctx.create_builder();
     builder.position_at_end(ctx.append_basic_block(register, "entry"));
     let word_ty = crate::compile::carriers::word();
@@ -2427,7 +2433,7 @@ mod tests {
         builder.build_call(exit, &[code.into()], "").unwrap();
         builder.build_unreachable().unwrap();
 
-        build_main_wrapper(ctx, &module, "tl_main", None, &[], &super::Globals::default(), &[], &[], &[], &[], &[], &[], &[], &[], &[], None, false, super::Target::Host, super::HeapInit { cells: typelisp_rt::DEFAULT_AOT_HEAP_CAPACITY, fixed: false, max_memory: None, frame_memory: None }).expect("build_main_wrapper failed");
+        build_main_wrapper(ctx, &module, "tl_main", None, &[], &super::Globals::default(), &[], &[], &super::PrintFacts::default(), &[], &[], None, false, super::Target::Host, super::HeapInit { cells: typelisp_rt::DEFAULT_AOT_HEAP_CAPACITY, fixed: false, max_memory: None, frame_memory: None }).expect("build_main_wrapper failed");
         module.verify().expect("module failed verification");
 
         let out_path = tmp_path("rt_ping_test");
@@ -2461,7 +2467,7 @@ mod tests {
         let (_, result) = crate::compile::runtime_abi::call_declared(&builder, rt_heap_live_count, &sig, &[]).unwrap();
         builder.build_return(Some(&result)).unwrap();
 
-        build_main_wrapper(ctx, &module, "tl_main", None, &[], &super::Globals::default(), &[], &[], &[], &[], &[], &[], &[], &[], &[], None, false, super::Target::Host, super::HeapInit { cells: typelisp_rt::DEFAULT_AOT_HEAP_CAPACITY, fixed: false, max_memory: None, frame_memory: None }).expect("build_main_wrapper failed");
+        build_main_wrapper(ctx, &module, "tl_main", None, &[], &super::Globals::default(), &[], &[], &super::PrintFacts::default(), &[], &[], None, false, super::Target::Host, super::HeapInit { cells: typelisp_rt::DEFAULT_AOT_HEAP_CAPACITY, fixed: false, max_memory: None, frame_memory: None }).expect("build_main_wrapper failed");
         module.verify().expect("module failed verification");
 
         let out_path = tmp_path("rt_heap_init_test");

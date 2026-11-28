@@ -30,27 +30,16 @@ pub fn io_wait(heap: &mut Heap, argv: &[Value], deadline: Option<typelisp_mem::h
     Ok(Waiting::Io { fd, interest, deadline, poller })
 }
 
-/// `secs` from now, with `sleep`'s refusals: negative or NaN is not a
-/// duration, and neither is one the clock cannot hold.
+/// `secs` from now, with the refusals of [`crate::sys_builtin::wait_duration`].
 pub fn io_deadline(secs: f64) -> Result<typelisp_mem::host::Instant, SchedError> {
-    if !(secs >= 0.0) {
-        return Err(SchedError::Panic(format!("net-wait-for: {} is not a non-negative number of seconds", secs)));
-    }
-    let d = core::time::Duration::try_from_secs_f64(secs)
-        .map_err(|_| SchedError::Panic(format!("net-wait-for: {} is longer than this can wait", secs)))?;
+    let d = crate::sys_builtin::wait_duration("net-wait-for", secs).map_err(SchedError::Panic)?;
     Ok(typelisp_mem::host::Instant::now() + d)
 }
 
-/// `(sleep secs)` as a wait, with the refusals CL makes: a negative or NaN
-/// wait is an error, and there is no duration to build from one. The same
-/// words on both sides, because a program must not be able to tell which
-/// side its `sleep` ran on.
+/// `(sleep secs)` as a wait, with the refusals of
+/// [`crate::sys_builtin::wait_duration`].
 pub fn sleep_wait(secs: f64) -> Result<Waiting, SchedError> {
-    if !(secs >= 0.0) {
-        return Err(SchedError::Panic(format!("sleep: {} is not a non-negative number of seconds", secs)));
-    }
-    let d = core::time::Duration::try_from_secs_f64(secs)
-        .map_err(|_| SchedError::Panic(format!("sleep: {} is longer than this can wait", secs)))?;
+    let d = crate::sys_builtin::wait_duration("sleep", secs).map_err(SchedError::Panic)?;
     Ok(Waiting::Until(typelisp_mem::host::Instant::now() + d))
 }
 

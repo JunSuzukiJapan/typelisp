@@ -17,7 +17,7 @@ fn stressed() -> (Heap, Checker, Interp) {
 /// plausible integer.
 #[test]
 fn a_compiled_struct_local_survives_collection() {
-    let (mut h, mut chk, mut interp) = stressed();
+    let (mut h, mut chk, interp) = stressed();
     let src = r#"(defstruct named (tag string) (n int))
                  (defun probe ((n int)) string
                    (let ((p (make-instance 'named :tag "keepme" :n n)))
@@ -27,7 +27,7 @@ fn a_compiled_struct_local_survives_collection() {
                            p::tag)))))
                  (compile probe)
                  (probe 7)"#;
-    match eval_in(&mut h, &mut chk, &mut interp, src).expect("compile+run failed under gc stress") {
+    match eval_in(&mut h, &mut chk, &interp, src).expect("compile+run failed under gc stress") {
         Value::Str(id) => assert_eq!(&*h.string(id), "keepme"),
         other => panic!("expected a string, got {:?}", other),
     }
@@ -56,7 +56,7 @@ fn a_compiled_struct_local_survives_collection() {
 /// return value, and is not passed to anything.
 #[test]
 fn a_compiled_struct_local_is_not_clobbered_by_a_later_box_allocation() {
-    let (mut h, mut chk, mut interp) = stressed();
+    let (mut h, mut chk, interp) = stressed();
     let src = r#"(defstruct tagged (tag string))
                  (defun probe () string
                    (let ((p (make-instance 'tagged :tag "keepme")))
@@ -66,7 +66,7 @@ fn a_compiled_struct_local_is_not_clobbered_by_a_later_box_allocation() {
                            p::tag)))))
                  (compile probe)
                  (probe)"#;
-    match eval_in(&mut h, &mut chk, &mut interp, src).expect("compile+run failed under gc stress") {
+    match eval_in(&mut h, &mut chk, &interp, src).expect("compile+run failed under gc stress") {
         Value::Str(id) => assert_eq!(
             &*h.string(id),
             "keepme",
@@ -81,7 +81,7 @@ fn a_compiled_struct_local_is_not_clobbered_by_a_later_box_allocation() {
 /// would also lose elements rather than only its identity.
 #[test]
 fn a_compiled_vector_local_survives_collection() {
-    let (mut h, mut chk, mut interp) = stressed();
+    let (mut h, mut chk, interp) = stressed();
     let src = r#"(defun probe ((n int)) int
                    (let ((v (the Vector<int> (Vector::new))))
                      (push v n)
@@ -91,6 +91,6 @@ fn a_compiled_vector_local_survives_collection() {
                          (+ (get v 0) (get v 1))))))
                  (compile probe)
                  (probe 22)"#;
-    let got = eval_in(&mut h, &mut chk, &mut interp, src).expect("compile+run failed under gc stress");
+    let got = eval_in(&mut h, &mut chk, &interp, src).expect("compile+run failed under gc stress");
     assert_eq!(got, Value::Int(42));
 }

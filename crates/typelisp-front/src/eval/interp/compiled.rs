@@ -285,8 +285,7 @@ pub(crate) fn call_body(address: usize, abi: u8, args: &[Word]) -> i64 {
     // SAFETY: `address` comes from a symbol the backend resolved out of a
     // module that defines it, so it points at a function built under the
     // shared ABI. `CompiledFn::new`/`new_multi` are the only producers.
-    let f: unsafe extern "C-unwind" fn(*const Word, u32) -> Word =
-        unsafe { std::mem::transmute::<usize, unsafe extern "C-unwind" fn(*const Word, u32) -> Word>(address) };
+    let f = unsafe { std::mem::transmute::<usize, typelisp_abi::ClassicFn>(address) };
     unsafe { f(args.as_ptr(), args.len() as u32) as i64 }
 }
 
@@ -591,7 +590,7 @@ impl Interp {
         // always points at a function with this signature.
         // A `(panic ...)` in this closure's body comes back as a raise
         // waiting on the thread, for the caller's `catch_compiled_panic`.
-        let f: unsafe extern "C-unwind" fn(*const Word, u32, *const Word, u32) -> Word = unsafe { std::mem::transmute(fn_ptr) };
+        let f: typelisp_abi::ClassicClosureFn = unsafe { std::mem::transmute(fn_ptr) };
         unsafe { f(args.as_ptr(), args.len() as u32, env.as_ptr(), env.len() as u32) as i64 }
     }
 

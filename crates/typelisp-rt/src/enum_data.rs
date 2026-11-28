@@ -85,7 +85,6 @@ pub unsafe extern "C" fn rt_data_field(id: Word, idx: Word) -> Word {
         Value::Boxed(id) if active_heap().is_enum(id) => id,
         _ => fatal("rt_data_field: first argument is not a boxed enum value"),
     };
-    let idx = idx;
     if idx < 0 {
         fatal("rt_data_field: negative field index");
     }

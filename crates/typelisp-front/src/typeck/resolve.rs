@@ -67,7 +67,7 @@ pub(crate) fn trait_named(reg: &Registry, here: NsId, sym: SymRef) -> Option<(Pa
 }
 
 /// The function, global variable or macro the bare name `sym` names in `here`.
-pub(crate) fn value_named<'r>(reg: &'r Registry, here: NsId, sym: SymRef) -> Option<(Path, &'r ValueDef)> {
+pub(crate) fn value_named(reg: &Registry, here: NsId, sym: SymRef) -> Option<(Path, &ValueDef)> {
     find_named(reg, here, sym, |ns, key| reg.values.get(&Path::of_symbol(ns, key)))
 }
 

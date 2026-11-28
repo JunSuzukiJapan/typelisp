@@ -13,8 +13,7 @@
 //! `compile-file`'s linker step needs.
 //!
 //! Every function here is declared under the exact same ABI as a compiled
-//! typelisp function (`unsafe extern "C" fn(*const Word, u32) -> Word`,
-//! `typelisp::compile::CompiledSignature`) — so the existing cross-function-
+//! typelisp function (`typelisp_abi::ClassicFn`) — so the existing cross-function-
 //! call wiring (JIT: the `externals` list of
 //! `typelisp::compile::CompiledFn::new`; AOT: ordinary linker symbol
 //! resolution against this crate's `staticlib`, see `typelisp::compile::aot`'s

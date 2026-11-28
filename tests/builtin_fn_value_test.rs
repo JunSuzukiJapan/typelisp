@@ -29,8 +29,8 @@ fn env() -> (Heap, Checker, Interp) {
 }
 
 fn eval_ok(src: &str) -> Value {
-    let (mut h, mut chk, mut interp) = env();
-    eval_in(&mut h, &mut chk, &mut interp, src).expect("eval failed")
+    let (mut h, mut chk, interp) = env();
+    eval_in(&mut h, &mut chk, &interp, src).expect("eval failed")
 }
 
 /// A `defenum` with one function-typed field per variant, plus a driver that
@@ -125,8 +125,8 @@ fn the_payload_free_variant_still_matches() {
 /// the collector and unable to sit in a struct field or cross a boundary.
 #[test]
 fn an_enum_holding_a_builtin_is_a_heap_box_not_native_data() {
-    let (mut h, mut chk, mut interp) = env();
-    let v = eval_in(&mut h, &mut chk, &mut interp, &format!("{} (op::Binary +)", OP_ENUM))
+    let (mut h, mut chk, interp) = env();
+    let v = eval_in(&mut h, &mut chk, &interp, &format!("{} (op::Binary +)", OP_ENUM))
         .expect("eval failed");
     match v {
         typelisp::Value::Boxed(id) => {
@@ -153,10 +153,10 @@ fn an_enum_holding_a_builtin_is_a_heap_box_not_native_data() {
 /// every run instead of one in a hundred.
 #[test]
 fn a_stored_builtin_survives_constant_collection() {
-    let (mut h, mut chk, mut interp) = env();
-    eval_in(&mut h, &mut chk, &mut interp, OP_ENUM).expect("definitions failed");
+    let (mut h, mut chk, interp) = env();
+    eval_in(&mut h, &mut chk, &interp, OP_ENUM).expect("definitions failed");
     h.set_gc_stress(true);
-    let got = eval_in(&mut h, &mut chk, &mut interp, "(run-binary (op::Binary +) 20 22)")
+    let got = eval_in(&mut h, &mut chk, &interp, "(run-binary (op::Binary +) 20 22)")
         .expect("eval under gc stress failed");
     assert_eq!(got, Value::Int(42));
 }

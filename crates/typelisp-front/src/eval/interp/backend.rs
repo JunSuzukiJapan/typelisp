@@ -93,7 +93,7 @@ pub struct Backend {
     /// Makes the entry C calls for a callback — the function and the
     /// function type C calls it at (`crate::ffi_callback`) — and answers its
     /// address. The function is compiled first if it is not already.
-    pub callback_entry: fn(&Interp, &mut Heap, crate::ffi_callback::CallbackSig) -> Result<(usize, Rc<dyn CompiledBody>), String>,
+    pub callback_entry: fn(&Interp, &mut Heap, crate::ffi_callback::CallbackSig) -> Result<crate::ffi_callback::CallbackEntry, String>,
 }
 
 thread_local! {

@@ -19,7 +19,7 @@ use crate::{Error, Heap, Value};
 use typelisp_mem::SymRef;
 
 use super::generic::Base;
-use super::registry::{BlanketImpl, Definition, MethodDef, Registry, Template, TraitImpl, TypeEntry, ValueDef};
+use super::registry::{BlanketImpl, Changes, Definition, MethodDef, Registry, Template, TraitImpl, TypeEntry, ValueDef};
 use super::tree::Typed;
 use typelisp_mem::symbols::NsId;
 
@@ -118,22 +118,22 @@ pub(crate) fn sorted<K: Serialize, V>(mut entries: Vec<(K, V)>) -> Vec<(K, V)> {
 /// (`None`: removed), table by table ([`Registry::changed_since`]).
 #[derive(Debug, Default, Serialize, Deserialize)]
 pub(crate) struct RegistryDelta {
-    pub(crate) values: Vec<(Path, Option<ValueDef>)>,
-    pub(crate) types: Vec<(Path, Option<TypeEntry>)>,
-    pub(crate) methods: Vec<((Path, Sym), Option<MethodDef>)>,
-    pub(crate) inst_methods: Vec<((Path, Sym), Option<Vec<(Vec<Type>, MethodDef)>>)>,
-    pub(crate) method_names: Vec<(Sym, Option<()>)>,
-    pub(crate) imports: Vec<((Ns, Sym), Option<Path>)>,
-    pub(crate) reexports: Vec<((Ns, Sym), Option<()>)>,
-    pub(crate) ctors: Vec<((Ns, Sym), Option<(Path, usize)>)>,
-    pub(crate) static_uses: Vec<((Ns, Sym), Option<(Path, Sym)>)>,
-    pub(crate) module_aliases: Vec<((Ns, Sym), Option<Ns>)>,
-    pub(crate) modules: Vec<(Ns, Option<()>)>,
-    pub(crate) trait_impls: Vec<((Path, Path), Option<Vec<TraitImpl>>)>,
-    pub(crate) blanket_impls: Vec<(Path, Option<BlanketImpl>)>,
-    pub(crate) blanket_owners: Vec<(Path, Option<Path>)>,
-    pub(crate) docs: Vec<(Definition, Option<String>)>,
-    pub(crate) predeclared: Vec<(Path, Option<()>)>,
+    pub(crate) values: Changes<Path, ValueDef>,
+    pub(crate) types: Changes<Path, TypeEntry>,
+    pub(crate) methods: Changes<(Path, Sym), MethodDef>,
+    pub(crate) inst_methods: Changes<(Path, Sym), Vec<(Vec<Type>, MethodDef)>>,
+    pub(crate) method_names: Changes<Sym, ()>,
+    pub(crate) imports: Changes<(Ns, Sym), Path>,
+    pub(crate) reexports: Changes<(Ns, Sym), ()>,
+    pub(crate) ctors: Changes<(Ns, Sym), (Path, usize)>,
+    pub(crate) static_uses: Changes<(Ns, Sym), (Path, Sym)>,
+    pub(crate) module_aliases: Changes<(Ns, Sym), Ns>,
+    pub(crate) modules: Changes<Ns, ()>,
+    pub(crate) trait_impls: Changes<(Path, Path), Vec<TraitImpl>>,
+    pub(crate) blanket_impls: Changes<Path, BlanketImpl>,
+    pub(crate) blanket_owners: Changes<Path, Path>,
+    pub(crate) docs: Changes<Definition, String>,
+    pub(crate) predeclared: Changes<Path, ()>,
     pub(crate) callbacks_lifted: u64,
     pub(crate) local_macros: u64,
 }
@@ -198,7 +198,7 @@ struct Defaulted {
 #[derive(Default, Serialize, Deserialize)]
 struct RebuiltBodies {
     /// Each body, or `None` for one forgotten.
-    templates: Vec<(Base, Option<Rc<Template>>)>,
+    templates: Changes<Base, Rc<Template>>,
     defaulted: Vec<Defaulted>,
     /// The trees' values, in order.
     values: Vec<OwnedForm>,
@@ -260,8 +260,8 @@ impl RebuiltBodies {
 /// Bodies a dump wrote, read back.
 #[derive(Debug, Default)]
 struct Bodies {
-    templates: Vec<(Base, Option<Rc<Template>>)>,
-    defaulted: Vec<((Path, SymRef), Option<(Path, Vec<Type>)>)>,
+    templates: Changes<Base, Rc<Template>>,
+    defaulted: Changes<(Path, SymRef), (Path, Vec<Type>)>,
 }
 
 impl Bodies {

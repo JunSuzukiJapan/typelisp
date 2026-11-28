@@ -44,11 +44,11 @@ fn assert_float(h: &Heap, v: &Value, expected: f64) {
 /// missed root shows up as the value being gone on a *later* form.
 #[test]
 fn a_float_global_survives_constant_collection() {
-    let (mut h, mut chk, mut interp) = env();
-    eval_in(&mut h, &mut chk, &mut interp, "(defvar (*f* f64) 2.5)").expect("definition failed");
+    let (mut h, mut chk, interp) = env();
+    eval_in(&mut h, &mut chk, &interp, "(defvar (*f* f64) 2.5)").expect("definition failed");
     h.set_gc_stress(true);
     for _ in 0..3 {
-        let v = eval_in(&mut h, &mut chk, &mut interp, "*f*").expect("eval under gc stress failed");
+        let v = eval_in(&mut h, &mut chk, &interp, "*f*").expect("eval under gc stress failed");
         assert_float(&h, &v, 2.5);
     }
 }
@@ -58,12 +58,12 @@ fn a_float_global_survives_constant_collection() {
 /// run while `*f*` is reachable only through its `defvar` slot.
 #[test]
 fn a_float_global_survives_collection_mid_form() {
-    let (mut h, mut chk, mut interp) = env();
-    eval_in(&mut h, &mut chk, &mut interp, "(defvar (*f* f64) 2.5)").expect("definition failed");
+    let (mut h, mut chk, interp) = env();
+    eval_in(&mut h, &mut chk, &interp, "(defvar (*f* f64) 2.5)").expect("definition failed");
     eval_in(
         &mut h,
         &mut chk,
-        &mut interp,
+        &interp,
         "(defun churn () f64 \
            (let ((i 0)) \
              (while (< i 20) \
@@ -72,7 +72,7 @@ fn a_float_global_survives_collection_mid_form() {
     )
     .expect("definition failed");
     h.set_gc_stress(true);
-    let v = eval_in(&mut h, &mut chk, &mut interp, "(churn)").expect("eval under gc stress failed");
+    let v = eval_in(&mut h, &mut chk, &interp, "(churn)").expect("eval under gc stress failed");
     assert_float(&h, &v, 2.5);
 }
 
@@ -80,11 +80,11 @@ fn a_float_global_survives_collection_mid_form() {
 /// allocating — the accumulator has to survive every one of them.
 #[test]
 fn a_float_local_survives_collection_across_arithmetic() {
-    let (mut h, mut chk, mut interp) = env();
+    let (mut h, mut chk, interp) = env();
     eval_in(
         &mut h,
         &mut chk,
-        &mut interp,
+        &interp,
         "(defun sum-up ((x f64)) f64 \
            (let ((acc x) (i 0)) \
              (while (< i 20) \
@@ -94,7 +94,7 @@ fn a_float_local_survives_collection_across_arithmetic() {
     )
     .expect("definition failed");
     h.set_gc_stress(true);
-    let v = eval_in(&mut h, &mut chk, &mut interp, "(sum-up 2.5)").expect("eval under gc stress failed");
+    let v = eval_in(&mut h, &mut chk, &interp, "(sum-up 2.5)").expect("eval under gc stress failed");
     assert_float(&h, &v, 52.5);
 }
 
@@ -103,12 +103,12 @@ fn a_float_local_survives_collection_across_arithmetic() {
 /// rooting is what has to keep it alive.
 #[test]
 fn a_float_struct_field_survives_collection() {
-    let (mut h, mut chk, mut interp) = env();
-    eval_in(&mut h, &mut chk, &mut interp, "(defstruct pt (x f64) (y f64))").expect("definition failed");
+    let (mut h, mut chk, interp) = env();
+    eval_in(&mut h, &mut chk, &interp, "(defstruct pt (x f64) (y f64))").expect("definition failed");
     eval_in(
         &mut h,
         &mut chk,
-        &mut interp,
+        &interp,
         "(defun churn ((p pt)) f64 \
            (let ((i 0)) \
              (while (< i 20) \
@@ -117,6 +117,6 @@ fn a_float_struct_field_survives_collection() {
     )
     .expect("definition failed");
     h.set_gc_stress(true);
-    let v = eval_in(&mut h, &mut chk, &mut interp, "(churn (make-instance 'pt :x 2.5 :y 1.0))").expect("eval under gc stress failed");
+    let v = eval_in(&mut h, &mut chk, &interp, "(churn (make-instance 'pt :x 2.5 :y 1.0))").expect("eval under gc stress failed");
     assert_float(&h, &v, 2.5);
 }
